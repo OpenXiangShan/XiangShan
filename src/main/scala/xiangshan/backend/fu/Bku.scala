@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, XSDebug, ZeroExt}
+import utils.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, XSDebug, XSError, ZeroExt}
 import xiangshan._
 import xiangshan.backend.fu.util._
 
@@ -30,10 +30,9 @@ class CountModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Input(UInt(XLEN.W))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
-
-  val funcReg = RegNext(io.func)
 
   def encode(bits: UInt): UInt = {
     LookupTreeDefault(bits, 0.U, List(0.U -> 2.U(2.W), 1.U -> 1.U(2.W)))
@@ -44,27 +43,35 @@ class CountModule(implicit p: Parameters) extends XSModule {
       left)
   }
 
+  // stage 0
   val c0 = Wire(Vec(32, UInt(2.W)))
   val c1 = Wire(Vec(16, UInt(3.W)))
-  val c2 = Reg(Vec(8, UInt(4.W)))
-  val c3 = Wire(Vec(4, UInt(5.W)))
-  val c4 = Wire(Vec(2, UInt(6.W)))
-
   val countSrc = Mux(io.func(1), Reverse(io.src), io.src)
 
   for(i <- 0 until 32){ c0(i) := encode(countSrc(2*i+1, 2*i)) }
   for(i <- 0 until 16){ c1(i) := clzi(1, c0(i*2+1), c0(i*2)) }
-  for(i <- 0 until 8){ c2(i) := clzi(2, c1(i*2+1), c1(i*2)) }
-  for(i <- 0 until 4){ c3(i) := clzi(3, c2(i*2+1), c2(i*2)) }
-  for(i <- 0 until 2){ c4(i) := clzi(4, c3(i*2+1), c3(i*2)) }
+
+  // pipeline registers
+  val funcReg = RegEnable(io.func, io.regEnable)
+  val c2 = Reg(Vec(8, UInt(4.W)))
+  val cpopTmp = Reg(Vec(4, UInt(5.W)))
+  when (io.regEnable) {
+    for (i <- 0 until 8) {
+      c2(i) := clzi(2, c1(i*2+1), c1(i*2))
+    }
+    for (i <- 0 until 4) {
+      cpopTmp(i) := PopCount(io.src(i*16+15, i*16))
+    }
+  }
+
+  // stage 1
+  val c3 = Wire(Vec(4, UInt(5.W)))
+  val c4 = Wire(Vec(2, UInt(6.W)))
+
+  for(i <- 0 until  4){ c3(i) := clzi(3, c2(i*2+1), c2(i*2)) }
+  for(i <- 0 until  2){ c4(i) := clzi(4, c3(i*2+1), c3(i*2)) }
   val zeroRes = clzi(5, c4(1), c4(0))
   val zeroWRes = Mux(funcReg(1), c4(1), c4(0))
-
-  val cpopTmp = Reg(Vec(4, UInt(5.W)))
-
-  for(i <- 0 until 4){
-    cpopTmp(i) := PopCount(io.src(i*16+15, i*16))
-  }
 
   val cpopLo32 = cpopTmp(0) +& cpopTmp(1)
   val cpopHi32 = cpopTmp(2) +& cpopTmp(3)
@@ -79,26 +86,31 @@ class ClmulModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
 
-  val funcReg = RegNext(io.func)
-
+  // stage 0
   val (src1, src2) = (io.src(0), io.src(1))
 
   val mul0 = Wire(Vec(64, UInt(128.W)))
   val mul1 = Wire(Vec(32, UInt(128.W)))
   val mul2 = Wire(Vec(16, UInt(128.W)))
-  val mul3 = Reg(Vec(8, UInt(128.W)))
 
   (0 until XLEN) map { i =>
     mul0(i) := Mux(src1(i), if(i==0) src2 else Cat(src2, 0.U(i.W)), 0.U)
   }
-
   (0 until 32) map { i => mul1(i) := mul0(i*2) ^ mul0(i*2+1)}
   (0 until 16) map { i => mul2(i) := mul1(i*2) ^ mul1(i*2+1)}
-  (0 until 8) map { i => mul3(i) := mul2(i*2) ^ mul2(i*2+1)}
 
+  // pipeline registers
+  val funcReg = RegEnable(io.func, io.regEnable)
+  val mul3 = Reg(Vec(8, UInt(128.W)))
+  when (io.regEnable) {
+    (0 until 8) map { i => mul3(i) := mul2(i*2) ^ mul2(i*2+1)}
+  }
+
+  // stage 1
   val res = ParallelXOR(mul3)
 
   val clmul  = res(63,0)
@@ -116,6 +128,7 @@ class MiscModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
 
@@ -134,13 +147,14 @@ class MiscModule(implicit p: Parameters) extends XSModule {
   (0 until 8).map( i => xpermbVec(i) := Mux(src2(i*8+7, i*8+3).orR, 0.U, xpermLUT(src1, src2(i*8+2, i*8), 8)))
   val xpermb = Cat(xpermbVec.reverse)
 
-  io.out := RegNext(Mux(io.func(0), xpermb, xpermn))
+  io.out := RegEnable(Mux(io.func(0), xpermb, xpermn), io.regEnable)
 }
 
 class HashModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Input(UInt(XLEN.W))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
 
@@ -170,17 +184,18 @@ class HashModule(implicit p: Parameters) extends XSModule {
   val sha = shaSource(io.func(2,0))
   val sm3 = Mux(io.func(0), SignExt(sm3p1(31,0), XLEN), SignExt(sm3p0(31,0), XLEN))
 
-  io.out := RegNext(Mux(io.func(3), sm3, sha))
+  io.out := RegEnable(Mux(io.func(3), sm3, sha), io.regEnable)
 }
 
 class BlockCipherModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
 
-  val (src1, src2, func, funcReg) = (io.src(0), io.src(1), io.func, RegNext(io.func))
+  val (src1, src2, func, funcReg) = (io.src(0), io.src(1), io.func, RegEnable(io.func, io.regEnable))
 
   val src1Bytes = VecInit((0 until 8).map(i => src1(i*8+7, i*8)))
   val src2Bytes = VecInit((0 until 8).map(i => src2(i*8+7, i*8)))
@@ -195,19 +210,23 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   val iaesSboxOut = Wire(Vec(8, UInt(8.W)))
 
   aesSboxOut.zip(aesSboxMid).zip(aesSboxIn)foreach { case ((out, mid), in) =>
-    mid := SboxInv(SboxAesTop(in))
+    when (io.regEnable) {
+      mid := SboxInv(SboxAesTop(in))
+    }
     out := SboxAesOut(mid)
   }
 
   iaesSboxOut.zip(iaesSboxMid).zip(iaesSboxIn)foreach { case ((out, mid), in) =>
-    mid := SboxInv(SboxIaesTop(in))
+    when (io.regEnable) {
+      mid := SboxInv(SboxIaesTop(in))
+    }
     out := SboxIaesOut(mid)
   }
 
   val aes64es = aesSboxOut.asUInt
   val aes64ds = iaesSboxOut.asUInt
 
-  val imMinIn  = RegNext(src1Bytes)
+  val imMinIn  = RegEnable(src1Bytes, io.regEnable)
 
   val aes64esm = Cat(MixFwd(Seq(aesSboxOut(4), aesSboxOut(5), aesSboxOut(6), aesSboxOut(7))),
                      MixFwd(Seq(aesSboxOut(0), aesSboxOut(1), aesSboxOut(2), aesSboxOut(3))))
@@ -229,15 +248,17 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   ksSboxIn(2) := Mux(src2(3,0) === "ha".U, src1Bytes(6), src1Bytes(7))
   ksSboxIn(3) := Mux(src2(3,0) === "ha".U, src1Bytes(7), src1Bytes(4))
   ksSboxOut.zip(ksSboxTop).zip(ksSboxIn).foreach{ case ((out, top), in) =>
-    top := SboxAesTop(in)
+    when (io.regEnable) {
+      top := SboxAesTop(in)
+    }
     out := SboxAesOut(SboxInv(top))
     }
 
-  val ks1Idx = RegNext(src2(3,0))
+  val ks1Idx = RegEnable(src2(3,0), io.regEnable)
   val aes64ks1i = Cat(ksSboxOut.asUInt ^ rcon(ks1Idx), ksSboxOut.asUInt ^ rcon(ks1Idx))
 
   val aes64ks2Temp = src1(63,32) ^ src2(31,0)
-  val aes64ks2 = RegNext(Cat(aes64ks2Temp ^ src2(63,32), aes64ks2Temp))
+  val aes64ks2 = RegEnable(Cat(aes64ks2Temp ^ src2(63,32), aes64ks2Temp), io.regEnable)
 
   val aesResult = LookupTreeDefault(funcReg, aes64es, List(
     BKUOpType.aes64es   -> aes64es,
@@ -252,7 +273,9 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   // SM4
   val sm4SboxIn  = src2Bytes(func(1,0))
   val sm4SboxTop = Reg(Vec(21, Bool()))
-  sm4SboxTop := SboxSm4Top(sm4SboxIn)
+  when (io.regEnable) {
+    sm4SboxTop := SboxSm4Top(sm4SboxIn)
+  }
   val sm4SboxOut = SboxSm4Out(SboxInv(sm4SboxTop))
 
   val sm4ed = sm4SboxOut ^ (sm4SboxOut<<8) ^ (sm4SboxOut<<2) ^ (sm4SboxOut<<18) ^ (sm4SboxOut&"h3f".U<<26) ^ (sm4SboxOut&"hc0".U<<10)
@@ -267,7 +290,7 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
     Cat(sm4ks(15,0), sm4ks(31,16)),
     Cat(sm4ks( 7,0), sm4ks(31,8))
   ))
-  val sm4Result = SignExt((sm4Source(funcReg(2,0)) ^ RegNext(src1(31,0)))(31,0), XLEN)
+  val sm4Result = SignExt((sm4Source(funcReg(2,0)) ^ RegEnable(src1(31,0), io.regEnable))(31,0), XLEN)
 
   io.out := Mux(funcReg(3), sm4Result, aesResult)
 }
@@ -276,58 +299,66 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(UInt())
+    val regEnable = Input(Bool())
     val out = Output(UInt(XLEN.W))
   })
 
   val (src1, src2, func) = (io.src(0), io.src(1), io.func)
-  val funcReg = RegNext(func)
+  val funcReg = RegEnable(func, io.regEnable)
 
   val hashModule = Module(new HashModule)
   hashModule.io.src := src1
   hashModule.io.func := func
+  hashModule.io.regEnable := io.regEnable
 
   val blockCipherModule = Module(new BlockCipherModule)
   blockCipherModule.io.src(0) := src1
   blockCipherModule.io.src(1) := src2
   blockCipherModule.io.func := func
+  blockCipherModule.io.regEnable := io.regEnable
 
   io.out := Mux(funcReg(4), hashModule.io.out, blockCipherModule.io.out)
 }
 
 class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
 
-  override def latency = 1
+  override def latency = 2
 
-  val (src1, src2, func, funcReg) = (
+  val (src1, src2, func) = (
     io.in.bits.src(0),
     io.in.bits.src(1),
-    io.in.bits.uop.ctrl.fuOpType,
-    uopVec(latency).ctrl.fuOpType
+    io.in.bits.uop.ctrl.fuOpType
   )
 
   val countModule = Module(new CountModule)
   countModule.io.src := src1
   countModule.io.func := func
+  countModule.io.regEnable := regEnable(1)
 
   val clmulModule = Module(new ClmulModule)
   clmulModule.io.src(0) := src1
   clmulModule.io.src(1) := src2
   clmulModule.io.func := func
+  clmulModule.io.regEnable := regEnable(1)
 
   val miscModule = Module(new MiscModule)
   miscModule.io.src(0) := src1
   miscModule.io.src(1) := src2
   miscModule.io.func := func
+  miscModule.io.regEnable := regEnable(1)
 
   val cryptoModule = Module(new CryptoModule)
   cryptoModule.io.src(0) := src1
   cryptoModule.io.src(1) := src2
   cryptoModule.io.func := func
+  cryptoModule.io.regEnable := regEnable(1)
 
 
+  // CountModule, ClmulModule, MiscModule, and CryptoModule have a latency of 1 cycle
+  val funcReg = uopVec(1).ctrl.fuOpType
   val result = Mux(funcReg(5), cryptoModule.io.out,
                   Mux(funcReg(3), countModule.io.out,
                       Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
 
-  io.out.bits.data := result
+  io.out.bits.data := RegEnable(result, regEnable(2))
 }

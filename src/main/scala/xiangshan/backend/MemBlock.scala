@@ -241,37 +241,27 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
-
+    lsq.io.trigger(i)             <> loadUnits(i).io.lsq.trigger
+  
     // update mem dependency predictor
     io.memPredUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
-
-
-    // TODO: load trigger, a total of 3
-      for (j <- 0 until 10) {
-        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
-        io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
-        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
-      }
-    when(ldExeWbReqs(i).fire()){
-      // load data, we need to delay cmp for 1 cycle for better timing
-//      ldExeWbReqs(i).bits.data
-      // TriggerCmp(ldExeWbReqs(i).bits.data, DontCare, DontCare, DontCare) 
-      // load vaddr 
-//      ldExeWbReqs(i).bits.debug.vaddr
-      // TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
-      for (j <- 0 until 3) {
-        val hit = Mux(tdata(j+3).select, TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)),
-          TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)))
-        // TODO (1) pick out vaddr cmp. put it in earlier stages of pipeline
-        // TODO (2) kandiao load data and hit on load instr
-        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
-        io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
-        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
-      }
+    for (j <- 0 until 10) {
+      io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+      io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+    }
+    for (j <- 0 until 3) {
+      loadUnits(i).io.trigger(j).tdata2 := tdata(j+3).tdata2
+      loadUnits(i).io.trigger(j).matchType := tdata(j+3).matchType
+      loadUnits(i).io.trigger(j).tEnable := tEnable(j+3)
+      val hit = Mux(tdata(j+3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
+      io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
+      io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
+      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
     }
   }
 
@@ -460,7 +450,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!storeUnits(1).io.feedbackSlow.valid)
   }
 
-  lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
 

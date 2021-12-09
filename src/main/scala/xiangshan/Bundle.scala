@@ -226,14 +226,10 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val diffTestDebugLrScValid = Bool()
   val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
-  def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = true) : Bool = {
-    (index, rfType) match {
-      case (0, 0) => ctrl.srcType(0) === SrcType.reg && ctrl.lsrc(0) =/= 0.U && (srcState(0) === SrcState.rdy || ignoreState.B)
-      case (1, 0) => ctrl.srcType(1) === SrcType.reg && ctrl.lsrc(1) =/= 0.U && (srcState(1) === SrcState.rdy || ignoreState.B)
-      case (0, 1) => ctrl.srcType(0) === SrcType.fp && (srcState(0) === SrcState.rdy || ignoreState.B)
-      case (1, 1) => ctrl.srcType(1) === SrcType.fp && (srcState(1) === SrcState.rdy || ignoreState.B)
-      case (2, 1) => ctrl.srcType(2) === SrcType.fp && (srcState(2) === SrcState.rdy || ignoreState.B)
-      case _ => false.B
+  def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
+    isFp match {
+      case false => ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U && (srcState(index) === SrcState.rdy || ignoreState.B)
+      case _ => ctrl.srcType(index) === SrcType.fp && (srcState(index) === SrcState.rdy || ignoreState.B)
     }
   }
   def srcIsReady: Vec[Bool] = {

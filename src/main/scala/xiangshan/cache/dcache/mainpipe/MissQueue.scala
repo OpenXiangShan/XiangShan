@@ -90,7 +90,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
 
     // replace pipe
-    val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
+    val replace_pipe_req = DecoupledIO(new MainPipeReq)
     val replace_pipe_resp = Input(Bool())
 
     // main pipe: amo miss
@@ -341,10 +341,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.replace_pipe_req.valid := !s_replace_req
   val replace = io.replace_pipe_req.bits
+  replace := DontCare
+  replace.miss := false.B
   replace.miss_id := io.id
-  replace.way_en := req.way_en
-  replace.vaddr := req.vaddr
-  replace.tag := req.replace_tag
+  replace.miss_dirty := false.B
+  replace.probe := false.B
+  replace.probe_need_data := false.B
+  replace.source := LOAD_SOURCE.U
+  replace.vaddr := req.vaddr // only untag bits are needed
+  replace.addr := Cat(req.replace_tag, 0.U(pgUntagBits.W)) // only tag bits are needed
+  replace.store_mask := 0.U
+  replace.replace := true.B
+  replace.replace_way_en := req.way_en
 
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   val refill = io.refill_pipe_req.bits
@@ -440,8 +448,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
 
-    val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
-    val replace_pipe_resp = Flipped(Vec(numReplaceRespPorts, ValidIO(new ReplacePipeResp)))
+    val replace_pipe_req = DecoupledIO(new MainPipeReq)
+    val replace_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Flipped(ValidIO(new AtomicsResp))
@@ -472,7 +480,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   val merge = Cat(secondary_ready_vec).orR
-  val reject = Cat(secondary_reject_vec).orR || io.req.bits.cancel
+  val reject = Cat(secondary_reject_vec).orR
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
 
@@ -483,30 +491,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // while it has the same set and the same way as mshr_1 (reject).
   // In this situation, the coming req should be merged by mshr_0
 //  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
-
-  def arbiter[T <: Bundle](
-    in: Seq[DecoupledIO[T]],
-    out: DecoupledIO[T],
-    name: Option[String] = None): Unit = {
-    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
-    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
-    for ((a, req) <- arb.io.in.zip(in)) {
-      a <> req
-    }
-    out <> arb.io.out
-  }
-
-  def rrArbiter[T <: Bundle](
-    in: Seq[DecoupledIO[T]],
-    out: DecoupledIO[T],
-    name: Option[String] = None): Unit = {
-    val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
-    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
-    for ((a, req) <- arb.io.in.zip(in)) {
-      a <> req
-    }
-    out <> arb.io.out
-  }
 
   def select_valid_one[T <: Bundle](
     in: Seq[DecoupledIO[T]],
@@ -544,7 +528,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
         e.io.mem_grant <> io.mem_grant
       }
 
-      e.io.replace_pipe_resp := Cat(io.replace_pipe_resp.map { case r => r.valid && r.bits.miss_id === i.U }).orR
+      e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       io.debug_early_replace(i) := e.io.debug_early_replace

@@ -98,12 +98,14 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     this.startAddr := resp.pc
     this.nextRangeAddr := resp.pc + (FetchWidth * 4 * 2).U
-    this.pftAddr := resp.ftb_entry.pftAddr
+    this.pftAddr :=
+      Mux(resp.preds.hit, resp.ftb_entry.pftAddr,
+        resp.pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U)
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
       (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
     ))
-    this.oversize := resp.ftb_entry.oversize
-    this.carry := resp.ftb_entry.carry
+    this.oversize := Mux(resp.preds.hit, resp.ftb_entry.oversize, false.B)
+    this.carry := Mux(resp.preds.hit, resp.ftb_entry.carry, resp.pc(instOffsetBits + log2Ceil(PredictWidth)).asBool)
     this
   }
   override def toPrintable: Printable = {
