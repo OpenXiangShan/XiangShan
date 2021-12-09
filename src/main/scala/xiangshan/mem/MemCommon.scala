@@ -73,11 +73,6 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val isFirstIssue = Bool()
 }
 
-class StoreDataBundle(implicit p: Parameters) extends XSBundle {
-  val data = UInt((XLEN+1).W)
-  val uop = new MicroOp
-}
-
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))

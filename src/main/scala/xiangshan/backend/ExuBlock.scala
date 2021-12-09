@@ -34,22 +34,33 @@ class ExuBlock(
   val outFpRfReadPorts: Int,
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
-)(implicit p: Parameters) extends LazyModule {
+)(implicit p: Parameters) extends LazyModule with HasWritebackSource with HasExuWbHelper {
   val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
 
   val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)
 
+  val fuConfigs = configs.map(c => (c._1, c._2)).filter(_._1.extendsExu)
+  val numOutFu = configs.filterNot(_._1.extendsExu).map(_._2).sum
+
   lazy val module = new ExuBlockImp(this)
+
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    val params = new WritebackSourceParams
+    params.exuConfigs = fuConfigs.flatMap(cfg => Seq.fill(cfg._2)(Seq(cfg._1)))
+    Seq(params)
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
-class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
+  with HasWritebackSourceImp {
   val scheduler = outer.scheduler.module
 
-  val fuConfigs = outer.configs.map(c => (c._1, c._2)).filter(_._1.extendsExu)
+  val fuConfigs = outer.fuConfigs
   val fuBlock = Module(new FUBlock(fuConfigs))
 
-  val numOutFu = outer.configs.filterNot(_._1.extendsExu).map(_._2).sum
+  val numOutFu = outer.numOutFu
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -68,6 +79,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
   })
+  override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.fuWriteback))
 
   // IO for the scheduler
   scheduler.io.hartId := io.hartId
@@ -187,8 +199,8 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   // By default, instructions do not have exceptions when they enter the function units.
   fuBlock.io.issue.map(_.bits.uop.clearExceptions())
   // For exe units that don't have exceptions, we assign zeroes to their exception vector.
-  for ((cfg, wb) <- flattenFuConfigs.zip(io.fuWriteback).filterNot(_._1.hasExceptionOut)) {
-    wb.bits.uop.clearExceptions()
+  for ((cfg, wb) <- flattenFuConfigs.zip(io.fuWriteback)) {
+    wb.bits.uop.clearExceptions(cfg.exceptionOut, cfg.flushPipe, cfg.replayInst)
   }
 
 }

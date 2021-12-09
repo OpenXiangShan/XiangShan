@@ -16,19 +16,19 @@
 
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import utils._
 import xiangshan._
+import xiangshan.backend.exu.StdExeUnit
+import xiangshan.backend.fu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, PtwResp, TLB, TlbReplace}
+import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
 import xiangshan.mem._
-import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule, PFEvent}
-import utils._
-import xiangshan.backend.exu.StdExeUnit
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -37,42 +37,41 @@ class Std(implicit p: Parameters) extends FunctionUnit {
   io.out.bits.data := io.in.bits.src(0)
 }
 
-class AmoData(implicit p: Parameters) extends FunctionUnit {
-  io.in.ready := true.B
-  io.out.valid := io.in.valid
-  io.out.bits.uop := io.in.bits.uop
-  io.out.bits.data := io.in.bits.src(0)
-}
-
-class MemBlock()(implicit p: Parameters) extends LazyModule {
+class MemBlock()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter with HasWritebackSource {
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
 
   lazy val module = new MemBlockImp(this)
+
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    val params = new WritebackSourceParams
+    params.exuConfigs = (loadExuConfigs ++ storeExuConfigs).map(cfg => Seq(cfg))
+    Seq(params)
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasExceptionNO
   with HasFPUParameters
-  with HasExeBlockHelper
+  with HasWritebackSourceImp
 {
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val redirect = Flipped(ValidIO(new Redirect))
     // in
-    val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
-    val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
+    val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-    val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
     val memoryViolation = ValidIO(new Redirect)
     val ptw = new BTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
@@ -93,6 +92,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
   })
+  override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -104,7 +104,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
   val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
-  val stData = stdExeUnits.map(_.stData.get)
+  val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
@@ -123,6 +123,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
+  val stOut = io.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrappper)
@@ -302,26 +303,22 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
     io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
 
-    io.stOut(i).valid := stu.io.stout.valid
-    io.stOut(i).bits  := stu.io.stout.bits
     stu.io.stout.ready := true.B
 
     // TODO: debug trigger
     // store vaddr 
-    when(io.stOut(i).fire()){
-      io.stOut(i).bits.debug.vaddr
-      // TriggerCmp(io.stOut(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
+    when (stOut(i).fire()) {
       for (j <- 0 until 10) {
-          io.stOut(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
-          io.stOut(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
-          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+          stOut(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+          stOut(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
       }
       for (j <- 0 until 3) {
         when(!tdata(j).select) {
-          val hit = TriggerCmp(io.stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
-          io.stOut(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
-          io.stOut(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
-          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
+          val hit = TriggerCmp(stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
+          stOut(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
+          stOut(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
+          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
         }
       }
     }
@@ -348,8 +345,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // mmio store writeback will use store writeback port 0
   lsq.io.mmioStout.ready := false.B
   when (lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
-    io.stOut(0).valid := true.B
-    io.stOut(0).bits  := lsq.io.mmioStout.bits
+    stOut(0).valid := true.B
+    stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
   }
 

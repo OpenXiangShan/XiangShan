@@ -19,17 +19,17 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
+import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
-import xiangshan.backend.fu.{PFEvent}
-import xiangshan.mem.mdp.{SSIT, LFST, WaitTable}
-import xiangshan.frontend.{FtqPtr, FtqRead}
-import xiangshan.mem.{LsqEnqIO}
-import difftest._
+import xiangshan.frontend.FtqRead
+import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -172,8 +172,33 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   }
 }
 
-class CtrlBlock(implicit p: Parameters) extends XSModule
-  with HasCircularQueuePtrHelper {
+class CtrlBlock(implicit p: Parameters) extends LazyModule with HasWritebackSink with HasWritebackSource {
+  val rob = LazyModule(new Rob)
+
+  override def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]]): HasWritebackSink = {
+    rob.addWritebackSink(Seq(this), Some(Seq(writebackSinks.length)))
+    super.addWritebackSink(source, index)
+  }
+
+  lazy val module = new CtrlBlockImp(this)
+
+  override lazy val writebackSourceParams: Seq[WritebackSourceParams] = {
+    writebackSinksParams
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
+
+  override def generateWritebackIO(
+    thisMod: Option[HasWritebackSource] = None,
+    thisModImp: Option[HasWritebackSourceImp] = None
+  ): Unit = {
+    module.io.writeback.zip(writebackSinksImp(thisMod, thisModImp)).foreach(x => x._1 := x._2)
+  }
+}
+
+class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
+  with HasXSParameter with HasCircularQueuePtrHelper with HasWritebackSourceImp {
+  val writebackLengths = outer.writebackSinksParams.map(_.length)
+
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val frontend = Flipped(new FrontendToCtrlIO)
@@ -182,7 +207,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
-    val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
     val memoryViolation = Flipped(ValidIO(new Redirect))
     val jumpPc = Output(UInt(VAddrBits.W))
     val jalr_target = Output(UInt(VAddrBits.W))
@@ -202,12 +226,25 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
         val lsdqFull  = Input(Bool())
       }
     })
-    val writeback = Vec(NRIntWritePorts + NRFpWritePorts - exuParameters.LduCnt, Flipped(ValidIO(new ExuOutput)))
+    val writeback = MixedVec(writebackLengths.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
     // redirect out
     val redirect = ValidIO(new Redirect)
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
+
+  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
+    Some(io.writeback.map(writeback => {
+      val exuOutput = WireInit(writeback)
+      val timer = GTimer()
+      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
+        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(stage2Redirect))
+        wb_next.bits := RegNext(wb.bits)
+        wb_next.bits.uop.debugInfo.writebackTime := timer
+      }
+      exuOutput
+    }))
+  }
 
   val decode = Module(new DecodeStage)
   val rat = Module(new RenameTableWrapper)
@@ -220,8 +257,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth, "ls"))
   val redirectGen = Module(new RedirectGenerator)
 
-  val robWbSize = io.writeback.length + io.stOut.length
-  val rob = Module(new Rob(robWbSize))
+  val rob = outer.rob.module
 
   val robPcRead = io.frontend.fromFtq.getRobFlushPcRead
   val flushPC = robPcRead(rob.io.flushOut.bits.ftqIdx, rob.io.flushOut.bits.ftqOffset)
@@ -359,13 +395,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   rob.io.hartId := io.hartId
   rob.io.redirect <> stage2Redirect
-  val exeWbResults = VecInit(io.writeback ++ io.stOut)
-  val timer = GTimer()
-  for((rob_wb, wb) <- rob.io.exeWbResults.zip(exeWbResults)) {
-    rob_wb.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(stage2Redirect))
-    rob_wb.bits := RegNext(wb.bits)
-    rob_wb.bits.uop.debugInfo.writebackTime := timer
-  }
+  outer.rob.generateWritebackIO(Some(outer), Some(this))
 
   io.redirect <> stage2Redirect
 
@@ -420,4 +450,5 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   hpm_ctrl.io.events_sets.perf_events := hpmEvents
   perfinfo.perfEvents := RegNext(hpm_ctrl.io.events_selected)
   pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
+
 }

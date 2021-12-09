@@ -67,7 +67,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -301,8 +301,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
         dataModule.io.data.wdata(i)
       )
     }
-    io.rob.storeDataRobWb(i).valid := RegNext(io.storeDataIn(i).fire())
-    io.rob.storeDataRobWb(i).bits := RegNext(io.storeDataIn(i).bits.uop.robIdx)
   }
 
   /**
