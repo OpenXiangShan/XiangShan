@@ -15,16 +15,15 @@
 ***************************************************************************************/
 
 package xiangshan.frontend
-import utils._
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils._
 import xiangshan._
-import xiangshan.cache._
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker}
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.frontend.icache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
@@ -38,7 +37,6 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasExceptionNO
 {
   val io = IO(new Bundle() {
     val fencei = Input(Bool())
