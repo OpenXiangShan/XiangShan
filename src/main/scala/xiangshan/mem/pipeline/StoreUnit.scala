@@ -20,11 +20,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, TlbCmd, TlbPtwIO, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
@@ -107,7 +106,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mmio = is_mmio_cbo
-  val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
+  val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
 
   io.in.ready := true.B
 
@@ -157,7 +156,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
   })
 
-  val s2_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
+  val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || io.pmpResp.mmio
 
   io.in.ready := true.B

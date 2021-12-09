@@ -156,10 +156,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val req = Wire(DecoupledIO(new MainPipeReq))
   arbiter(
     in = Seq(
-      store_req,
       io.probe_req,
-      io.atomic_req,
-      io.replace_req
+      io.replace_req,
+      store_req,
+      io.atomic_req
     ),
     out = req,
     name = Some("main_pipe_req")

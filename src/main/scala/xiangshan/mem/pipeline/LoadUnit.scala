@@ -20,11 +20,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, TlbCmd, TlbPtwIO, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -174,7 +174,8 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.dtlbResp.bits.paddr
-  val s1_exception = selectLoad(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR // af & pf exception were modified below.
+  // af & pf exception were modified below.
+  val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mask = io.in.bits.mask
   val s1_bank_conflict = io.dcacheBankConflict
@@ -283,7 +284,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   when (isSoftPrefetch) {
     excep := 0.U.asTypeOf(excep.cloneType)
   }
-  val s2_exception = selectLoad(excep, false).asUInt.orR
+  val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
 
   val actually_mmio = io.pmpResp.mmio
   val s2_uop = io.in.bits.uop
@@ -372,7 +373,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     RegNext(io.csrCtrl.ldld_vio_check)
   io.out.bits.uop.ctrl.replayInst := forwardFailReplay || ldldVioReplay
   io.out.bits.mmio := s2_mmio
-  io.out.bits.uop.ctrl.flushPipe := io.in.bits.uop.ctrl.flushPipe || (s2_mmio && io.sentFastUop)
+  io.out.bits.uop.ctrl.flushPipe := s2_mmio && io.sentFastUop
   io.out.bits.uop.cf.exceptionVec := excep
 
   // For timing reasons, sometimes we can not let

@@ -19,110 +19,14 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest._
 import freechips.rocketchip.util._
 import utils.MaskedRegMap.WritableMask
 import utils._
+import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend._
-import xiangshan.cache._
-import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
-import difftest._
-
-trait HasExceptionNO {
-  def instrAddrMisaligned = 0
-  def instrAccessFault    = 1
-  def illegalInstr        = 2
-  def breakPoint          = 3
-  def loadAddrMisaligned  = 4
-  def loadAccessFault     = 5
-  def storeAddrMisaligned = 6
-  def storeAccessFault    = 7
-  def ecallU              = 8
-  def ecallS              = 9
-  def ecallM              = 11
-  def instrPageFault      = 12
-  def loadPageFault       = 13
-  def storePageFault      = 15
-
-//  def singleStep          = 14
-
-  val ExcPriority = Seq(
-    breakPoint, // TODO: different BP has different priority
-    instrPageFault,
-    instrAccessFault,
-    illegalInstr,
-    instrAddrMisaligned,
-    ecallM, ecallS, ecallU,
-    storePageFault,
-    loadPageFault,
-    storeAccessFault,
-    loadAccessFault,
-    storeAddrMisaligned,
-    loadAddrMisaligned
-  )
-  val frontendSet = List(
-    // instrAddrMisaligned,
-    instrAccessFault,
-    illegalInstr,
-    instrPageFault
-  )
-  val csrSet = List(
-    illegalInstr,
-    breakPoint,
-    ecallU,
-    ecallS,
-    ecallM
-  )
-  val loadUnitSet = List(
-    loadAddrMisaligned,
-    loadAccessFault,
-    loadPageFault
-  )
-  val storeUnitSet = List(
-    storeAddrMisaligned,
-    storeAccessFault,
-    storePageFault
-  )
-  val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
-  val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
-  val csrWbCount = (0 until 16).map(i => if (csrSet.contains(i)) 1 else 0)
-  val loadWbCount = (0 until 16).map(i => if (loadUnitSet.contains(i)) 1 else 0)
-  val storeWbCount = (0 until 16).map(i => if (storeUnitSet.contains(i)) 1 else 0)
-  val atomicsWbCount = (0 until 16).map(i => if (atomicsUnitSet.contains(i)) 1 else 0)
-  val writebackCount = (0 until 16).map(i => csrWbCount(i) + atomicsWbCount(i) + loadWbCount(i) + 2 * storeWbCount(i))
-  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] = {
-    if (dontCareBits) {
-      val new_vec = Wire(ExceptionVec())
-      new_vec := DontCare
-      select.map(i => new_vec(i) := vec(i))
-      return new_vec
-    }
-    else if (falseBits) {
-      val new_vec = Wire(ExceptionVec())
-      new_vec.map(_ := false.B)
-      select.map(i => new_vec(i) := vec(i))
-      return new_vec
-    }
-    else {
-      val new_vec = Wire(Vec(select.length, Bool()))
-      select.zipWithIndex.map{ case(s, i) => new_vec(i) := vec(s) }
-      return new_vec
-    }
-  }
-  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, frontendSet, dontCareBits, falseBits)
-  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, csrSet, dontCareBits, falseBits)
-  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, loadUnitSet, dontCareBits, falseBits)
-  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, storeUnitSet, dontCareBits, falseBits)
-  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, atomicsUnitSet, dontCareBits, falseBits)
-  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
-}
+import xiangshan.cache._
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
@@ -502,6 +406,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(XLEN - 2, 36) | // WPRI
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
+    GenMask(16, 15)       | // XS is read-only
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
     GenMask(2)              // WPRI
@@ -546,7 +451,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
   // TODO: use config to control the length of asid
   // val satpMask = "h8fffffffffffffff".U(XLEN.W) // enable asid, mode can only be 8 / 0
-  val satpMask = Cat("h8".U(4.W),Asid_true_mask(AsidLength),"hfffffffffff".U((XLEN - 4 - 16).W))
+  val satpMask = Cat("h8".U(Satp_Mode_len.W), satp_part_wmask(Satp_Asid_len, AsidLength), satp_part_wmask(Satp_Addr_len, PAddrBits-12))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   // Page 60 in riscv-priv: The low bit of sepc (sepc[0]) is always zero.
   val sepcMask = ~(0x1.U(XLEN.W))
@@ -1029,7 +934,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasTriggerHit = csrio.exception.bits.uop.cf.trigger.triggerHitVec.orR && raiseException
 
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
-  val regularExceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val exceptionNO = Mux(hasSingleStep || hasTriggerHit, 3.U, regularExceptionNO)
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 

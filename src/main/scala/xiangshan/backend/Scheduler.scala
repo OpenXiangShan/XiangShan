@@ -29,7 +29,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper, RsPerfCounter}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr, StoreDataBundle}
+import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -57,19 +57,67 @@ object DispatchArbiter {
   }
 }
 
-trait HasExuWbMappingHelper {
+trait HasExuWbHelper {
   def findInWbPorts(wb: Seq[Seq[ExuConfig]], target: ExuConfig) : Seq[Int] = {
     wb.zipWithIndex.filter(_._1.contains(target)).map(_._2)
   }
+
   def findInWbPorts(wb: Seq[Seq[ExuConfig]], targets: Seq[ExuConfig]) : Seq[Int] = {
     targets.map(findInWbPorts(wb, _)).fold(Seq())(_ ++ _)
   }
+
   def getFastWakeupIndex(cfg: ExuConfig, intSource: Seq[Int], fpSource: Seq[Int], offset: Int) : Seq[Int] = {
     val sources = Seq(
       (cfg.readIntRf, intSource),
       (cfg.readFpRf, fpSource.map(_ + offset))
     )
     sources.map(c => if (c._1) c._2 else Seq()).reduce(_ ++ _)
+  }
+  def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+    val uop = WireInit(x)
+    uop.valid := x.valid && x.bits.ctrl.fpWen
+    uop
+  }
+  def fpOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
+    val out = WireInit(x)
+    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out
+  }
+  def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
+    val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
+    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out
+  }
+  def intUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+    val uop = WireInit(x)
+    uop.valid := x.valid && x.bits.ctrl.rfWen
+    uop
+  }
+  def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
+    val out = WireInit(x)
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out
+  }
+  def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
+    val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out
+  }
+  def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
+    val v = Wire(Valid(d.bits.cloneType))
+    v.valid := d.valid
+    v.bits := d.bits
+    v
+  }
+
+  def validIOToDecoupledIO[T <: Data](v: Valid[T]): DecoupledIO[T] = {
+    val d = Wire(DecoupledIO(v.bits.cloneType))
+    d.valid := v.valid
+    d.ready := true.B
+    d.bits := v.bits
+    d
   }
 }
 
@@ -83,7 +131,7 @@ class Scheduler(
   val outFpRfReadPorts: Int,
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
-)(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbMappingHelper {
+)(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbHelper {
   val numDpPorts = dpPorts.length
   val dpExuConfigs = dpPorts.map(port => port.map(_._1).map(configs(_)._1))
   def getDispatch2 = {

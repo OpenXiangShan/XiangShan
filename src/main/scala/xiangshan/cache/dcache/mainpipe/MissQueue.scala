@@ -550,7 +550,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  arbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
+  arbiter_with_pipereg(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
   arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
   arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 

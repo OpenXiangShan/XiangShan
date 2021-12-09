@@ -19,12 +19,11 @@ package xiangshan.backend.dispatch
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
-import xiangshan._
 import difftest._
-import xiangshan.backend.fu.HasExceptionNO
+import utils._
+import xiangshan.ExceptionNO._
+import xiangshan._
 import xiangshan.backend.rob.RobEnqIO
-import xiangshan.mem.LsqEnqIO
 import xiangshan.mem.mdp._
 
 case class DispatchParameters
@@ -38,7 +37,7 @@ case class DispatchParameters
 )
 
 // read rob and enqueue
-class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
+class Dispatch(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     // from rename

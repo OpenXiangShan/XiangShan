@@ -57,54 +57,43 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   assert(RegNext(io.meta_write.ready))
   assert(RegNext(io.tag_write.ready))
 
-  val s0_fire, s1_ready, s1_can_go, s1_fire = Wire(Bool())
-  val s1_valid = RegInit(false.B)
-  val s1_req = RegEnable(io.req.bits, s0_fire)
-  when (s0_fire) {
-    s1_valid := true.B
-  }.elsewhen (s1_fire) {
-    s1_valid := false.B
-  }
-  s0_fire := io.req.valid && s1_ready
-  s1_ready := !s1_valid || s1_fire
-  s1_fire := s1_valid && s1_can_go
-  s1_can_go := io.data_write.ready && io.meta_write.ready && io.tag_write.ready
-  assert(RegNext(s1_can_go))
+  val refill_w_valid = io.req.valid
+  val refill_w_req = io.req.bits
 
-  io.req.ready := s1_ready
-  io.resp.valid := s1_fire
-  io.resp.bits := s1_req.miss_id
+  io.req.ready := true.B
+  io.resp.valid := io.req.fire()
+  io.resp.bits := refill_w_req.miss_id
 
-  val idx = s1_req.idx
-  val tag = get_tag(s1_req.addr)
+  val idx = refill_w_req.idx
+  val tag = get_tag(refill_w_req.addr)
 
-  io.data_write.valid := s1_valid
-  io.data_write.bits.addr := s1_req.paddrWithVirtualAlias
-  io.data_write.bits.way_en := s1_req.way_en
-  io.data_write.bits.wmask := s1_req.wmask
-  io.data_write.bits.data := s1_req.data
+  io.data_write.valid := refill_w_valid
+  io.data_write.bits.addr := refill_w_req.paddrWithVirtualAlias
+  io.data_write.bits.way_en := refill_w_req.way_en
+  io.data_write.bits.wmask := refill_w_req.wmask
+  io.data_write.bits.data := refill_w_req.data
 
-  io.meta_write.valid := s1_valid
+  io.meta_write.valid := refill_w_valid
   io.meta_write.bits.idx := idx
-  io.meta_write.bits.way_en := s1_req.way_en
-  io.meta_write.bits.meta := s1_req.meta
+  io.meta_write.bits.way_en := refill_w_req.way_en
+  io.meta_write.bits.meta := refill_w_req.meta
   io.meta_write.bits.tag := tag
 
-  io.tag_write.valid := s1_valid
+  io.tag_write.valid := refill_w_valid
   io.tag_write.bits.idx := idx
-  io.tag_write.bits.way_en := s1_req.way_en
+  io.tag_write.bits.way_en := refill_w_req.way_en
   io.tag_write.bits.tag := tag
 
-  io.store_resp.valid := s1_fire && s1_req.source === STORE_SOURCE.U
+  io.store_resp.valid := refill_w_valid && refill_w_req.source === STORE_SOURCE.U
   io.store_resp.bits := DontCare
   io.store_resp.bits.miss := false.B
   io.store_resp.bits.replay := false.B
-  io.store_resp.bits.id := s1_req.id
+  io.store_resp.bits.id := refill_w_req.id
 
-  io.release_wakeup.valid := s1_fire
-  io.release_wakeup.bits := s1_req.miss_id
+  io.release_wakeup.valid := refill_w_valid
+  io.release_wakeup.bits := refill_w_req.miss_id
 
-  io.replace_access.valid := s1_fire
+  io.replace_access.valid := refill_w_valid
   io.replace_access.bits.set := idx
-  io.replace_access.bits.way := OHToUInt(s1_req.way_en)
+  io.replace_access.bits.way := OHToUInt(refill_w_req.way_en)
 }
