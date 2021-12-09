@@ -97,7 +97,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
   val release_id  = Cat(MissQueueKey.U, id.U)
-  val victim_need_release = req.coh.isValid()
 
   io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
   io.victimInfor.vidx  := req_idx
@@ -165,7 +164,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     is(s_send_grant_ack) {
       when(io.mem_finish.fire()) {
-        state := Mux(victim_need_release,s_send_replace,s_write_back)
+        state := s_send_replace
       }
     }
 
