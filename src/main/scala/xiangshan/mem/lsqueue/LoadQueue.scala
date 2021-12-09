@@ -21,14 +21,10 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem._
-import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.frontend.FtqPtr
 import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache._
+import xiangshan.frontend.FtqPtr
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -79,7 +75,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
-  with HasExceptionNO
 {
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
@@ -766,8 +761,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
     * misc
     */
-  io.rob.storeDataRobWb := DontCare // will be overwriten by store queue's result
-
   // perf counter
   QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
   io.lqFull := !allowEnqueue

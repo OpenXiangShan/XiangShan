@@ -16,24 +16,24 @@
 
 package xiangshan
 
-import chisel3._
-import chisel3.util._
-import xiangshan.backend._
-import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.WbArbiterWrapper
-import xiangshan.frontend._
-import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
+import chisel3._
+import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
+import xiangshan.backend._
+import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
+import xiangshan.cache.mmu._
+import xiangshan.frontend._
+
+import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
   with HasXSParameter
-  with HasExceptionNO
   with HasFPUParameters {
   def io: Record
 }
@@ -49,11 +49,87 @@ trait NeedImpl {
   }
 }
 
+class WritebackSourceParams(
+  var exuConfigs: Seq[Seq[ExuConfig]] = Seq()
+ ) {
+  def length: Int = exuConfigs.length
+  def ++(that: WritebackSourceParams): WritebackSourceParams = {
+    new WritebackSourceParams(exuConfigs ++ that.exuConfigs)
+  }
+}
+
+trait HasWritebackSource {
+  val writebackSourceParams: Seq[WritebackSourceParams]
+  final def writebackSource(sourceMod: HasWritebackSourceImp): Seq[Seq[Valid[ExuOutput]]] = {
+    require(sourceMod.writebackSource.isDefined, "should not use Valid[ExuOutput]")
+    val source = sourceMod.writebackSource.get
+    require(source.length == writebackSourceParams.length, "length mismatch between sources")
+    for ((s, p) <- source.zip(writebackSourceParams)) {
+      require(s.length == p.length, "params do not match with the exuOutput")
+    }
+    source
+  }
+  final def writebackSource1(sourceMod: HasWritebackSourceImp): Seq[Seq[DecoupledIO[ExuOutput]]] = {
+    require(sourceMod.writebackSource1.isDefined, "should not use DecoupledIO[ExuOutput]")
+    val source = sourceMod.writebackSource1.get
+    require(source.length == writebackSourceParams.length, "length mismatch between sources")
+    for ((s, p) <- source.zip(writebackSourceParams)) {
+      require(s.length == p.length, "params do not match with the exuOutput")
+    }
+    source
+  }
+  val writebackSourceImp: HasWritebackSourceImp
+}
+
+trait HasWritebackSourceImp {
+  def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = None
+  def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = None
+}
+
+trait HasWritebackSink {
+  // Caches all sources. The selected source will be the one with smallest length.
+  var writebackSinks = ListBuffer.empty[(Seq[HasWritebackSource], Seq[Int])]
+  def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]] = None): HasWritebackSink = {
+    val realIndex = if (index.isDefined) index.get else Seq.fill(source.length)(0)
+    writebackSinks += ((source, realIndex))
+    this
+  }
+
+  def writebackSinksParams: Seq[WritebackSourceParams] = {
+    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }
+  }
+  final def writebackSinksMod(
+     thisMod: Option[HasWritebackSource] = None,
+     thisModImp: Option[HasWritebackSourceImp] = None
+   ): Seq[Seq[HasWritebackSourceImp]] = {
+    require(thisMod.isDefined == thisModImp.isDefined)
+    writebackSinks.map(_._1.map(source =>
+      if (thisMod.isDefined && source == thisMod.get) thisModImp.get else source.writebackSourceImp)
+    )
+  }
+  final def writebackSinksImp(
+    thisMod: Option[HasWritebackSource] = None,
+    thisModImp: Option[HasWritebackSourceImp] = None
+  ): Seq[Seq[ValidIO[ExuOutput]]] = {
+    val sourceMod = writebackSinksMod(thisMod, thisModImp)
+    writebackSinks.zip(sourceMod).map{ case ((s, i), m) =>
+      s.zip(i).zip(m).flatMap(x => x._1._1.writebackSource(x._2)(x._1._2))
+    }
+  }
+  def selWritebackSinks(func: WritebackSourceParams => Int): Int = {
+    writebackSinksParams.zipWithIndex.minBy(params => func(params._1))._2
+  }
+  def generateWritebackIO(
+    thisMod: Option[HasWritebackSource] = None,
+    thisModImp: Option[HasWritebackSourceImp] = None
+   ): Unit
+}
+
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
-  with HasXSParameter with HasExuWbMappingHelper
+  with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -144,6 +220,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       IssQueSize = exuBlocks.head.scheduler.memRsEntries.max
     )
   })))
+
+  val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
+  wb2Ctrl.addWritebackSink(exuBlocks :+ memBlock)
+  val ctrlBlock = LazyModule(new CtrlBlock)
+  val writebackSources = Seq(Seq(wb2Ctrl), Seq(wbArbiter))
+  writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -154,8 +236,7 @@ class XSCore()(implicit p: config.Parameters) extends XSCoreBase
 
 class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasSoCParameter
-  with HasExeBlockHelper {
+  with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val l2_pf_enable = Output(Bool())
@@ -165,25 +246,26 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
-  val ctrlBlock = Module(new CtrlBlock)
-
   val frontend = outer.frontend.module
+  val ctrlBlock = outer.ctrlBlock.module
+  val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
   val exuBlocks = outer.exuBlocks.map(_.module)
-
 
   ctrlBlock.io.hartId := io.hartId
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
 
-
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
+
+  wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
+  outer.wb2Ctrl.generateWritebackIO()
 
   io.beu_errors.icache <> frontend.io.error
   io.beu_errors.dcache <> memBlock.io.error
@@ -203,18 +285,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
   ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
   ctrlBlock.io.stIn <> memBlock.io.stIn
-  ctrlBlock.io.stOut <> memBlock.io.stOut
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
-  val intWriteback = rfWriteback.take(outer.wbArbiter.intArbiter.numOutPorts)
-  val fpWriteback = rfWriteback.drop(outer.wbArbiter.intArbiter.numOutPorts)
-  val fpWritbackNoLoad = fpWriteback.zip(outer.wbArbiter.fpWbPorts).filterNot(_._2.contains(LdExeUnitCfg)).map(_._1)
-  require(fpWritbackNoLoad.length + intWriteback.length == ctrlBlock.io.writeback.length)
-  ctrlBlock.io.writeback <> VecInit(intWriteback ++ fpWritbackNoLoad)
-  // Load Int and Fp have the same bits and we can re-use the write-back ports
-  for (i <- 0 until exuParameters.LduCnt) {
-    ctrlBlock.io.writeback(exuParameters.AluCnt + i).valid := memBlock.io.writeback(i).valid
-  }
+  val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
+  outer.ctrlBlock.generateWritebackIO()
 
   val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup
   require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
