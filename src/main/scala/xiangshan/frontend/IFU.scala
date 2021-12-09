@@ -196,10 +196,6 @@ with HasCircularQueuePtrHelper
   val f2_vSetIdx    = RegEnable(next = f1_vSetIdx,    enable=f1_fire)
   val f2_fire       = f2_valid && f2_ready
 
-  def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
-    Mux(valid, data, RegEnable(data, valid))
-  }
-
   f2_ready := f3_ready && icacheRespAllValid || !f2_valid
   //TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire       =  fromICache(0).valid && (fromICache(0).bits.vaddr ===  f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(1).bits.vaddr ===  f2_ftq_req.fallThruAddr)) || !f2_doubleLine)
@@ -222,7 +218,8 @@ with HasCircularQueuePtrHelper
   val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
-  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
+  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault && 
+                                                           !fromICache(0).bits.tlbExcp.pageFault
 
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo

@@ -41,7 +41,6 @@ class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
     val vaddr      = UInt(VAddrBits.W)
     val waymask   = UInt(nWays.W)
     val coh       = new ClientMetadata
-    //val release   = ValidUndirectioned(new ReleaseReq)
 
     def getVirSetIdx = get_idx(vaddr)
     def getPhyTag    = get_phy_tag(paddr)
@@ -77,11 +76,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
-//    val release    =  DecoupledIO(new ReleaseReq)
-//    val victimInfor = Output(new ICacheVictimInfor())
-//    val probeMerge  = Input(new ICacheVictimInfor)
-//    val probeMergeFix = Output(Bool())
-
+    val release_req    =  DecoupledIO(new ReplacePipeReq)
+    val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
+    val victimInfor        =  Output(new ICacheVictimInfor())
   })
 
   /** default value for control signals */
@@ -91,34 +88,22 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
-  val s_idle :: s_send_release :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(7)
+  val s_idle  :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_send_replace :: s_wait_replace :: s_wait_resp :: Nil = Enum(8)
   val state = RegInit(s_idle)
-
   /** control logic transformation */
   //request register
   val req = Reg(new ICacheMissReq)
   val req_idx = req.getVirSetIdx //virtual index
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
+  val release_id  = Cat(MissQueueKey.U, id.U)
 
-//  val victim_tag = get_phy_tag(req.release.bits.addr)
-//  val victim_idx = req_idx
+  io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
+  io.victimInfor.vidx  := req_idx
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
-//  val needMergeProbe = (io.probeMerge.valid && state =/= s_idle && io.probeMerge.ptag === victim_tag && io.probeMerge.vidx === victim_idx)
-//
-//  //change release into a ProbeAck
-//  //WARNING: no change to param, default TtoN
-//  when(needMergeProbe && state === s_send_release){
-//    io.release.bits.voluntary := false.B
-//    io.release.bits.hasData   := true.B
-//  }
-//
-//  io.probeMergeFix := needMergeProbe && state === s_send_release
-
   //cacheline register
-  //refullCycles: 8 for 64-bit bus bus and 2 for 256-bit
   val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
   val respDataReg = Reg(Vec(refillCycles, UInt(beatBits.W)))
 
@@ -129,16 +114,21 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
+  io.release_req.bits.paddr := req.paddr
+  io.release_req.bits.vaddr := req.vaddr
+  io.release_req.bits.voluntary := true.B
+  io.release_req.bits.waymask   := req.waymask
+  io.release_req.bits.id   := release_id
+  io.release_req.bits.param := DontCare //release will not care tilelink param
 
   io.req.ready := (state === s_idle)
-  io.mem_acquire.valid := (state === s_send_mem_aquire) //&& !io.flush
+  io.mem_acquire.valid := (state === s_send_mem_aquire)
+  io.release_req.valid := (state === s_send_replace)
 
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
   val is_dirty = RegInit(false.B)
   val is_grant = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
-
-  val neddSendAck = RegInit(false.B)
 
   //state change
   switch(state) {
@@ -166,21 +156,32 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
           is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
           when(readBeatCnt === (refillCycles - 1).U) {
             assert(refill_done, "refill not done!")
-            state := s_write_back
-            neddSendAck := edge.isResponse(io.mem_grant.bits)
+            state := s_send_grant_ack
           }
         }
       }
     }
 
-    is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire(), Mux(neddSendAck, s_send_grant_ack, s_wait_resp), s_write_back)
-    }
-
     is(s_send_grant_ack) {
       when(io.mem_finish.fire()) {
-        state := s_wait_resp
+        state := s_send_replace
       }
+    }
+
+    is(s_send_replace){
+      when(io.release_req.fire()){
+        state := s_wait_replace
+      }
+    }
+
+    is(s_wait_replace){
+      when(io.release_resp.valid && io.release_resp.bits === release_id){
+        state := s_write_back
+      }
+    }
+
+    is(s_write_back) {
+      state := Mux(io.meta_write.fire() && io.data_write.fire(), s_wait_resp, s_write_back)
     }
 
     is(s_wait_resp) {
@@ -192,32 +193,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   }
 
   /** refill write and meta write */
-
-  /** update coh meta */
-  def missCohGen(param: UInt, dirty: Bool): UInt = {
-    MuxLookup(Cat(param, dirty), Nothing, Seq(
-      Cat(toB, false.B) -> Branch,
-      Cat(toB, true.B)  -> Branch,
-      Cat(toT, false.B) -> Trunk,
-      Cat(toT, true.B)  -> Dirty))
-  }
-
-  val miss_new_coh = ClientMetadata(missCohGen(grant_param, is_dirty))
-
-  io.meta_write.valid := (state === s_write_back)
-  io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
-
-  io.data_write.valid := (state === s_write_back)
-  io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
-
-//  io.release.valid := req.release.valid && (state === s_send_release)
-//  io.release.bits  := req.release.bits
-//
-//  io.victimInfor.valid   := state =/= s_idle
-//  io.victimInfor.ptag    := req_tag
-//  io.victimInfor.vidx    := req_idx
-
-  /** Tilelink request for next level cache/memory */
   val missCoh    = ClientMetadata(Nothing)
   val grow_param = missCoh.onAccess(M_XRD)._2
   val acquireBlock = edge.AcquireBlock(
@@ -237,6 +212,22 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   //resp to ifu
   io.resp.valid := state === s_wait_resp
+  /** update coh meta */
+  def missCohGen(param: UInt, dirty: Bool): UInt = {
+    MuxLookup(Cat(param, dirty), Nothing, Seq(
+      Cat(toB, false.B) -> Branch,
+      Cat(toB, true.B)  -> Branch,
+      Cat(toT, false.B) -> Trunk,
+      Cat(toT, true.B)  -> Dirty))
+  }
+
+  val miss_new_coh = ClientMetadata(missCohGen(grant_param, is_dirty))
+
+  io.meta_write.valid := (state === s_write_back)
+  io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
+
+  io.data_write.valid := (state === s_write_back)
+  io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
 
   XSPerfAccumulate(
     "entryPenalty" + Integer.toString(id, 10),
@@ -263,34 +254,22 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
-//    val release     = DecoupledIO(new ReleaseReq)
+    val release_req    =  DecoupledIO(new ReplacePipeReq)
+    val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
 
-//    val victimInfor = Vec(2, Output(new ICacheVictimInfor()))
-//    val probeMerge  = Flipped(ValidIO(new ICacheVictimInfor))
+    val victimInfor = Vec(PortNumber, Output(new ICacheVictimInfor()))
+
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
 
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  PortNumber))
   val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  PortNumber))
-  //val release_arb    = Module(new Arbiter(new ReleaseReq,  PortNumber))
+  val release_arb    = Module(new Arbiter(new ReplacePipeReq,  PortNumber))
 
   io.mem_grant.ready := true.B
 
-//  val probeMergeFix = VecInit(Seq.fill(2)(WireInit(false.B)))
-//
-//  val probeMerge = RegInit(0.U.asTypeOf(new ICacheVictimInfor))
-//  when(io.probeMerge.valid){
-//    probeMerge.ptag   := io.probeMerge.bits.ptag
-//    probeMerge.vidx   := io.probeMerge.bits.vidx
-//    probeMerge.valid  := true.B
-//  }
-//
-//  when(probeMergeFix.reduce(_||_)){
-//    probeMerge.valid := false.B
-//  }
-
-  val entries = (0 until 2) map { i =>
+  val entries = (0 until PortNumber) map { i =>
     val entry = Module(new ICacheMissEntry(edge, i))
 
     entry.io.id := i.U
@@ -300,15 +279,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     entry.io.req.bits  := io.req(i).bits
     io.req(i).ready    := entry.io.req.ready
 
-//    io.victimInfor(i)  := entry.io.victimInfor
-//    entry.io.probeMerge := probeMerge
-//
-//    probeMergeFix(i) := entry.io.probeMergeFix
-
     // entry resp
     meta_write_arb.io.in(i)     <>  entry.io.meta_write
     refill_arb.io.in(i)         <>  entry.io.data_write
-    //release_arb.io.in(i)        <>  entry.io.release
+    release_arb.io.in(i)        <>  entry.io.release_req
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
@@ -317,6 +291,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     }
 
     io.resp(i) <> entry.io.resp
+
+    io.victimInfor(i) := entry.io.victimInfor
+
+    entry.io.release_resp <> io.release_resp
 
     XSPerfAccumulate(
       "entryPenalty" + Integer.toString(i, 10),
@@ -335,7 +313,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
-  //io.release        <> release_arb.io.out
+  io.release_req        <> release_arb.io.out
 
   (0 until nWays).map{ w =>
     XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)
