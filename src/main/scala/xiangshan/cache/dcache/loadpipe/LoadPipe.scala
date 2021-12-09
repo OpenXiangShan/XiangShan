@@ -20,9 +20,9 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{XSDebug, XSPerfAccumulate, PerfEventsBundle}
+import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 
-class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
+class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   def metaBits = (new Meta).getWidth
   def encMetaBits = cacheParams.tagCode.width((new MetaAndTag).getWidth) - tagBits
   def getMeta(encMeta: UInt): UInt = {
@@ -300,18 +300,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(5))
-  })
   val perfEvents = Seq(
-    ("load_req                     ", io.lsu.req.fire()                                               ),
-    ("load_replay                  ", io.lsu.resp.fire() && resp.bits.replay                          ),
-    ("load_replay_for_data_nack    ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
-    ("load_replay_for_no_mshr      ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
-    ("load_replay_for_conflict     ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
+    ("load_req                 ", io.lsu.req.fire()                                               ),
+    ("load_replay              ", io.lsu.resp.fire() && resp.bits.replay                          ),
+    ("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
+    ("load_replay_for_no_mshr  ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
+    ("load_replay_for_conflict ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }
