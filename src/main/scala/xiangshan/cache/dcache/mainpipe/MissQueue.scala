@@ -128,7 +128,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val release_entry = s_grantack && w_refill_resp && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
-  val data_not_refilled = !w_grantlast
+  val data_not_refilled = !w_grantfirst
 
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
@@ -309,7 +309,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val data = refill_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
-  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data
+  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
   io.refill_to_ldq.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count))
   io.refill_to_ldq.bits.refill_done := RegNext(refill_done && io.mem_grant.fire())
