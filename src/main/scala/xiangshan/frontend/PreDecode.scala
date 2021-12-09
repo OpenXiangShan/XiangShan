@@ -192,15 +192,18 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
  */
 
 object FaultType {
-  def jalFault        = "b00".U
-  def targetFault     = "b01".U
-  def faulsePred      = "b10".U    //not CFI taken or invalid instruction taken
-  def apply() = UInt(2.W)
+  def noFault         = "b000".U
+  def jalFault        = "b001".U    //not CFI taken or invalid instruction taken
+  def retFault        = "b010".U    //not CFI taken or invalid instruction taken
+  def targetFault     = "b011".U
+  def faulsePred      = "b100".U    //not CFI taken or invalid instruction taken
+  def apply() = UInt(3.W)
 }
 
 class CheckInfo extends Bundle {  // 8 bit
-  val value  = UInt(2.W)
+  val value  = UInt(3.W)
   def isjalFault      = value === FaultType.jalFault
+  def isRetFault      = value === FaultType.retFault
   def istargetFault   = value === FaultType.targetFault
   def isfaulsePred    = value === FaultType.faulsePred
 }
@@ -256,7 +259,11 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC, 2.U, 4.U ) ))
 
-  io.out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVec(i), FaultType.jalFault , Mux(targetFault(i), FaultType.targetFault , FaultType.faulsePred))}
+  io.out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVec(i) , FaultType.jalFault ,
+                                                                             Mux(retFaultVec(i), FaultType.retFault ,
+                                                                             Mux(targetFault(i), FaultType.targetFault , 
+                                                                             Mux(notCFITaken(i) || invalidTaken(i) ,FaultType.faulsePred, FaultType.noFault))))}
+
   io.out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVec(i) || retFaultVec(i) || notCFITaken(i) || invalidTaken(i) || targetFault(i)}
   io.out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i),  seqTargets(i) )}
 

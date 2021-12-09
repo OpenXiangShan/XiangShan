@@ -146,13 +146,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   val t_idle :: t_miss :: t_fixed :: Nil = Enum(3)
-  val tlb_status = VecInit(Seq.fill(PortNumber)(RegInit(t_idle)))
+  val tlb_status = RegInit(VecInit(Seq.fill(PortNumber)(t_idle)))
   dontTouch(tlb_status)
 
   val tlb_miss_vec = VecInit((0 until PortNumber).map( i => toITLB(i).valid && fromITLB(i).bits.miss ))
-  val tlb_all_resp = Wire(Vec(2, Bool()))//VecInit((0 until PortNumber).map( i => !fromITLB(i).bits.miss  )).reduce(_&&_)
-  tlb_all_resp(0) := !fromITLB(0).bits.miss
-  tlb_all_resp(1) := !fromITLB(1).bits.miss || !s0_double_line
+  val tlb_resp = Wire(Vec(2, Bool()))//VecInit((0 until PortNumber).map( i => !fromITLB(i).bits.miss  )).reduce(_&&_)
+  tlb_resp(0) := !fromITLB(0).bits.miss
+  tlb_resp(1) := !fromITLB(1).bits.miss || !s0_double_line
+  val tlb_all_resp = tlb_resp.reduce(_&&_)
   // val tlb_miss_slot = Seq.fill(PortNumber)(RegInit(0.U.asTypeOf(new TlbResp)))
 
   (0 until PortNumber).map { i => 
@@ -165,7 +166,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  s0_fire        := s0_valid && s1_ready && tlb_all_resp
+  s0_fire        := s0_valid && s1_ready && tlb_all_resp && fetch_req(0).ready && fetch_req(1).ready
 
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready  && 
@@ -211,6 +212,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
 
+  //response
   val tlbRespPAddr = ResultHoldBypass(valid = s1_tlb_all_resp_wire, data = VecInit(fromITLB.map(_.bits.paddr)))
   val tlbExcpPF    = ResultHoldBypass(valid = s1_tlb_all_resp_wire, data = VecInit(fromITLB.map(port => port.bits.excp.pf.instr && port.valid)))   
   val tlbExcpAF    = ResultHoldBypass(valid = s1_tlb_all_resp_wire, data = VecInit(fromITLB.map(port => port.bits.excp.af.instr && port.valid)))   
@@ -281,7 +283,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || (!s2_valid && s2_miss_available)
   s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
 
-  val pmpExcpAF = fromPMP.map(port => port.instr)
   val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
 
   val (s2_req_paddr , s2_req_vaddr)   = (RegEnable(next = s1_req_paddr, enable = s1_fire), RegEnable(next = s1_req_vaddr, enable = s1_fire))
@@ -293,6 +294,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_port_hit     = RegEnable(next = s1_port_hit, enable = s1_fire)
   val s2_bank_miss    = RegEnable(next = s1_bank_miss, enable = s1_fire)
 
+
   val sec_meet_vec = Wire(Vec(2, Bool()))
   val s2_fixed_hit_vec = VecInit((0 until 2).map(i => s2_port_hit(i) || sec_meet_vec(i)))
   val s2_fixed_hit = (s2_valid && s2_fixed_hit_vec(0) && s2_fixed_hit_vec(1) && s2_double_line) || (s2_valid && s2_fixed_hit_vec(0) && !s2_double_line)
@@ -302,6 +304,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_victim_coh   = RegEnable(next = s1_victim_coh, enable = s1_fire)
 
   /** exception and pmp logic **/
+  //PMP Result
+  val pmpExcpAF = Wire(Vec(PortNumber, Bool()))
+  pmpExcpAF(0)  := fromPMP(0).instr
+  pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
   //exception information
   val s2_except_pf = RegEnable(next =tlbExcpPF, enable = s1_fire)
   val s2_except_af = VecInit(RegEnable(next = tlbExcpAF, enable = s1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(s1_fire)).asBool))
@@ -311,7 +317,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !s2_except_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool()
 
   io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_fire
+    p.req.valid := s2_fire 
     p.req.bits.addr := s2_req_paddr(i)
     p.req.bits.size := 3.U // TODO
     p.req.bits.cmd := TlbCmd.exec
