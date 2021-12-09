@@ -80,6 +80,13 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
     beat_data(i) := req.data((i + 1) * beatBits - 1, i * beatBits)
   }
 
+  val probeResponse = edge.ProbeAck(
+    fromSource = io.id,
+    toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
+    lgSize = log2Ceil(cacheParams.blockBytes).U,
+    reportPermissions = req.param
+  )
+
   val probeResponseData = edge.ProbeAck(
     fromSource = io.id,
     toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
@@ -87,13 +94,6 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
     reportPermissions = req.param,
     data = beat_data(beat)
   )
-
-  val voluntaryRelease = edge.Release(
-    fromSource = io.id,
-    toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
-    lgSize = log2Ceil(blockBytes).U,
-    shrinkPermissions = req.param
-  )._2
 
     val voluntaryReleaseData = edge.Release(
     fromSource = io.id,
@@ -106,8 +106,8 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
 
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req )
-  io.mem_release.bits  := Mux(req.voluntary,
-          Mux(req.hasData, voluntaryReleaseData, voluntaryRelease), probeResponseData)
+  io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
+                            Mux(req.hasData,probeResponseData,probeResponse))
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
 
