@@ -45,7 +45,7 @@ class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
 class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
   val tdata2 = Input(UInt(64.W)) 
   val matchType = Input(UInt(2.W)) 
-  val tEnable = Input(Bool()) 
+  val tEnable = Input(Bool()) // timing is calculated before this
   val addrHit = Output(Bool())
   val lastDataHit = Output(Bool())
 }

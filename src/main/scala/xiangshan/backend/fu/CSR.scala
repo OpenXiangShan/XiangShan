@@ -133,11 +133,11 @@ trait HasTriggerConst {
 }
 
 class TdataBundle extends Bundle {
-  val hit = Bool()
+//  val hit = Bool()
   val select = Bool()
   val timing = Bool()
 //  val size = UInt(4.W) // hardwire to 0
-  val action = Bool()
+//  val action = Bool()
   val chain = Bool()
   val matchType = UInt(2.W)
   val m = Bool()
@@ -349,18 +349,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val tselectPhy = RegInit(0.U(4.W))
   val tDummy = WireInit(0.U(64.W))
   val tControlPhy = RegInit(0.U(64.W))
+  val triggerAction = RegInit(false.B)
   def ReadTdata1(rdata: UInt) = {
     val tdata1 = tdata1Phy(tselectPhy)
+    XSDebug(s"Debug Mode: tdata1(${tselectPhy})is read, the actual value is ${Binary(tdata1Phy(tselectPhy).asUInt)}\n")
     Cat(
       2.U(4.W), // type, hardwired
       0.U(1.W), // dmode, hardwired
       0.U(6.W), // maskmax, hardwired to 0 because we don not support
       1.U(2.W), // sizehi, hardwired
-      tdata1.hit,
+      0.U(1.W), // just don't want to implement this
       tdata1.select, // select
       tdata1.timing,
       0.U(2.W), // sizelo
-      0.U(3.W), tdata1.action, // action, 0 is breakpoint 1 is enter debug
+      0.U(3.W), triggerAction, // action, 0 is breakpoint 1 is enter debug
       tdata1.chain,
       0.U(2.W), tdata1.matchType,
       tdata1.m, false.B, tdata1.s, tdata1.u,
@@ -369,10 +371,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   def WriteTdata1(wdata: UInt) = {
     val tdata1_new = WireInit(tdata1Phy(tselectPhy))
-    tdata1_new.hit := wdata(20)
-    tdata1_new.select := wdata(19)
+    XSDebug(s"Debug Mode: tdata1(${tselectPhy})is written, the actual value is ${Binary(wdata)}\n")
+//    tdata1_new.hit := wdata(20)
+    tdata1_new.select := (tdata1_function(tselectPhy)._2 === I_Trigger) && wdata(19)
     tdata1_new.timing := wdata(18)
-    tdata1_new.action := wdata(12)
+    triggerAction := wdata(12)
     tdata1_new.chain := tdata1_function(tselectPhy)._1.B && wdata(11)
     when(wdata(10, 7) === 0.U || wdata(10, 7) === 2.U || wdata(10, 7) === 3.U) {tdata1_new.matchType := wdata(8, 7)}
     tdata1_new.m := wdata(6)
@@ -406,12 +409,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     res.matchType := tdata1.matchType
     res.select := tdata1.select
     res.timing := tdata1.timing
-    res.action := tdata1.action
+    res.action := triggerAction
     res.chain := tdata1.chain
     res.tdata2 := tdata2
     res
   }
 
+  // JiaPai! Valid!
   csrio.customCtrl.frontend_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U, Seq(
     0.U -> 0.U,
     1.U -> 1.U,
@@ -863,7 +867,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && addr === Tdata1.U && tdata1_function(tselectPhy)._2 === I_Trigger)
   csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && addr === Tdata1.U && tdata1_function(tselectPhy)._2 =/= I_Trigger)
-
+  XSDebug(csrio.customCtrl.trigger_enable.asUInt.orR(), s"Debug Mode: At least 1 trigger is enabled, trigger enable is ${Binary(csrio.customCtrl.trigger_enable.asUInt())}\n")
 
   // CSR inst decode
   val isEbreak = addr === privEbreak && func === CSROpType.jmp
@@ -966,6 +970,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
   cfOut.exceptionVec := csrExceptionVec
 
+  XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
+
   /**
     * Exception and Intr
     */
@@ -1004,7 +1010,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasStoreAccessFault = csrio.exception.bits.uop.cf.exceptionVec(storeAccessFault) && raiseException
   val hasbreakPoint = csrio.exception.bits.uop.cf.exceptionVec(breakPoint) && raiseException
   val hasSingleStep = csrio.exception.bits.uop.ctrl.singleStep && raiseException
-  val hasTriggerHit = csrio.exception.bits.uop.cf.trigger.triggerHitVec.orR && raiseException
+  val hasTriggerHit = (csrio.exception.bits.uop.cf.trigger.frontendException || csrio.exception.bits.uop.cf.trigger.backendHit.orR) && raiseException
+
+  XSDebug(hasSingleStep, "Debug Mode: single step exception\n")
+  XSDebug(hasTriggerHit, s"Debug Mode: trigger hit, is frontend? ${csrio.exception.bits.uop.cf.trigger.frontendException} " +
+    s"backend hit vec ${Binary(csrio.exception.bits.uop.cf.trigger.backendHit.asUInt)}\n")
 
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
   val regularExceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
@@ -1013,7 +1023,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // TODO
+  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit && triggerAction) // TODO
   val ebreakEnterParkLoop = debugMode && raiseExceptionIntr
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",

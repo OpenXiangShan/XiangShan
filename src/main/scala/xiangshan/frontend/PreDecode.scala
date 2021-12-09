@@ -146,8 +146,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   io.out.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
   val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
   triggerEnable := io.in.csrTriggerEnable
-  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
-  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
+//  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
+  XSDebug(triggerEnable.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
+  for (i <- 0 until 4)
+    PrintTriggerInfo(triggerEnable(i), tdata(i))
 
   for (i <- 0 until PredictWidth) {
     //TODO: Terrible timing for pc comparing
@@ -182,17 +184,33 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pc(i)               := currentPC
     io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U)&& !pageFault(0) && pageFault(1) && !currentIsRVC
 //    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
-    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
-    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
-    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
+//    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
+//    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
+//    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
+    val triggerHitVec = Wire(Vec(4, Bool()))
     for (j <- 0 until 4) {
       val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
-      io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
-      io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
-      if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
+      triggerHitVec(j) := hit
+//      io.out.triggered(i).frontendHit(triggerMapping(j)) := hit
+      io.out.triggered(i).frontendTiming(j) := tdata(j).timing
     }
-    io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i) 
+    // fix chains this could be moved further into the pipeline
+    io.out.triggered(i).frontendHit := triggerHitVec
+    val enableChain = tdata(0).chain
+    when(enableChain){
+      io.out.triggered(i).frontendHit(0) := triggerHitVec(0) && triggerHitVec(1) && (tdata(0).timing === tdata(1).timing)
+      io.out.triggered(i).frontendHit(1) := triggerHitVec(0) && triggerHitVec(1) && (tdata(0).timing === tdata(1).timing)
+    }
+    for(j <- 0 until 2) {
+      io.out.triggered(i).backendEn(j) := Mux(tdata(j+2).chain, triggerHitVec(j+2), true.B)
+      io.out.triggered(i).backendConsiderTiming(j) := tdata(j+2).chain
+      io.out.triggered(i).backendChainTiming(j) := tdata(j+2).timing
+    }
+    XSDebug(io.out.triggered(i).getHitFrontend, p"Debug Mode: Predecode Inst No. ${i} has trigger hit vec ${io.out.triggered(i).frontendHit}" +
+      p"with timing ${io.out.triggered(i).frontendTiming} and backend ${io.out.triggered(i).backendEn} + ${io.out.triggered(i).backendConsiderTiming}\n")
+
+    io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i)
     io.out.accessFault(i)      := hasAccessFault
 
 

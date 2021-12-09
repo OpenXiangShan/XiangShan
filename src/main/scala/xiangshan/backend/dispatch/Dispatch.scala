@@ -99,6 +99,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
     singleStepStatus := true.B
   }
+  XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
+  val frontendTriggerHitReg = RegInit(false.B)
+  val frontendTriggerHitWire = WireInit(Fill(log2Up(RenameWidth), true.B))
+  when(io.redirect.valid) {
+    frontendTriggerHitReg := false.B
+  }
+
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
@@ -106,7 +113,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     io.fromRename(i).fire()
   ))
 
+
   for (i <- 0 until RenameWidth) {
+    when(io.fromRename(i).fire() && io.fromRename(i).bits.cf.trigger.getHitFrontend && io.fromRename(i).bits.cf.trigger.getTimingFrontend){
+      frontendTriggerHitWire := i.U
+      frontendTriggerHitReg := true.B
+      XSDebug(p"Debug Mode: A frontend trigger with timing 1 has fired. Index is ${i}\n")
+    }
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
 
     updatedUop(i) := io.fromRename(i).bits
@@ -133,7 +146,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
-
+    // update frontend triggers
+    updatedUop(i).cf.trigger.frontendException :=
+      (io.fromRename(i).bits.cf.trigger.getHitFrontend && !io.fromRename(i).bits.cf.trigger.getTimingFrontend) ||
+        (frontendTriggerHitWire < i.U) || frontendTriggerHitReg
+    when (io.fromRename(i).fire()) {
+      XSDebug(updatedUop(i).cf.trigger.frontendException, s"Debug Mode: inst ${i} has frontend trigger exception\n")
+      XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
+    }
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
@@ -211,7 +231,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(io.fromRename.map(r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR))
+  val hasException = VecInit(io.fromRename.map(
+    r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR || r.bits.ctrl.singleStep || r.bits.cf.trigger.frontendException))
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isNoSpecExec(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)

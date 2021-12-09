@@ -515,10 +515,41 @@ xret csr to pc + 4/ + 2
 // Timing of 0 means trap at current inst, 1 means trap at next inst
 // Chaining and timing and the validness of a trigger is controlled by csr
 // In two chained triggers, if they have different timing, both won't fire
-class TriggerCf (implicit p: Parameters) extends XSBundle {
-  val triggerHitVec = Vec(10, Bool())
-  val triggerTiming = Vec(10, Bool())
-  val triggerChainVec = Vec(5, Bool())
+//class TriggerCf (implicit p: Parameters) extends XSBundle {
+//  val triggerHitVec = Vec(10, Bool())
+//  val triggerTiming = Vec(10, Bool())
+//  val triggerChainVec = Vec(5, Bool())
+//}
+
+class TriggerCf(implicit p: Parameters) extends XSBundle {
+  // frontend
+  val frontendHit = Vec(4, Bool())
+  val frontendTiming = Vec(4, Bool())
+
+  val frontendHitNext = Vec(4, Bool())
+
+  val frontendException = Bool()
+  // backend
+  val backendEn = Vec(2, Bool()) // Hit(6) && chain(4) , Hit(8) && chain(4)
+  val backendConsiderTiming = Vec(2, Bool())
+  val backendChainTiming = Vec(2, Bool())
+  val backendHit = Vec(6, Bool())
+  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
+
+  // Two situations not allowed:
+  // 1. load data comparison
+  // 2. store chaining with store
+
+  def frontendChain = Seq(false.B, false.B) ++ backendChainTiming
+  def getTimingFrontend = (frontendHit.zip(frontendTiming).zip(frontendChain).map {
+    case ((h, t), c) => Mux(h, t, true.B) && !c
+  }).reduce(_ && _) // unless all 1 the timing is one
+  def getHitFrontend = frontendHit.reduce(_ || _)
+
+  def getTimingBackend = (backendHit.zip(backendTiming).map {
+    case (h, t) => Mux(h, t, true.B)
+  }).reduce(_ && _)
+  def getHitBackend = backendHit.reduce(_ || _)
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
