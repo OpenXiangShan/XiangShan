@@ -216,7 +216,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
   // distributed csr write
-  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
+  val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPMethod with PMAMethod with HasTriggerConst
@@ -1127,12 +1127,27 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Distributed CSR update req
   //
   // For now we use it to implement customized cache op
+  // It can be delayed if necessary
 
-  when(csrio.distributedUpdate.w.valid){
+  val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
+  val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
+  val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
+  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid, 
+    delayedUpdate0.w.bits.addr,
+    delayedUpdate1.w.bits.addr
+  )
+  val distributedUpdateData = Mux(delayedUpdate0.w.valid, 
+    delayedUpdate0.w.bits.data,
+    delayedUpdate1.w.bits.data
+  )
+
+  assert(!(delayedUpdate0.w.valid && delayedUpdate1.w.valid))
+
+  when(distributedUpdateValid){
     // cacheopRegs can be distributed updated
     CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
-      when((Scachebase + attribute("offset").toInt).U === csrio.distributedUpdate.w.bits.addr){
-        cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
+      when((Scachebase + attribute("offset").toInt).U === distributedUpdateAddr){
+        cacheopRegs(name) := distributedUpdateData
       }
     }}
   }
