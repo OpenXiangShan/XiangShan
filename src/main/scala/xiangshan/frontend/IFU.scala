@@ -507,6 +507,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_instr_range    = RegNext(io.toIbuffer.bits.enqEnable)
   val wb_pc             = RegNext(f3_pc)
   val wb_pd             = RegNext(f3_pd)
+  val wb_instr_valid    = RegNext(f3_instr_valid)
 
   //***提前结束的lastHafl***
   // val wb_lastIdx        = RegNext(f3_lastIdx)
@@ -525,7 +526,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.valid                  := wb_valid
   checkFlushWb.bits.pc                := wb_pc
   checkFlushWb.bits.pd                := wb_pd
-  checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_range(i)}
+  checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)}
   checkFlushWb.bits.ftqIdx            := wb_ftq_req.ftqIdx
   checkFlushWb.bits.ftqOffset         := wb_ftq_req.ftqOffset.bits
   checkFlushWb.bits.misOffset.valid   := ParallelOR(wb_check_result.fixedMissPred) || wb_half_flush
