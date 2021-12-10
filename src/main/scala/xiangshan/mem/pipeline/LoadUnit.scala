@@ -443,7 +443,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && ldldVioReplay)
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
+class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
@@ -579,10 +579,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(12))
-  })
-
   val perfEvents = Seq(
     ("load_s0_in_fire         ", load_s0.io.in.fire()                                                                                                            ),
     ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()                                                                            ),
@@ -597,10 +593,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     ("load_s2_replay_tlb_miss ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && load_s2.io.in.bits.tlbMiss                                    ),
     ("load_s2_replay_cache    ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)

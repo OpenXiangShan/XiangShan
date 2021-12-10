@@ -444,7 +444,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   lazy val module = new ICacheImp(this)
 }
 
-class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters {
+class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io = IO(new ICacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
@@ -576,15 +576,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     assert (!bus.d.fire())
   }
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
   val perfEvents = Seq(
-    ("icache_miss_cnt         ", false.B                               ),
-    ("icache_miss_penty       ", BoolStopWatch(start = false.B, stop = false.B || false.B, startHighPriority = true)                               ),
+    ("icache_miss_cnt  ", false.B),
+    ("icache_miss_penty", BoolStopWatch(start = false.B, stop = false.B || false.B, startHighPriority = true)),
   )
+  generatePerfEvent()
 
-    // Customized csr cache op support
+  // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
