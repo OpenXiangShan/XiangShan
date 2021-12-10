@@ -126,15 +126,13 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   def wbFpPriority: Int = params.exuCfg.get.wbFpPriority
 
   override def toString: String = params.toString
+  // for better timing, we limits the size of RS to 2-deq
+  val maxRsDeq = 2
+  def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
-  lazy val module = new LazyModuleImp(this) {
-    // for better timing, we limits the size of RS to 2-deq
-    val maxRsDeq = 2
-
-    // split rs to 2-deq
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
-    val numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
     val rs = (0 until numRS).map(i => {
       val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
       val numEnq = params.numEnq / numRS
@@ -154,7 +152,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       )
     })
     val io = IO(new ReservationStationIO(params)(updatedP))
-    val perf = IO(Vec(rs.length, Output(new RsPerfCounter)))
 
     rs.foreach(_.io.redirect <> io.redirect)
     io.numExist <> rs.map(_.io.numExist).reduce(_ +& _)
@@ -185,7 +182,9 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
     }
-    perf <> rs.map(_.perf)
+
+    val perfEvents = rs.flatMap(_.getPerfEvents)
+    generatePerfEvent()
   }
 
   var fastWakeupIdx = 0
@@ -237,13 +236,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
-class RsPerfCounter(implicit p: Parameters) extends XSBundle {
-  val full = Bool()
-}
-
-class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule {
+class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new ReservationStationIO(params))
-  val perf = IO(Output(new RsPerfCounter))
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -253,7 +247,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s2_deq = Wire(io.deq.cloneType)
 
   io.numExist := PopCount(statusArray.io.isValid)
-  perf.full := RegNext(statusArray.io.isValid.andR)
+
+  val perfEvents = Seq(("full", statusArray.io.isValid.andR))
+  generatePerfEvent()
+
   statusArray.io.redirect := io.redirect
 
   /**

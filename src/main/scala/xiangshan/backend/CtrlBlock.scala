@@ -169,7 +169,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   }
 }
 
-class CtrlBlock(implicit p: Parameters) extends LazyModule with HasWritebackSink with HasWritebackSource {
+class CtrlBlock(implicit p: Parameters) extends LazyModule
+  with HasWritebackSink with HasWritebackSource {
   val rob = LazyModule(new Rob)
 
   override def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]]): HasWritebackSink = {
@@ -193,7 +194,11 @@ class CtrlBlock(implicit p: Parameters) extends LazyModule with HasWritebackSink
 }
 
 class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasXSParameter with HasCircularQueuePtrHelper with HasWritebackSourceImp {
+  with HasXSParameter
+  with HasCircularQueuePtrHelper
+  with HasWritebackSourceImp
+  with HasPerfEvents
+{
   val writebackLengths = outer.writebackSinksParams.map(_.length)
 
   val io = IO(new Bundle {
@@ -249,9 +254,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val waittable = Module(new WaitTable)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth, "fp"))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth, "ls"))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
 
   val rob = outer.rob.module
@@ -417,41 +422,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
 
   val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
   val csrevents = pfevent.io.hpmevent.slice(8,16)
+
   val perfinfo = IO(new Bundle(){
-    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
-    val perfEventsRs      = Input(new PerfEventsBundle(NumRs))
-    val perfEventsEu0     = Input(new PerfEventsBundle(10))
-    val perfEventsEu1     = Input(new PerfEventsBundle(10))
+    val perfEventsRs      = Input(Vec(NumRs, new PerfEvent))
+    val perfEventsEu0     = Input(Vec(6, new PerfEvent))
+    val perfEventsEu1     = Input(Vec(6, new PerfEvent))
   })
 
-  if(print_perfcounter){
-    val decode_perf     = decode.perfEvents.map(_._1).zip(decode.perfinfo.perfEvents.perf_events)
-    val rename_perf     = rename.perfEvents.map(_._1).zip(rename.perfinfo.perfEvents.perf_events)
-    val dispat_perf     = dispatch.perfEvents.map(_._1).zip(dispatch.perfinfo.perfEvents.perf_events)
-    val intdq_perf      = intDq.perfEvents.map(_._1).zip(intDq.perfinfo.perfEvents.perf_events)
-    val fpdq_perf       = fpDq.perfEvents.map(_._1).zip(fpDq.perfinfo.perfEvents.perf_events)
-    val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
-    val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
-    val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
-
-    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-      println(s"ctrl perf $i: $perf_name")
-    }
-  }
-
-  val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ 
-                  dispatch.perfinfo.perfEvents.perf_events ++ 
-                  intDq.perfinfo.perfEvents.perf_events ++ fpDq.perfinfo.perfEvents.perf_events ++
-                  lsDq.perfinfo.perfEvents.perf_events ++ rob.perfinfo.perfEvents.perf_events ++
-                  perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events ++ 
-                  perfinfo.perfEventsRs.perf_events
-
-  val perf_length = hpmEvents.length
-  val hpm_ctrl = Module(new HPerfmonitor(perf_length,csrevents.length))
-  hpm_ctrl.io.hpm_event := csrevents
-  hpm_ctrl.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := RegNext(hpm_ctrl.io.events_selected)
-  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
-
+  val allPerfEvents = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerf)
+  val hpmEvents = allPerfEvents ++ perfinfo.perfEventsEu0 ++ perfinfo.perfEventsEu1 ++ perfinfo.perfEventsRs
+  val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
+  generatePerfEvent()
 }

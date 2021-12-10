@@ -37,7 +37,7 @@ case class DispatchParameters
 )
 
 // read rob and enqueue
-class Dispatch(implicit p: Parameters) extends XSModule {
+class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     // from rename
@@ -294,9 +294,6 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(9))
-  })
   val perfEvents = Seq(
     ("dispatch_in                 ", PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                                                                       ),
     ("dispatch_empty              ", !hasValidInstr                                                                                                                      ),
@@ -308,8 +305,5 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     ("dispatch_stall_cycle_fp_dq  ", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept  ),
     ("dispatch_stall_cycle_ls_dq  ", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

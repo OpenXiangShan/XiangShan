@@ -29,7 +29,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst {
+class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
@@ -276,26 +276,19 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
-    if(!q.shouldBlock) {
-      val perfEvents = Seq(
-        ("access         ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i)))                                         ),
-        ("miss           ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i) && missVec(i)))                           ),
-        )
-      for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-        perf_out.incr_step := RegNext(perf)
-      }
-    } else {
-      val perfEvents = Seq(
-        ("access         ", PopCount((0 until Width).map(i => io.requestor(i).req.fire()))                           ),
-        ("miss           ", PopCount((0 until Width).map(i => ptw.req(i).fire()))                                    ),
-      )
-      for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-        perf_out.incr_step := RegNext(perf)
-      }
-    }
+
+  val perfEvents = if(!q.shouldBlock) {
+    Seq(
+      ("access", PopCount((0 until Width).map(i => vmEnable && validRegVec(i)))              ),
+      ("miss  ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i) && missVec(i)))),
+    )
+  } else {
+    Seq(
+      ("access", PopCount((0 until Width).map(i => io.requestor(i).req.fire()))),
+      ("miss  ", PopCount((0 until Width).map(i => ptw.req(i).fire()))         ),
+    )
+  }
+  generatePerfEvent()
 }
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {

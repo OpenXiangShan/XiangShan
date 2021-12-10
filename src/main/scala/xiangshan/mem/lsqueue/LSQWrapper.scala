@@ -52,7 +52,7 @@ class LsqEnqIO(implicit p: Parameters) extends XSBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val enq = new LsqEnqIO
@@ -191,12 +191,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull
 
-  val ldq_perf = loadQueue.perfEvents.map(_._1).zip(loadQueue.perfinfo.perfEvents.perf_events)
-  val stq_perf = storeQueue.perfEvents.map(_._1).zip(storeQueue.perfinfo.perfEvents.perf_events)
-  val perfEvents = ldq_perf ++ stq_perf
-  val perf_list = storeQueue.perfinfo.perfEvents.perf_events ++ loadQueue.perfinfo.perfEvents.perf_events
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perf_list
-}                          
+  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEvents)
+  generatePerfEvent()
+}

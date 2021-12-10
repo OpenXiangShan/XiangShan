@@ -434,5 +434,4 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
-  val print_perfcounter  = false
 }
