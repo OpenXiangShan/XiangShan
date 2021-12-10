@@ -273,14 +273,14 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   def should_merge(new_req: MissReq): Bool = {
-    val block_match = req.addr === get_block_addr(new_req.addr)
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match &&
     (before_read_sent_can_merge(new_req) ||
       before_data_refill_can_merge(new_req))
   }
 
   def should_reject(new_req: MissReq): Bool = {
-    val block_match = req.addr === get_block_addr(new_req.addr)
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
 
     req_valid &&
