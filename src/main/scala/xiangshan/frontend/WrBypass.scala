@@ -21,6 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.experimental.chiselName
+import xiangshan.cache.mmu.CAMTemplate
 
 class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val numWays: Int = 1, val tagWidth: Int = 0)(implicit p: Parameters) extends XSModule {
@@ -45,54 +46,63 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     override def cloneType = (new WrBypassPtr).asInstanceOf[this.type]
   }
 
+  class Idx_Tag extends Bundle {
+    val idx = UInt(idxWidth.W)
+    val tag = if (hasTag) Some(UInt(tagWidth.W)) else None
+    def apply(idx: UInt, tag: UInt) = {
+      this.idx := idx
+      this.tag.map(_ := tag)
+    }
+  }
+  val idx_tag_cam = Module(new CAMTemplate(new Idx_Tag, numEntries, 1))
+  val data_mem = Mem(numEntries, Vec(numWays, gen))
 
-
-  val tags = RegInit(0.U.asTypeOf((Vec(numEntries, UInt(tagWidth.W)))))
-  val idxes = RegInit(0.U.asTypeOf((Vec(numEntries, UInt(idxWidth.W)))))
-  val datas = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, gen))))
   val valids = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
 
   val enq_ptr = RegInit(0.U.asTypeOf(new WrBypassPtr))
   val enq_idx = enq_ptr.value
 
-  val hits = VecInit((0 until numEntries).map {i =>
-    idxes(i) === io.write_idx &&
-    tags(i) === io.write_tag.getOrElse(0.U)
-  })
-  val hit = hits.reduce(_||_)
-  val hit_idx = ParallelPriorityEncoder(hits)
+  idx_tag_cam.io.r.req(0)(io.write_idx, io.write_tag.getOrElse(0.U))
+  val hits_oh = idx_tag_cam.io.r.resp(0)
+  val hit_idx = OHToUInt(hits_oh)
+  val hit = hits_oh.reduce(_||_)
 
   io.hit := hit
   for (i <- 0 until numWays) {
-    io.hit_data(i).valid := valids(hit_idx)(i)
-    io.hit_data(i).bits  := datas(hit_idx)(i)
+    io.hit_data(i).valid := Mux1H(hits_oh, valids)(i)
+    io.hit_data(i).bits  := data_mem.read(hit_idx)(i)
   }
 
+  val full_mask = Fill(numWays, 1.U(1.W)).asTypeOf(Vec(numWays, Bool()))
+  val update_way_mask = io.write_way_mask.getOrElse(full_mask)
+
+  // write data on every request
+  when (io.wen) {
+    val data_write_idx = Mux(hit, hit_idx, enq_idx)
+    data_mem.write(data_write_idx, io.write_data, update_way_mask)
+  }
+
+  // update valids
   for (i <- 0 until numWays) {
     when (io.wen) {
-      val full_mask = Fill(numWays, 1.U(1.W)).asTypeOf(Vec(numWays, Bool()))
-      val update_this_way = io.write_way_mask.getOrElse(full_mask)(i)
       when (hit) {
-        when (update_this_way) {
-          datas(hit_idx)(i) := io.write_data(i)
+        when (update_way_mask(i)) {
           valids(hit_idx)(i) := true.B
         }
       }.otherwise {
         valids(enq_idx)(i) := false.B
-        when (update_this_way) {
+        when (update_way_mask(i)) {
           valids(enq_idx)(i) := true.B
-          datas(enq_idx)(i) := io.write_data(i)
         }
       }
     }
-    
   }
 
-  when (io.wen && !hit) {
-    idxes(enq_idx) := io.write_idx
-    tags(enq_idx) := io.write_tag.getOrElse(0.U)
-    enq_ptr := enq_ptr + 1.U
-  }
+  val enq_en = io.wen && !hit
+  idx_tag_cam.io.w.valid := enq_en
+  idx_tag_cam.io.w.bits.index := enq_idx
+  idx_tag_cam.io.w.bits.data(io.write_idx, io.write_tag.getOrElse(0.U))
+  enq_ptr := enq_ptr + enq_en
 
   XSPerfAccumulate("wrbypass_hit",  io.wen &&  hit)
   XSPerfAccumulate("wrbypass_miss", io.wen && !hit)
