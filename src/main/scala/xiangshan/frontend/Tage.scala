@@ -321,6 +321,7 @@ class TageTable
   val update_idx_in_bank = get_bank_idx(update_idx)
 
   val not_silent_update = Wire(Bool())
+  val silent_update_from_wrbypass = Wire(Bool())
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
@@ -352,7 +353,7 @@ class TageTable
 
   val wrbypass = Module(new WrBypass(UInt(TageCtrBits.W), wrBypassEntries, log2Ceil(nRows), tagWidth=tagLen))
 
-  wrbypass.io.wen := io.update.mask && not_silent_update
+  wrbypass.io.wen := io.update.mask && !silent_update_from_wrbypass
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   val bypass_ctr = wrbypass.io.hit_data(0).bits
@@ -374,6 +375,9 @@ class TageTable
       !silentUpdate(bypass_ctr, io.update.taken),
       !silentUpdate(io.update.oldCtr, io.update.taken)) ||
     io.update.alloc
+  silent_update_from_wrbypass := wrbypass.io.hit && silentUpdate(bypass_ctr, io.update.taken)
+  
+  
 
   wrbypass.io.write_idx := update_idx
   wrbypass.io.write_tag.map(_ := update_tag)
