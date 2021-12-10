@@ -237,7 +237,7 @@ class TageTable
   def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
 
   // bypass entries for tage update
-  val wrBypassEntries = 8
+  val wrBypassEntries = 16
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
 
@@ -324,15 +324,19 @@ class TageTable
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
-      valid   = io.update.mask && update_req_bank_1h(b) && not_silent_update,
+      valid   = io.update.mask && update_req_bank_1h(b) && not_silent_update/*  && !s0_bank_req_1h(b) */,
       data    = update_wdata,
       setIdx  = update_idx_in_bank,
       waymask = true.B
     )
   }
 
+  // val writeBuffers = Seq.fill(nBanks)(Queue())
+
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
-  io.req.ready := !bank_conflict
+  io.req.ready := true.B
+  // io.req.ready := !(io.update.mask && not_silent_update)
+  // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"tage_table_bank_conflict", bank_conflict)
 
   val newValidArray = VecInit(validArray.asBools)
