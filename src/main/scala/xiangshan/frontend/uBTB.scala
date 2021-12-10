@@ -33,7 +33,7 @@ trait MicroBTBParams extends HasXSParameter {
 
 @chiselName
 class MicroBTB(implicit p: Parameters) extends BasePredictor
-  with MicroBTBParams
+  with MicroBTBParams with HasPerfEvents
 {
   val ubtbAddr = new TableAddr(log2Up(numWays), 1)
 
@@ -129,15 +129,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
   XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
   val perfEvents = Seq(
-    ("ubtb_commit_hits       ", u_valid &&  u_meta.hit),
-    ("ubtb_commit_misse      ", u_valid && !u_meta.hit),
+    ("ubtb_commit_hit       ", u_valid &&  u_meta.hit),
+    ("ubtb_commit_miss      ", u_valid && !u_meta.hit),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

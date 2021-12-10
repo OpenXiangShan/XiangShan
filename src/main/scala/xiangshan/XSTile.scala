@@ -12,7 +12,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{ResetGen, TLEdgeBuffer}
+import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val paddr = Valid(UInt(soc.PAddrBits.W))
@@ -58,7 +58,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 
   l2_binder match {
     case Some(binder) =>
-      memory_port :=* TLEdgeBuffer(_ => true, Some("l2_to_l3_buffer")) :=* binder
+      memory_port := TLBuffer() := TLClientsMerger() := TLXbar() :=* binder
     case None =>
       memory_port := l1_xbar
   }
@@ -130,7 +130,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     if(l2cache.isDefined){
-      core.module.io.perfEvents <> l2cache.get.module.io.perfEvents.flatten
+      core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }
     else {
       core.module.io.perfEvents <> DontCare

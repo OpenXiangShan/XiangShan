@@ -25,7 +25,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
 
-class Rename(implicit p: Parameters) extends XSModule {
+class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val robCommits = Flipped(new RobCommitIO)
@@ -300,28 +300,16 @@ class Rename(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
 
 
-  val intfl_perf     = intFreeList.perfEvents.map(_._1).zip(intFreeList.perfinfo.perfEvents.perf_events)
-  val fpfl_perf      = fpFreeList.perfEvents.map(_._1).zip(fpFreeList.perfinfo.perfEvents.perf_events)
-  val perf_list = Wire(new PerfEventsBundle(6))
-  val perf_seq = Seq(
-    ("rename_in                   ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
-    ("rename_waitinstr            ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
-    ("rename_stall_cycle_dispatch ", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_fp       ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_int      ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_walk     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk ),
-  ) 
-  for (((perf_out,(perf_name,perf)),i) <- perf_list.perf_events.zip(perf_seq).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
-
-  val perfEvents_list = perf_list.perf_events ++
-                        intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++
-                        fpFreeList.perfinfo.perfEvents.perf_events
-
-  val perfEvents = perf_seq ++ intfl_perf ++ fpfl_perf
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perfEvents_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perfEvents_list
+  val renamePerf = Seq(
+    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
+    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_stall_cycle_dispatch", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_fp      ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_int     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_walk    ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk)
+  )
+  val intFlPerf = intFreeList.getPerfEvents
+  val fpFlPerf = fpFreeList.getPerfEvents
+  val perfEvents = renamePerf ++ intFlPerf ++ fpFlPerf
+  generatePerfEvent()
 }

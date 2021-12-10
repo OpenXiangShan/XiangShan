@@ -237,10 +237,14 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
-  def clearExceptions(): MicroOp = {
-    cf.exceptionVec.map(_ := false.B)
-    ctrl.replayInst := false.B
-    ctrl.flushPipe := false.B
+  def clearExceptions(
+    exceptionBits: Seq[Int] = Seq(),
+    flushPipe: Boolean = false,
+    replayInst: Boolean = false
+  ): MicroOp = {
+    cf.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
+    if (!flushPipe) { ctrl.flushPipe := false.B }
+    if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
 }

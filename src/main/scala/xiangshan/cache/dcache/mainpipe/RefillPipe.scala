@@ -42,6 +42,8 @@ class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
 class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new RefillPipeReq))
+    val resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
+
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val meta_write = DecoupledIO(new MetaWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
@@ -55,38 +57,43 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   assert(RegNext(io.meta_write.ready))
   assert(RegNext(io.tag_write.ready))
 
-  io.req.ready := io.data_write.ready && io.meta_write.ready && io.tag_write.ready
+  val refill_w_valid = io.req.valid
+  val refill_w_req = io.req.bits
 
-  val idx = io.req.bits.idx
-  val tag = get_tag(io.req.bits.addr)
+  io.req.ready := true.B
+  io.resp.valid := io.req.fire()
+  io.resp.bits := refill_w_req.miss_id
 
-  io.data_write.valid := io.req.valid
-  io.data_write.bits.addr := io.req.bits.paddrWithVirtualAlias
-  io.data_write.bits.way_en := io.req.bits.way_en
-  io.data_write.bits.wmask := io.req.bits.wmask
-  io.data_write.bits.data := io.req.bits.data
+  val idx = refill_w_req.idx
+  val tag = get_tag(refill_w_req.addr)
 
-  io.meta_write.valid := io.req.valid
+  io.data_write.valid := refill_w_valid
+  io.data_write.bits.addr := refill_w_req.paddrWithVirtualAlias
+  io.data_write.bits.way_en := refill_w_req.way_en
+  io.data_write.bits.wmask := refill_w_req.wmask
+  io.data_write.bits.data := refill_w_req.data
+
+  io.meta_write.valid := refill_w_valid
   io.meta_write.bits.idx := idx
-  io.meta_write.bits.way_en := io.req.bits.way_en
-  io.meta_write.bits.meta := io.req.bits.meta
+  io.meta_write.bits.way_en := refill_w_req.way_en
+  io.meta_write.bits.meta := refill_w_req.meta
   io.meta_write.bits.tag := tag
 
-  io.tag_write.valid := io.req.valid
+  io.tag_write.valid := refill_w_valid
   io.tag_write.bits.idx := idx
-  io.tag_write.bits.way_en := io.req.bits.way_en
+  io.tag_write.bits.way_en := refill_w_req.way_en
   io.tag_write.bits.tag := tag
 
-  io.store_resp.valid := io.req.fire() && io.req.bits.source === STORE_SOURCE.U
+  io.store_resp.valid := refill_w_valid && refill_w_req.source === STORE_SOURCE.U
   io.store_resp.bits := DontCare
   io.store_resp.bits.miss := false.B
   io.store_resp.bits.replay := false.B
-  io.store_resp.bits.id := io.req.bits.id
+  io.store_resp.bits.id := refill_w_req.id
 
-  io.release_wakeup.valid := io.req.fire()
-  io.release_wakeup.bits := io.req.bits.miss_id
+  io.release_wakeup.valid := refill_w_valid
+  io.release_wakeup.bits := refill_w_req.miss_id
 
-  io.replace_access.valid := RegNext(io.req.fire())
-  io.replace_access.bits.set := RegNext(idx)
-  io.replace_access.bits.way := RegNext(OHToUInt(io.req.bits.way_en))
+  io.replace_access.valid := refill_w_valid
+  io.replace_access.bits.set := idx
+  io.replace_access.bits.way := OHToUInt(refill_w_req.way_en)
 }
