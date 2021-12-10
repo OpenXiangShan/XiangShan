@@ -102,7 +102,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
-  io.csrUpdate <> dcache.io.csr.update
+  io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))

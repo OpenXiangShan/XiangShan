@@ -89,8 +89,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
 
   val lrsc_blocked = Mux(
     io.req.fire(),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === io.req.bits.addr,
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(io.req.bits.addr),
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(req.addr)
   )
 
   when (state === s_pipe_req) {
@@ -122,7 +122,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   // perfoemance counters
   XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
   XSPerfAccumulate("probe_penalty", state =/= s_invalid)
-  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr)
+  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(req.addr))
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
@@ -190,8 +190,8 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire())
   val selected_lrsc_blocked = Mux(
     pipe_req_arb.io.out.fire(),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === pipe_req_arb.io.out.bits.addr,
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === selected_req_bits.addr && selected_req_valid
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(pipe_req_arb.io.out.bits.addr),
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(selected_req_bits.addr) && selected_req_valid
   )
   val resvsetProbeBlock = RegNext(io.update_resv_set || selected_lrsc_blocked)
   // When we update update_resv_set, block all probe req in the next cycle
