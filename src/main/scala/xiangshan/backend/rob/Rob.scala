@@ -600,8 +600,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
 
   // sync fflags/dirty_fs to csr
-  io.csr.fflags := fflags
-  io.csr.dirty_fs := dirty_fs
+  io.csr.fflags := RegNext(fflags)
+  io.csr.dirty_fs := RegNext(dirty_fs)
 
   // commit branch to brq
   val cfiCommitVec = VecInit(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{case(v, t) => v && CommitType.isBranch(t)})
