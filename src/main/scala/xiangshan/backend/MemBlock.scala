@@ -57,6 +57,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasFPUParameters
   with HasWritebackSourceImp
+  with HasPerfEvents
 {
 
   val io = IO(new Bundle {
@@ -91,6 +92,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
+    val perfEventsPTW = Input(Vec(19, new PerfEvent))
   })
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
@@ -474,39 +476,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.slice(16,24)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
-    val perfEventsPTW     = Input(new PerfEventsBundle(19))
-  })
-  val perfEvents_list = Wire(new PerfEventsBundle(2))
-  val perfEvents = Seq(
-    ("ldDeqCount                   ", ldDeqCount      ),
-    ("stDeqCount                   ", stDeqCount      ),
-  ) 
-  for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
 
-  if(print_perfcounter){
-    val ldu0_perf     = loadUnits(0).perfEvents.map(_._1).zip(loadUnits(0).perfinfo.perfEvents.perf_events)
-    val ldu1_perf     = loadUnits(1).perfEvents.map(_._1).zip(loadUnits(1).perfinfo.perfEvents.perf_events)
-    val sbuf_perf     = sbuffer.perfEvents.map(_._1).zip(sbuffer.perfinfo.perfEvents.perf_events)
-    val lsq_perf      = lsq.perfEvents.map(_._1).zip(lsq.perfinfo.perfEvents.perf_events)
-    val dc_perf       = dcache.perfEvents.map(_._1).zip(dcache.perfinfo.perfEvents.perf_events)
-    val mem_perf = perfEvents ++ ldu0_perf ++ ldu1_perf ++ sbuf_perf ++ lsq_perf ++ dc_perf
-    for (((perf_name,perf),i) <- mem_perf.zipWithIndex) {
-      println(s"lsu perf $i: $perf_name")
-    }
-  }
-
-  val hpmEvents = perfEvents_list.perf_events ++ loadUnits(0).perfinfo.perfEvents.perf_events ++ 
-                  loadUnits(1).perfinfo.perfEvents.perf_events ++ sbuffer.perfinfo.perfEvents.perf_events ++ 
-                  lsq.perfinfo.perfEvents.perf_events ++ dcache.perfinfo.perfEvents.perf_events ++ 
-                  perfinfo.perfEventsPTW.perf_events
-  val perf_length = hpmEvents.length
-
-  val hpm_lsu = Module(new HPerfmonitor(perf_length,csrevents.length))
-  hpm_lsu.io.hpm_event := csrevents
-  hpm_lsu.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := RegNext(hpm_lsu.io.events_selected)
+  val memBlockPerfEvents = Seq(
+    ("ldDeqCount", ldDeqCount),
+    ("stDeqCount", stDeqCount),
+  )
+  val allPerfEvents = memBlockPerfEvents ++ (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
+  val hpmEvents = allPerfEvents.map(_._2.asTypeOf(new PerfEvent)) ++ io.perfEventsPTW
+  val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
+  generatePerfEvent()
 }

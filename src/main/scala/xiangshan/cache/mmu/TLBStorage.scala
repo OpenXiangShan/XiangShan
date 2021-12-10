@@ -18,10 +18,8 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
 import chisel3.experimental.chiselName
-import freechips.rocketchip.util.SRAMAnnotation
-import xiangshan._
+import chisel3.util._
 import utils._
 
 @chiselName
@@ -34,7 +32,7 @@ class TLBFA(
   saveLevel: Boolean = false,
   normalPage: Boolean,
   superPage: Boolean
-)(implicit p: Parameters) extends TlbModule{
+)(implicit p: Parameters) extends TlbModule with HasPerfEvents {
   require(!(sameCycle && saveLevel))
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
@@ -143,17 +141,11 @@ class TLBFA(
     XSPerfAccumulate(s"refill${i}", io.w.valid && io.w.bits.wayIdx === i.U)
   }
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
   val perfEvents = Seq(
-    ("tlbstore_access            ", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _)                            ),
-    ("tlbstore_hit               ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt())),
+    ("tlbstore_access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _)                            ),
+    ("tlbstore_hit   ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt())),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 
   println(s"tlb_fa: nSets${nSets} nWays:${nWays}")
 }

@@ -240,7 +240,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val l2_pf_enable = Output(Bool())
-    val perfEvents = Vec(numPCntHc * coreParams.L2NBanks,(Input(UInt(6.W))))
+    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
   })
 
@@ -331,18 +331,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
-  // TODO: connect rsPerf
-  val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
-  val rs_perf = Wire(new PerfEventsBundle(rsPerf.length))
-  val rs_cnt = rs_perf.length
-  for (i <- 0 until rs_cnt){
-    rs_perf.perf_events(i).incr_step := rsPerf(i).asUInt
-  }
-  dontTouch(rsPerf)
-  exuBlocks(0).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu0
-  exuBlocks(1).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu1
-  memBlock.perfinfo.perfEventsPTW <> ptw.perfinfo.perfEvents
-  ctrlBlock.perfinfo.perfEventsRs := rs_perf
+  ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
+  ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
+  memBlock.io.perfEventsPTW  := ptw.getPerf
+  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -351,9 +343,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
 
-  csrioIn.perf.perfEventsFrontend <> frontend.perfinfo.perfEvents
-  csrioIn.perf.perfEventsCtrl     <> ctrlBlock.perfinfo.perfEvents
-  csrioIn.perf.perfEventsLsu      <> memBlock.perfinfo.perfEvents
+  csrioIn.perf.perfEventsFrontend <> frontend.getPerf
+  csrioIn.perf.perfEventsCtrl     <> ctrlBlock.getPerf
+  csrioIn.perf.perfEventsLsu      <> memBlock.getPerf
   csrioIn.perf.perfEventsHc       <> io.perfEvents
 
   csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags

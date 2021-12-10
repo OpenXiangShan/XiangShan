@@ -59,10 +59,10 @@ class FpuCsrIO extends Bundle {
 
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
-  val perfEventsFrontend  = (new PerfEventsBundle(numCSRPCntFrontend ))
-  val perfEventsCtrl      = (new PerfEventsBundle(numCSRPCntCtrl     ))
-  val perfEventsLsu       = (new PerfEventsBundle(numCSRPCntLsu      ))
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks,(UInt(6.W)))
+  val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
+  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
+  val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -572,26 +572,24 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
   }
 
-  val hpmEvents = Wire(new PerfEventsBundle(numPCntHc * coreParams.L2NBanks))
-  for(i <- 0 until numPCntHc * coreParams.L2NBanks) {
-    hpmEvents.perf_events(i).incr_step := csrio.perf.perfEventsHc(i)
+  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+  for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
+    hpmEvents(i) := csrio.perf.perfEventsHc(i)
   }
 
-  val hpm_hc = Module(new HPerfmonitor(numPCntHc * coreParams.L2NBanks,numCSRPCntHc))
-  val csrevents = perfEvents.slice(24,29)
-  hpm_hc.io.hpm_event := csrevents
-  hpm_hc.io.events_sets := hpmEvents
+  val csrevents = perfEvents.slice(24, 29)
+  val hpm_hc = HPerfMonitor(csrevents, hpmEvents)
   val mcountinhibit = RegInit(0.U(XLEN.W))
   val mcycle = RegInit(0.U(XLEN.W))
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
-  val perf_events = csrio.perf.perfEventsFrontend.perf_events ++ 
-                    csrio.perf.perfEventsCtrl.perf_events ++ 
-                    csrio.perf.perfEventsLsu.perf_events ++ 
-                    hpm_hc.io.events_selected.perf_events
+  val perf_events = csrio.perf.perfEventsFrontend ++
+                    csrio.perf.perfEventsCtrl ++
+                    csrio.perf.perfEventsLsu ++
+                    hpm_hc.getPerf
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
   for(i <- 0 until 29){
-    perfCnts(i) := Mux((mcountinhibit(i+3) | !perfEventscounten(i)), perfCnts(i), (perfCnts(i) + perf_events(i).incr_step))
+    perfCnts(i) := Mux(mcountinhibit(i+3) | !perfEventscounten(i), perfCnts(i), perfCnts(i) + perf_events(i).value)
   }
 
   // CSR reg map

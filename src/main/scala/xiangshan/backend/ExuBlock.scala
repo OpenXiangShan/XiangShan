@@ -54,7 +54,7 @@ class ExuBlock(
 }
 
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasWritebackSourceImp {
+  with HasWritebackSourceImp with HasPerfEvents {
   val scheduler = outer.scheduler.module
 
   val fuConfigs = outer.fuConfigs
@@ -91,10 +91,8 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(scheduler.perfinfo.perfEvents.length))
-  })
-  scheduler.perfinfo <> perfinfo
+  val perfEvents = scheduler.getPerfEvents
+  generatePerfEvent()
 
   // the scheduler issues instructions to function units
   scheduler.io.issue <> fuBlock.io.issue ++ io.issue.getOrElse(Seq())
