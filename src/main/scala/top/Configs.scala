@@ -37,6 +37,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
+  case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
@@ -247,7 +248,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
-        ))
+        )),
+        sramClkDivBy2 = true
       ))
     )
 })
@@ -280,7 +282,7 @@ class MediumConfig(n: Int = 1) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(8 * 1024, inclusive = false, banks = 4, ways = 8)
-    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 2, alwaysReleaseData = true)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )

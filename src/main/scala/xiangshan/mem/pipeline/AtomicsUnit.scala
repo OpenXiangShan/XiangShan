@@ -24,13 +24,14 @@ import xiangshan._
 import xiangshan.cache.{DCacheWordIOWithVaddr, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))
-    val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
+    val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIOWithVaddr
     val dtlb          = new TlbRequestIO

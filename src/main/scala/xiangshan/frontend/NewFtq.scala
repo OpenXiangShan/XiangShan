@@ -19,12 +19,9 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, PerfBundle, PerfEventsBundle, XSError}
+import utils._
 import xiangshan._
-import scala.tools.nsc.doc.model.Val
-import utils.{ParallelPriorityMux, ParallelPriorityEncoder}
-import xiangshan.backend.{CtrlToFtqIO}
-import firrtl.annotations.MemoryLoadFileType
+import xiangshan.backend.CtrlToFtqIO
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -444,7 +441,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with BPUUtils with HasBPUConst {
+  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -1199,9 +1196,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(22))
-  })
+
   val perfEvents = Seq(
     ("bpu_s2_redirect        ", bpu_s2_redirect                                                             ),
     ("bpu_s3_redirect        ", bpu_s3_redirect                                                             ),
@@ -1228,8 +1223,5 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ("ftb_false_hit          ", PopCount(ftb_false_hit)                                                     ),
     ("ftb_hit                ", PopCount(ftb_hit)                                                           ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

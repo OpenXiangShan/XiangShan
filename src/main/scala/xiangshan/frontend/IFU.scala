@@ -104,7 +104,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters with HasIFUConst
-with HasCircularQueuePtrHelper
+  with HasCircularQueuePtrHelper with HasPerfEvents
 {
   println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
@@ -196,10 +196,6 @@ with HasCircularQueuePtrHelper
   val f2_vSetIdx    = RegEnable(next = f1_vSetIdx,    enable=f1_fire)
   val f2_fire       = f2_valid && f2_ready
 
-  def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
-    Mux(valid, data, RegEnable(data, valid))
-  }
-
   f2_ready := f3_ready && icacheRespAllValid || !f2_valid
   //TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire       =  fromICache(0).valid && (fromICache(0).bits.vaddr ===  f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(1).bits.vaddr ===  f2_ftq_req.fallThruAddr)) || !f2_doubleLine)
@@ -222,7 +218,8 @@ with HasCircularQueuePtrHelper
   val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
-  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
+  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault && 
+                                                           !fromICache(0).bits.tlbExcp.pageFault
 
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo
@@ -432,6 +429,7 @@ with HasCircularQueuePtrHelper
 
   val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
+  f3_redirect := (!predecodeFlushReg && predecodeFlush && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
 
 
   /** performance counter */
@@ -441,11 +439,6 @@ with HasCircularQueuePtrHelper
   val f3_hit_0    = io.toIbuffer.fire() && f3_perf_info.bank_hit(0)
   val f3_hit_1    = io.toIbuffer.fire() && f3_doubleLine & f3_perf_info.bank_hit(1)
   val f3_hit      = f3_perf_info.hit
-
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(15))
-  })
-
   val perfEvents = Seq(
     ("frontendFlush                ", f3_redirect                                ),
     ("ifu_req                      ", io.toIbuffer.fire()                        ),
@@ -463,12 +456,7 @@ with HasCircularQueuePtrHelper
     ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
     ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
-
-  f3_redirect := (!predecodeFlushReg && predecodeFlush && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
+  generatePerfEvent()
 
   XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
   XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
@@ -476,7 +464,7 @@ with HasCircularQueuePtrHelper
   XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
   XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
   XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
-  XSPerfAccumulate("frontendFlush",  f3_redirect )
+  XSPerfAccumulate("frontendFlush",   f3_redirect )
   XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && io.toIbuffer.fire()  )
   XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && io.toIbuffer.fire()  )
   XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && io.toIbuffer.fire()  )

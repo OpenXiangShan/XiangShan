@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+import mem.{AddPipelineReg}
 
 import scala.math.max
 
@@ -168,6 +169,18 @@ trait HasDCacheParameters extends HasL1CacheParameters {
       a <> req
     }
     out <> arb.io.out
+  }
+
+  def arbiter_with_pipereg[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    AddPipelineReg(arb.io.out, out, false.B)
   }
 
   def rrArbiter[T <: Bundle](
@@ -372,7 +385,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
 
   val io = IO(new DCacheIO)
 
@@ -536,13 +549,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  val refillPipeStatus = Wire(Valid(UInt(idxBits.W)))
-  refillPipeStatus.valid := refillPipe.io.req.valid
-  refillPipeStatus.bits := get_idx(refillPipe.io.req.bits.paddrWithVirtualAlias)
-  val storeShouldBeBlocked = refillPipeStatus.valid
-  val probeShouldBeBlocked = refillPipeStatus.valid
-  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, probeShouldBeBlocked)
-  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, storeShouldBeBlocked)
+  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, refillPipe.io.req.valid)
+  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
 
   io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
@@ -555,15 +563,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
 
   //----------------------------------------
-  // replace pipe
+  // replace (main pipe)
   val mpStatus = mainPipe.io.status
-//  val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
-//  val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
-//  val replaceShouldBeBlocked = mpStatus.s1.valid ||
-//    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-//      s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
-//    )).orR()
-//  block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
   mainPipe.io.replace_req <> missQueue.io.replace_pipe_req
   missQueue.io.replace_pipe_resp := mainPipe.io.replace_resp
 
@@ -576,6 +577,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
+  missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
   //----------------------------------------
@@ -701,22 +703,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
   XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
 
-  val wb_perf      = wb.perfEvents.map(_._1).zip(wb.perfinfo.perfEvents.perf_events)
-  val mainp_perf     = mainPipe.perfEvents.map(_._1).zip(mainPipe.perfinfo.perfEvents.perf_events)
-  val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
-  val probq_perf     = probeQueue.perfEvents.map(_._1).zip(probeQueue.perfinfo.perfEvents.perf_events)
-  val ldu_0_perf     = ldu(0).perfEvents.map(_._1).zip(ldu(0).perfinfo.perfEvents.perf_events)
-  val ldu_1_perf     = ldu(1).perfEvents.map(_._1).zip(ldu(1).perfinfo.perfEvents.perf_events)
-  val perfEvents = wb_perf ++ mainp_perf ++ missq_perf ++ probq_perf ++ ldu_0_perf ++ ldu_1_perf
-  val perflist = wb.perfinfo.perfEvents.perf_events ++ mainPipe.perfinfo.perfEvents.perf_events ++
-                 missQueue.perfinfo.perfEvents.perf_events ++ probeQueue.perfinfo.perfEvents.perf_events ++
-                 ldu(0).perfinfo.perfEvents.perf_events ++ ldu(1).perfinfo.perfEvents.perf_events
-  val perf_length = perflist.length
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perflist.length))
-  })
-  perfinfo.perfEvents.perf_events := perflist
-
+  val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
+  generatePerfEvent()
 }
 
 class AMOHelper() extends ExtModule {
@@ -738,20 +726,18 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
     clientNode := dcache.clientNode
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     val io = IO(new DCacheIO)
-    val perfinfo = IO(new Bundle(){
-      val perfEvents = Output(new PerfEventsBundle(dcache.asInstanceOf[DCache].module.perf_length))
-    })
-    val perfEvents = dcache.asInstanceOf[DCache].module.perfEvents.map(_._1).zip(dcache.asInstanceOf[DCache].module.perfinfo.perfEvents.perf_events)
-    if (!useDcache) {
+    val perfEvents = if (!useDcache) {
       // a fake dcache which uses dpi-c to access memory, only for debug usage!
       val fake_dcache = Module(new FakeDCache())
       io <> fake_dcache.io
+      Seq()
     }
     else {
       io <> dcache.module.io
-      perfinfo := dcache.asInstanceOf[DCache].module.perfinfo
+      dcache.module.getPerfEvents
     }
+    generatePerfEvent()
   }
 }

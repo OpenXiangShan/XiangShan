@@ -377,7 +377,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val rightShifter = Module(new RightShifter(len, lzc_width))
   rightShifter.io.in := rPreShifted
   rightShifter.io.shiftNum := dLZCReg
-  rightShifter.io.msb := rSignReg
+  rightShifter.io.msb := Mux(~(rPreShifted.orR()), 0.U, rSignReg)
   val rShifted = rightShifter.io.out
   val rFinal = RegEnable(Mux(specialReg, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = RegEnable(Mux(specialReg, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))

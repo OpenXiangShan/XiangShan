@@ -19,11 +19,10 @@ package xiangshan.backend.decode
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.{UIntIsOneOf, uintToBitPat}
-import xiangshan._
+import freechips.rocketchip.util.uintToBitPat
 import utils._
-import xiangshan.backend._
-import xiangshan.backend.decode.BDecode.{N, Y}
+import xiangshan.ExceptionNO.illegalInstr
+import xiangshan._
 import xiangshan.backend.decode.Instructions._
 
 /**

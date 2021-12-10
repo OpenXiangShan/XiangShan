@@ -99,7 +99,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   io.dataOut := data
 }
 
-class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst {
+class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
@@ -630,9 +630,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
   // XSPerfAccumulate("store_req", io.lsu.req.fire())
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(10))
-  })
   val perfEvents = Seq(
     ("sbuffer_req_valid ", PopCount(VecInit(io.in.map(_.valid)).asUInt)                                                                ),
     ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire())).asUInt)                                                               ),
@@ -647,13 +644,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     ("refill_resp_valid ", io.dcache.refill_hit_resp.fire()                                                                            ),
     ("replay_resp_valid ", io.dcache.replay_resp.fire()                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
-    ("sbuffer_1/4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
-    ("sbuffer_2/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
-    ("sbuffer_3/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
+    ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
+    ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
+    ("sbuffer_3_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
     ("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
   )
+  generatePerfEvent()
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
 }
