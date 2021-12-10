@@ -177,6 +177,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   val f1_pc                 = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + (i * 2).U))
+  val f1_half_snpc          = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + ((i+2) * 2).U))
   val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
                                   else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
@@ -214,8 +215,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
 
   val f2_pc               = RegEnable(next = f1_pc, enable = f1_fire)
+  val f2_half_snpc        = RegEnable(next = f1_half_snpc, enable = f1_fire)
   val f2_cut_ptr          = RegEnable(next = f1_cut_ptr, enable = f1_fire)
-  val f2_lastHafl_snpc    = VecInit(f2_pc.map(_ + 4.U))
+  val f2_half_match       = VecInit(f2_half_snpc.map(_ === f2_ftq_req.fallThruAddr))
 
 
   def isNextLine(pc: UInt, startAddr: UInt) = {
@@ -290,17 +292,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_except_af      = RegEnable(next = f2_except_af, enable = f2_fire)
   val f3_mmio           = RegEnable(next = f2_mmio   , enable = f2_fire)
 
-  val f3_expd_instr  = RegEnable(next = f2_expd_instr,  enable = f2_fire)
-  val f3_pd          = RegEnable(next = f2_pd,          enable = f2_fire)
-  val f3_jump_offset = RegEnable(next = f2_jump_offset, enable = f2_fire)
-  val f3_af_vec      = RegEnable(next = f2_af_vec,      enable = f2_fire)
-  val f3_pf_vec      = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
-  val f3_pc          = RegEnable(next = f2_pc,          enable = f2_fire)
-  val f3_lastHafl_snpc   = RegEnable(next = f2_lastHafl_snpc,   enable = f2_fire)
-  val f3_instr_range = RegEnable(next = f2_instr_range, enable = f2_fire)
-  val f3_foldpc      = RegEnable(next = f2_foldpc,      enable = f2_fire)
-  val f3_crossPageFault      = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
-  val f3_hasHalfValid      = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
+  val f3_expd_instr     = RegEnable(next = f2_expd_instr,  enable = f2_fire)
+  val f3_pd             = RegEnable(next = f2_pd,          enable = f2_fire)
+  val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
+  val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
+  val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
+  val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
+  val f3_half_snpc        = RegEnable(next = f2_half_snpc, enable = f2_fire)
+  val f3_half_match     = RegEnable(next = f2_half_match,   enable = f2_fire)
+  val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
+  val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
+  val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
+  val f3_hasHalfValid   = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
 
   //  val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
   //  val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
@@ -392,12 +395,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   fromUncache.ready   := true.B
 
   val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
-  val f3_lastHalfMatch  = false.B//f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
 
   val f3_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
   val f3_mmio_range      = VecInit((0 until PredictWidth).map(i => if(i ==0) true.B else false.B))
 
-  val f3_instr_valid = Mux(f3_lastHalfMatch,f3_hasHalfValid.asUInt ,VecInit(f3_pd.map(inst => inst.valid)).asUInt)
+  val f3_instr_valid = Mux(f3_lastHalf.valid,f3_hasHalfValid.asUInt ,VecInit(f3_pd.map(inst => inst.valid)).asUInt)
 
   //** prediction result check   **//
   checkerIn.ftqOffset   := f3_ftq_req.ftqOffset
@@ -408,18 +410,25 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkerIn.pds         := f3_pd
   checkerIn.pc          := f3_pc
 
-  val lastValidIdx        = ~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
-  val hasLastHalf         = !f3_pd(lastValidIdx).isRVC && f3_pd(lastValidIdx).valid && !checkerOut.fixedTaken(lastValidIdx) && ! f3_req_is_mmio
-  //val middlePC            = f3_lastHafl_snpc(lastValidIdx)
-  val lastHaflSnpc        =  f3_lastHafl_snpc(lastValidIdx)
+  def hasLastHalf(idx: UInt) = {
+    !f3_pd(idx).isRVC && checkerOut.fixedRange(idx) && f3_instr_valid(idx) && !checkerOut.fixedTaken(idx) && ! f3_req_is_mmio && !f3_ftq_req.oversize
+  }
+
+  val f3_lastValidIdx        = (PredictWidth - 1).U//~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
+  val f3_lastIdx             = ~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
+
+  val f3_hasLastHalf         = hasLastHalf(f3_lastValidIdx)
+
   val f3_lastHalf_mask    = VecInit((0 until PredictWidth).map( i => if(i ==0) false.B else true.B )).asUInt()
-  // // TODO: What if next packet does not match?
-  // when (f3_flush) {
-  //   f3_lastHalf.valid := false.B
-  // }.elsewhen (f3_fire) {
-  //   f3_lastHalf.valid := hasLastHalf
-  //   f3_lastHalf.middlePC := middlePC
-  // }
+  val lastHaflSnpc        =  f3_half_snpc(f3_lastValidIdx)
+
+  when (f3_flush) {
+    f3_lastHalf.valid := false.B
+  }.elsewhen (f3_fire) {
+    f3_lastHalf.valid := f3_hasLastHalf
+    f3_lastHalf.middlePC := f3_ftq_req.fallThruAddr
+  }
+
 
   io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
   io.toIbuffer.bits.instrs      := f3_expd_instr
@@ -436,7 +445,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.triggered   := DontCare//f2_triggered
 
   val lastHalfMask = VecInit((0 until PredictWidth).map(i => if(i ==0) false.B else true.B))
-  when(f3_lastHalfMatch){
+  when(f3_lastHalf.valid){
     io.toIbuffer.bits.enqEnable := checkerOut.fixedRange.asUInt & f3_instr_valid & lastHalfMask.asUInt
     io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid
   }
@@ -498,8 +507,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_instr_range    = RegNext(io.toIbuffer.bits.enqEnable)
   val wb_pc             = RegNext(f3_pc)
   val wb_pd             = RegNext(f3_pd)
-  val wb_lastHalf       = RegNext(hasLastHalf)
-  val wb_lastHalf_spc   = RegNext(lastHaflSnpc)
+
+  //***提前结束的lastHafl***
+  // val wb_lastIdx        = RegNext(f3_lastIdx)
+  // val wb_adv_last       = wb_lastIdx =/= (PredictWidth - 1).U 
+  
+  //***fallThrough不等于下一个start的lastHalf***
+  // val wb_halfNotMatch   = RegNext(f3_lastHalf.valid && f3_lastHalf.middlePC =/= f3_req.startAddr)
+  // val wb_lastHalf_spc   = RegNext(lastHaflSnpc)
+
+  val wb_half_flush = false.B 
+  val wb_half_target = DontCare
 
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
@@ -507,14 +525,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.valid                  := wb_valid
   checkFlushWb.bits.pc                := wb_pc
   checkFlushWb.bits.pd                := wb_pd
-  checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  wb_pd(i).valid && wb_instr_range(i)}
+  checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_range(i)}
   checkFlushWb.bits.ftqIdx            := wb_ftq_req.ftqIdx
   checkFlushWb.bits.ftqOffset         := wb_ftq_req.ftqOffset.bits
-  checkFlushWb.bits.misOffset.valid   := ParallelOR(wb_check_result.fixedMissPred) || wb_lastHalf
-  checkFlushWb.bits.misOffset.bits    := Mux(wb_lastHalf, (PredictWidth - 1).U, ParallelPriorityEncoder(wb_check_result.fixedMissPred))
+  checkFlushWb.bits.misOffset.valid   := ParallelOR(wb_check_result.fixedMissPred) || wb_half_flush
+  checkFlushWb.bits.misOffset.bits    := Mux(wb_half_flush, (PredictWidth - 1).U, ParallelPriorityEncoder(wb_check_result.fixedMissPred))
   checkFlushWb.bits.cfiOffset.valid   := ParallelOR(wb_check_result.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits    := ParallelPriorityEncoder(wb_check_result.fixedTaken)
-  checkFlushWb.bits.target            := Mux(wb_lastHalf, wb_lastHalf_spc, wb_check_result.fixedTarget(ParallelPriorityEncoder(wb_check_result.fixedMissPred)))
+  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result.fixedTarget(ParallelPriorityEncoder(wb_check_result.fixedMissPred)))
   checkFlushWb.bits.jalTarget         := wb_check_result.fixedTarget(ParallelPriorityEncoder(VecInit(wb_pd.map{pd => pd.isJal })))
   checkFlushWb.bits.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
 
