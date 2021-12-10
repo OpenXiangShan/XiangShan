@@ -164,6 +164,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     out = req,
     name = Some("main_pipe_req")
   )
+  val store_idx = get_idx(io.store_req.bits.vaddr)
+  val store_set_conflict = s1_valid && store_idx === s1_idx ||
+    s2_valid && store_idx === s2_idx ||
+    s3_valid && store_idx === s3_idx
+  store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
+    !io.probe_req.valid && !io.replace_req.valid
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
