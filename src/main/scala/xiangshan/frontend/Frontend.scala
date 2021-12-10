@@ -37,6 +37,7 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasXSParameter
+  with HasPerfEvents
 {
   val io = IO(new Bundle() {
     val fencei = Input(Bool())
@@ -64,10 +65,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
 
-  //PFEvent
-  val pfevent = Module(new PFEvent)
+
   val tlbCsr = RegNext(io.tlbCsr)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
 
   // trigger
   ifu.io.frontendTrigger := io.csrCtrl.frontend_trigger
@@ -137,29 +136,12 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 
-  if(print_perfcounter){
-    val ifu_perf     = ifu.perfEvents.map(_._1).zip(ifu.perfinfo.perfEvents.perf_events)
-    val ibuffer_perf = ibuffer.perfEvents.map(_._1).zip(ibuffer.perfinfo.perfEvents.perf_events)
-    val icache_perf  = icache.perfEvents.map(_._1).zip(icache.perfinfo.perfEvents.perf_events)
-    val ftq_perf     = ftq.perfEvents.map(_._1).zip(ftq.perfinfo.perfEvents.perf_events)
-    val bpu_perf     = bpu.perfEvents.map(_._1).zip(bpu.perfinfo.perfEvents.perf_events)
-    val perfEvents = ifu_perf ++ ibuffer_perf ++ icache_perf ++ ftq_perf ++ bpu_perf
+  // PFEvent
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  val csrevents = pfevent.io.hpmevent.take(8)
 
-    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-      println(s"frontend perf $i: $perf_name")
-    }
-  }
-
-  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++
-                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++
-                  bpu.perfinfo.perfEvents.perf_events
-  val perf_length = hpmEvents.length
-  val csrevents = pfevent.io.hpmevent.slice(0,8)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
-  })
-  val hpm_frontend = Module(new HPerfmonitor(perf_length,csrevents.length))
-  hpm_frontend.io.hpm_event := csrevents
-  hpm_frontend.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := RegNext(hpm_frontend.io.events_selected)
+  val allPerfEvents = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerf)
+  override val perfEvents = HPerfMonitor(csrevents, allPerfEvents).getPerfEvents
+  generatePerfEvent()
 }

@@ -40,10 +40,11 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
+  extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
 
-  val s_invalid :: s_valid:: Nil = Enum(2)
+  val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
   val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
@@ -68,24 +69,24 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
-    * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
-    *
-    * uop only changes when a new instruction enqueues.
-    *
-    * state changes when
-    * (1) enqueue: from s_invalid to s_valid
-    * (2) dequeue: from s_valid to s_dispatched
-    * (3) commit: from s_dispatched to s_invalid
-    * (4) redirect (branch misprediction or exception): from any state to s_invalid (flushed)
-    * (5) redirect (replay): from s_dispatched to s_valid (re-dispatch)
-    */
+   * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
+   *
+   * uop only changes when a new instruction enqueues.
+   *
+   * state changes when
+   * (1) enqueue: from s_invalid to s_valid
+   * (2) dequeue: from s_valid to s_dispatched
+   * (3) commit: from s_dispatched to s_invalid
+   * (4) redirect (branch misprediction or exception): from any state to s_invalid (flushed)
+   * (5) redirect (replay): from s_dispatched to s_valid (re-dispatch)
+   */
   // enqueue: from s_invalid to s_valid
   io.enq.canAccept := canEnqueue
-  dataModule.io.wen   := VecInit((0 until enqnum).map(_ => false.B))
+  dataModule.io.wen := VecInit((0 until enqnum).map(_ => false.B))
   dataModule.io.waddr := DontCare
   dataModule.io.wdata := VecInit(io.enq.req.map(_.bits))
   for (i <- 0 until enqnum) {
-    when (io.enq.req(i).valid && canActualEnqueue) {
+    when(io.enq.req(i).valid && canActualEnqueue) {
       dataModule.io.wen(i) := true.B
       val sel = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
       dataModule.io.waddr(i) := tailPtr(sel).value
@@ -97,10 +98,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
-    when (io.deq(i).fire() && !io.redirect.valid) {
+    when(io.deq(i).fire() && !io.redirect.valid) {
       stateEntries(headPtr(i).value) := s_invalid
 
-//      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
+      //      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
@@ -109,7 +110,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   for (i <- 0 until size) {
     needCancel(i) := stateEntries(i) =/= s_invalid && robIdxEntries(i).needFlush(io.redirect)
 
-    when (needCancel(i)) {
+    when(needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
@@ -119,16 +120,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   }
 
   /**
-    * Part 2: update indices
-    *
-    * tail: (1) enqueue; (2) redirect
-    * head: dequeue
-    */
+   * Part 2: update indices
+   *
+   * tail: (1) enqueue; (2) redirect
+   * head: dequeue
+   */
 
   // dequeue
   val currentValidCounter = distanceBetween(tailPtr(0), headPtr(0))
   val numDeqTry = Mux(currentValidCounter > deqnum.U, deqnum.U, currentValidCounter)
-  val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map{case (deq, i) =>
+  val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map { case (deq, i) =>
     // For dequeue, the first entry should never be s_invalid
     // Otherwise, there should be a redirect and tail walks back
     // in this case, we set numDeq to 0
@@ -185,8 +186,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
 
   /**
-    * Part 3: set output and input
-    */
+   * Part 3: set output and input
+   */
   // TODO: remove this when replay moves to rob
   dataModule.io.raddr := VecInit(nextHeadPtr.map(_.value))
   for (i <- 0 until deqnum) {
@@ -213,7 +214,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   }
   XSDebug(false, true.B, "\n")
 
-//  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
+  // XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
   QueuePerf(size, PopCount(stateEntries.map(_ =/= s_invalid)), !canEnqueue)
   io.dqFull := !canEnqueue
   XSPerfAccumulate("in", numEnq)
@@ -222,21 +223,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
   XSPerfAccumulate("fake_block", fake_block)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(8))
-  })
   val perfEvents = Seq(
-    ("dispatchq_in           ", numEnq                                                                                                                           ),
-    ("dispatchq_out          ", PopCount(io.deq.map(_.fire()))                                                                                                   ),
-    ("dispatchq_out_try      ", PopCount(io.deq.map(_.valid))                                                                                                    ),
-    ("dispatchq_fake_block   ", fake_block                                                                                                                       ),
-    ("dispatchq_1/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U))                                                                     ),
-    ("dispatchq_2/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U))     ),
-    ("dispatchq_3/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U)) ),
-    ("dispatchq_4/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U))                                                                 ),
+    ("dispatchq_in        ", numEnq),
+    ("dispatchq_out       ", PopCount(io.deq.map(_.fire()))),
+    ("dispatchq_out_try   ", PopCount(io.deq.map(_.valid))),
+    ("dispatchq_fake_block", fake_block),
+    ("dispatchq_1_4_valid ", (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U / 4.U))),
+    ("dispatchq_2_4_valid ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U / 4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U / 2.U))),
+    ("dispatchq_3_4_valid ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U / 2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U * 3.U / 4.U))),
+    ("dispatchq_4_4_valid ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U * 3.U / 4.U))),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
-}                                                                                                                  
+  generatePerfEvent()
+}

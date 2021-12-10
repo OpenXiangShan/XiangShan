@@ -19,10 +19,10 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle, PipelineConnect}
-import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import freechips.rocketchip.tilelink.TLPermissions._
-import huancun.{DirtyField, DirtyKey}
+import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
+import huancun.DirtyKey
+import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
 
 class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
@@ -379,7 +379,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_release_resp)
 }
 
-class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump {
+class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
@@ -475,18 +475,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(5))
-  })
   val perfEvents = Seq(
-    ("dcache_wbq_req          ", io.req.fire()                                                                                                                                                              ),
-    ("dcache_wbq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))                                                                                          ),
-    ("dcache_wbq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))     ),
-    ("dcache_wbq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) ),
-    ("dcache_wbq_4/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U*3.U/4.U))                                                                                      ),
+    ("dcache_wbq_req      ", io.req.fire()                                                                                                                                                              ),
+    ("dcache_wbq_1_4_valid", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))                                                                                          ),
+    ("dcache_wbq_2_4_valid", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))     ),
+    ("dcache_wbq_3_4_valid", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) ),
+    ("dcache_wbq_4_4_valid", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U*3.U/4.U))                                                                                      ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

@@ -443,7 +443,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
 }
 
-class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
+class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val req = Flipped(DecoupledIO(new MissReq))
@@ -582,18 +582,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(5))
-  })
-  val perfEvents = Seq(
-    ("dcache_missq_req          ", io.req.fire()                                                                                                                                                                       ),
-    ("dcache_missq_1/4_valid    ", (PopCount(entries.map(entry => (!entry.io.primary_ready))) < (cfg.nMissEntries.U/4.U))                                                                                              ),
-    ("dcache_missq_2/4_valid    ", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/4.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U/2.U))    ),
-    ("dcache_missq_3/4_valid    ", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/2.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U*3.U/4.U))),
-    ("dcache_missq_4/4_valid    ", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U*3.U/4.U))                                                                                          ),
-  )
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  val perfEvents = Seq(
+    ("dcache_missq_req      ", io.req.fire()                                                                                                                                                                       ),
+    ("dcache_missq_1_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) < (cfg.nMissEntries.U/4.U))                                                                                              ),
+    ("dcache_missq_2_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/4.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U/2.U))    ),
+    ("dcache_missq_3_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/2.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U*3.U/4.U))),
+    ("dcache_missq_4_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U*3.U/4.U))                                                                                          ),
+  )
+  generatePerfEvent()
 }
