@@ -55,7 +55,7 @@ class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with 
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, RegNext(io.sfence.valid || io.csr.satp.changed))
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed, 2))
   val req = RegEnable(req_in.bits, req_in.fire())
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
   val haveOne = BoolStopWatch(req_in.fire(), tlb.resp.fire() || flush)
@@ -95,7 +95,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false)(implicit p: Para
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, RegNext(io.sfence.valid || io.csr.satp.changed))
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed, 2))
   /* sent: tlb -> repeater -> ptw
    * recv: ptw -> repeater -> tlb
    * different from PTWRepeater
@@ -162,7 +162,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(Size+1).W))
 
-  val flush = RegNext(io.sfence.valid || io.csr.satp.changed)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, 2)
   val tlb_req = WireInit(io.tlb.req)
   tlb_req.suggestName("tlb_req")
 
