@@ -316,14 +316,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 //  val f3_data = if(HasCExtension) Wire(Vec(PredictWidth + 1, UInt(16.W))) else Wire(Vec(PredictWidth, UInt(32.W)))
 //  f3_data       :=  f3_cut_data
 
-  val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_w_commit :: Nil = Enum(6)
+  val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_wait_commit :: mmio_commited :: Nil = Enum(7)
   val mmio_state = RegInit(mmio_idle)
 
   val f3_req_is_mmio     = f3_mmio && f3_valid
-  val mmio_has_commited = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
-  val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === mmio_w_commit && mmio_has_commited
+  val mmio_commit = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
+  val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === mmio_commited
    
-  val f3_mmio_to_commit =  f3_req_is_mmio && mmio_state === mmio_w_commit
+  val f3_mmio_to_commit =  f3_req_is_mmio && mmio_state === mmio_wait_commit
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
@@ -364,7 +364,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(mmio_w_resp){
       when(fromUncache.fire()){
           val isRVC =  fromUncache.bits.data(1,0) =/= 3.U
-          mmio_state :=  Mux(isRVC, mmio_resend , mmio_w_commit)
+          mmio_state :=  Mux(isRVC, mmio_resend , mmio_wait_commit)
       }
     }  
 
@@ -374,15 +374,19 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     is(mmio_resend_w_resp){
       when(fromUncache.fire()){
-          mmio_state :=  mmio_w_commit
+          mmio_state :=  mmio_wait_commit
       }
     }  
 
-    is(mmio_w_commit){
-      when(mmio_has_commited){
-          mmio_state  :=  mmio_idle
+    is(mmio_wait_commit){
+      when(mmio_commit){
+          mmio_state  :=  mmio_commited
       }
     }  
+
+    is(mmio_commited){
+        mmio_state := mmio_idle
+    }
   }
 
   when(f3_ftq_flush_self || f3_ftq_flush_by_older)  {
