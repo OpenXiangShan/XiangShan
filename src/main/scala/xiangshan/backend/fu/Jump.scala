@@ -53,7 +53,10 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
-  io.target := target
+  // RISC-V spec for JALR:
+  // The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1,
+  // then setting the least-significant bit of the result to zero.
+  io.target := Cat(target(XLEN - 1, 1), false.B)
   io.result := Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
   io.isAuipc := isAuipc
 }
