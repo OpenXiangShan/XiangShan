@@ -65,18 +65,18 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
 
-
-  val tlbCsr = RegNext(io.tlbCsr)
+  val tlbCsr = DelayN(io.tlbCsr, 2)
+  val csrCtrl = DelayN(io.csrCtrl, 2)
 
   // trigger
-  ifu.io.frontendTrigger := io.csrCtrl.frontend_trigger
-  val triggerEn = io.csrCtrl.trigger_enable
+  ifu.io.frontendTrigger := csrCtrl.frontend_trigger
+  val triggerEn = csrCtrl.trigger_enable
   ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
   // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
-  pmp.io.distribute_csr := io.csrCtrl.distribute_csr
+  pmp.io.distribute_csr := csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
     pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp(i).req)
     icache.io.pmp(i).resp <> pmp_check(i).resp
@@ -93,7 +93,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   icache.io.fencei := RegNext(io.fencei)
 
-  val needFlush = io.backend.toFtq.stage3Redirect.valid
+  val needFlush = RegNext(io.backend.toFtq.stage2Redirect.valid)
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
@@ -112,7 +112,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   //icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
 
-  icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  icache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(icache.io.csr.update)
 
   //IFU-Ibuffer
