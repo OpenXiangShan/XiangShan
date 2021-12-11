@@ -52,7 +52,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
   else (satp.mode === 8.U && (mode < ModeM))
 
-  val reqAddr = req.map(_.bits.vaddr.asTypeOf((new VaBundle).cloneType))
+  val reqAddr = req.map(_.bits.vaddr.asTypeOf(new VaBundle))
   val vpn = reqAddr.map(_.vpn)
   val cmd = req.map(_.bits.cmd)
   val valid = req.map(_.valid)
@@ -160,8 +160,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val fault_valid = vmEnable
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+    val fault_valid = vmEnable
     resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
@@ -227,11 +227,30 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     data = ptw.resp.bits
   )
 
+  // if sameCycle, just req.valid
+  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
+  // because sram is too slow and dtlb is too distant from dtlbRepeater
   for (i <- 0 until Width) {
-    io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
-    io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
+    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) && 
+      !RegNext(refill, init = false.B) &&
+      param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
+    io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
   }
   io.ptw.resp.ready := true.B
+
+  def need_RegNext[T <: Data](need: Boolean, data: T): T = {
+    if (need) RegNext(data)
+    else data
+  }
+  def need_RegNextInit[T <: Data](need: Boolean, data: T, init_value: T): T = {
+    if (need) RegNext(data, init = init_value)
+    else data
+  }
+
+  def param_choose[T <: Data](need: Boolean, truedata: T, falsedata: T): T = {
+    if (need) truedata
+    else falsedata
+  }
 
   if (!q.shouldBlock) {
     for (i <- 0 until Width) {
