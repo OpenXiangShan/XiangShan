@@ -769,11 +769,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ))
   MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
-  when (csrio.fpu.fflags.valid) {
-    fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
+  when (RegNext(csrio.fpu.fflags.valid)) {
+    fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
   }
   // set fs and sd in mstatus
-  when (csrw_dirty_fp_state || csrio.fpu.dirty_fs) {
+  when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
