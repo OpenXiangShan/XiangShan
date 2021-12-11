@@ -74,8 +74,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
 
   difftestIO <> DontCare
 
-  val sfence = RegNext(io.sfence)
-  val csr    = RegNext(io.csr.tlb)
+  val sfence = DelayN(io.sfence, 2)
+  val csr    = DelayN(io.csr.tlb, 2)
   val satp   = csr.satp
   val priv   = csr.priv
   val flush  = sfence.valid || csr.satp.changed

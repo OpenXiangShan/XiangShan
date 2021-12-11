@@ -94,12 +94,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
   })
+
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  dcache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  val csrCtrl = DelayN(io.csrCtrl, 2)
+  dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
 
@@ -188,7 +190,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // pmp
   val pmp = Module(new PMP())
-  pmp.io.distribute_csr <> io.csrCtrl.distribute_csr
+  pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb.map(_.pmp(0))) {
@@ -197,10 +199,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   val tdata = Reg(Vec(6, new MatchTriggerIO))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
-  val en = io.csrCtrl.trigger_enable
+  val en = csrCtrl.trigger_enable
   tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
-  when(io.csrCtrl.mem_trigger.t.valid) {
-    tdata(io.csrCtrl.mem_trigger.t.bits.addr) := io.csrCtrl.mem_trigger.t.bits.tdata
+  when(csrCtrl.mem_trigger.t.valid) {
+    tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
   }
   val lTriggerMapping = Map(0 -> 4, 1 -> 5, 2 -> 9)
   val sTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 7)
@@ -224,7 +226,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
     // ld-ld violation check
     loadUnits(i).io.lsq.loadViolationQuery <> lsq.io.loadViolationQuery(i)
-    loadUnits(i).io.csrCtrl <> io.csrCtrl
+    loadUnits(i).io.csrCtrl       <> csrCtrl
     // dtlb
     loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
     // pmp
@@ -369,7 +371,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.sqempty        <> sbuffer.io.sqempty
 
   // Sbuffer
-  sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
+  sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
   // TODO: if dcache sbuffer resp needs to ne delayed 
   // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
@@ -474,7 +476,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
 
   val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  pfevent.io.distribute_csr := csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.slice(16,24)
 
   val memBlockPerfEvents = Seq(
