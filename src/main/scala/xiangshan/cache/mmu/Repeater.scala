@@ -226,7 +226,11 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   io.tlb.resp.valid := ptwResp_valid
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
-  io.ptw.req(0).valid := v(issPtr) && !isEmptyIss && !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, ignoreAsid = true))
+
+  val issue_valid = v(issPtr) && !isEmptyIss
+  val issue_filtered = ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true)
+  val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
+  io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.resp.ready := true.B
 
@@ -246,7 +250,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   val do_enq = canEnqueue && Cat(reqs.map(_.valid)).orR
   val do_deq = (!v(deqPtr) && !isEmptyDeq)
-  val do_iss = Mux(v(issPtr), io.ptw.req(0).fire(), !isEmptyIss)
+  val do_iss = issue_fire_fake || (!v(issPtr) && !isEmptyIss)
   when (do_enq) {
     enqPtr := enqPtr + enqNum
   }
@@ -255,6 +259,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   }
   when (do_iss) {
     issPtr := issPtr + 1.U
+  }
+  when (issue_fire_fake && issue_filtered) { // issued but is filtered
+    v(issPtr) := false.B
   }
   when (do_enq =/= do_deq) {
     mayFullDeq := do_enq
