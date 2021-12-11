@@ -165,10 +165,12 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4Buffer() :=
     AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
+    TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
     TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
     mem_xbar
