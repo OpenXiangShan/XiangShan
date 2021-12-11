@@ -157,12 +157,13 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   })
 
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
+  val is_mmio = io.in.bits.mmio || io.pmpResp.mmio
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
-  io.out.bits.mmio := (io.in.bits.mmio || io.pmpResp.mmio) && !s2_exception
+  io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.st
-  io.out.valid := io.in.valid && (!io.out.bits.mmio || s2_exception)
+  io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
