@@ -596,7 +596,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     val tdata2 = io.trigger(i).tdata2
     val matchType = io.trigger(i).matchType
     val tEnable = io.trigger(i).tEnable
-    hitLoadAddrTriggerHitVec(i) := TriggerCmp(io.ldout.bits.debug.vaddr, tdata2, matchType, tEnable)
+    hitLoadAddrTriggerHitVec(i) := TriggerCmp(load_s2.io.out.bits.vaddr, tdata2, matchType, tEnable)
     io.trigger(i).addrHit := Mux(hitLoadOut.valid, hitLoadAddrTriggerHitVec(i), lqLoadAddrTriggerHitVec(i))
     io.trigger(i).lastDataHit := TriggerCmp(lastValidData, tdata2, matchType, tEnable)
   }}
