@@ -278,10 +278,10 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val sentFastUop = Input(Bool())
   })
-  val isSoftPrefetch = io.in.bits.isSoftPrefetch
+  val s2_is_prefetch = io.in.bits.isSoftPrefetch
   val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
   excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
-  when (isSoftPrefetch) {
+  when (s2_is_prefetch) {
     excep := 0.U.asTypeOf(excep.cloneType)
   }
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
@@ -292,10 +292,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_data_invalid = io.lsq.dataInvalid
-  val s2_mmio = !isSoftPrefetch && actually_mmio && !s2_exception
+  val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
-  val s2_is_prefetch = io.in.bits.isSoftPrefetch
 
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
@@ -366,7 +365,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   // if forward fail, replay this inst from fetch
-  val forwardFailReplay = s2_forward_fail && !s2_mmio
+  val forwardFailReplay = s2_forward_fail && !s2_mmio && !s2_is_prefetch
   // if ld-ld violation is detected, replay from this inst from fetch
   val ldldVioReplay = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
@@ -391,14 +390,18 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // feedback tlb result to RS
   io.rsFeedback.valid := io.in.valid
-  when (io.in.bits.isSoftPrefetch) {
-    io.rsFeedback.bits.hit := (!s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception))
-  }.otherwise {
-    if (EnableFastForward) {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
-    } else {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
-    }
+  if (EnableFastForward) {
+    io.rsFeedback.bits.hit := 
+      (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && // replay if dcache miss queue full / busy
+      !s2_tlb_miss && // replay if dtlb miss
+      !s2_data_invalid || // replay if store to load forward data is not ready 
+      s2_is_prefetch // prefetch will not be replayed
+  } else {
+    io.rsFeedback.bits.hit := 
+      (!s2_cache_replay || s2_mmio || s2_exception) && // replay if dcache miss queue full / busy
+      !s2_tlb_miss && // replay if dtlb miss
+      !s2_data_invalid || // replay if store to load forward data is not ready
+      s2_is_prefetch // prefetch will not be replayed
   }
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
