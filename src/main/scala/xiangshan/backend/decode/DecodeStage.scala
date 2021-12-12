@@ -22,7 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class DecodeStage(implicit p: Parameters) extends XSModule {
+class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
@@ -81,18 +81,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
+
   val perfEvents = Seq(
     ("decoder_fused_instr          ", PopCount(fusionDecoder.io.out.map(_.fire))                                 ),
     ("decoder_waitInstr            ", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready))),
     ("decoder_stall_cycle          ", hasValid && !io.out(0).ready                                               ),
     ("decoder_utilization          ", PopCount(io.in.map(_.valid))                                               ),
   )
-  val numPerfEvents = perfEvents.size
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(numPerfEvents))
-  })
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

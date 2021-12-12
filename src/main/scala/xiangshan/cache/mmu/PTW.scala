@@ -42,7 +42,7 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 }
 
 @chiselName
-class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst {
+class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
@@ -74,8 +74,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
 
   difftestIO <> DontCare
 
-  val sfence = RegNext(io.sfence)
-  val csr    = RegNext(io.csr.tlb)
+  val sfence = DelayN(io.sfence, 2)
+  val csr    = DelayN(io.csr.tlb, 2)
   val satp   = csr.satp
   val priv   = csr.priv
   val flush  = sfence.valid || csr.satp.changed
@@ -327,22 +327,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   }
 
 
-  if(print_perfcounter){
-    val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
-    val cache_perf     = cache.perfEvents.map(_._1).zip(cache.perfinfo.perfEvents.perf_events)
-    val fsm_perf       = fsm.perfEvents.map(_._1).zip(fsm.perfinfo.perfEvents.perf_events)
-    val perfEvents  = missq_perf ++ cache_perf ++ fsm_perf
-    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-      println(s"ptw perf $i: $perf_name")
-    }
-  }
-  val perf_list = missQueue.perfinfo.perfEvents.perf_events ++ cache.perfinfo.perfEvents.perf_events ++ fsm.perfinfo.perfEvents.perf_events
-  val perf_length = perf_list.length
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perf_list
-
+  val perfEvents  = Seq(missQueue, cache, fsm).flatMap(_.getPerfEvents)
+  generatePerfEvent()
 }
 
 class PTEHelper() extends ExtModule {
@@ -389,18 +375,17 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
     node := ptw.node
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     val io = IO(new PtwIO)
-    val perfinfo = IO(new Bundle(){
-      val perfEvents = Output(new PerfEventsBundle(ptw.asInstanceOf[PTW].module.perf_length))
-    })
-    if(useSoftPTW) {
+    val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
+      Seq()
     }
     else {
         io <> ptw.module.io
-        perfinfo := ptw.asInstanceOf[PTW].module.perfinfo
+        ptw.module.getPerfEvents
     }
+    generatePerfEvent()
   }
 }

@@ -24,7 +24,6 @@ import utils.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.mem.StoreDataBundle
 
 case class ExuParameters
 (
@@ -68,9 +67,14 @@ case class ExuConfig
   val readFpRf = fpSrcCnt > 0
   val writeIntRf = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
+  val writeFflags = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
-  val hasExceptionOut = fuConfigs.map(_.hasExceptionOut).reduce(_ || _)
+  val exceptionOut = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
+  val flushPipe: Boolean = fuConfigs.map(_.flushPipe).reduce(_ ||_)
+  val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
+  val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
+  val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
 
   val latency: HasFuLatency = {
     val lats = fuConfigs.map(_.latency)
@@ -115,7 +119,6 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   @public val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
   @public val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
   @public val fmaMid = if (config == FmacExeUnitCfg) Some(IO(new FMAMidResultIO)) else None
-  @public val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
 
   val functionUnits = config.fuConfigs.map(cfg => {
     val mod = Module(cfg.fuGen(p))

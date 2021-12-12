@@ -59,7 +59,7 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
 }
 
 @chiselName
-class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
+class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwFsmIO)
 
   val sfence = io.sfence
@@ -193,9 +193,6 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   TimeOutAssert(state =/= s_idle, timeOutThreshold, "page table walker time out")
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(7))
-  })
   val perfEvents = Seq(
     ("fsm_count         ", io.req.fire()                                     ),
     ("fsm_busy          ", state =/= s_idle                                  ),
@@ -205,8 +202,5 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
     ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

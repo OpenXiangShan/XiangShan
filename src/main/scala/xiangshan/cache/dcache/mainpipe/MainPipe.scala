@@ -84,7 +84,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   }
 }
 
-class MainPipe(implicit p: Parameters) extends DCacheModule {
+class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val metaBits = (new Meta).getWidth
   val encMetaBits = cacheParams.tagCode.width((new MetaAndTag).getWidth) - tagBits
 
@@ -669,15 +669,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
   val perfEvents = Seq(
-    ("dcache_mp_req                    ", s0_fire                                                                     ),
-    ("dcache_mp_total_penalty          ", (PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))             ),
+    ("dcache_mp_req          ", s0_fire                                                      ),
+    ("dcache_mp_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

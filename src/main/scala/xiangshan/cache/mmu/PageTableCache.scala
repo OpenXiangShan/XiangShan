@@ -85,7 +85,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 }
 
 @chiselName
-class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
+class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
   val ecc = Code.fromString(l2tlbParams.ecc)
@@ -659,9 +659,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSDebug(RegNext(sfence.valid), p"[sfence] l3g:${Binary(l3g)}\n")
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(8))
-  })
   val perfEvents = Seq(
     ("access           ", base_valid_access_0             ),
     ("l1_hit           ", l1Hit                           ),
@@ -672,8 +669,5 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     ("rwHarzad         ",  io.req.valid && !io.req.ready  ),
     ("out_blocked      ",  io.resp.valid && !io.resp.ready),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }
