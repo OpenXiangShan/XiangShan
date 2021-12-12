@@ -222,7 +222,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   // * need redo ld-ld violation check
   val needLdVioCheckRedo = io.loadViolationQueryReq.valid &&
     !io.loadViolationQueryReq.ready &&
-    RegNext(io.csrCtrl.ldld_vio_check)
+    RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.needLdVioCheckRedo := needLdVioCheckRedo
   io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo)
   io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict / re do ld-ld violation check
@@ -369,7 +369,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // if ld-ld violation is detected, replay from this inst from fetch
   val ldldVioReplay = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
-    RegNext(io.csrCtrl.ldld_vio_check)
+    RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.out.bits.uop.ctrl.replayInst := forwardFailReplay || ldldVioReplay
   io.out.bits.mmio := s2_mmio
   io.out.bits.uop.ctrl.flushPipe := s2_mmio && io.sentFastUop

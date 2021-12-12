@@ -616,7 +616,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   //to selectout prefetch.r/prefetch.w
   val isORI = BitPat("b?????????????????110?????0010011") === ctrl_flow.instr
-  when(isORI) {
+  when(isORI && io.csrCtrl.soft_prefetch_enable) {
     // TODO: add CSR based Zicbop config
     when(cs.ldest === 0.U) {
       cs.selImm := SelImm.IMM_S
