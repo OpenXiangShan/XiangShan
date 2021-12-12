@@ -269,204 +269,47 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
 }
 
-//class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
-//  val pc          = Vec(PredictWidth, UInt(VAddrBits.W))
-//  val instrs      = Vec(PredictWidth, UInt(32.W))
-//  val pd          = Vec(PredictWidth, (new PreDecodeInfo))
-//  val takens      = Vec(PredictWidth, Bool())
-//  val misOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-//  val cfiOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-//  val target       = UInt(VAddrBits.W)
-//  val jalTarget    = UInt(VAddrBits.W)
-//  val hasLastHalf  = Bool()
-//  val realEndPC    = UInt(VAddrBits.W)
-//  val instrRange   = Vec(PredictWidth, Bool())
-//  val pageFault    = Vec(PredictWidth, Bool())
-//  val accessFault  = Vec(PredictWidth, Bool())
-//  val crossPageIPF = Vec(PredictWidth, Bool())
-//  val triggered    = Vec(PredictWidth, new TriggerCf)
-//}
-//
-//class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
-//  val io = IO(new Bundle() {
-//    val in = Input(new IfuToPreDecode)
-//    val out = Output(new PreDecodeResp)
-//  })
-//
-//  val instValid     = io.in.instValid
-//  val data          = io.in.data
-//  val pcStart       = io.in.startAddr
-//  val pcEnd         = io.in.fallThruAddr
-//  val pcEndError    = io.in.fallThruError
-//  val isDoubleLine  = io.in.isDoubleLine
-//  val bbOffset      = io.in.ftqOffset.bits
-//  val bbTaken       = io.in.ftqOffset.valid
-//  val bbTarget      = io.in.target
-//  val oversize      = io.in.oversize
-//  val pageFault     = io.in.pageFault
-//  val accessFault   = io.in.accessFault
-//
-//  val validStart        = Wire(Vec(PredictWidth, Bool()))
-//  dontTouch(validStart)
-//  val validEnd          = Wire(Vec(PredictWidth, Bool()))
-//  val targets           = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
-//  val misPred           = Wire(Vec(PredictWidth, Bool()))
-//  val takens            = Wire(Vec(PredictWidth, Bool()))
-//  val falseHit          = Wire(Vec(PredictWidth, Bool()))
-//  val instRange         = Wire(Vec(PredictWidth, Bool()))
-//  //"real" means signals that are genrated by repaired end pc of this basic block using predecode information
-//  val realEndPC         = Wire(UInt(VAddrBits.W))
-//  val realHasLastHalf   = Wire(Vec(PredictWidth, Bool()))
-//  val realMissPred      = Wire(Vec(PredictWidth, Bool()))
-//  val realTakens        = Wire(Vec(PredictWidth, Bool()))
-//
-//  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
-//                       else         VecInit((0 until PredictWidth).map(i => data(i)))
-//
-//  val nextLinePC =  addrAlign(pcStart, 64, VAddrBits) + 64.U
-//
-//  // Frontend Triggers
-//  val tdata = Reg(Vec(4, new MatchTriggerIO))
-//  when(io.in.frontendTrigger.t.valid) {
-//    tdata(io.in.frontendTrigger.t.bits.addr) := io.in.frontendTrigger.t.bits.tdata
-//  }
-//  io.out.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
-//  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
-//  triggerEnable := io.in.csrTriggerEnable
-//  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
-//  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
-//
-//  for (i <- 0 until PredictWidth) {
-//    //TODO: Terrible timing for pc comparing
-//    val isNextLine      = (io.out.pc(i) > nextLinePC)
-//    val nullInstruction = isNextLine && !isDoubleLine
-//
-//    val hasPageFault   = ((io.out.pc(i) < nextLinePC && pageFault(0))   || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && pageFault(1)))
-//    val hasAccessFault = ((io.out.pc(i) < nextLinePC && accessFault(0)) || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && accessFault(1)))
-//    val exception      = hasPageFault || hasAccessFault
-//    val inst           = Mux(exception || nullInstruction , NOP, WireInit(rawInsts(i)))
-//    val expander       = Module(new RVCExpander)
-//
-//    val isFirstInBlock = i.U === 0.U
-//    val isLastInBlock  = (i == PredictWidth - 1).B
-//    val currentPC      = pcStart + (i << 1).U((log2Ceil(PredictWidth)+1).W)
-//    val currentIsRVC   = isRVC(inst) && HasCExtension.B
-//
-//    val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
-//
-//    validStart(i)   := (lastIsValidEnd || !HasCExtension.B)
-//    validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
-//
-//    val brType::isCall::isRet::Nil = brInfo(inst)
-//    val jalOffset = jal_offset(inst, currentIsRVC)
-//    val brOffset  = br_offset(inst, currentIsRVC)
-//
-//    io.out.pd(i).valid         := (lastIsValidEnd || !HasCExtension.B)
-//    io.out.pd(i).isRVC         := currentIsRVC
-//    io.out.pd(i).brType        := brType
-//    io.out.pd(i).isCall        := isCall
-//    io.out.pd(i).isRet         := isRet
-//    io.out.pc(i)               := currentPC
-//    io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U)&& !pageFault(0) && pageFault(1) && !currentIsRVC
-////    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
-//    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
-//    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
-//    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
-//    for (j <- 0 until 4) {
-//      val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
-//        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
-//      io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
-//      io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
-//      if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
-//    }
-//    io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i)
-//    io.out.accessFault(i)      := hasAccessFault
-//
-//
-//    expander.io.in             := inst
-//    io.out.instrs(i)           := expander.io.out.bits
-//
-//    takens(i)    := (validStart(i)  && (bbTaken && bbOffset === i.U && !io.out.pd(i).notCFI || io.out.pd(i).isJal || io.out.pd(i).isRet))
-//
-//    val jumpTarget      = io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
-//    targets(i) := Mux(takens(i), jumpTarget, pcEnd)
-//                       //Banch and jal have wrong targets
-//    val targetFault    = (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))
-//                       //An not-CFI instruction is predicted taken
-//    val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken)
-//                       //A jal instruction is predicted not taken
-//    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isJal)
-//                       //A ret instruction is predicted not taken
-//    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isRet)
-//                       //An invalid instruction is predicted taken
-//    val invalidInsFault  = (!validStart(i)  && i.U === bbOffset && bbTaken)
-//
-//    misPred(i)   := targetFault  || notCFIFault || jalFault || retFault || invalidInsFault || pcEndError
-//    falseHit(i)  := invalidInsFault || notCFIFault
-//
-//    realMissPred(i)     := misPred(i) && instRange(i)
-//    realHasLastHalf(i)  := instValid && currentPC === (realEndPC - 2.U) && validStart(i) && instRange(i) && !currentIsRVC
-//    realTakens(i)       := takens(i) && instRange(i)
-//  }
-//
-//  //TODO:
-//  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B && !io.out.cfiOffset.valid
-//
-//  val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
-//  val jumpOffset              =  PriorityEncoder(jumpOH)
-//  val rvcOH                   =  VecInit(io.out.pd.map(inst => inst.isRVC))
-//  val jumpPC                  =  io.out.pc(jumpOffset)
-//  val jumpIsRVC               =  rvcOH(jumpOffset)
-//  val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
-//  val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
-//  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
-//  val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
-//  val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC || (pcStart + (FetchWidth * 4).U) === nextLinePC) && !isDoubleLine
-//  val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
-//
-//  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
-//  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump && ((jumpNextPC < boundPC) || (jumpNextPC === boundPC) ), jumpNextPC, boundPC), pcEnd)
-//
-//  val validLastOffset      = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
-//
-//  io.out.misOffset.valid  := ParallelOR(realMissPred) || beyondFetch
-//  io.out.misOffset.bits   := Mux(beyondFetch, PredictWidth.U, Mux(pcEndError,validLastOffset,PriorityEncoder(realMissPred)))
-//  io.out.instrRange.zipWithIndex.map{case (bit,i) => bit := instRange(i).asBool()}
-//
-//  io.out.cfiOffset.valid  := ParallelOR(realTakens)
-//  io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
-//
-//  io.out.target           := Mux(beyondFetch,io.out.pc.last + 2.U ,Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC))
-//  io.out.takens           := realTakens
-//
-//  io.out.jalTarget        :=  targets(jumpOffset)
-//
-//  io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
-//  io.out.realEndPC        := realEndPC
-//
-//  for (i <- 0 until PredictWidth) {
-//    XSDebug(true.B,
-//      p"instr ${Hexadecimal(io.out.instrs(i))}, " +
-//      p"validStart ${Binary(validStart(i))}, " +
-//      p"validEnd ${Binary(validEnd(i))}, " +
-//      p"pc ${Hexadecimal(io.out.pc(i))}, " +
-//      p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
-//      p"brType ${Binary(io.out.pd(i).brType)}, " +
-//      p"isRet ${Binary(io.out.pd(i).isRet)}, " +
-//      p"isCall ${Binary(io.out.pd(i).isCall)}\n"
-//    )
-//  }
-//}
-//
-//class RVCExpander(implicit p: Parameters) extends XSModule {
-//  val io = IO(new Bundle {
-//    val in = Input(UInt(32.W))
-//    val out = Output(new ExpandedInstruction)
-//  })
-//
-//  if (HasCExtension) {
-//    io.out := new RVCDecoder(io.in, XLEN).decode
-//  } else {
-//    io.out := new RVCDecoder(io.in, XLEN).passthrough
-//  }
-//}
+class FrontendTrigger(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle(){
+    val frontendTrigger = Input(new FrontendTdataDistributeIO)
+    val csrTriggerEnable = Input(Vec(4, Bool()))
+    val triggered    = Output(Vec(PredictWidth, new TriggerCf))
+
+    val pds           = Input(Vec(PredictWidth, new PreDecodeInfo))
+    val pc            = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
+    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W))) 
+                        else Input(Vec(PredictWidth, UInt(32.W)))
+  })
+
+  val data          = io.data
+
+  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
+                        else         VecInit((0 until PredictWidth).map(i => data(i)))
+
+  val tdata = Reg(Vec(4, new MatchTriggerIO))
+  when(io.frontendTrigger.t.valid) {
+    tdata(io.frontendTrigger.t.bits.addr) := io.frontendTrigger.t.bits.tdata
+  }
+  io.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
+  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
+  triggerEnable := io.csrTriggerEnable
+  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
+  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
+
+  for (i <- 0 until PredictWidth) {
+    val currentPC = io.pc(i)
+    val currentIsRVC = io.pds(i).isRVC
+    val inst = WireInit(rawInsts(i))
+
+    io.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
+    io.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
+    io.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
+    for (j <- 0 until 4) {
+      val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
+        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
+      io.triggered(i).triggerHitVec(triggerMapping(j)) := hit
+      io.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
+      if(chainMapping.contains(j)) io.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
+    }
+  }  
+}

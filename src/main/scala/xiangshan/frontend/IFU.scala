@@ -77,7 +77,6 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
 
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data                =  if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
-//  val lastHalfMatch       =  Bool()
   val frontendTrigger     = new FrontendTdataDistributeIO
   val csrTriggerEnable    = Vec(4, Bool())
   val pc                  = Vec(PredictWidth, UInt(VAddrBits.W))
@@ -118,6 +117,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val preDecoder      = Module(new PreDecode)
   val predChecker     = Module(new PredChecker)
+  val frontendTrigger = Module(new FrontendTrigger)
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
   val (checkerIn, checkerOut)         = (predChecker.io.in, predChecker.io.out)
 
@@ -304,13 +304,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
   val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
   val f3_hasHalfValid   = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
-
-  //  val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
-  //  val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
   val f3_pAddrs   = RegEnable(next = f2_paddrs, enable = f2_fire)
 
+  /*** MMIO State Machine***/
   val f3_mmio_data    = Reg(UInt(maxInstrLen.W))
 
 //  val f3_data = if(HasCExtension) Wire(Vec(PredictWidth + 1, UInt(16.W))) else Wire(Vec(PredictWidth, UInt(32.W)))
@@ -398,14 +396,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   toUncache.bits.addr := Mux((mmio_state === mmio_resend), f3_pAddrs(0) + 2.U, f3_pAddrs(0))
   fromUncache.ready   := true.B
 
+
   val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
 
   val f3_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
   val f3_mmio_range      = VecInit((0 until PredictWidth).map(i => if(i ==0) true.B else false.B))
+  val f3_instr_valid     = Wire(Vec(PredictWidth, Bool()))
 
-  val f3_instr_valid = Mux(f3_lastHalf.valid,f3_hasHalfValid.asUInt ,VecInit(f3_pd.map(inst => inst.valid)).asUInt)
-
-  //** prediction result check   **//
+  /*** prediction result check   ***/
   checkerIn.ftqOffset   := f3_ftq_req.ftqOffset
   checkerIn.jumpOffset  := f3_jump_offset
   checkerIn.target      := f3_ftq_req.target
@@ -414,17 +412,19 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkerIn.pds         := f3_pd
   checkerIn.pc          := f3_pc
 
+  /*** process half RVI in the last 2 Bytes  ***/
+
   def hasLastHalf(idx: UInt) = {
-    !f3_pd(idx).isRVC && checkerOut.fixedRange(idx) && f3_instr_valid(idx) && !checkerOut.fixedTaken(idx) && ! f3_req_is_mmio && !f3_ftq_req.oversize
+    !f3_pd(idx).isRVC && checkerOut.fixedRange(idx) && f3_instr_valid(idx) && !checkerOut.fixedTaken(idx) && !checkerOut.fixedMissPred(idx) && ! f3_req_is_mmio && !f3_ftq_req.oversize
   }
 
-  val f3_lastValidIdx        = (PredictWidth - 1).U//~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
-  val f3_lastIdx             = ~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
+  val f3_last_validIdx             = ~ParallelPriorityEncoder(checkerOut.fixedRange.reverse)
 
-  val f3_hasLastHalf         = hasLastHalf(f3_lastValidIdx)
+  val f3_hasLastHalf         = hasLastHalf((PredictWidth - 1).U)
+  val f3_false_lastHalf      = hasLastHalf(f3_last_validIdx)
+  val f3_false_snpc          = f3_half_snpc(f3_last_validIdx)
 
   val f3_lastHalf_mask    = VecInit((0 until PredictWidth).map( i => if(i ==0) false.B else true.B )).asUInt()
-  val lastHaflSnpc        =  f3_half_snpc(f3_lastValidIdx)
 
   when (f3_flush) {
     f3_lastHalf.valid := false.B
@@ -433,11 +433,24 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_lastHalf.middlePC := f3_ftq_req.fallThruAddr
   }
 
+  f3_instr_valid := Mux(f3_lastHalf.valid,f3_hasHalfValid ,VecInit(f3_pd.map(inst => inst.valid)))
+
+  /*** frontend Trigger  ***/
+  frontendTrigger.io.pds  := f3_pd
+  frontendTrigger.io.pc   := f3_pc
+  frontendTrigger.io.data   := f3_cut_data
+
+  frontendTrigger.io.frontendTrigger  := io.frontendTrigger
+  frontendTrigger.io.csrTriggerEnable := io.csrTriggerEnable
+
+  val f3_triggered = frontendTrigger.io.triggered
+
+  /*** send to Ibuffer  ***/
 
   io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
   io.toIbuffer.bits.instrs      := f3_expd_instr
-  io.toIbuffer.bits.valid       := f3_instr_valid
-  io.toIbuffer.bits.enqEnable   := checkerOut.fixedRange.asUInt & f3_instr_valid
+  io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
+  io.toIbuffer.bits.enqEnable   := checkerOut.fixedRange.asUInt & f3_instr_valid.asUInt
   io.toIbuffer.bits.pd          := f3_pd
   io.toIbuffer.bits.ftqPtr      := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc          := f3_pc
@@ -446,12 +459,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ipf         := f3_pf_vec
   io.toIbuffer.bits.acf         := f3_af_vec
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPageFault
-  io.toIbuffer.bits.triggered   := DontCare//f2_triggered
+  io.toIbuffer.bits.triggered   := f3_triggered
 
   val lastHalfMask = VecInit((0 until PredictWidth).map(i => if(i ==0) false.B else true.B))
   when(f3_lastHalf.valid){
-    io.toIbuffer.bits.enqEnable := checkerOut.fixedRange.asUInt & f3_instr_valid & lastHalfMask.asUInt
-    io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid
+    io.toIbuffer.bits.enqEnable := checkerOut.fixedRange.asUInt & f3_instr_valid.asUInt & lastHalfMask.asUInt
+    io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid.asUInt
   }
 
   /** external predecode for MMIO instruction */
@@ -503,7 +516,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
    *
    * ---------------------------------------------------------------------
    */
-  //val wb_valid          = RegNext((f3_fire || (f3_valid && !RegNext(f3_valid))) && !f3_flush && !f3_req_is_mmio)
   val wb_valid          = RegNext(RegNext(f2_fire && !f2_flush) && !f3_req_is_mmio && !f3_flush)
   val wb_ftq_req        = RegNext(f3_ftq_req)
 
@@ -513,16 +525,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_pd             = RegNext(f3_pd)
   val wb_instr_valid    = RegNext(f3_instr_valid)
 
-  //***提前结束的lastHafl***
-  // val wb_lastIdx        = RegNext(f3_lastIdx)
-  // val wb_adv_last       = wb_lastIdx =/= (PredictWidth - 1).U 
+  /* false hit lastHalf */
+  val wb_lastIdx        = RegNext(f3_last_validIdx)
+  val wb_false_lastHalf = RegNext(f3_false_lastHalf) && wb_lastIdx =/= (PredictWidth - 1).U 
+  val wb_false_target   = RegNext(f3_false_snpc)
   
-  //***fallThrough不等于下一个start的lastHalf***
-  // val wb_halfNotMatch   = RegNext(f3_lastHalf.valid && f3_lastHalf.middlePC =/= f3_req.startAddr)
-  // val wb_lastHalf_spc   = RegNext(lastHaflSnpc)
-
-  val wb_half_flush = false.B 
-  val wb_half_target = DontCare
+  val wb_half_flush = wb_false_lastHalf
+  val wb_half_target = wb_false_target
 
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
@@ -544,9 +553,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   toFtq.pdWb := Mux(f3_req_is_mmio, mmioFlushWb,  checkFlushWb)
 
   wb_redirect := checkFlushWb.bits.misOffset.valid && wb_valid
-
-//  val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
-//  val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
 
   /** performance counter */
