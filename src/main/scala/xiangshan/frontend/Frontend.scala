@@ -24,8 +24,6 @@ import xiangshan._
 import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker}
 import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.frontend.icache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB,TlbResp}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
