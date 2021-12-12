@@ -394,14 +394,15 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     io.rsFeedback.bits.hit := 
       (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && // replay if dcache miss queue full / busy
       !s2_tlb_miss && // replay if dtlb miss
-      !s2_data_invalid || // replay if store to load forward data is not ready 
-      s2_is_prefetch // prefetch will not be replayed
+      !s2_data_invalid // replay if store to load forward data is not ready 
   } else {
     io.rsFeedback.bits.hit := 
       (!s2_cache_replay || s2_mmio || s2_exception) && // replay if dcache miss queue full / busy
       !s2_tlb_miss && // replay if dtlb miss
-      !s2_data_invalid || // replay if store to load forward data is not ready
-      s2_is_prefetch // prefetch will not be replayed
+      !s2_data_invalid // replay if store to load forward data is not ready
+  }
+  when(s2_is_prefetch){
+    io.rsFeedback.bits.hit := !s2_tlb_miss // replay if dtlb miss
   }
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
