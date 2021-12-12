@@ -24,7 +24,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
+import xiangshan.mem.{SqPtr, MemWaitUpdateReq}
 import xiangshan.backend.fu.fpu.{FMAMidResult, FMAMidResultIO}
 
 import scala.math.max
@@ -126,15 +126,13 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   def wbFpPriority: Int = params.exuCfg.get.wbFpPriority
 
   override def toString: String = params.toString
+  // for better timing, we limits the size of RS to 2-deq
+  val maxRsDeq = 2
+  def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
-  lazy val module = new LazyModuleImp(this) {
-    // for better timing, we limits the size of RS to 2-deq
-    val maxRsDeq = 2
-
-    // split rs to 2-deq
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
-    val numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
     val rs = (0 until numRS).map(i => {
       val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
       val numEnq = params.numEnq / numRS
@@ -154,7 +152,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       )
     })
     val io = IO(new ReservationStationIO(params)(updatedP))
-    val perf = IO(Vec(rs.length, Output(new RsPerfCounter)))
 
     rs.foreach(_.io.redirect <> io.redirect)
     io.numExist <> rs.map(_.io.numExist).reduce(_ +& _)
@@ -179,16 +176,15 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.checkwait.isDefined) {
      rs.foreach(_.io.checkwait.get <> io.checkwait.get)
     }
-    if (io.store.isDefined) {
-      io.store.get.stData <> rs.flatMap(_.io.store.get.stData)
-    }
     if (io.load.isDefined) {
       io.load.get.fastMatch <> rs.flatMap(_.io.load.get.fastMatch)
     }
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
     }
-    perf <> rs.map(_.perf)
+
+    val perfEvents = rs.flatMap(_.getPerfEvents)
+    generatePerfEvent()
   }
 
   var fastWakeupIdx = 0
@@ -231,9 +227,6 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
-  val store = if (params.isStore) Some(new Bundle {
-    val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
-  }) else None
   val load = if (params.isLoad) Some(new Bundle() {
     val fastMatch = Vec(params.numDeq, Output(UInt(exuParameters.LduCnt.W)))
   }) else None
@@ -243,13 +236,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
-class RsPerfCounter(implicit p: Parameters) extends XSBundle {
-  val full = Bool()
-}
-
-class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule {
+class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new ReservationStationIO(params))
-  val perf = IO(Output(new RsPerfCounter))
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -259,7 +247,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s2_deq = Wire(io.deq.cloneType)
 
   io.numExist := PopCount(statusArray.io.isValid)
-  perf.full := RegNext(statusArray.io.isValid.andR)
+
+  val perfEvents = Seq(("full", statusArray.io.isValid.andR))
+  generatePerfEvent()
+
   statusArray.io.redirect := io.redirect
 
   /**
@@ -632,12 +623,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire() && wakeupBypassMask(j).asUInt().orR())
       }
-    }
-
-    if (io.store.isDefined) {
-      io.store.get.stData(i).valid := s2_deq(i).valid
-      io.store.get.stData(i).bits.data := s2_deq(i).bits.src(1)
-      io.store.get.stData(i).bits.uop := s2_deq(i).bits.uop
     }
   }
 

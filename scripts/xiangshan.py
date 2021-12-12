@@ -246,6 +246,7 @@ class XiangShan(object):
             "pmp/pmp.riscv.bin",
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
+            "isa_misc/satp_ppn.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)

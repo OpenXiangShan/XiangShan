@@ -98,6 +98,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   with HasIFUConst
   with HasPdConst
   with HasCircularQueuePtrHelper
+  with HasPerfEvents
 {
   println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
@@ -212,7 +213,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
-  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
+  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault && 
+                                                           !fromICache(0).bits.tlbExcp.pageFault
 
   val f2_pc               = RegEnable(next = f1_pc, enable = f1_fire)
   val f2_half_snpc        = RegEnable(next = f1_half_snpc, enable = f1_fire)
@@ -562,11 +564,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_hit_0    = io.toIbuffer.fire() && f3_perf_info.bank_hit(0)
   val f3_hit_1    = io.toIbuffer.fire() && f3_doubleLine & f3_perf_info.bank_hit(1)
   val f3_hit      = f3_perf_info.hit
-
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(15))
-  })
-
   val perfEvents = Seq(
     ("frontendFlush                ", wb_redirect                                ),
     ("ifu_req                      ", io.toIbuffer.fire()                        ),
@@ -584,12 +581,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
     ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
-
-//  f3_redirect := (!predecodeFlushReg && predecodeFlush && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
+  generatePerfEvent()
 
   XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
   XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )

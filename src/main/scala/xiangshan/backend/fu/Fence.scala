@@ -21,13 +21,14 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.ExceptionNO.illegalInstr
 
 class FenceToSbuffer extends Bundle {
   val flushSb = Output(Bool())
   val sbIsEmpty = Input(Bool())
 }
 
-class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
+class Fence(implicit p: Parameters) extends FunctionUnit {
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
