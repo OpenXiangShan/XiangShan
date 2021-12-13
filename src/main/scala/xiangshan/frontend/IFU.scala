@@ -499,7 +499,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f3_mmio_missOffset.valid := f3_req_is_mmio
   f3_mmio_missOffset.bits  := 0.U
 
-  mmioFlushWb.valid           := (f3_mmio_req_commit && f3_mmio_use_seq_pc)
+  mmioFlushWb.valid           := (f3_req_is_mmio && mmio_state === mmio_wait_commit && RegNext(fromUncache.fire())  && f3_mmio_use_seq_pc)
   mmioFlushWb.bits.pc         := f3_pc
   mmioFlushWb.bits.pd         := f3_pd
   mmioFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f3_mmio_range(i)}
@@ -511,7 +511,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
-  mmio_redirect := (f3_mmio_req_commit && f3_mmio_use_seq_pc)
+  mmio_redirect := (f3_req_is_mmio && mmio_state === mmio_wait_commit && RegNext(fromUncache.fire())  && f3_mmio_use_seq_pc)
 
   /* ---------------------------------------------------------------------
    * Ftq Write back :
