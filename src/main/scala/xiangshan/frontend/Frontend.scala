@@ -91,8 +91,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     itlbParams
   )
 
-  icache.io.fencei := RegNext(io.fencei)
-
   val needFlush = RegNext(io.backend.toFtq.stage2Redirect.valid)
 
   //IFU-Ftq
@@ -129,8 +127,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
-  instrUncache.io.flush := false.B//icache.io.missQueue.flush
-  io.error <> DontCare
+  instrUncache.io.flush := false.B
+  io.error <> RegNext(RegNext(icache.io.error))
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)

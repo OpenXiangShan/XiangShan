@@ -137,8 +137,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val fencei   = Input(Bool())
     val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val errors = Output(Vec(PortNumber, new L1CacheErrorInfo))
   }}
 
   io.read.ready := !io.write.valid
@@ -155,6 +155,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
@@ -189,37 +190,22 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   }
   //Parity Decode
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
+  val ecc_errors = Wire(Vec(2,Vec(nWays,Bool())))
   for((tagArray,i) <- tagArrays.zipWithIndex){
     val read_meta_bits = tagArray.io.r.resp.asTypeOf(Vec(nWays,UInt(metaEntryBits.W)))
     val read_meta_decoded = read_meta_bits.map{ way_bits => cacheParams.tagCode.decode(way_bits)}
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_meta_wrong(w)}
+    (0 until nWays).map{ w => ecc_errors(i)(w) := read_meta_wrong(w)}
   }
 
   //Parity Encode
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-  //  when(io.write.valid){
-  //      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-  //  }
-
-  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
-  val validArray = RegInit(0.U((nSets * nWays).W))
-  val validMetas = VecInit((0 until 2).map{ bank =>
-    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
-    validMeta
-  })
-
   val wayNum   = OHToUInt(io.write.bits.waymask)
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
-  when(io.write.valid){
-    validArray := validArray.bitSet(validPtr, true.B)
-  }
-
-  when(io.fencei){ validArray := 0.U }
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
@@ -234,7 +220,16 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     io.readResp.metaData(1) := read_metas(1)
   }
 
-  (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
+  val bank_0_error = Cat(ecc_errors(0)).orR() && RegNext( tagArrays(0).io.r.req.fire())
+  val bank_1_error = Cat(ecc_errors(1)).orR() && RegNext( tagArrays(1).io.r.req.fire())
+  val bank_error   = Seq(bank_0_error, bank_1_error)
+
+  for(i <- 0 until PortNumber){
+    io.errors(i).ecc_error.valid  := bank_error(i)
+    io.errors(i).ecc_error.bits   := true.B  
+    io.errors(i).paddr.valid      := io.errors(i).ecc_error.valid
+    io.errors(i).paddr.bits       := RegNext(Cat(bank_idx(i), 0.U(pgUntagBits.W)))    
+  }
 
   io.write.ready := true.B
   // deal with customized cache op
@@ -291,6 +286,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheDataRespBundle)
     val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val errors = Output(Vec(PortNumber, new L1CacheErrorInfo))
   }}
 
   io.read.ready := !io.write.valid
@@ -305,6 +301,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
@@ -339,13 +336,14 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   //Parity Decode
   val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
+  val ecc_errors = Wire(Vec(2,Vec(nWays,Bool())))
   for((dataArray,i) <- dataArrays.zipWithIndex){
     val read_data_bits = dataArray.io.r.resp.asTypeOf(Vec(nWays,Vec(dataUnitNum, UInt(dataCodeBits.W))))
     val read_data_decoded = read_data_bits.map{way_bits => way_bits.map(unit =>  cacheParams.dataCode.decode(unit))}
     val read_data_wrong    = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.error ))})
     val read_data_corrected = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.corrected )).asUInt})
     read_datas(i) := read_data_corrected.asTypeOf(Vec(nWays,UInt(blockBits.W)))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_data_wrong(w).asUInt.orR } 
+    (0 until nWays).map{ w => ecc_errors(i)(w) := RegNext(io.read.fire()) && read_data_wrong(w).asUInt.orR } 
   } 
 
   //Parity Encode
@@ -356,6 +354,19 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   io.readResp.datas(0) := Mux( port_0_read_1_reg, read_datas(1) , read_datas(0))
   io.readResp.datas(1) := Mux( port_1_read_0_reg, read_datas(0) , read_datas(1))
+
+  val bank_0_error = Cat(ecc_errors(0)).orR() && RegNext( dataArrays(0).io.r.req.fire())
+  val bank_1_error = Cat(ecc_errors(1)).orR() && RegNext( dataArrays(1).io.r.req.fire())
+  val bank_error   = Seq(bank_0_error, bank_1_error)
+
+  for(i <- 0 until PortNumber){
+    io.errors(i).ecc_error.valid  := bank_error(i)
+    io.errors(i).ecc_error.bits   := true.B
+    io.errors(i).paddr.valid      := io.errors(i).ecc_error.valid  
+    io.errors(i).paddr.bits       := RegNext(Cat(bank_idx(i), 0.U(pgUntagBits.W)))    
+  }
+
+
 
   io.write.ready := true.B
 
@@ -407,13 +418,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val fencei      = Input(Bool())
   val stop        = Input(Bool())
   val csr         = new L1CacheToCsrIO
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val perfInfo = Output(new ICachePerfInfo)
+  val error  = new L1CacheErrorInfo
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -488,7 +499,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  metaArray.io.fencei := io.fencei
   bus.a <> missUnit.io.mem_acquire
   bus.e <> missUnit.io.mem_finish
 
@@ -505,6 +515,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
+
+  //Parity error port
+  val errors = dataArray.io.errors ++ metaArray.io.errors
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
 
   /** Block set-conflict request */
