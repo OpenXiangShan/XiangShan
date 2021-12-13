@@ -37,17 +37,25 @@ trait HasTriggerConst {
 }
 
 class TdataBundle extends Bundle {
-//  val hit = Bool()
+  val ttype = UInt(4.W)
+  val dmode = Bool()
+  val maskmax = UInt(6.W)
+  val zero1 = UInt(30.W)
+  val sizehi = UInt(2.W)
+  val hit = Bool()
   val select = Bool()
   val timing = Bool()
-//  val size = UInt(4.W) // hardwire to 0
-//  val action = Bool()
+  val sizelo = UInt(2.W)
+  val action = UInt(4.W)
   val chain = Bool()
-  val matchType = UInt(2.W)
+  val matchType = UInt(4.W)
   val m = Bool()
+  val zero2 = Bool()
   val s = Bool()
   val u = Bool()
-  val data = UInt(64.W) // tdata2
+  val execute = Bool()
+  val store = Bool()
+  val load = Bool()
 }
 
 class FpuCsrIO extends Bundle {
@@ -248,72 +256,74 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Trigger CSRs
 
-  val tdata1_function = Map(
-   0.U -> (true, I_Trigger), 1.U -> (false, I_Trigger),
-   2.U -> (true, S_Trigger), 3.U -> (false, S_Trigger),
-   4.U -> (true, L_Trigger), 5.U -> (false, L_Trigger), // No.5 Load Trigger
-   6.U -> (true, I_Trigger), 7.U -> (false, S_Trigger),
-   8.U -> (true, I_Trigger), 9.U -> (false, L_Trigger)
-  ).withDefaultValue((false, I_Trigger))
-  val tdata1Phy = RegInit(VecInit(List.fill(10) {0.U(64.W).asTypeOf(new TdataBundle)}))
+  val type_config = Array(
+    0.U -> I_Trigger, 1.U -> I_Trigger,
+    2.U -> S_Trigger, 3.U -> S_Trigger,
+    4.U -> L_Trigger, 5.U -> L_Trigger, // No.5 Load Trigger
+    6.U -> I_Trigger, 7.U -> S_Trigger,
+    8.U -> I_Trigger, 9.U -> L_Trigger
+  )
+  def TypeLookup(select: UInt) = MuxLookup(select, I_Trigger, type_config)
+
+  val tdata1Phy = RegInit(VecInit(List.fill(10) {0.U(64.W)}))
   val tdata2Phy = Reg(Vec(10, UInt(64.W)))
   val tselectPhy = RegInit(0.U(4.W))
   val tDummy = WireInit(0.U(64.W))
+  val tdata1Wire = Wire(UInt(64.W))
+  val tdata2Wire = Wire(UInt(64.W))
+  val tinfo = RegInit(2.U(64.W))
   val tControlPhy = RegInit(0.U(64.W))
   val triggerAction = RegInit(false.B)
+  tdata1Wire := tdata1Phy(tselectPhy)
+  tdata2Wire := tdata2Phy(tselectPhy)
+
   def ReadTdata1(rdata: UInt) = {
-    val tdata1 = tdata1Phy(tselectPhy)
-    XSDebug(src2(11, 0) === Tdata1.U && valid, p"\nDebug Mode: tdata1(${tselectPhy})is read, the actual value is ${Binary(tdata1Phy(tselectPhy).asUInt)}\n")
-    Cat(
-      2.U(4.W), // type, hardwired
-      0.U(1.W), // dmode, hardwired
-      0.U(6.W), // maskmax, hardwired to 0 because we don not support
-      0.U(30.W),
-      1.U(2.W), // sizehi, hardwired
-      0.U(1.W), // just don't want to implement this
-      tdata1.select, // select
-      tdata1.timing,
-      0.U(2.W), // sizelo
-      0.U(3.W), triggerAction, // action, 0 is breakpoint 1 is enter debug
-      tdata1.chain,
-      0.U(2.W), tdata1.matchType,
-      tdata1.m, false.B, tdata1.s, tdata1.u,
-      GenESL(tdata1_function(tselectPhy)._2)
-    )
+    val tdata1 = WireInit(tdata1Wire)
+    val read_data = tdata1Wire
+    XSDebug(src2(11, 0) === Tdata1.U && valid, p"\nDebug Mode: tdata1(${tselectPhy})is read, the actual value is ${Binary(tdata1)}\n")
+    read_data & (triggerAction << 12) // fix action
   }
   def WriteTdata1(wdata: UInt) = {
-    val tdata1_new = WireInit(tdata1Phy(tselectPhy))
-    XSDebug(src2(11, 0) === Tdata1.U && valid && func =/= CSROpType.jmp, p"Debug Mode: tdata1(${tselectPhy})is written, the actual value is ${Binary(wdata)}\n")
+    val tdata1 = WireInit(tdata1Wire.asTypeOf(new TdataBundle))
+    val wdata_wire = WireInit(wdata.asTypeOf(new TdataBundle))
+    val tdata1_new = WireInit(wdata.asTypeOf(new TdataBundle))
+    XSDebug(src2(11, 0) === Tdata1.U && valid && func =/= CSROpType.jmp, p"Debug Mode: tdata1(${tselectPhy})is written, the actual value is ${wdata}\n")
 //    tdata1_new.hit := wdata(20)
-    tdata1_new.select := (tdata1_function(tselectPhy)._2 === I_Trigger) && wdata(19)
-    tdata1_new.timing := wdata(18)
-    triggerAction := wdata(12)
-    tdata1_new.chain := tdata1_function(tselectPhy)._1.B && wdata(11)
-    when(wdata(10, 7) === 0.U || wdata(10, 7) === 2.U || wdata(10, 7) === 3.U) {
-      tdata1_new.matchType := wdata(8, 7)
-    } .otherwise{tdata1_new.matchType := tdata1Phy(tselectPhy).matchType}
-    tdata1_new.m := wdata(6)
-    tdata1_new.s := wdata(4)
-    tdata1_new.u := wdata(3)
-    tdata1Phy(tselectPhy) := tdata1_new
-    0.U
-  }
-
-  def ReadTselect(rdata: UInt) = Cat(0.U(60.W), tselectPhy)
-  def WriteTselect(wdata: UInt) = {
-    when (wdata < 10.U){
-      tselectPhy := wdata(3, 0)
+    tdata1_new.select := (TypeLookup(tselectPhy) === I_Trigger) && wdata_wire.select
+    when(wdata_wire.action <= 1.U){
+      triggerAction := tdata1_new.action(0)
+    } .otherwise{
+      tdata1_new.action := tdata1.action
+    }
+    tdata1_new.zero1 := 0.U
+    tdata1_new.zero2 := 0.U
+    tdata1_new.chain := !tselectPhy(0) && wdata_wire.chain
+    when(wdata_wire.matchType =/= 0.U && wdata_wire.matchType =/= 2.U && wdata_wire.matchType =/= 3.U) {
+      tdata1_new.matchType := tdata1.matchType
+    }
+    tdata1_new.sizehi := Mux(TypeLookup(tselectPhy) === I_Trigger, 0.U, 1.U)
+    tdata1_new.sizelo:= Mux(TypeLookup(tselectPhy) === I_Trigger, 3.U, 1.U)
+    tdata1_new.execute := TypeLookup(tselectPhy) === I_Trigger
+    tdata1_new.store := TypeLookup(tselectPhy) === S_Trigger
+    tdata1_new.load := TypeLookup(tselectPhy) === L_Trigger
+    when(valid && func =/= CSROpType.jmp && addr === Tdata1.U) {
+      tdata1Phy(tselectPhy) := tdata1_new.asUInt()
     }
     0.U
   }
 
+  def WriteTselect(wdata: UInt) = {
+    Mux(wdata < 10.U, wdata(3, 0), tselectPhy)
+  }
+
   def ReadTdata2(tdata: UInt) = tdata2Phy(tselectPhy)
   def WriteTdata2(wdata: UInt) = {
-    tdata2Phy(tselectPhy) := wdata
+    when(valid && func =/= CSROpType.jmp && addr === Tdata2.U) {
+      tdata2Phy(tselectPhy) := wdata
+    }
     0.U
   }
 
-  def ReadTinfo(tdata: UInt) = 2.U(XLEN.W)
 
   val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
 
@@ -343,8 +353,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     7.U -> 4.U,
     9.U -> 5.U
   ))
-  csrio.customCtrl.frontend_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy), tdata2Phy(tselectPhy))
-  csrio.customCtrl.mem_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy), tdata2Phy(tselectPhy))
+  csrio.customCtrl.frontend_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle), tdata2Phy(tselectPhy))
+  csrio.customCtrl.mem_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle), tdata2Phy(tselectPhy))
 
   // Machine-Level CSRs
 
@@ -668,10 +678,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Trigger ---
-    MaskedRegMap(Tselect, tDummy, WritableMask, WriteTselect, WritableMask, ReadTselect),
+    MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
     MaskedRegMap(Tdata1, tDummy, WritableMask, WriteTdata1, WritableMask, ReadTdata1),
     MaskedRegMap(Tdata2, tDummy, WritableMask, WriteTdata2, WritableMask, ReadTdata2),
-    MaskedRegMap(Tinfo, tDummy, 0.U(XLEN.W), MaskedRegMap.Unwritable, WritableMask, ReadTinfo),
+    MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
     //--- Debug Mode ---
@@ -789,11 +799,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
 
   // Trigger Ctrl
-  csrio.customCtrl.trigger_enable := tdata1Phy.map{tdata1 => tdata1.m && priviledgeMode === ModeM ||
+  csrio.customCtrl.trigger_enable := tdata1Phy.map{t =>
+    def tdata1 = t.asTypeOf(new TdataBundle)
+    tdata1.m && priviledgeMode === ModeM ||
     tdata1.s && priviledgeMode === ModeS || tdata1.u && priviledgeMode === ModeU
   }
-  csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && addr === Tdata1.U && tdata1_function(tselectPhy)._2 === I_Trigger)
-  csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && addr === Tdata1.U && tdata1_function(tselectPhy)._2 =/= I_Trigger)
+  csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && addr === Tdata1.U && TypeLookup(tselectPhy) === I_Trigger)
+  csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && addr === Tdata1.U && TypeLookup(tselectPhy) =/= I_Trigger)
   XSDebug(csrio.customCtrl.trigger_enable.asUInt.orR(), p"Debug Mode: At least 1 trigger is enabled, trigger enable is ${Binary(csrio.customCtrl.trigger_enable.asUInt())}\n")
 
   // CSR inst decode
