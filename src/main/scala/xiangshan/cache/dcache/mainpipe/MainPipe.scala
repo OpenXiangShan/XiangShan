@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utils._
+import xiangshan.L1CacheErrorInfo
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -136,6 +137,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
     val invalid_resv_set = Input(Bool())
     val update_resv_set = Output(Bool())
+
+    // ecc error
+    val error = Output(new L1CacheErrorInfo())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -217,12 +221,17 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     require(encMeta.getWidth == encMetaBits)
     encMeta(metaBits - 1, 0)
   }
+  def getECC(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(encMetaBits - 1, metaBits)
+  }
 
   val tag_resp = Wire(Vec(nWays, UInt(tagBits.W)))
   val ecc_meta_resp = Wire(Vec(nWays, UInt(encMetaBits.W)))
   tag_resp := Mux(RegNext(s0_fire), io.tag_resp, RegNext(tag_resp))
   ecc_meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(ecc_meta_resp))
   val meta_resp = ecc_meta_resp.map(getMeta(_))
+  val ecc_resp = ecc_meta_resp.map(getECC(_))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
@@ -231,6 +240,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   val s1_hit_tag = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => tag_resp(w))), get_tag(s1_req.addr))
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
+  val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
+  val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_req.addr)).asUInt)
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -668,6 +679,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.status.s3.valid := s3_valid && !s3_req.replace
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
+
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit && !s1_req.replace) &&
+    RegNext(dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := s2_req.addr
 
   val perfEvents = Seq(
     ("dcache_mp_req          ", s0_fire                                                      ),

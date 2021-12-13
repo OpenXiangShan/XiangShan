@@ -410,10 +410,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
-  val errors = bankedDataArray.io.errors ++ metaArray.io.errors
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
-  // assert(!io.error.ecc_error.valid)
-
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
@@ -426,6 +422,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wb         = Module(new WritebackQueue(edge))
 
   missQueue.io.hartId := io.hartId
+
+  val errors = bankedDataArray.io.errors ++ ldu.map(_.io.error) ++
+    Seq(mainPipe.io.error)
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
   //----------------------------------------
   // meta array
