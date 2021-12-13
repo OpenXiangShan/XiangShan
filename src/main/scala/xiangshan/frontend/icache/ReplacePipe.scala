@@ -66,6 +66,12 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r0_ready, r1_ready, r2_ready = WireInit(false.B)
   val r0_fire,  r1_fire , r2_fire  = WireInit(false.B)
 
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 0
+    ******************************************************************************
+    */  
+
   val r0_valid       = io.pipe_req.valid
 
   val r0_req         = io.pipe_req.bits
@@ -83,10 +89,12 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
-  //---------------------------------------------
-
-  //---------------------------------------------
-
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 1
+    ******************************************************************************
+    */  
+  
   val r1_valid = generatePipeControl(lastFire = r0_fire, thisFire = r1_fire, thisFlush = false.B, lastFlush = false.B)
   r1_ready := r2_ready  || !r1_valid
   r1_fire  := r1_valid && r2_ready
@@ -118,9 +126,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   /**
     ******************************************************************************
-    * 
-    * 
-    * 
+    * ReplacePipe Stage 2
     ******************************************************************************
     */
     

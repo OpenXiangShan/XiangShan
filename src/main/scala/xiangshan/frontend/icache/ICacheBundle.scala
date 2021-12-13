@@ -33,8 +33,6 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
-  val valid      = Vec(2, Vec(nWays ,Bool()))
-  val errors     = Vec(2, Vec(nWays ,Bool()))
 
   def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
   def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
@@ -77,7 +75,7 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas = Vec(2,Vec(nWays,UInt(blockBits.W)))
-  val errors = Vec(2, Vec(nWays ,Bool() ))
+  // val errors = Vec(2, Vec(nWays ,Bool() ))
 }
 
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
