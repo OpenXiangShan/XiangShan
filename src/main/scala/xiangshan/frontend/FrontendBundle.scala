@@ -76,10 +76,10 @@ class Exception(implicit p: Parameters) extends XSBundle {
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs    = Vec(PredictWidth, UInt(32.W))
   val valid     = UInt(PredictWidth.W)
+  val enqEnable = UInt(PredictWidth.W)
   val pd        = Vec(PredictWidth, new PreDecodeInfo)
   val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  //val exception = new Exception
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val ipf          = Vec(PredictWidth, Bool())

@@ -115,9 +115,15 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.status.r1_set.valid := r1_valid
   io.status.r1_set.bits  := r1_req.vidx
 
-  //---------------------------------------------
 
-  //---------------------------------------------
+  /**
+    ******************************************************************************
+    * 
+    * 
+    * 
+    ******************************************************************************
+    */
+    
   val r2_valid          = generatePipeControl(lastFire = r1_fire, thisFire = r2_fire, thisFlush = false.B, lastFlush = false.B)
 
   r2_ready      := r2_valid && io.release_req.ready  || !r2_valid
