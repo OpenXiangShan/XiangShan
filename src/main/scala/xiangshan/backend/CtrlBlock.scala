@@ -318,7 +318,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.csrCtrl := io.csrCtrl
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
 
   // memory dependency predict
   // when decode, send fold pc to mdp
