@@ -308,7 +308,22 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     entry
   }
 
-  TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
+  val prefEntries = Module(new ICachePrefetchEntry(edge, PortNumber))
+
+  prefEntries.io.mem_hint_ack.valid := false.B
+  prefEntries.io.mem_hint_ack.bits  := DontCare
+
+  when (io.mem_grant.bits.source === PortNumber.U) {
+    prefEntries.io.mem_hint_ack <> io.mem_grant
+  }
+
+  prefEntries.io.req.valid := io.req.map(_.valid).reduce(_ || _)
+  prefEntries.io.req.bits  := Mux(io.req(0).valid, io.req(0).bits,  io.req(1).bits)
+  prefEntries.io.id := PortNumber.U
+
+  val tl_a_chanel = entries.map(_.io.mem_acquire) ++ Seq(prefEntries.io.mem_hint)
+
+  TLArbiter.lowest(edge, io.mem_acquire, tl_a_chanel:_*)
   TLArbiter.lowest(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
 
   io.meta_write     <> meta_write_arb.io.out
@@ -322,5 +337,76 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
 }
 
+class ICachePrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends ICacheMissUnitModule
+{
+  val io = IO(new Bundle {
+    val id = Input(UInt(log2Ceil(nMissEntries).W))
+
+    val req = Flipped(DecoupledIO(new ICacheMissReq))
+
+    //tilelink channel
+    val mem_hint = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_hint_ack = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+
+  })
+
+  /** default value for control signals */
+  io.mem_hint.bits := DontCare
+  io.mem_hint_ack.ready := true.B
+
+
+  val s_idle  :: s_send_hint :: s_wait_hint_ack :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  /** control logic transformation */
+  //request register
+  val req = Reg(new ICacheMissReq)
+  val req_idx = req.getVirSetIdx //virtual index
+  val req_tag = req.getPhyTag //physical tag
+  val req_waymask = req.waymask
+
+  //initial
+  io.mem_hint.bits := DontCare
+  io.mem_hint_ack.ready := true.B
+
+  io.req.ready := (state === s_idle)
+  io.mem_hint.valid := (state === s_send_hint)
+
+  //state change
+  switch(state) {
+    is(s_idle) {
+      when(io.req.fire()) {
+        state := s_send_hint
+        req := io.req.bits
+      }
+    }
+
+    // memory request
+    is(s_send_hint) {
+      when(io.mem_hint.fire()) {
+        state := s_idle
+      }
+    }
+  }
+
+  /** refill write and meta write */
+  val hint = edge.Hint(
+    fromSource = io.id,
+    toAddress = addrAlign(req.paddr, blockBytes, PAddrBits) + blockBytes.U,
+    lgSize = (log2Up(cacheParams.blockBytes)).U,
+    param = TLHints.PREFETCH_READ
+  )._2
+  io.mem_hint.bits := hint
+
+
+  XSPerfAccumulate(
+    "PrefetchEntryPenalty" + Integer.toString(id, 10),
+    BoolStopWatch(
+      start = io.req.fire(),
+      stop = io.mem_hint_ack.fire(),
+      startHighPriority = true)
+  )
+  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())
+
+}
 
 
