@@ -915,7 +915,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall)
+  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
   retTarget := DontCare
   // val illegalEret = TODO
@@ -1035,8 +1035,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // todo
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr // exception in debug mode (except ebrk) changes cmderr. how ???
+  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit)
+  val ebreakEnterParkLoop = debugMode && hasbreakPoint
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
@@ -1123,22 +1123,25 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }
       dcsr := dcsrNew.asUInt
       debugIntrEnable := false.B
-    }.elsewhen (delegS) {
-      scause := causeNO
-      sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
-      mstatusNew.spp := priviledgeMode
-      mstatusNew.pie.s := mstatusOld.ie.s
-      mstatusNew.ie.s := false.B
-      priviledgeMode := ModeS
-      when (tvalWen) { stval := 0.U }
-    }.otherwise {
-      mcause := causeNO
-      mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
-      mstatusNew.mpp := priviledgeMode
-      mstatusNew.pie.m := mstatusOld.ie.m
-      mstatusNew.ie.m := false.B
-      priviledgeMode := ModeM
-      when (tvalWen) { mtval := 0.U }
+    }. elsewhen(debugMode) {
+      //everything is not changed lol
+      XSDebug("intr/exception in debug mode")
+    } .elsewhen (delegS) {
+        scause := causeNO
+        sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        mstatusNew.spp := priviledgeMode
+        mstatusNew.pie.s := mstatusOld.ie.s
+        mstatusNew.ie.s := false.B
+        priviledgeMode := ModeS
+        when (tvalWen) { stval := 0.U }
+      }.otherwise {
+        mcause := causeNO
+        mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        mstatusNew.mpp := priviledgeMode
+        mstatusNew.pie.m := mstatusOld.ie.m
+        mstatusNew.ie.m := false.B
+        priviledgeMode := ModeM
+        when (tvalWen) { mtval := 0.U }
     }
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
