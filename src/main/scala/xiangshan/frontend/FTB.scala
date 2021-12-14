@@ -45,8 +45,10 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   def JMP_OFFSET_LEN = 20
 }
 
-class FtbSlot(val offsetLen: Int, val subOffsetLen: Int = 0)(implicit p: Parameters) extends XSBundle with FTBParams {
-  require(subOffsetLen <= offsetLen)
+class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit p: Parameters) extends XSBundle with FTBParams {
+  if (subOffsetLen.isDefined) {
+    require(subOffsetLen.get <= offsetLen)
+  }
   val offset  = UInt(log2Ceil(PredictWidth).W)
   val lower   = UInt(offsetLen.W)
   val tarStat = UInt(TAR_STAT_SZ.W)
@@ -58,7 +60,7 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Int = 0)(implicit p: Paramet
       Mux(target_higher > pc_higher, TAR_OVF,
         Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT))
     def getLowerByTarget(target: UInt, offsetLen: Int) = target(offsetLen, 1)
-    val offLen = if (isShare) this.subOffsetLen else this.offsetLen
+    val offLen = if (isShare) this.subOffsetLen.get else this.offsetLen
     val pc_higher = pc(VAddrBits-1, offLen+1)
     val target_higher = target(VAddrBits-1, offLen+1)
     val stat = getTargetStatByHigher(pc_higher, target_higher)
@@ -68,35 +70,54 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Int = 0)(implicit p: Paramet
     this.sharing := isShare.B
   }
 
-  def getTarget(pc: UInt) = {
-    def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt) = {
-      val higher = pc(VAddrBits-1, offLen+1)
+  def getTarget(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+    def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt,
+      last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+      val h = pc(VAddrBits-1, offLen+1)
+      val higher = Wire(UInt((VAddrBits-offLen-1).W))
+      val higher_plus_one = Wire(UInt((VAddrBits-offLen-1).W))
+      val higher_minus_one = Wire(UInt((VAddrBits-offLen-1).W))
+      if (last_stage.isDefined) {
+        val last_stage_pc = last_stage.get._1
+        val last_stage_pc_h = last_stage_pc(VAddrBits-1, offLen+1)
+        val stage_en = last_stage.get._2
+        higher := RegEnable(last_stage_pc_h, stage_en)
+        higher_plus_one := RegEnable(last_stage_pc_h+1.U, stage_en)
+        higher_minus_one := RegEnable(last_stage_pc_h-1.U, stage_en)
+      } else {
+        higher := h
+        higher_plus_one := h + 1.U
+        higher_minus_one := h - 1.U
+      }
       val target =
         Cat(
-          Mux(stat === TAR_OVF, higher+1.U,
-            Mux(stat === TAR_UDF, higher-1.U, higher)),
+          Mux1H(Seq(
+            (stat === TAR_OVF, higher_plus_one),
+            (stat === TAR_UDF, higher_minus_one),
+            (stat === TAR_FIT, higher),
+          )),
           lower(offLen-1, 0), 0.U(1.W)
         )
       require(target.getWidth == VAddrBits)
       require(offLen != 0)
       target
     }
-    if (subOffsetLen != 0)
+    if (subOffsetLen.isDefined)
       Mux(sharing,
-        getTarget(subOffsetLen)(pc, lower, tarStat),
-        getTarget(offsetLen)(pc, lower, tarStat)
+        getTarget(subOffsetLen.get)(pc, lower, tarStat, last_stage),
+        getTarget(offsetLen)(pc, lower, tarStat, last_stage)
       )
     else
-      getTarget(offsetLen)(pc, lower, tarStat)
+      getTarget(offsetLen)(pc, lower, tarStat, last_stage)
   }
   def fromAnotherSlot(that: FtbSlot) = {
     require(
-      this.offsetLen > that.offsetLen && that.offsetLen == this.subOffsetLen ||
+      this.offsetLen > that.offsetLen && this.subOffsetLen.map(_ == that.offsetLen).getOrElse(true) ||
       this.offsetLen == that.offsetLen
     )
     this.offset := that.offset
     this.tarStat := that.tarStat
-    this.sharing := (this.offsetLen > that.offsetLen && that.offsetLen == this.subOffsetLen).B
+    this.sharing := (this.offsetLen > that.offsetLen && that.offsetLen == this.subOffsetLen.get).B
     this.valid := that.valid
     this.lower := ZeroExt(that.lower, this.offsetLen)
   }
@@ -112,7 +133,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
 
   // if shareTailSlot is set, this slot can hold a branch or a jal/jalr
   // else this slot holds only jal/jalr
-  val tailSlot = new FtbSlot(JMP_OFFSET_LEN, BR_OFFSET_LEN)
+  val tailSlot = new FtbSlot(JMP_OFFSET_LEN, Some(BR_OFFSET_LEN))
 
   // Partial Fall-Through Address
   val pftAddr     = UInt((log2Up(PredictWidth)+1).W)
@@ -150,8 +171,8 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
     this.tailSlot.setLowerStatByTarget(pc, target, false)
   }
 
-  def getTargetVec(pc: UInt) = {
-    VecInit((brSlots :+ tailSlot).map(_.getTarget(pc)))
+  def getTargetVec(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+    VecInit((brSlots :+ tailSlot).map(_.getTarget(pc, last_stage)))
   }
 
   def getOffsetVec = VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
@@ -203,7 +224,6 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
       (if (shareTailSlot) Seq(tailSlot.offset) else Nil)
     )
   }
-
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"-----------FTB entry----------- \n")
@@ -424,17 +444,13 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.pc                  := s2_pc
   io.out.resp.s2.ftb_entry           := ftb_entry
-  io.out.resp.s2.preds.fromFtbEntry(ftb_entry, s2_pc)
+  io.out.resp.s2.preds.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
 
   io.out.last_stage_meta := RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire)
 
   // always taken logic
-  when (s2_hit) {
-    for (i <- 0 until numBr) {
-      when (ftb_entry.always_taken(i)) {
-        io.out.resp.s2.preds.br_taken_mask(i) := true.B
-      }
-    }
+  for (i <- 0 until numBr) {
+    io.out.resp.s2.preds.br_taken_mask(i) := io.in.bits.resp_in(0).s2.preds.br_taken_mask(i) || s2_hit && ftb_entry.always_taken(i)
   }
 
   // Update logic

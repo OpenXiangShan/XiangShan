@@ -100,3 +100,46 @@ object ParallelPriorityEncoder {
 object ParallelSingedExpandingAdd {
   def apply(in: Seq[SInt]): SInt = ParallelOperation(in, (a: SInt, b: SInt) => a +& b)
 }
+
+class SelectTwoInterRes[T <: Data](gen: T) extends Bundle {
+  // val valid = Bool()
+  val hasOne = Bool()
+  val hasTwo = Bool()
+  val first = chiselTypeOf(gen)
+  val second = chiselTypeOf(gen)
+  override def cloneType = new SelectTwoInterRes(gen).asInstanceOf[this.type]
+}
+
+object SelectTwoInterRes {
+  def apply[T <: Data](hasOne: Bool, hasTwo: Bool, first: T, second: T): SelectTwoInterRes[T] = {
+    val res = Wire(new SelectTwoInterRes(first))
+    res.hasOne := hasOne
+    res.hasTwo := hasTwo
+    res.first := first
+    res.second := second
+    res
+  }
+  def apply[T <: Data](valid: Bool, data: T): SelectTwoInterRes[T] = {
+    val res = apply(valid, false.B, data, data)
+    res
+  }
+}
+
+
+object ParallelSelectTwo {
+  def mergeSelectFirstTwo[T <: Data](a: SelectTwoInterRes[T], b: SelectTwoInterRes[T]): SelectTwoInterRes[T] = {
+    SelectTwoInterRes(
+      a.hasOne || b.hasOne,
+      a.hasTwo || b.hasTwo || a.hasOne && b.hasOne,
+      Mux(a.hasOne, a.first, b.first),
+      Mux1H(Seq(
+        (!a.hasOne, b.second),
+        (a.hasOne && !a.hasTwo, b.first),
+        (a.hasTwo, a.second) 
+      ))
+    )
+  }
+  def apply[T <: Data](xs: Seq[SelectTwoInterRes[T]]): SelectTwoInterRes[T] = {
+    ParallelOperation(xs, mergeSelectFirstTwo[T])
+  }
+}

@@ -453,51 +453,59 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
   val updateMisPred = update.mispred_mask(numBr) // the last one indicates jmp results
   // access tag tables and output meta info
-  val basePred             = base_table_resp.bits.ctr =/= 0.U
-  val baseTarget           = base_table_resp.bits.target
-  s1_tageTaken         := basePred // TODO: reintroduce BIM
-  s1_tageTarget        := baseTarget
-  s1_finalAltPred      := basePred
-  val s1_finalAltTarget    = WireInit(baseTarget)
-  var s1_temp_altPred      = basePred
-  var s1_temp_altTarget    = baseTarget
-  var s1_temp_provided     = false.B
-  var s1_temp_provider     = 0.U
-  var s1_temp_alt_provided = false.B
-  var s1_temp_alt_provider = 0.U
-
-  for (i <- 1 until ITTageNTables) { // skip base table
-    val hit = s1_resps(i).valid
-    val ctr = s1_resps(i).bits.ctr
-    val target = s1_resps(i).bits.target
-    when (hit) {
-      s1_tageTaken := Mux(ctr === 0.U, s1_temp_altPred, true.B) // Use altpred on weak taken
-      s1_tageTarget := Mux(ctr === 0.U, s1_temp_altTarget, target)
-      s1_finalAltPred := s1_temp_altPred
-      s1_finalAltTarget := s1_temp_altTarget
-    }
-    s1_temp_alt_provided = (s1_temp_provided && hit || s1_temp_alt_provided) // assign before s1_provided
-    s1_temp_provided = s1_temp_provided || hit          // Once hit then provide
-    s1_temp_alt_provider = Mux(hit, s1_temp_provider, s1_temp_alt_provider) // assign before s1 provider
-    s1_temp_provider = Mux(hit, i.U, s1_temp_provider)  // Use the last hit as provider
-    s1_temp_altPred = Mux(hit, true.B, s1_temp_altPred) // Save current pred as potential altpred
-    s1_temp_altTarget = Mux(hit, target, s1_temp_altTarget)
+  class ITTageTableInfo(implicit p: Parameters) extends ITTageResp {
+    val tableIdx = UInt(log2Ceil(ITTageNTables).W)
   }
-  s1_provided       := s1_temp_provided
-  s1_provider       := s1_temp_provider
-  s1_altProvided    := s1_temp_alt_provided
-  s1_altProvider    := s1_temp_alt_provider
-  s1_providerU      := s1_resps(s1_temp_provider).bits.u
-  s1_providerCtr    := s1_resps(s1_temp_provider).bits.ctr
-  s1_altProviderCtr := s1_resps(s1_temp_alt_provider).bits.ctr
-  s1_providerTarget := s1_resps(s1_temp_provider).bits.target
-  s1_altProviderTarget := s1_finalAltTarget
+  val inputRes = VecInit(s1_resps.zipWithIndex.map{case (r, i) => {
+    val tableInfo = Wire(new ITTageTableInfo)
+    tableInfo.u := r.bits.u
+    tableInfo.ctr := r.bits.ctr
+    tableInfo.target := r.bits.target
+    tableInfo.tableIdx := i.U(log2Ceil(ITTageNTables).W)
+    SelectTwoInterRes(r.valid, tableInfo)
+  }}.init)
+
+  val selectedInfo = ParallelSelectTwo(inputRes.reverse)
+  val provided = selectedInfo.hasOne
+  val altProvided = selectedInfo.hasTwo
+  val providerInfo = selectedInfo.first
+  val altProviderInfo = selectedInfo.second
+  val providerNull = providerInfo.ctr === 0.U
+  
+  val basePred   = base_table_resp.bits.ctr =/= 0.U
+  val baseTarget = base_table_resp.bits.target
+  
+  s1_tageTaken := Mux1H(Seq(
+    (provided && !providerNull, providerInfo.ctr(ITTageCtrBits-1)),
+    (altProvided && providerNull, altProviderInfo.ctr(ITTageCtrBits-1)),
+    (!provided, basePred)
+  )) // TODO: reintroduce BIM
+  s1_tageTarget := Mux1H(Seq(
+    (provided && !providerNull, providerInfo.target),
+    (altProvided && providerNull, altProviderInfo.target),
+    (!provided, baseTarget)
+  ))
+  s1_finalAltPred := Mux(altProvided, altProviderInfo.ctr(ITTageCtrBits-1), basePred)
+  s1_provided       := provided
+  s1_provider       := providerInfo.tableIdx
+  s1_altProvided    := altProvided
+  s1_altProvider    := altProviderInfo.tableIdx
+  s1_providerU      := providerInfo.u
+  s1_providerCtr    := providerInfo.ctr
+  s1_altProviderCtr := altProviderInfo.ctr
+  s1_providerTarget := providerInfo.target
+  s1_altProviderTarget := altProviderInfo.target
 
   XSDebug(io.s2_fire, p"hit_taken_jalr:")
-  when(io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_jalr && s2_tageTaken) {
+  when(s2_tageTaken) {
+    io.out.resp.s2.preds.jalr_target := s2_tageTarget
     // FIXME: should use s1 globally
-    io.out.resp.s2.preds.targets.last := s2_tageTarget
   }
+  // this is handled in RAS
+  // val is_jalr = io.in.bits.resp_in(0).s2.preds.is_jalr
+  // val last_target_in = io.in.bits.resp_in(0).s2.preds.targets.last
+  // val last_target_out = io.out.resp.s2.preds.targets.last
+  // last_target_out := Mux(is_jalr, jalr_target, last_target_in)
 
   resp_meta.provider.valid    := s2_provided
   resp_meta.provider.bits     := s2_provider

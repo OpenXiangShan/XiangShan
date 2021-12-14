@@ -386,9 +386,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   s2_fire := s2_valid
 
-  when(s2_flush)                    { s2_valid := false.B }
-    .elsewhen(s1_fire && !s1_flush) { s2_valid := true.B  }
-    .elsewhen(s2_fire)              { s2_valid := false.B }
+  when(s2_flush)       { s2_valid := false.B }
+    .elsewhen(s1_fire) { s2_valid := !s1_flush  }
+    .elsewhen(s2_fire) { s2_valid := false.B }
 
   predictors.io.s2_fire := s2_fire
 
@@ -437,9 +437,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   }
 
   def preds_needs_redirect(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
+    x.preds.hit =/= y.preds.hit ||
     x.real_slot_taken_mask().asUInt.orR =/= y.real_slot_taken_mask().asUInt().orR ||
     x.preds.br_valids.asUInt =/= y.preds.br_valids.asUInt ||
     PriorityEncoder(x.real_br_taken_mask()) =/= PriorityEncoder(y.real_br_taken_mask)
+  }
+
+  def no_need_to_redirect(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
+    !x.preds.hit && !y.preds.hit ||
+    x.preds.hit && y.preds.hit && (
+      VecInit(x.lastBrPosOH).asUInt === VecInit(y.lastBrPosOH).asUInt &&
+      x.preds.taken_mask_on_slot.asUInt === y.preds.taken_mask_on_slot.asUInt
+    )
   }
   // s2
   val s2_possible_predicted_ghist_ptrs = (0 to numBr).map(s2_ghist_ptr - _.U)
@@ -458,6 +467,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val previous_s1_pred = RegEnable(resp.s1, init=0.U.asTypeOf(resp.s1), s1_fire)
 
+  // val s2_redirect_s1_last_pred = !no_need_to_redirect(s1_last_pred, resp.s2)
+  // val s2_redirect_s0_last_pred = !no_need_to_redirect(s0_last_pred_reg, resp.s2)
   val s2_redirect_s1_last_pred = preds_needs_redirect(s1_last_pred, resp.s2)
   val s2_redirect_s0_last_pred = preds_needs_redirect(s0_last_pred_reg, resp.s2)
 

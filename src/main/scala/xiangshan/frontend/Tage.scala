@@ -49,6 +49,11 @@ trait TageParams extends HasBPUConst with HasXSParameter {
     }.reduce(_+_)
   }.reduce(_+_)
 
+  def posUnconf(ctr: UInt) = ctr === (1 << (ctr.getWidth - 1)).U
+  def negUnconf(ctr: UInt) = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
+
+  def unconf(ctr: UInt) = posUnconf(ctr) || negUnconf(ctr)
+
 }
 
 trait HasFoldedHistory {
@@ -98,7 +103,7 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
   val oldCtr = UInt(TageCtrBits.W)
   // update u
   val uMask = Bool()
-  val u = UInt(2.W)
+  val u = Bool()
   val reset_u = Bool()
 }
 
@@ -112,9 +117,9 @@ class TageMeta(val bank: Int)(implicit p: Parameters)
   val providerU = Bool()
   val providerCtr = UInt(TageCtrBits.W)
   val basecnt = UInt(2.W)
-  val predcnt = UInt(3.W)
+  val predcnt = UInt(TageCtrBits.W)
   val altpredhit = Bool()
-  val altpredcnt = UInt(3.W)
+  val altpredcnt = UInt(TageCtrBits.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(BankTageNTables(bank)).W))
   val taken = Bool()
   val scMeta = new SCMeta(EnableSC, BankSCNTables(bank))
@@ -526,44 +531,44 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val updateMisPreds = update.mispred_mask
 
+  class TageTableInfo(val bank: Int)(implicit p: Parameters) extends TageResp {
+    val tableIdx = UInt(log2Ceil(BankTageNTables(bank)).W)
+  }
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
-    val s1_tageTaken     = WireInit(bt.io.s1_cnt(w)(1))
-    var s1_altPred       = WireInit(bt.io.s1_cnt(w)(1))
-    val s1_finalAltPred  = WireInit(bt.io.s1_cnt(w)(1))
-    var s1_provided      = false.B
-    var s1_provider      = 0.U
-    var s1_altprednum    = 0.U
-    var s1_altpredhit    = false.B
-    var s1_prednum       = 0.U
-    var s1_basecnt       = 0.U
 
-    for (i <- 0 until BankTageNTables(w)) {
-      val hit = s1_resps(w)(i).valid
-      val ctr = s1_resps(w)(i).bits.ctr
-      when (hit) {
-        s1_tageTaken := Mux(ctr === 3.U || ctr === 4.U, s1_altPred, ctr(2)) // Use altpred on weak taken
-        s1_finalAltPred := s1_altPred
-      }
-      s1_altpredhit = (s1_provided && hit) || s1_altpredhit        // Once hit then provide
-      s1_provided = s1_provided || hit          // Once hit then provide
-      s1_provider = Mux(hit, i.U, s1_provider)  // Use the last hit as provider
-      s1_altPred = Mux(hit, ctr(2), s1_altPred) // Save current pred as potential altpred
-      s1_altprednum = Mux(hit,s1_prednum,s1_altprednum)      // get altpredict table number
-      s1_prednum = Mux(hit,i.U,s1_prednum)      // get predict table number
-    }
-    s1_provideds(w)      := s1_provided
+    val inputRes = VecInit(s1_resps(w).zipWithIndex.map{case (r, i) => {
+      val tableInfo = Wire(new TageTableInfo(w))
+      tableInfo.u := r.bits.u
+      tableInfo.ctr := r.bits.ctr
+      tableInfo.tableIdx := i.U(log2Ceil(BankTageNTables(w)).W)
+      SelectTwoInterRes(r.valid, tableInfo)
+    }})
+
+    val selectedInfo = ParallelSelectTwo(inputRes.reverse)
+    val provided = selectedInfo.hasOne
+    val altProvided = selectedInfo.hasTwo
+    val providerInfo = selectedInfo.first
+    val altProviderInfo = selectedInfo.second
+
+    val providerUnconf = unconf(providerInfo.ctr)
+
+    s1_provideds(w)      := provided
     s1_basecnts(w)       := bt.io.s1_cnt(w)
-    s1_providers(w)      := s1_provider
-    s1_finalAltPreds(w)  := s1_finalAltPred
-    s1_tageTakens(w)     := s1_tageTaken
-    s1_providerUs(w)     := s1_resps(w)(s1_provider).bits.u
-    s1_providerCtrs(w)   := s1_resps(w)(s1_provider).bits.ctr
-    s1_prednums(w)       := s1_prednum
-    s1_altprednums(w)    := s1_altprednum
-    s1_predcnts(w)       := s1_resps(w)(s1_prednum).bits.ctr
-    s1_altpredhits(w)    := s1_altpredhit
-    s1_altpredcnts(w)    := s1_resps(w)(s1_altprednum).bits.ctr
+    s1_providers(w)      := providerInfo.tableIdx
+    s1_finalAltPreds(w)  := Mux(altProvided, altProviderInfo.ctr(TageCtrBits-1), bt.io.s1_cnt(w)(1))
+    s1_tageTakens(w)     := Mux1H(Seq(
+      (provided && !providerUnconf, providerInfo.ctr(TageCtrBits-1)),
+      (altProvided && providerUnconf, altProviderInfo.ctr(TageCtrBits-1)),
+      (!provided, bt.io.s1_cnt(w)(1))
+    ))
+    s1_providerUs(w)     := providerInfo.u
+    s1_providerCtrs(w)   := providerInfo.ctr
+    s1_prednums(w)       := providerInfo.tableIdx
+    s1_altprednums(w)    := altProviderInfo.tableIdx
+    s1_predcnts(w)       := providerInfo.ctr
+    s1_altpredhits(w)    := altProvided
+    s1_altpredcnts(w)    := altProviderInfo.ctr
 
     resp_meta(w).provider.valid   := s2_provideds(w)
     resp_meta(w).provider.bits    := s2_providers(w)
@@ -586,8 +591,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val allocatableSlots =
       RegEnable(
         VecInit(s1_resps(w).map(r => !r.valid && !r.bits.u)).asUInt &
-          ~(LowerMask(UIntToOH(s1_provider), BankTageNTables(w)) &
-            Fill(BankTageNTables(w), s1_provided.asUInt)),
+          ~(LowerMask(UIntToOH(s1_providers(w)), BankTageNTables(w)) &
+            Fill(BankTageNTables(w), s1_provideds(w).asUInt)),
         io.s1_fire
       )
     val allocLFSR   = LFSR64()(BankTageNTables(w) - 1, 0)

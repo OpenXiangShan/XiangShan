@@ -284,6 +284,7 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   val slot_valids = Vec(totalSlot, Bool())
 
   val targets = Vec(totalSlot, UInt(VAddrBits.W))
+  val jalr_target = UInt(VAddrBits.W) // special path for indirect predictors
   val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
   val fallThroughAddr = UInt(VAddrBits.W)
   val oversize = Bool()
@@ -313,8 +314,9 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
     VecInit(
       if (shareTailSlot)
         (br_slot_valids zip br_taken_mask.init).map{ case (t, v) => t && v } :+ (
-          (br_taken_mask.last && tail_slot_valid && is_br_sharing) ||
-          tail_slot_valid && !is_br_sharing
+          tail_slot_valid && (
+            is_br_sharing && br_taken_mask.last || !is_br_sharing
+          )
         )
       else
         (br_slot_valids zip br_taken_mask).map{ case (v, t) => v && t } :+
@@ -324,9 +326,10 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
 
   def taken = br_taken_mask.reduce(_||_) || slot_valids.last // || (is_jal || is_jalr)
 
-  def fromFtbEntry(entry: FTBEntry, pc: UInt) = {
+  def fromFtbEntry(entry: FTBEntry, pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
     slot_valids := entry.brSlots.map(_.valid) :+ entry.tailSlot.valid
     targets := entry.getTargetVec(pc)
+    jalr_target := targets.last
     offsets := entry.getOffsetVec
     fallThroughAddr := entry.getFallThrough(pc)
     oversize := entry.oversize
@@ -340,6 +343,7 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   def fromMicroBTBEntry(entry: MicroBTBEntry) = {
     slot_valids := entry.slot_valids
     targets := entry.targets
+    jalr_target := DontCare
     offsets := entry.offsets
     fallThroughAddr := entry.fallThroughAddr
     oversize := entry.oversize

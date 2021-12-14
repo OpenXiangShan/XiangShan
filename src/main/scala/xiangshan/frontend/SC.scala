@@ -198,12 +198,12 @@ trait HasSC extends HasSCParameter { this: Tage =>
   
     val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
     val useThresholds = VecInit(scThresholds map (_.thres))
-    def belowThreshold(sum: SInt, threshold: UInt) = {
+    def aboveThreshold(sum: SInt, threshold: UInt) = {
       def sign(x: SInt) = x(x.getWidth-1)
       def pos(x: SInt) = !sign(x)
       def neg(x: SInt) = sign(x)
       val signedThres = threshold.zext
-      sum <= signedThres && pos(sum) || sum >= -signedThres && neg(sum)
+      sum > signedThres && pos(sum) || sum < -signedThres && neg(sum)
     }
     val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
   
@@ -244,13 +244,13 @@ trait HasSC extends HasSCParameter { this: Tage =>
       val providerCtr = s1_providerCtrs(w)
       val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
       val s1_totalSums = VecInit(s1_scTableSums.map(_  +& s1_pvdrCtrCentered))
-      val s1_sumBelowThresholds = VecInit((s1_totalSums zip useThresholds) map { case (sum, thres) => belowThreshold(sum, thres)})
+      val s1_sumAboveThresholds = VecInit((s1_totalSums zip useThresholds) map { case (sum, thres) => aboveThreshold(sum, thres)})
       val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
       
-      val s2_sumBelowThresholds = RegEnable(s1_sumBelowThresholds, io.s1_fire)
+      val s2_sumAboveThresholds = RegEnable(s1_sumAboveThresholds, io.s1_fire)
       val s2_scPreds = RegEnable(s1_scPreds, io.s1_fire)
-  
-      val s2_scCtrs = RegEnable(VecInit(s1_scResps(w).map(r => r.ctr(s1_tageTakens(w).asUInt))), io.s1_fire)
+      val s2_scResps = VecInit(RegEnable(s1_scResps(w), io.s1_fire).map(_.ctr))
+      val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens(w).asUInt)))
       val s2_chooseBit = s2_tageTakens(w)
       scMeta.tageTaken := s2_tageTakens(w)
       scMeta.scUsed := s2_provideds(w)
@@ -259,20 +259,24 @@ trait HasSC extends HasSCParameter { this: Tage =>
   
       when (s2_provideds(w)) {
         s2_sc_used(w) := true.B
-        s2_unconf(w) := s2_sumBelowThresholds(s2_chooseBit)
-        s2_conf(w) := !s2_sumBelowThresholds(s2_chooseBit)
+        s2_unconf(w) := !s2_sumAboveThresholds(s2_chooseBit)
+        s2_conf(w) := s2_sumAboveThresholds(s2_chooseBit)
         // Use prediction from Statistical Corrector
         XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
-        when (!s2_sumBelowThresholds(s2_chooseBit)) {
+        when (s2_sumAboveThresholds(s2_chooseBit)) {
           val pred = s2_scPreds(s2_chooseBit)
           val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
           s2_agree(w) := s2_tageTakens(w) === pred
           s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
-          io.out.resp.s2.preds.br_taken_mask(w) := pred
+          // io.out.resp.s2.preds.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
+
+      io.out.resp.s2.preds.br_taken_mask(w) :=
+        Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
+          s2_scPreds(s2_chooseBit), s2_tageTakens(w))
   
       val updateSCMeta = updateSCMetas(w)
       val updateTageMeta = updateMetas(w)
@@ -284,14 +288,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
         val pvdrCtr = updateTageMeta.providerCtr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
         val sumAbs = sum.abs.asUInt
-        val sumBelowThreshold = belowThreshold(sum, useThresholds(w))
+        val sumAboveThreshold = aboveThreshold(sum, useThresholds(w))
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
   
         update_sc_used(w) := true.B
-        update_unconf(w) := sumBelowThreshold
-        update_conf(w) := !sumBelowThreshold
+        update_unconf(w) := !sumAboveThreshold
+        update_conf(w) := sumAboveThreshold
         update_agree(w) := scPred === tagePred
         update_disagree(w) := scPred =/= tagePred
         sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
@@ -305,7 +309,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         }
   
         val updateThres = updateThresholds(w)
-        when (scPred =/= taken || sumBelowThreshold) {
+        when (scPred =/= taken || !sumAboveThreshold) {
           scUpdateMask(w).foreach(_ := true.B)
           XSDebug(sum < 0.S,
             p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +

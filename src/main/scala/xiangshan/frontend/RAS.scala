@@ -160,9 +160,17 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_call
   spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
 
-  when (spec_pop) {
-    io.out.resp.s2.preds.targets.last := spec_top_addr
+  val jalr_target = io.out.resp.s2.preds.jalr_target
+  val last_target_in = io.in.bits.resp_in(0).s2.preds.targets.last
+  val last_target_out = io.out.resp.s2.preds.targets.last
+  val is_jalr = io.in.bits.resp_in(0).s2.preds.is_jalr
+  val is_ret = io.in.bits.resp_in(0).s2.preds.is_ret
+  // assert(is_jalr && is_ret || !is_ret)
+  when(is_ret) {
+    jalr_target := spec_top_addr
+    // FIXME: should use s1 globally
   }
+  last_target_out := Mux(is_jalr, jalr_target, last_target_in)
 
   io.out.resp.s2.rasSp  := spec_ras.sp
   io.out.resp.s2.rasTop := spec_ras.top
