@@ -93,7 +93,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     uop.srcState(1) := DontCare
     uop.srcState(2) := DontCare
     uop.robIdx := DontCare
-    uop.diffTestDebugLrScValid := DontCare
     uop.debugInfo := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
