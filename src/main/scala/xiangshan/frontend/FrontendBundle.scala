@@ -26,7 +26,9 @@ import scala.math._
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr       = UInt(VAddrBits.W)
-  val fallThruAddr    = UInt(VAddrBits.W)
+  //val fallThruAddr    = UInt(VAddrBits.W)
+  val crossCacheline  = Bool()
+  val nextlineStart   = UInt(VAddrBits.W)
   val fallThruError   = Bool()
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))

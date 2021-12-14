@@ -108,7 +108,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
-  def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(blockOffBits - 1, 1) === 0.U
+  def isLastInCacheline(addr: UInt): Bool = addr(blockOffBits - 1, 1) === 0.U
 
   class TlbExept(implicit p: Parameters) extends XSBundle{
     val pageFault = Bool()
@@ -130,9 +130,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f0_valid                             = fromFtq.req.valid
   val f0_ftq_req                           = fromFtq.req.bits
-  val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr), isLastInCacheline(f0_ftq_req.fallThruAddr)))
-  val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
-  val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.fallThruAddr))
+  //val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.nextlineStart), isLastInCacheline(f0_ftq_req.fallThruAddr)))
+  val f0_situation                         = Seq(fromFtq.req.bits.crossCacheline, isLastInCacheline(f0_ftq_req.target) && !fromFtq.req.ftqIdx.valid , fromFtq.req.ftqIdx.valid && fromFtq.req.ftqIdx === (PredictWidth - 1).U )
+  val f0_doubleLine                        = f0_situation.map(_).reduce(_||_)
+  val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.nextlineStart))
   val f0_fire                              = fromFtq.req.fire()
 
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
@@ -157,7 +158,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   toICache(0).valid       := fromFtq.req.valid && !f0_flush
   toICache(0).bits.vaddr  := fromFtq.req.bits.startAddr
   toICache(1).valid       := fromFtq.req.valid && f0_doubleLine && !f0_flush
-  toICache(1).bits.vaddr  := fromFtq.req.bits.fallThruAddr
+  toICache(1).bits.vaddr  := fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
 
 
   /** Fetch Stage 1  */
@@ -194,7 +195,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f2_ready := f3_ready && icacheRespAllValid || !f2_valid
   //TODO: addr compare may be timing critical
-  val f2_icache_all_resp_wire       =  fromICache(0).valid && (fromICache(0).bits.vaddr ===  f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(1).bits.vaddr ===  f2_ftq_req.fallThruAddr)) || !f2_doubleLine)
+  val f2_icache_all_resp_wire       =  fromICache(0).valid && (fromICache(0).bits.vaddr ===  f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(1).bits.vaddr ===  f2_ftq_req.nextlineStart)) || !f2_doubleLine)
   val f2_icache_all_resp_reg        = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
@@ -219,8 +220,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pc               = RegEnable(next = f1_pc, enable = f1_fire)
   val f2_half_snpc        = RegEnable(next = f1_half_snpc, enable = f1_fire)
   val f2_cut_ptr          = RegEnable(next = f1_cut_ptr, enable = f1_fire)
-  val f2_half_match       = VecInit(f2_half_snpc.map(_ === f2_ftq_req.fallThruAddr))
-
 
   def isNextLine(pc: UInt, startAddr: UInt) = {
     startAddr(blockOffBits) ^ pc(blockOffBits)
@@ -233,7 +232,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   //calculate
   val f2_foldpc = VecInit(f2_pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth)))
   val f2_jump_range = Fill(PredictWidth, !f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~f2_ftq_req.ftqOffset.bits
-  val f2_ftr_range  = Fill(PredictWidth, f2_ftq_req.oversize) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr)
+  val f2_ftr_range  = Fill(PredictWidth, f2_ftq_req.oversize || f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(f2_ftq_req.target, f2_ftq_req.startAddr)
   val f2_instr_range = f2_jump_range & f2_ftr_range
   val f2_pf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_pf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_pf(1))))
   val f2_af_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_af(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_af(1))))
@@ -432,7 +431,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_lastHalf.valid := false.B
   }.elsewhen (f3_fire) {
     f3_lastHalf.valid := f3_hasLastHalf
-    f3_lastHalf.middlePC := f3_ftq_req.fallThruAddr
+    f3_lastHalf.middlePC := f3_ftq_req.target
   }
 
   f3_instr_valid := Mux(f3_lastHalf.valid,f3_hasHalfValid ,VecInit(f3_pd.map(inst => inst.valid)))
