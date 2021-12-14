@@ -183,7 +183,7 @@ trait PMAMethod extends PMAConst {
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30050000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).c := true.B
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30010000)
