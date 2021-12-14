@@ -21,6 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.L1CacheErrorInfo
+import xiangshan.cache.CacheInstrucion._
 
 class Meta(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
@@ -65,44 +66,60 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
   val metaAndTagBits = metaAndTagOnReset.getWidth
   val encMetaAndTagBits = cacheParams.tagCode.width(metaAndTagBits)
   val encMetaBits = encMetaAndTagBits - tagBits
+  val encBits = encMetaAndTagBits - metaAndTagBits
 
   val io = IO(new Bundle() {
-    // TODO: this is made of regs, so we don't need to use DecoupledIO
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encMetaBits.W))))
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
-    // customized cache op port 
+    // customized cache op port
     val cacheOp = Flipped(new DCacheInnerOpIO)
   })
-//  val meta_array = VecInit(Seq.fill(nSets)(
-//    VecInit(Seq.fill(nWays)(
-//      RegInit(0.U(encMetaBits.W))))
-//  ))
 
-  val meta_array = Reg(Vec(nSets, Vec(nWays, UInt(encMetaBits.W))))
+  val meta_array = Reg(Vec(nSets, Vec(nWays, new Meta)))
+  val ecc_array = Reg(Vec(nSets, Vec(nWays, UInt(encBits.W))))
   when (reset.asBool()) {
     meta_array := 0.U.asTypeOf(meta_array.cloneType)
+    ecc_array := 0.U.asTypeOf(ecc_array.cloneType)
   }
 
   io.read.zip(io.resp).foreach {
     case (read, resp) =>
       read.ready := true.B
-      resp := RegEnable(meta_array(read.bits.idx), read.valid)
+      resp := VecInit(RegEnable(meta_array(read.bits.idx), read.valid).zip(
+        RegEnable(ecc_array(read.bits.idx), read.valid)
+      ).map { case (m, ecc) => Cat(ecc, m.asUInt) })
   }
+
   io.write.foreach {
     case write =>
       write.ready := true.B
       val ecc = cacheParams.tagCode.encode(MetaAndTag(write.bits.meta.coh, write.bits.tag).asUInt)(encMetaAndTagBits - 1, metaAndTagBits)
-      val encMeta = Cat(ecc, write.bits.meta.asUInt)
-      require(encMeta.getWidth == encMetaBits)
       write.bits.way_en.asBools.zipWithIndex.foreach {
         case (wen, i) =>
           when (write.valid && wen) {
-            meta_array(write.bits.idx)(i) := encMeta
+            meta_array(write.bits.idx)(i) := write.bits.meta
+            ecc_array(write.bits.idx)(i) := ecc
           }
       }
   }
 
   // deal with customized cache op
-  io.cacheOp.resp := DontCare // TODO
+  val cacheOpShouldResp = WireInit(false.B)
+  when (io.cacheOp.req.valid) {
+    when (isReadTagECC(io.cacheOp.req.bits.opCode)) {
+      cacheOpShouldResp := true.B
+    }
+    when (isWriteTagECC(io.cacheOp.req.bits.opCode)) {
+      ecc_array(io.cacheOp.req.bits.index)(io.cacheOp.req.bits.wayNum(4, 0)) := io.cacheOp.req.bits.write_tag_ecc
+      cacheOpShouldResp := true.B
+    }
+  }
+  io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
+  io.cacheOp.resp.bits := DontCare
+  io.cacheOp.resp.bits.read_tag_low := Mux(
+    io.cacheOp.resp.valid,
+    RegNext(ecc_array(io.cacheOp.req.bits.index)(io.cacheOp.req.bits.wayNum(4, 0))),
+    0.U
+  )
 }
