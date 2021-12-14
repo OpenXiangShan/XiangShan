@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import xiangshan.L1CacheErrorInfo
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   def metaBits = (new Meta).getWidth
@@ -28,6 +29,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   def getMeta(encMeta: UInt): UInt = {
     require(encMeta.getWidth == encMetaBits)
     encMeta(metaBits - 1, 0)
+  }
+  def getECC(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(encMetaBits - 1, metaBits)
   }
 
   val io = IO(new DCacheBundle {
@@ -62,6 +67,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
+
+    // ecc error
+    val error = Output(new L1CacheErrorInfo())
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -268,6 +276,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
+
+  // check ecc error
+  val ecc_resp = VecInit(io.meta_resp.map(r => getECC(r)))
+  val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
+  val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_addr)).asUInt)
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit) && RegNext(dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := s2_addr
 
   // -------
   // Debug logging functions
