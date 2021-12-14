@@ -961,9 +961,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // mtval write logic
   // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when (RegNext(RegNext(hasInstrPageFault || hasLoadPageFault || hasStorePageFault))) {
+  val updateTval = VecInit(Seq(
+    hasInstrPageFault,
+    hasLoadPageFault,
+    hasStorePageFault,
+    hasInstrAccessFault,
+    hasLoadAccessFault,
+    hasStoreAccessFault,
+    hasLoadAddrMisaligned,
+    hasStoreAddrMisaligned
+  )).asUInt.orR
+  when (RegNext(RegNext(updateTval))) {
       val tval = RegNext(Mux(
-      RegNext(hasInstrPageFault),
+      RegNext(hasInstrPageFault || hasInstrAccessFault),
       RegNext(Mux(
         csrio.exception.bits.uop.cf.crossPageIPFFix,
         SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
@@ -971,22 +981,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       )),
       memExceptionAddr
     ))
-    when (RegNext(RegNext(priviledgeMode === ModeM))) {
+    when (RegNext(priviledgeMode === ModeM)) {
       mtval := tval
     }.otherwise {
       stval := tval
     }
   }
 
-  when (RegNext(RegNext(hasLoadAddrMisaligned || hasStoreAddrMisaligned))) {
-    mtval := RegNext(memExceptionAddr)
-  }
-
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
+  val clearTval = !updateTval || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
@@ -1037,6 +1043,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }
       dcsr := dcsrNew.asUInt
       debugIntrEnable := false.B
+
     }.elsewhen (delegS) {
       scause := causeNO
       sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
@@ -1044,7 +1051,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when (tvalWen) { stval := 0.U }
+      when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
       mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
@@ -1052,7 +1059,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when (tvalWen) { mtval := 0.U }
+      when (clearTval) { mtval := 0.U }
     }
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
