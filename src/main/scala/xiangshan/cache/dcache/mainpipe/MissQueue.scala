@@ -128,7 +128,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val release_entry = s_grantack && w_refill_resp && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
-  val data_not_refilled = !w_grantlast
+  val data_not_refilled = !w_grantfirst
 
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
@@ -137,8 +137,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
-
-  val grant_beats = RegInit(0.U(beatBits.W))
 
   when (release_entry && req_valid) {
     req_valid := false.B
@@ -172,7 +170,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     should_refill_data_reg := io.req.bits.isLoad
-    grant_beats := 0.U
   }
 
   val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
@@ -225,7 +222,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       }
       w_grantlast := w_grantlast || refill_done
       hasData := true.B
-      grant_beats := grant_beats + 1.U
     }.otherwise {
       // Grant
       assert(full_overwrite)
@@ -277,23 +273,21 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   def should_merge(new_req: MissReq): Bool = {
-    val block_match = req.addr === get_block_addr(new_req.addr)
-    val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match &&
     (before_read_sent_can_merge(new_req) ||
-      beat_match && before_data_refill_can_merge(new_req))
+      before_data_refill_can_merge(new_req))
   }
 
   def should_reject(new_req: MissReq): Bool = {
-    val block_match = req.addr === get_block_addr(new_req.addr)
-    val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
 
     req_valid &&
       Mux(
         block_match,
         !before_read_sent_can_merge(new_req) &&
-          !(beat_match && before_data_refill_can_merge(new_req)),
+          !before_data_refill_can_merge(new_req),
         set_match && new_req.way_en === req.way_en
       )
   }
@@ -309,7 +303,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val data = refill_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
-  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data
+  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
   io.refill_to_ldq.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count))
   io.refill_to_ldq.bits.refill_done := RegNext(refill_done && io.mem_grant.fire())
