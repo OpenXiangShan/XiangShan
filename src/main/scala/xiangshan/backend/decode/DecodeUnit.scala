@@ -19,11 +19,10 @@ package xiangshan.backend.decode
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.{UIntIsOneOf, uintToBitPat}
-import xiangshan._
+import freechips.rocketchip.util.uintToBitPat
 import utils._
-import xiangshan.backend._
-import xiangshan.backend.decode.BDecode.{N, Y}
+import xiangshan.ExceptionNO.illegalInstr
+import xiangshan._
 import xiangshan.backend.decode.Instructions._
 
 /**
@@ -617,7 +616,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   //to selectout prefetch.r/prefetch.w
   val isORI = BitPat("b?????????????????110?????0010011") === ctrl_flow.instr
-  when(isORI) {
+  when(isORI && io.csrCtrl.soft_prefetch_enable) {
     // TODO: add CSR based Zicbop config
     when(cs.ldest === 0.U) {
       cs.selImm := SelImm.IMM_S

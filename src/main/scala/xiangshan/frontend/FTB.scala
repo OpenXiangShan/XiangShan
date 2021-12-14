@@ -285,7 +285,8 @@ object FTBMeta {
 //   }
 // }
 
-class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils with HasCircularQueuePtrHelper {
+class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
+  with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
@@ -519,15 +520,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(2))
-  })
   val perfEvents = Seq(
     ("ftb_commit_hits            ", u_valid  &&  update.preds.hit),
     ("ftb_commit_misses          ", u_valid  && !update.preds.hit),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

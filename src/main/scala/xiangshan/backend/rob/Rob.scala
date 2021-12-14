@@ -17,13 +17,14 @@
 package xiangshan.backend.rob
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
-import xiangshan.frontend.FtqPtr
 import difftest._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils._
+import xiangshan._
+import xiangshan.backend.exu.ExuConfig
+import xiangshan.frontend.FtqPtr
 
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
   p => p(XSCoreParamsKey).RobSize
@@ -64,7 +65,6 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())
-  val storeDataRobWb = Input(Vec(StorePipelineWidth, Valid(new RobPtr)))
 }
 
 class RobEnqIO(implicit p: Parameters) extends XSBundle {
@@ -88,7 +88,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
     val hasNoSpecExec = Input(Bool())
-    val commitType = Input(CommitType())
+    val interrupt_safe = Input(Bool())
     val misPredBlock = Input(Bool())
     val isReplaying = Input(Bool())
     // output: the CommitWidth deqPtr
@@ -100,7 +100,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
   val exceptionEnable = io.deq_w(0) && io.exception_state.valid && !io.exception_state.bits.flushPipe && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
@@ -263,7 +263,24 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 }
 
-class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class Rob(implicit p: Parameters) extends LazyModule with HasWritebackSink with HasXSParameter {
+
+  lazy val module = new RobImp(this)
+
+  override def generateWritebackIO(
+    thisMod: Option[HasWritebackSource] = None,
+    thisModImp: Option[HasWritebackSourceImp] = None
+  ): Unit = {
+    val sources = writebackSinksImp(thisMod, thisModImp)
+    module.io.writeback.zip(sources).foreach(x => x._1 := x._2)
+  }
+}
+
+class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
+  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents {
+  val wbExuConfigs = outer.writebackSinksParams.map(_.exuConfigs)
+  val numWbPorts = wbExuConfigs.map(_.length)
+
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val redirect = Input(Valid(new Redirect))
@@ -271,7 +288,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val flushOut = ValidIO(new Redirect)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
-    val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
+    val writeback = MixedVec(numWbPorts.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
     val commits = new RobCommitIO
     val lsq = new RobLsqIO
     val bcommit = Output(UInt(log2Up(CommitWidth + 1).W))
@@ -280,18 +297,35 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val robFull = Output(Bool())
   })
 
-  println("Rob: size:" + RobSize + " wbports:" + numWbPorts  + " commitwidth:" + CommitWidth)
+  def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
+    wbExuConfigs(index).zip(io.writeback(index)).filter(x => func(x._1))
+  }
+  val exeWbSel = outer.selWritebackSinks(_.exuConfigs.length)
+  val fflagsWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.writeFflags)))
+  val fflagsPorts = selectWb(fflagsWbSel, _.exists(_.writeFflags))
+  val exceptionWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.needExceptionGen)))
+  val exceptionPorts = selectWb(fflagsWbSel, _.exists(_.needExceptionGen))
+  val exuWbPorts = selectWb(exeWbSel, _.forall(_ != StdExeUnitCfg))
+  val stdWbPorts = selectWb(exeWbSel, _.contains(StdExeUnitCfg))
+  println(s"Rob: size $RobSize, numWbPorts: $numWbPorts, commitwidth: $CommitWidth")
+  println(s"exuPorts: ${exuWbPorts.map(_._1.map(_.name))}")
+  println(s"stdPorts: ${stdWbPorts.map(_._1.map(_.name))}")
+  println(s"fflags: ${fflagsPorts.map(_._1.map(_.name))}")
+
+
+  val exuWriteback = exuWbPorts.map(_._2)
+  val stdWriteback = stdWbPorts.map(_._2)
 
   // instvalid field
-  // val valid = RegInit(VecInit(List.fill(RobSize)(false.B)))
   val valid = Mem(RobSize, Bool())
   // writeback status
-  // val writebacked = Reg(Vec(RobSize, Bool()))
   val writebacked = Mem(RobSize, Bool())
   val store_data_writebacked = Mem(RobSize, Bool())
   // data for redirect, exception, etc.
-  // val flagBkup = RegInit(VecInit(List.fill(RobSize)(false.B)))
   val flagBkup = Mem(RobSize, Bool())
+  // some instructions are not allowed to trigger interrupts
+  // They have side effects on the states of the processor before they write back
+  val interrupt_safe = Mem(RobSize, Bool())
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -361,31 +395,34 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
     when (canEnqueue(i)) {
+      val enqUop = io.enq.req(i).bits
       // store uop in data module and debug_microOp Vec
-      debug_microOp(enqPtrVec(i).value) := io.enq.req(i).bits
+      debug_microOp(enqPtrVec(i).value) := enqUop
       debug_microOp(enqPtrVec(i).value).debugInfo.dispatchTime := timer
       debug_microOp(enqPtrVec(i).value).debugInfo.enqRsTime := timer
       debug_microOp(enqPtrVec(i).value).debugInfo.selectTime := timer
       debug_microOp(enqPtrVec(i).value).debugInfo.issueTime := timer
       debug_microOp(enqPtrVec(i).value).debugInfo.writebackTime := timer
-      when (io.enq.req(i).bits.ctrl.blockBackward) {
+      when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
-      when (io.enq.req(i).bits.ctrl.noSpecExec) {
+      when (enqUop.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      val enqHasException = ExceptionNO.selectFrontend(enqUop.cf.exceptionVec).asUInt.orR
       // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      when(!enqHasException && FuType.isSvinvalBegin(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := true.B
       }
       // the end instruction of Svinval enqs so clear doingSvinval 
-      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      when(!enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
-      assert( !doingSvinval || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe)))
+      assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
+        FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
@@ -399,29 +436,26 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   /**
     * Writeback (from execution units)
     */
-  for (i <- 0 until numWbPorts) {
-    when (io.exeWbResults(i).valid) {
-      val wbIdx = io.exeWbResults(i).bits.uop.robIdx.value
-      debug_microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
-      debug_microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
-      debug_microOp(wbIdx).ctrl.replayInst := io.exeWbResults(i).bits.uop.ctrl.replayInst
-      debug_microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
-      debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
-      debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
-      debug_microOp(wbIdx).debugInfo.enqRsTime := io.exeWbResults(i).bits.uop.debugInfo.enqRsTime
-      debug_microOp(wbIdx).debugInfo.selectTime := io.exeWbResults(i).bits.uop.debugInfo.selectTime
-      debug_microOp(wbIdx).debugInfo.issueTime := io.exeWbResults(i).bits.uop.debugInfo.issueTime
-      debug_microOp(wbIdx).debugInfo.writebackTime := io.exeWbResults(i).bits.uop.debugInfo.writebackTime
+  for (wb <- exuWriteback) {
+    when (wb.valid) {
+      val wbIdx = wb.bits.uop.robIdx.value
+      debug_microOp(wbIdx).diffTestDebugLrScValid := wb.bits.uop.diffTestDebugLrScValid
+      debug_exuData(wbIdx) := wb.bits.data
+      debug_exuDebug(wbIdx) := wb.bits.debug
+      debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.uop.debugInfo.enqRsTime
+      debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.uop.debugInfo.selectTime
+      debug_microOp(wbIdx).debugInfo.issueTime := wb.bits.uop.debugInfo.issueTime
+      debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.uop.debugInfo.writebackTime
 
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.cf.pc)} wen ${debug_Uop.ctrl.rfWen} " +
-        p"data 0x${Hexadecimal(io.exeWbResults(i).bits.data)} ldst ${debug_Uop.ctrl.ldest} pdst ${debug_Uop.pdest} " +
-        p"skip ${io.exeWbResults(i).bits.debug.isMMIO} robIdx: ${io.exeWbResults(i).bits.uop.robIdx}\n"
+        p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ctrl.ldest} pdst ${debug_Uop.pdest} " +
+        p"skip ${wb.bits.debug.isMMIO} robIdx: ${wb.bits.uop.robIdx}\n"
       )
     }
   }
-  val writebackNum = PopCount(io.exeWbResults.map(_.valid))
+  val writebackNum = PopCount(exuWriteback.map(_.valid))
   XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
 
 
@@ -431,11 +465,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val deqDispatchData = dispatchDataRead(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
-  // However, we cannot determine whether a load/store instruction is MMIO.
-  // Thus, we don't allow load/store instructions to trigger an interrupt.
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
+  val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val triggerBefore = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_before
   val triggerAfter = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_after && !exceptionDataRead.bits.trigger_before
@@ -511,8 +542,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
-  val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
-    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).bits.redirectValid
+  val misPredWb = Cat(VecInit(exuWriteback.map(wb =>
+    wb.bits.redirect.cfiUpdate.isMisPred && wb.bits.redirectValid
   ))).orR()
   val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
@@ -569,8 +600,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   }
 
   // sync fflags/dirty_fs to csr
-  io.csr.fflags := fflags
-  io.csr.dirty_fs := dirty_fs
+  io.csr.fflags := RegNext(fflags)
+  io.csr.dirty_fs := RegNext(dirty_fs)
 
   // commit branch to brq
   val cfiCommitVec = VecInit(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{case(v, t) => v && CommitType.isBranch(t)})
@@ -579,11 +610,11 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE))
-  io.lsq.lcommit := Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec))
-  io.lsq.scommit := Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec))
-  io.lsq.pendingld := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value)
-  io.lsq.pendingst := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value)
-  io.lsq.commit := !io.commits.isWalk && io.commits.valid(0)
+  io.lsq.lcommit := RegNext(Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec)))
+  io.lsq.scommit := RegNext(Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec)))
+  io.lsq.pendingld := RegNext(!io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value))
+  io.lsq.pendingst := RegNext(!io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
+  io.lsq.commit := RegNext(!io.commits.isWalk && io.commits.valid(0))
 
   /**
     * state changes
@@ -611,7 +642,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   deqPtrGenModule.io.exception_state := exceptionDataRead
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
-  deqPtrGenModule.io.commitType := deqDispatchData.commitType
+  deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
 
   deqPtrGenModule.io.misPredBlock := misPredBlock
   deqPtrGenModule.io.isReplaying := isReplaying
@@ -704,7 +735,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // enqueue logic set 6 writebacked to false
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
-      writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !io.enq.req(i).bits.cf.exceptionVec.asUInt.orR
+      val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec)
+      writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !enqHasException.asUInt.orR
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
     }
@@ -715,20 +747,20 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     store_data_writebacked(wbIdx) := true.B
   }
   // writeback logic set numWbPorts writebacked to true
-  for (i <- 0 until numWbPorts) {
-    when (io.exeWbResults(i).valid) {
-      val wbIdx = io.exeWbResults(i).bits.uop.robIdx.value
-      val block_wb =
-        selectAll(io.exeWbResults(i).bits.uop.cf.exceptionVec, false, true).asUInt.orR ||
-        io.exeWbResults(i).bits.uop.ctrl.flushPipe ||
-        io.exeWbResults(i).bits.uop.ctrl.replayInst
+  for ((wb, cfgs) <- exuWriteback.zip(wbExuConfigs(exeWbSel))) {
+    when (wb.valid) {
+      val wbIdx = wb.bits.uop.robIdx.value
+      val wbHasException = ExceptionNO.selectByExu(wb.bits.uop.cf.exceptionVec, cfgs).asUInt.orR
+      val wbHasFlushPipe = cfgs.exists(_.flushPipe).B && wb.bits.uop.ctrl.flushPipe
+      val wbHasReplayInst = cfgs.exists(_.replayInst).B && wb.bits.uop.ctrl.replayInst
+      val block_wb = wbHasException || wbHasFlushPipe || wbHasReplayInst
       writebacked(wbIdx) := !block_wb
     }
   }
   // store data writeback logic mark store as data_writebacked
-  for (i <- 0 until StorePipelineWidth) {
-    when(io.lsq.storeDataRobWb(i).valid) {
-      store_data_writebacked(io.lsq.storeDataRobWb(i).bits.value) := true.B
+  for (wb <- stdWriteback) {
+    when(RegNext(wb.valid)) {
+      store_data_writebacked(RegNext(wb.bits.uop.robIdx.value)) := true.B
     }
   }
 
@@ -740,6 +772,21 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
+  // interrupt_safe
+  for (i <- 0 until RenameWidth) {
+    // We RegNext the updates for better timing.
+    // Note that instructions won't change the system's states in this cycle.
+    when (RegNext(canEnqueue(i))) {
+      // For now, we allow non-load-store instructions to trigger interrupts
+      // For MMIO instructions, they should not trigger interrupts since they may
+      // be sent to lower level before it writes back.
+      // However, we cannot determine whether a load/store instruction is MMIO.
+      // Thus, we don't allow load/store instructions to trigger an interrupt.
+      // TODO: support non-MMIO load-store instructions to trigger interrupts
+      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.ctrl.commitType)
+      interrupt_safe(RegNext(enqPtrVec(i).value)) := RegNext(allow_interrupts)
+    }
+  }
 
   /**
     * read and write of data modules
@@ -769,7 +816,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   for (i <- 0 until RenameWidth) {
     exceptionGen.io.enq(i).valid := canEnqueue(i)
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
-    exceptionGen.io.enq(i).bits.exceptionVec := selectFrontend(io.enq.req(i).bits.cf.exceptionVec, false, true)
+    exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
     exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.ctrl.replayInst
     assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
@@ -778,47 +825,25 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.enq(i).bits.trigger := io.enq.req(i).bits.cf.trigger
   }
 
-  // TODO: don't hard code these idxes
-  val numIntWbPorts = exuParameters.AluCnt + exuParameters.LduCnt + exuParameters.MduCnt
-  // CSR is after Alu and Load
-  def csr_wb_idx = exuParameters.AluCnt + exuParameters.LduCnt
-  def atomic_wb_idx = exuParameters.AluCnt // first port for load
-  def load_wb_idxes = Seq(exuParameters.AluCnt + 1) // second port for load
-  def store_wb_idxes = io.exeWbResults.indices.takeRight(2)
-  val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
-  all_exception_possibilities.zipWithIndex.foreach{ case (p, i) => connect_exception(i, p) }
-  def connect_exception(index: Int, wb_index: Int) = {
-    exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
-    // A temporary fix for float load writeback
-    // TODO: let int/fp load use the same two wb ports
-    if (wb_index == atomic_wb_idx || load_wb_idxes.contains(wb_index)) {
-      when (io.exeWbResults(wb_index - exuParameters.AluCnt + numIntWbPorts + exuParameters.FmacCnt).valid) {
-        exceptionGen.io.wb(index).valid := true.B
-      }
-    }
-    exceptionGen.io.wb(index).bits.robIdx       := io.exeWbResults(wb_index).bits.uop.robIdx
-    val selectFunc = if (wb_index == csr_wb_idx) selectCSR _
-    else if (wb_index == atomic_wb_idx) selectAtomics _
-    else if (load_wb_idxes.contains(wb_index)) selectLoad _
-    else {
-      assert(store_wb_idxes.contains(wb_index))
-      selectStore _
-    }
-    exceptionGen.io.wb(index).bits.exceptionVec    := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
-    exceptionGen.io.wb(index).bits.flushPipe       := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
-    exceptionGen.io.wb(index).bits.replayInst      := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
-    exceptionGen.io.wb(index).bits.singleStep      := false.B
-    exceptionGen.io.wb(index).bits.crossPageIPFFix := false.B
-    exceptionGen.io.wb(index).bits.trigger := io.exeWbResults(wb_index).bits.uop.cf.trigger
+  println(s"ExceptionGen:")
+  val exceptionCases = exceptionPorts.map(_._1.flatMap(_.exceptionOut).distinct.sorted)
+  require(exceptionCases.length == exceptionGen.io.wb.length)
+  for ((((configs, wb), exc_wb), i) <- exceptionPorts.zip(exceptionGen.io.wb).zipWithIndex) {
+    exc_wb.valid                := wb.valid
+    exc_wb.bits.robIdx          := wb.bits.uop.robIdx
+    exc_wb.bits.exceptionVec    := ExceptionNO.selectByExu(wb.bits.uop.cf.exceptionVec, configs)
+    exc_wb.bits.flushPipe       := configs.exists(_.flushPipe).B && wb.bits.uop.ctrl.flushPipe
+    exc_wb.bits.replayInst      := configs.exists(_.replayInst).B && wb.bits.uop.ctrl.replayInst
+    exc_wb.bits.singleStep      := false.B
+    exc_wb.bits.crossPageIPFFix := false.B
+    // TODO: make trigger configurable
+    exc_wb.bits.trigger         := wb.bits.uop.cf.trigger
+    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
+      s"flushPipe ${configs.exists(_.flushPipe)}, " +
+      s"replayInst ${configs.exists(_.replayInst)}")
   }
 
-  // 4 fmac + 2 fmisc + 1 i2f
-  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + numIntWbPorts)
-  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt + 2)
-  val i2fWb = Seq(numIntWbPorts - 1) // last port in int
-  val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
-    (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
-  }).map(_._1)
+  val fflags_wb = fflagsPorts.map(_._2)
   val fflagsDataModule = Module(new SyncDataModuleTemplate(
     UInt(5.W), RobSize, CommitWidth, fflags_wb.size)
   )
@@ -986,10 +1011,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
         dt_isRVC(enqPtrVec(i).value) := io.enq.req(i).bits.cf.pd.isRVC
       }
     }
-    for (i <- 0 until numWbPorts) {
-      when (io.exeWbResults(i).valid) {
-        val wbIdx = io.exeWbResults(i).bits.uop.robIdx.value
-        dt_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
+    for (wb <- exuWriteback) {
+      when (wb.valid) {
+        val wbIdx = wb.bits.uop.robIdx.value
+        dt_exuDebug(wbIdx) := wb.bits.debug
       }
     }
     // Always instantiate basic difftest modules.
@@ -1069,9 +1094,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.instrCnt := instrCnt
   }
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(18))
-  })
   val perfEvents = Seq(
     ("rob_interrupt_num       ", io.flushOut.valid && intrEnable                                                                                                   ),
     ("rob_exception_num       ", io.flushOut.valid && exceptionEnable                                                                                              ),
@@ -1087,13 +1109,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     ("rob_commitInstrStore    ", ifCommit(PopCount(io.commits.valid.zip(commitIsStore).map{ case (v, t) => v && t }))                                              ),
     ("rob_walkInstr           ", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U)                                                                           ),
     ("rob_walkCycle           ", (state === s_walk || state === s_extrawalk)                                                                                       ),
-    ("rob_1/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) < (RobSize.U/4.U))                                                                     ),
-    ("rob_2/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/4.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U/2.U))    ),
-    ("rob_3/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/2.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U*3.U/4.U))),
-    ("rob_4/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U*3.U/4.U))                                                                 ),
+    ("rob_1_4_valid           ", (PopCount((0 until RobSize).map(valid(_))) < (RobSize.U/4.U))                                                                     ),
+    ("rob_2_4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/4.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U/2.U))    ),
+    ("rob_3_4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/2.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U*3.U/4.U))),
+    ("rob_4_4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U*3.U/4.U))                                                                 ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

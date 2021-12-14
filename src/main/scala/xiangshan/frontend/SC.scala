@@ -174,7 +174,7 @@ object SCThreshold {
 }
 
 
-trait HasSC extends HasSCParameter { this: Tage =>
+trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info = Set[FoldedHistoryInfo]()
   if (EnableSC) {
@@ -352,16 +352,10 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
   override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
 
-
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(3))
-  })
   val perfEvents = Seq(
     ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid),
     ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
     ("sc_update_on_unconf           ", PopCount(update_on_unconf)  ),
   )
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

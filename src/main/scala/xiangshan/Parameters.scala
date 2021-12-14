@@ -23,11 +23,13 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import huancun.{CacheParameters, HCCacheParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
-import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
+import huancun._
+import huancun.debug._
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -133,10 +135,6 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  NRIntReadPorts: Int = 14,
-  NRIntWritePorts: Int = 8,
-  NRFpReadPorts: Int = 14,
-  NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 80,
   StoreQueueSize: Int = 64,
   RobSize: Int = 256,
@@ -163,7 +161,8 @@ case class XSCoreParameters
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
-  EnableFastForward: Boolean = true,
+  EnableLoadToLoadForward: Boolean = false,
+  EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
@@ -171,7 +170,8 @@ case class XSCoreParameters
     name = "itlb",
     fetchi = true,
     useDmode = false,
-    sameCycle = true,
+    sameCycle = false,
+    missSameCycle = true,
     normalNWays = 32,
     normalReplacer = Some("plru"),
     superNWays = 4,
@@ -208,14 +208,13 @@ case class XSCoreParameters
     superNWays = 4,
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
-  NumPMP: Int = 16, // 0 or 16 or 64
-  NumPMA: Int = 16,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2
+    nMissEntries = 2,
+    nReleaseEntries = 2
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -378,6 +377,7 @@ trait HasXSParameter {
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
+  val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val RefillSize = coreParams.RefillSize
@@ -389,15 +389,12 @@ trait HasXSParameter {
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
-  val NumPMP = coreParams.NumPMP
-  val NumPMA = coreParams.NumPMA
-  val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
-  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 
-              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 + 
+  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
+              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
               (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2) 
+              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2)
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -441,5 +438,4 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
-  val print_perfcounter  = false
 }

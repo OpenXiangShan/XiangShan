@@ -71,7 +71,7 @@ class L2TlbMQIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst
 }
 
 @chiselName
-class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
+class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   require(MSHRSize >= (2 + l2tlbParams.filterSize))
 
   val io = IO(new L2TlbMQIO())
@@ -226,17 +226,11 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
   }
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(4))
-  })
   val perfEvents = Seq(
     ("tlbmissq_incount           ", io.in.fire()               ),
     ("tlbmissq_inblock           ", io.in.valid && !io.in.ready),
     ("tlbmissq_memcount          ", io.mem.req.fire()          ),
     ("tlbmissq_memcycle          ", PopCount(is_waiting)       ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

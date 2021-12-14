@@ -18,10 +18,11 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
+import xiangshan.ExceptionNO._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
-import xiangshan.backend.{AmoData, Std}
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -387,11 +388,11 @@ package object xiangshan {
 
     // l1 cache op
     // bit encoding: | cbo_zero 01 | size(2bit) 11 |
-    def cbo_zero  = "b0111".U 
+    def cbo_zero  = "b0111".U
 
-    // llc op 
+    // llc op
     // bit encoding: | prefetch 11 | suboptype(2bit) |
-    def cbo_clean = "b1100".U 
+    def cbo_clean = "b1100".U
     def cbo_flush = "b1101".U
     def cbo_inval = "b1110".U
 
@@ -454,14 +455,14 @@ package object xiangshan {
     def aes64ks2    = "b100110".U
 
     // merge to two instruction sm4ks & sm4ed
-    def sm4ks0      = "b101000".U
-    def sm4ks1      = "b101001".U
-    def sm4ks2      = "b101010".U
-    def sm4ks3      = "b101011".U
-    def sm4ed0      = "b101100".U
-    def sm4ed1      = "b101101".U
-    def sm4ed2      = "b101110".U
-    def sm4ed3      = "b101111".U
+    def sm4ed0      = "b101000".U
+    def sm4ed1      = "b101001".U
+    def sm4ed2      = "b101010".U
+    def sm4ed3      = "b101011".U
+    def sm4ks0      = "b101100".U
+    def sm4ks1      = "b101101".U
+    def sm4ks2      = "b101110".U
+    def sm4ks3      = "b101111".U
 
     def sha256sum0  = "b110000".U
     def sha256sum1  = "b110001".U
@@ -499,6 +500,59 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
+  object ExceptionNO {
+    def instrAddrMisaligned = 0
+    def instrAccessFault    = 1
+    def illegalInstr        = 2
+    def breakPoint          = 3
+    def loadAddrMisaligned  = 4
+    def loadAccessFault     = 5
+    def storeAddrMisaligned = 6
+    def storeAccessFault    = 7
+    def ecallU              = 8
+    def ecallS              = 9
+    def ecallM              = 11
+    def instrPageFault      = 12
+    def loadPageFault       = 13
+    // def singleStep          = 14
+    def storePageFault      = 15
+    def priorities = Seq(
+      breakPoint, // TODO: different BP has different priority
+      instrPageFault,
+      instrAccessFault,
+      illegalInstr,
+      instrAddrMisaligned,
+      ecallM, ecallS, ecallU,
+      storePageFault,
+      loadPageFault,
+      storeAccessFault,
+      loadAccessFault,
+      storeAddrMisaligned,
+      loadAddrMisaligned
+    )
+    def all = priorities.distinct.sorted
+    def frontendSet = Seq(
+      instrAddrMisaligned,
+      instrAccessFault,
+      illegalInstr,
+      instrPageFault
+    )
+    def partialSelect(vec: Vec[Bool], select: Seq[Int]): Vec[Bool] = {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.foreach(_ := false.B)
+      select.foreach(i => new_vec(i) := vec(i))
+      new_vec
+    }
+    def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
+    def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
+    def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
+      partialSelect(vec, fuConfig.exceptionOut)
+    def selectByExu(vec:Vec[Bool], exuConfig: ExuConfig): Vec[Bool] =
+      partialSelect(vec, exuConfig.exceptionOut)
+    def selectByExu(vec:Vec[Bool], exuConfigs: Seq[ExuConfig]): Vec[Bool] =
+      partialSelect(vec, exuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted)
+  }
+
   def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
@@ -512,7 +566,7 @@ package object xiangshan {
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
-  def mouDataGen(p: Parameters) = new AmoData()(p)
+  def mouDataGen(p: Parameters) = new Std()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -560,9 +614,8 @@ package object xiangshan {
     name = "fence",
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
-    FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
-    hasExceptionOut = true
+    FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr) // TODO: need rewrite latency structure, not just this value,
   )
 
   val csrCfg = FuConfig(
@@ -574,8 +627,8 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false,
-    hasExceptionOut = true
+    exceptionOut = Seq(illegalInstr, breakPoint, ecallU, ecallS, ecallM),
+    flushPipe = true
   )
 
   val i2fCfg = FuConfig(
@@ -587,7 +640,7 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = false,
     writeFpRf = true,
-    hasRedirect = false,
+    writeFflags = true,
     latency = CertainLatency(2),
     fastUopOut = true, fastImplemented = true
   )
@@ -601,10 +654,9 @@ package object xiangshan {
     0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false,
     latency = UncertainLatency(),
     fastUopOut = true,
-    fastImplemented = false
+    fastImplemented = true
   )
 
   val mulCfg = FuConfig(
@@ -616,7 +668,6 @@ package object xiangshan {
     0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false,
     latency = CertainLatency(2),
     fastUopOut = true,
     fastImplemented = true
@@ -631,7 +682,6 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false,
     latency = CertainLatency(1),
     fastUopOut = true,
     fastImplemented = true
@@ -641,7 +691,7 @@ package object xiangshan {
     name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, writeFflags = true,
     latency = UncertainLatency(), fastUopOut = true, fastImplemented = true
   )
 
@@ -649,7 +699,7 @@ package object xiangshan {
     name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
-    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2),
+    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, writeFflags = true, latency = CertainLatency(2),
     fastUopOut = true, fastImplemented = true
   )
 
@@ -657,7 +707,7 @@ package object xiangshan {
     name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2),
+    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, writeFflags = true, latency = CertainLatency(2),
     fastUopOut = true, fastImplemented = true
   )
 
@@ -665,46 +715,50 @@ package object xiangshan {
     name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
-    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
-    fastUopOut = true, fastImplemented = false, hasInputBuffer = true
+    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, writeFflags = true, latency = UncertainLatency(),
+    fastUopOut = true, fastImplemented = true, hasInputBuffer = true
   )
 
   val lduCfg = FuConfig(
     "ldu",
     null, // DontCare
     (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
-    FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
-    latency = UncertainLatency(), hasExceptionOut = true
+    FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    flushPipe = true,
+    replayInst = true
   )
 
   val staCfg = FuConfig(
     "sta",
     null,
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
-    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    latency = UncertainLatency(), hasExceptionOut = true
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
   )
 
   val stdCfg = FuConfig(
     "std",
     fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
-    writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
+    writeIntRf = false, writeFpRf = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
     "mou",
     null,
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
-    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    latency = UncertainLatency(), hasExceptionOut = true
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency(), exceptionOut = lduCfg.exceptionOut ++ staCfg.exceptionOut
   )
 
   val mouDataCfg = FuConfig(
     "mou",
     mouDataGen,
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
-    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    latency = UncertainLatency(), hasExceptionOut = true
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency()
   )
 
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)

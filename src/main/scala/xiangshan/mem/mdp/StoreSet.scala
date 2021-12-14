@@ -65,13 +65,13 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val SSIT_UPDATE_STORE_READ_PORT = 1
   val SSIT_READ_PORT_NUM = DecodeWidth
 
-  // data sram write port allocate 
+  // data sram write port allocate
+  // load update and flush uses the same write port
+  val SSIT_MISC_WRITE_PORT = 0
   val SSIT_UPDATE_LOAD_WRITE_PORT = 0
   val SSIT_UPDATE_STORE_WRITE_PORT = 1
-  val SSIT_MISC_WRITE_PORT = 2
-  val SSIT_WRITE_PORT_NUM = 3
+  val SSIT_WRITE_PORT_NUM = 2
 
-  // TODO: reorg sram size
   val valid_sram = Module(new SyncDataModuleTemplate(
     Bool(),
     SSITSize,
@@ -120,6 +120,34 @@ class SSIT(implicit p: Parameters) extends XSModule {
     io.rdata(i).valid := valid_sram.io.rdata(i)
     io.rdata(i).ssid := data_sram.io.rdata(i).ssid
     io.rdata(i).strict := data_sram.io.rdata(i).strict
+  }
+
+  // flush SSIT
+  // reset period: ResetTimeMax2Pow
+  val resetStepCounter = RegInit(0.U((log2Up(SSITSize)+1).W))
+  val resetStepCounterFull = resetStepCounter(log2Up(SSITSize))
+  val s_idle :: s_flush :: Nil = Enum(2)
+  val state = RegInit(s_flush)
+  
+  switch (state) {
+    is(s_idle) {
+      when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+        state := s_flush
+        resetCounter := 0.U
+      }
+    }
+    is(s_flush) {
+      when(resetStepCounterFull) {
+        state := s_idle // reset finished
+        resetStepCounter := 0.U
+      }.otherwise{
+        valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+        valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+        valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+        debug_valid(resetStepCounter) := false.B
+        resetStepCounter := resetStepCounter + 1.U
+      }
+    }
   }
 
   // update SSIT if load violation redirect is detected
@@ -244,6 +272,15 @@ class SSIT(implicit p: Parameters) extends XSModule {
     }
   }
 
+  // make SyncDataModuleTemplate happy
+  when(valid_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === valid_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
+    valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+  }
+
+  when(data_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === data_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
+    data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+  }
+
   XSPerfAccumulate("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
   XSPerfAccumulate("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
   XSPerfAccumulate("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
@@ -253,32 +290,6 @@ class SSIT(implicit p: Parameters) extends XSModule {
     memPredUpdateReqValid && ssidIsSame && loadStrict && loadAssigned && storeAssigned
   ) // should be zero
 
-  // reset period: ResetTimeMax2Pow
-  val resetStepCounter = RegInit(0.U((log2Up(SSITSize)+1).W))
-  val resetStepCounterFull = resetStepCounter(log2Up(SSITSize))
-  val s_idle :: s_flush :: Nil = Enum(2)
-  val state = RegInit(s_flush)
-
-  switch (state) {
-    is(s_idle) {
-      when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
-        state := s_flush
-        resetCounter := 0.U
-      }
-    }
-    is(s_flush) {
-      when(resetStepCounterFull) {
-        state := s_idle // reset finished
-        resetStepCounter := 0.U
-      }.otherwise{
-        valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
-        valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
-        valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
-        debug_valid(resetStepCounter) := false.B
-        resetStepCounter := resetStepCounter + 1.U
-      }
-    }
-  }
 
   // debug
   for (i <- 0 until StorePipelineWidth) {

@@ -46,12 +46,16 @@ case class FuConfig
   numFpSrc: Int,
   writeIntRf: Boolean,
   writeFpRf: Boolean,
-  hasRedirect: Boolean,
+  writeFflags: Boolean = false,
+  hasRedirect: Boolean = false,
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
   fastImplemented: Boolean = false,
   hasInputBuffer: Boolean = false,
-  hasExceptionOut: Boolean = false
+  exceptionOut: Seq[Int] = Seq(),
+  flushPipe: Boolean = false,
+  replayInst: Boolean = false,
+  trigger: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }

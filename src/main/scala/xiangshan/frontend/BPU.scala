@@ -43,7 +43,7 @@ trait HasBPUConst extends HasXSParameter {
   val numBpStages = BP_STAGES.length
 
   val debug = true
-  val resetVector = 0x10000000L//TODO: set reset vec
+  val resetVector = 0x10000000L
   // TODO: Replace log2Up by log2Ceil
 }
 
@@ -291,7 +291,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
 }
 
 @chiselName
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
+class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents {
   val io = IO(new PredictorIO)
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
@@ -603,10 +603,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   XSPerfAccumulate("s2_redirect", s2_redirect)
 
-  val perfEvents = predictors.asInstanceOf[Composer].perfEvents.map(_._1).zip(predictors.asInstanceOf[Composer].perfinfo.perfEvents.perf_events)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(predictors.asInstanceOf[Composer].perfinfo.perfEvents.perf_events.length))
-  })
-  perfinfo.perfEvents := predictors.asInstanceOf[Composer].perfinfo.perfEvents
-
+  val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
+  generatePerfEvent()
 }

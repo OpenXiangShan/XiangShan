@@ -359,6 +359,7 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val miss = Output(Bool())
+  val fast_miss = Output(Bool()) // without sram part for timing optimization
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
@@ -486,7 +487,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
-    require(this.asid.getWidth <= asid.getWidth)
+//    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
     if (allType) {
       require(hasLevel)
@@ -676,7 +677,6 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
     val tlb = Input(new TlbCsrBundle)
     val distribute_csr = Flipped(new DistributedCSRIO)
   }
-  val perfEvents      = Output(new PerfEventsBundle(numPCntPtw))
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
