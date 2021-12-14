@@ -180,7 +180,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   update_cache_req_when_write("CACHE_BANK_NUM", translated_cache_req.bank_num)
   update_cache_req_when_write("CACHE_TAG_HIGH", translated_cache_req.write_tag_high)
   update_cache_req_when_write("CACHE_TAG_LOW", translated_cache_req.write_tag_low)
-  update_cache_req_when_write("CACHE_DATA_ECC", translated_cache_req.write_tag_ecc)
+  update_cache_req_when_write("CACHE_TAG_ECC", translated_cache_req.write_tag_ecc)
   update_cache_req_when_write("CACHE_DATA_0", translated_cache_req.write_data_vec(0))
   update_cache_req_when_write("CACHE_DATA_1", translated_cache_req.write_data_vec(1))
   update_cache_req_when_write("CACHE_DATA_2", translated_cache_req.write_data_vec(2))

@@ -117,7 +117,7 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
   }
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   io.cacheOp.resp.bits := DontCare
-  io.cacheOp.resp.bits.read_tag_low := Mux(
+  io.cacheOp.resp.bits.read_tag_ecc := Mux(
     io.cacheOp.resp.valid,
     RegNext(ecc_array(io.cacheOp.req.bits.index)(io.cacheOp.req.bits.wayNum(4, 0))),
     0.U
