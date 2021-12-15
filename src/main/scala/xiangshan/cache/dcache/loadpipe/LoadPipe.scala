@@ -42,10 +42,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val nack      = Input(Bool())
 
     // meta and data array read port
-//    val meta_read = DecoupledIO(new L1MetaReadReq)
-//    val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
+    val error_resp = Input(Vec(nWays, Bool()))
 
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(tagBits.W)))
@@ -142,6 +141,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // this simplifies our logic in s2 stage
   val s1_hit_meta = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
   val s1_hit_coh = s1_hit_meta.coh
+  val s1_hit_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => io.error_resp(w))), false.B)
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
@@ -153,6 +153,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
   val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
   val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_addr))
+  val s1_error = Mux(s1_need_replacement, false.B, s1_hit_error)
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack
@@ -197,6 +198,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
+  val s2_error = RegEnable(s1_error, s1_fire) || // error reported by exist dcache error bit
+    io.error.ecc_error.valid // error reported by load s2 ecc check
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
@@ -261,8 +264,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
     XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   }
-  
-  resp.bits.miss_enter := io.miss_req.fire()
+  resp.bits.error := s2_error
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

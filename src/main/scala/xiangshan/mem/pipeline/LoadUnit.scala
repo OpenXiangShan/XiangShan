@@ -280,7 +280,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   })
   val s2_is_prefetch = io.in.bits.isSoftPrefetch
   val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
-  excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
+  excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || 
+    io.pmpResp.ld ||
+    !io.pmpResp.mmio || io.dcacheResp.bits.error && !io.dcacheResp.bits.miss && io.csrCtrl.cache_error_enable
   when (s2_is_prefetch) {
     excep := 0.U.asTypeOf(excep.cloneType)
   }
@@ -295,6 +297,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
+  val s2_cache_error = io.dcacheResp.bits.error
 
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt

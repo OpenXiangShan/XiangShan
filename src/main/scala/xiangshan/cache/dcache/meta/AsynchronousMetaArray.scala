@@ -64,6 +64,10 @@ class ECCWriteReq(implicit p: Parameters) extends ECCReadReq {
   val ecc = UInt()
 }
 
+class ErrorWriteReq(implicit p: Parameters) extends MetaReadReq {
+  val error = Bool()
+}
+
 class AsynchronousECCArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
   def metaAndTagOnReset = MetaAndTag(ClientMetadata.onReset, 0.U)
 
@@ -171,4 +175,36 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
   }
 
   ecc_array.io.cacheOp <> io.cacheOp
+}
+
+class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
+  val io = IO(new Bundle() {
+    val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
+    val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
+    val write = Vec(writePorts, Flipped(DecoupledIO(new ErrorWriteReq)))
+    // customized cache op port 
+    // val cacheOp = Flipped(new DCacheInnerOpIO)
+  })
+
+  val meta_array = Reg(Vec(nSets, Vec(nWays, Bool())))
+  when (reset.asBool()) {
+    meta_array := 0.U.asTypeOf(meta_array.cloneType)
+  }
+
+  io.read.zip(io.resp).foreach {
+    case (read, resp) =>
+      read.ready := true.B
+      resp := RegEnable(meta_array(read.bits.idx), read.valid)
+  }
+
+  io.write.foreach {
+    case write =>
+      write.ready := true.B
+      write.bits.way_en.asBools.zipWithIndex.foreach {
+        case (wen, i) =>
+          when (write.valid && wen) {
+            meta_array(write.bits.idx)(i) := write.bits.error
+          }
+      }
+  }
 }

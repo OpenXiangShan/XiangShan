@@ -503,6 +503,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
   csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
+  csrio.customCtrl.cache_error_enable := smblockctl(6)
 
   val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)

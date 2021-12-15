@@ -115,6 +115,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val meta_write = DecoupledIO(new MetaWriteReq)
+    val error_resp = Input(Vec(nWays, Bool()))
+    val error_write = DecoupledIO(new ErrorWriteReq)
 
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(tagBits.W)))
@@ -253,6 +255,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
   val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
   val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_req.addr)).asUInt)
+  val s1_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_resp(w))), false.B)
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -288,6 +291,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_tag = RegEnable(s1_tag, s1_fire)
   val s2_coh = RegEnable(s1_coh, s1_fire)
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
+  val s2_error = RegEnable(s1_error, s1_fire) || // error reported by exist dcache error bit
+    io.error.ecc_error.valid // error reported by mainpipe s2 ecc check
 
   val s2_hit = s2_tag_match && s2_has_permission
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
@@ -355,6 +360,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire_to_s3)
   val s3_data_word = RegEnable(s2_data_word, s2_fire_to_s3)
   val s3_data = RegEnable(s2_data, s2_fire_to_s3)
+  val s3_error = RegEnable(s2_error, s2_fire_to_s3)
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
 
@@ -606,6 +612,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   atomic_hit_resp.data := Mux(s3_sc, s3_sc_resp, s3_data_word)
   atomic_hit_resp.miss := false.B
   atomic_hit_resp.miss_id := s3_req.miss_id
+  atomic_hit_resp.error := s3_error
   atomic_hit_resp.replay := false.B
   atomic_hit_resp.ack_miss_queue := s3_req.miss
   atomic_hit_resp.id := lrsc_valid
@@ -613,6 +620,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   atomic_replay_resp.data := DontCare
   atomic_replay_resp.miss := true.B
   atomic_replay_resp.miss_id := DontCare
+  atomic_replay_resp.error := false.B
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
@@ -629,6 +637,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.tag := get_tag(s3_req.addr)
   io.meta_write.bits.meta.coh := new_coh
+
+  io.error_write.valid := s3_fire && update_meta
+  io.error_write.bits.idx := s3_idx
+  io.error_write.bits.way_en := s3_way_en
+  io.error_write.bits.error := s3_error
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx
