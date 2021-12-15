@@ -23,9 +23,11 @@ import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
+import xiangshan.backend.HasExuWbHelper
 
 class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
     val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
     val out = DecoupledIO(new ExuOutput)
   })
@@ -63,7 +65,8 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 
   if (hasFastUopOut) {
-    io.out.valid := RegNext(ctrl_arb.io.out.valid)
+    val uop = ctrl_arb.io.out.bits.uop
+    io.out.valid := RegNext(ctrl_arb.io.out.valid && !uop.robIdx.needFlush(io.redirect))
     // When hasFastUopOut, only uop comes at the same cycle with valid.
     // Other bits like data, fflags come at the next cycle after valid,
     // and they need to be selected with the fireVec.
@@ -71,7 +74,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
     val sel = VecInit(io.in.map(_.fire)).asUInt
     io.out.bits := Mux1H(RegNext(sel), dataVec)
     // uop comes at the same cycle with valid and only RegNext is needed.
-    io.out.bits.uop := RegNext(ctrl_arb.io.out.bits.uop)
+    io.out.bits.uop := RegNext(uop)
   }
 }
 
@@ -85,6 +88,9 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   val exclusivePorts = priorities.zipWithIndex.filter(_._1 == 0).map(_._2)
   val sharedPorts = priorities.zipWithIndex.filter(_._1 == 1).map(_._2)
   val otherPorts = priorities.zipWithIndex.filter(_._1 > 1).map(_._2)
+
+  // Dirty code for Load2Fp: should be delayed for one more cycle
+  val needRegNext = exclusivePorts.map(i => cfgs(i) == LdExeUnitCfg && isFp)
 
   val numInPorts = cfgs.length
   val numOutPorts = exclusivePorts.length + sharedPorts.length
@@ -103,8 +109,7 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
       if (in.size < n) {
         Seq(in) ++ Seq.fill(n - 1)(Seq())
       } else {
-        val m = in.size / n
-        in.take(m) +: splitN(in.drop(m), n - 1)
+        (0 until n).map(i => in.zipWithIndex.filter(_._2 % n == i).map(_._1).toSeq)
       }
     }
   }
@@ -142,6 +147,7 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
 class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
     val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput)))
     val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
   })
@@ -155,10 +161,15 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
       val hasFastUopOut = outer.hasFastUopOut(i)
       out.valid := in.valid
       out.bits := in.bits
+      require(!hasFastUopOut || !outer.needRegNext(i))
       if (hasFastUopOut) {
         // When hasFastUopOut, only uop comes at the same cycle with valid.
-        out.valid := RegNext(in.valid)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
         out.bits.uop := RegNext(in.bits.uop)
+      }
+      if (outer.needRegNext(i)) {
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
+        out.bits := RegNext(in.bits)
       }
       in.ready := true.B
   }
@@ -170,6 +181,7 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
     val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
     val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
+    arb.io.redirect <> io.redirect
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
@@ -188,7 +200,7 @@ class WbArbiterWrapper(
   exuConfigs: Seq[ExuConfig],
   numIntOut: Int,
   numFpOut: Int
-)(implicit p: Parameters) extends LazyModule {
+)(implicit p: Parameters) extends LazyModule with HasWritebackSource {
   val numInPorts = exuConfigs.length
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -205,16 +217,52 @@ class WbArbiterWrapper(
 
   val numOutPorts = intArbiter.numOutPorts + fpArbiter.numOutPorts
 
-  lazy val module = new LazyModuleImp(this) with HasXSParameter {
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    // To optimize write ports, we can remove the duplicate ports.
+    val duplicatePorts = fpWbPorts.filter(cfgs => cfgs.length == 1 && intWbPorts.contains(cfgs))
+    val duplicateSource = exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.contains(Seq(cfg._1))).map(_._2)
+    val duplicateSink = intWbPorts.zipWithIndex.filter(cfgs => duplicatePorts.contains(cfgs._1)).map(_._2)
+    require(duplicateSource.length == duplicatePorts.length)
+    require(duplicateSink.length == duplicatePorts.length)
+    val effectiveConfigs = intWbPorts ++ fpWbPorts.filterNot(cfg => duplicatePorts.contains(cfg))
+    val simpleConfigs = exuConfigs.filter(cfg => !cfg.writeFpRf && !cfg.writeIntRf).map(p => Seq(p))
+    Seq(new WritebackSourceParams(effectiveConfigs ++ simpleConfigs))
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
+
+  lazy val module = new LazyModuleImp(this)
+    with HasXSParameter with HasWritebackSourceImp with HasExuWbHelper {
+
     val io = IO(new Bundle() {
       val hartId = Input(UInt(8.W))
+      val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))
     })
 
+    override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
+      // To optimize write ports, we can remove the duplicate ports.
+      val duplicatePorts = fpWbPorts.zipWithIndex.filter(cfgs => cfgs._1.length == 1 && intWbPorts.contains(cfgs._1))
+      val duplicateSource = exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.map(_._1).contains(Seq(cfg._1))).map(_._2)
+      val duplicateSink = intWbPorts.zipWithIndex.filter(cfgs => duplicatePorts.map(_._1).contains(cfgs._1)).map(_._2)
+      require(duplicateSource.length == duplicatePorts.length)
+      require(duplicateSink.length == duplicatePorts.length)
+      // effectivePorts: distinct write-back ports that write to the regfile
+      val effectivePorts = io.out.zipWithIndex.filterNot(i => duplicatePorts.map(_._2).contains(i._2 - numIntWbPorts))
+      // simplePorts: write-back ports that don't write to the regfile but update the ROB states
+      val simplePorts = exuConfigs.zip(io.in).filter(cfg => !cfg._1.writeFpRf && !cfg._1.writeIntRf)
+      val simpleWriteback = simplePorts.map(_._2).map(decoupledIOToValidIO)
+      val writeback = WireInit(VecInit(effectivePorts.map(_._1) ++ simpleWriteback))
+      for ((sink, source) <- duplicateSink.zip(duplicateSource)) {
+        writeback(sink).valid := io.in(source).valid
+      }
+      Some(Seq(writeback))
+    }
+
     // ready is set to true.B as default (to be override later)
     io.in.foreach(_.ready := true.B)
 
+    intArbiter.module.io.redirect <> io.redirect
     val intWriteback = io.in.zip(exuConfigs).filter(_._2.writeIntRf)
     intArbiter.module.io.in.zip(intWriteback).foreach { case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen
@@ -233,6 +281,7 @@ class WbArbiterWrapper(
       difftest.io.data := out.bits.data
     })
 
+    fpArbiter.module.io.redirect <> io.redirect
     val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
     fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen
@@ -253,4 +302,41 @@ class WbArbiterWrapper(
 
     io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
   }
+}
+
+class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModule
+  with HasWritebackSource with HasWritebackSink {
+  override def generateWritebackIO(
+    thisMod: Option[HasWritebackSource],
+    thisModImp: Option[HasWritebackSourceImp]
+  ): Unit = {
+    require(writebackSinks.length == 1)
+    val sink = writebackSinks.head
+    val sourceMod = writebackSinksMod(thisMod, thisModImp).head
+    module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
+  }
+
+  lazy val module = new LazyModuleImp(this) with HasWritebackSourceImp {
+    val io = IO(new Bundle {
+      val redirect = Flipped(ValidIO(new Redirect))
+      val in = Vec(configs.length, Input(Decoupled(new ExuOutput)))
+      val out = Vec(configs.length, ValidIO(new ExuOutput))
+    })
+
+    for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
+      out.valid := in.fire
+      out.bits := in.bits
+      if (config.hasFastUopOut) {
+        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
+        out.bits.uop := RegNext(in.bits.uop)
+      }
+    }
+
+    override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))
+  }
+
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    Seq(new WritebackSourceParams(configs.map(cfg => Seq(cfg))))
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }

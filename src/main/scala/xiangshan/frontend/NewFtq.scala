@@ -19,12 +19,9 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, PerfBundle, PerfEventsBundle, XSError}
+import utils._
 import xiangshan._
-import scala.tools.nsc.doc.model.Val
-import utils.{ParallelPriorityMux, ParallelPriorityEncoder}
-import xiangshan.backend.{CtrlToFtqIO}
-import firrtl.annotations.MemoryLoadFileType
+import xiangshan.backend.CtrlToFtqIO
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -444,7 +441,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with BPUUtils with HasBPUConst {
+  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -461,11 +458,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   io.bpuInfo := DontCare
 
-  val robFlush = io.fromBackend.robFlush
   val stage2Redirect = io.fromBackend.stage2Redirect
-  val stage3Redirect = io.fromBackend.stage3Redirect
+  val stage3Redirect = RegNext(io.fromBackend.stage2Redirect)
 
-  val stage2Flush = stage2Redirect.valid || robFlush.valid
+  val stage2Flush = stage2Redirect.valid
   val backendFlush = stage2Flush || RegNext(stage2Flush)
   val ifuFlush = Wire(Bool())
 
@@ -473,8 +469,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val allowBpuIn, allowToIfu = WireInit(false.B)
   val flushToIfu = !allowToIfu
-  allowBpuIn := !ifuFlush && !robFlush.valid && !stage2Redirect.valid && !stage3Redirect.valid
-  allowToIfu := !ifuFlush && !robFlush.valid && !stage2Redirect.valid && !stage3Redirect.valid
+  allowBpuIn := !ifuFlush && !stage2Redirect.valid && !stage3Redirect.valid
+  allowToIfu := !ifuFlush && !stage2Redirect.valid && !stage3Redirect.valid
 
   val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
   val validEntries = distanceBetween(bpuPtr, commPtr)
@@ -721,7 +717,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.raddr.init.last := io.fromBackend.stage2Redirect.bits.ftqIdx.value
 
   val stage3CfiInfo = ftq_redirect_sram.io.rdata.init.last
-  val fromBackendRedirect = WireInit(io.fromBackend.stage3Redirect)
+  val fromBackendRedirect = WireInit(stage3Redirect)
   val backendRedirectCfi = fromBackendRedirect.bits.cfiUpdate
   backendRedirectCfi.fromFtqRedirectSram(stage3CfiInfo)
 
@@ -816,7 +812,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** flush ptr and state queue ****************************
   // ***********************************************************************************
 
-  val redirectVec = VecInit(robFlush, stage2Redirect, fromIfuRedirect)
+  val redirectVec = VecInit(stage2Redirect, fromIfuRedirect)
 
   // when redirect, we should reset ptrs and status queues
   when(redirectVec.map(r => r.valid).reduce(_||_)){
@@ -837,7 +833,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   // only the valid bit is actually needed
-  io.toIfu.redirect.bits    := Mux(robFlush.valid, robFlush.bits, stage2Redirect.bits)
+  io.toIfu.redirect.bits    := stage2Redirect.bits
   io.toIfu.redirect.valid   := stage2Flush
 
   // commit
@@ -1199,9 +1195,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(22))
-  })
+
   val perfEvents = Seq(
     ("bpu_s2_redirect        ", bpu_s2_redirect                                                             ),
     ("bpu_s3_redirect        ", bpu_s3_redirect                                                             ),
@@ -1228,8 +1222,5 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ("ftb_false_hit          ", PopCount(ftb_false_hit)                                                     ),
     ("ftb_hit                ", PopCount(ftb_hit)                                                           ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

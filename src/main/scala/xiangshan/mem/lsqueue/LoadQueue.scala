@@ -21,14 +21,10 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem._
-import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.frontend.FtqPtr
 import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache._
+import xiangshan.frontend.FtqPtr
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -79,7 +75,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
-  with HasExceptionNO
+  with HasPerfEvents
 {
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
@@ -635,14 +631,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
     io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
     // If a load needs that cam port, replay it from rs
-    (0 until LoadQueueSize).map(i => {
-      when(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && allocated(i) && writebacked(i)){
-        // Note: if a load has missed in dcache and is waiting for refill in load queue,
-        // its released flag still needs to be set as true if addr matches. 
-        released(i) := true.B
-      }
-    })
   }
+
+  (0 until LoadQueueSize).map(i => {
+    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
+      allocated(i) && 
+      writebacked(i) &&
+      io.release.valid
+    )){
+      // Note: if a load has missed in dcache and is waiting for refill in load queue,
+      // its released flag still needs to be set as true if addr matches. 
+      released(i) := true.B
+    }
+  })
 
   /**
     * Memory mapped IO / other uncached operations
@@ -661,7 +662,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
-      when(RegNext(io.rob.pendingld) && lqTailMmioPending && lqTailAllocated) {
+      when(RegNext(io.rob.pendingld && lqTailMmioPending && lqTailAllocated)) {
         uncacheState := s_req
       }
     }
@@ -761,8 +762,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
     * misc
     */
-  io.rob.storeDataRobWb := DontCare // will be overwriten by store queue's result
-
   // perf counter
   QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
   io.lqFull := !allowEnqueue
@@ -774,25 +773,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(10))
-  })
   val perfEvents = Seq(
-    ("rollback          ", io.rollback.valid                                                               ),
-    ("mmioCycle         ", uncacheState =/= s_idle                                                         ),
-    ("mmio_Cnt          ", io.uncache.req.fire()                                                           ),
-    ("refill            ", io.dcache.valid                                                                 ),
-    ("writeback_success ", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
-    ("writeback_blocked ", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
-    ("ltq_1/4_valid     ", (validCount < (LoadQueueSize.U/4.U))                                            ),
-    ("ltq_2/4_valid     ", (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))    ),
-    ("ltq_3/4_valid     ", (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))),
-    ("ltq_4/4_valid     ", (validCount > (LoadQueueSize.U*3.U/4.U))                                        ),
+    ("rollback         ", io.rollback.valid                                                               ),
+    ("mmioCycle        ", uncacheState =/= s_idle                                                         ),
+    ("mmio_Cnt         ", io.uncache.req.fire()                                                           ),
+    ("refill           ", io.dcache.valid                                                                 ),
+    ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
+    ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
+    ("ltq_1_4_valid    ", (validCount < (LoadQueueSize.U/4.U))                                            ),
+    ("ltq_2_4_valid    ", (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))    ),
+    ("ltq_3_4_valid    ", (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))),
+    ("ltq_4_4_valid    ", (validCount > (LoadQueueSize.U*3.U/4.U))                                        )
   )
+  generatePerfEvent()
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
 

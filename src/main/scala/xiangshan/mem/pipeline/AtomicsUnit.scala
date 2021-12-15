@@ -24,13 +24,14 @@ import xiangshan._
 import xiangshan.cache.{DCacheWordIOWithVaddr, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))
-    val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
+    val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIOWithVaddr
     val dtlb          = new TlbRequestIO
@@ -274,7 +275,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.out.valid := true.B
     io.out.bits.uop := in.uop
     io.out.bits.uop.cf.exceptionVec := exceptionVec
-    io.out.bits.uop.diffTestDebugLrScValid := is_lrsc_valid
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
@@ -301,5 +301,15 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     difftest.io.atomicMask := mask_reg
     difftest.io.atomicFuop := fuop_reg
     difftest.io.atomicOut  := resp_data_wire
+  }
+
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val uop = io.out.bits.uop
+    val difftest = Module(new DifftestLrScEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.valid := io.out.fire &&
+      (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)
+    difftest.io.success := is_lrsc_valid
   }
 }

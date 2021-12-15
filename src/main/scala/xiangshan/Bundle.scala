@@ -223,7 +223,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
-  val diffTestDebugLrScValid = Bool()
   val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
@@ -237,10 +236,14 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
-  def clearExceptions(): MicroOp = {
-    cf.exceptionVec.map(_ := false.B)
-    ctrl.replayInst := false.B
-    ctrl.flushPipe := false.B
+  def clearExceptions(
+    exceptionBits: Seq[Int] = Seq(),
+    flushPipe: Boolean = false,
+    replayInst: Boolean = false
+  ): MicroOp = {
+    cf.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
+    if (!flushPipe) { ctrl.flushPipe := false.B }
+    if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
 }
@@ -453,7 +456,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
-  val ldld_vio_check = Output(Bool())
+  val ldld_vio_check_enable = Output(Bool())
+  val soft_prefetch_enable = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // Decode

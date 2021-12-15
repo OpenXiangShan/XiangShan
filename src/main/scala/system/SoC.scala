@@ -19,19 +19,19 @@ package system
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.DebugModule
-import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4ToTL, AXI4UserYanker}
+import device.{DebugModule, TLPMA, TLPMAIO}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLRegisterNode, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
-import huancun.debug.TLLogger
-import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
-import top.BusPerfMonitor
 import utils.{BinaryArbiter, TLEdgeBuffer}
+import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.tilelink._
+import top.BusPerfMonitor
+import xiangshan.backend.fu.PMAConst
+import huancun._
+import huancun.debug.TLLogger
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -110,10 +110,12 @@ trait HaveSlaveAXI4Port {
 
   error_xbar :=
     TLFIFOFixer() :=
-    TLWidthWidget(16) :=
+    TLWidthWidget(32) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4IdIndexer(1) :=
     l3FrontendAXI4Node
   errorDevice.node := error_xbar
@@ -163,9 +165,12 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4Buffer() :=
+    AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
+    TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
     TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
     mem_xbar
@@ -202,11 +207,15 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
+    AXI4IdIndexer(idBits = 2) :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
+    TLBuffer() :=
     peripheralXbar
 
   val peripheral = InModuleBody {
@@ -218,6 +227,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
 class SoCMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
+  with PMAConst
   with HaveSlaveAXI4Port
 {
   val peripheral_ports = Array.fill(NumCores) { TLTempNode() }
@@ -235,7 +245,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for(port <- peripheral_ports) {
-    peripheralXbar := TLBuffer.chainNode(1, Some("L2_to_L3_peripheral_buffer")) := port
+    peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
@@ -244,7 +254,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
       TLBuffer() :=
       core_out
   }
-  l3_banked_xbar := l3_xbar
+  l3_banked_xbar := TLBuffer() := l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
@@ -277,18 +287,23 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
 
+  val pma = LazyModule(new TLPMA)
+  pma.node := peripheralXbar
+
   lazy val module = new LazyModuleImp(this){
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
+    val cacheable_check = IO(new TLPMAIO)
 
     val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
     val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
     ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs_wire.asBools
+    pma.module.io <> cacheable_check
 
     val freq = 100
     val cnt = RegInit(freq.U)
