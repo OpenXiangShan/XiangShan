@@ -540,7 +540,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   /* false oversize */
   val lastIsRVC = wb_instr_range.asTypeOf(Vec(PredictWidth,Bool())).last  && wb_pd.last.isRVC
   val lastIsRVI = wb_instr_range.asTypeOf(Vec(PredictWidth,Bool()))(PredictWidth - 2) && !wb_pd(PredictWidth - 2).isRVC 
-  val wb_false_oversize = wb_valid &&  wb_ftq_req.oversize && (lastIsRVC || lastIsRVI)
+  val lastTaken = wb_check_result.fixedTaken.last
+  val wb_false_oversize = wb_valid &&  wb_ftq_req.oversize && (lastIsRVC || lastIsRVI) && !lastTaken
   val wb_oversize_target = RegNext(f3_oversize_target)
 
   when(wb_valid){
