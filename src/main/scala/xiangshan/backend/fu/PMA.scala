@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
-import utils.{ParallelPriorityMux, ZeroExt}
+import utils.{ParallelPriorityMux, ZeroExt, ValidHold}
 import xiangshan.cache.mmu.TlbCmd
 
 /* Memory Mapped PMA */
@@ -58,10 +58,16 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
     val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % pmaCfgPerCSR == 0)))
     val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
 //      println(s"tlbpma i:$i notempty:$notempty")
-      RegField.apply(n = PMXLEN, r = RegReadFn((ivalid, oready) =>
-        if (notempty) { (true.B, ivalid, pmaCfgMerged(pmaCfgIndex(i))) }
-        else { (true.B, ivalid, 0.U) }
-      ), w = RegWriteFn((valid, data) => {
+      RegField.apply(n = PMXLEN, r = RegReadFn{(ivalid, oready) =>
+        val r_ready = Wire(Bool())
+        val o_valid = Wire(Bool())
+        val v_reg = ValidHold(r_ready && ivalid, o_valid && oready, false.B)
+        r_ready := !v_reg
+        o_valid := v_reg
+
+        if (notempty) { (r_ready, o_valid, pmaCfgMerged(pmaCfgIndex(i))) }
+        else { (r_ready, o_valid, 0.U) }
+      }, w = RegWriteFn((valid, data) => {
         if (notempty) { when (valid) { pmaCfgMerged(pmaCfgIndex(i)) := write_cfg_vec(mask, addr, i)(data) } }
         true.B
       }), desc = RegFieldDesc(s"MMPMA_config_${i}", s"pma config register #${i}"))
@@ -177,7 +183,7 @@ trait PMAMethod extends PMAConst {
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30050000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).c := true.B
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30010000)

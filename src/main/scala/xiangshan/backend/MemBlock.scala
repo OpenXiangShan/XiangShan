@@ -116,12 +116,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val atomicsUnit = Module(new AtomicsUnit)
 
+  // Atom inst comes from sta / std, then its result 
+  // will be writebacked using load writeback port
+  // 
+  // However, atom exception will be writebacked to rob
+  // using store writeback port
+
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
   val ldOut0 = Wire(Decoupled(new ExuOutput))
   ldOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
   ldOut0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
+  when(atomicsUnit.io.out.valid){
+    ldOut0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
+  }
 
   val ldExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
   io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
@@ -352,6 +361,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).valid := true.B
     stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
+  }
+
+  // atom inst will use store writeback port 0 to writeback exception info
+  when (atomicsUnit.io.out.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := atomicsUnit.io.out.bits
+    assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
   }
 
   // Lsq
