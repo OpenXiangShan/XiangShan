@@ -472,7 +472,7 @@ abstract class Imm(val len: Int) extends Bundle {
 }
 
 case class Imm_I() extends Imm(12) {
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits(len - 1, 0), 32)
 
   override def minBitsFromInstr(instr: UInt): UInt =
     Cat(instr(31, 20))
@@ -493,7 +493,7 @@ case class Imm_B() extends Imm(12) {
 }
 
 case class Imm_U() extends Imm(20){
-  override def do_toImm32(minBits: UInt): UInt = Cat(minBits, 0.U(12.W))
+  override def do_toImm32(minBits: UInt): UInt = Cat(minBits(len - 1, 0), 0.U(12.W))
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(31, 12)
@@ -546,6 +546,17 @@ object ImmUnion {
   println(s"ImmUnion max len: $maxLen")
 }
 
+case class Imm_LUI_LOAD() {
+  def immFromLuiLoad(lui_imm: UInt, load_imm: UInt): UInt = {
+    val loadImm = load_imm(Imm_I().len - 1, 0)
+    Cat(lui_imm(Imm_U().len - loadImm.getWidth - 1, 0), loadImm)
+  }
+  def getLuiImm(uop: MicroOp): UInt = {
+    val loadImmLen = Imm_I().len
+    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.ctrl.imm(ImmUnion.maxLen - 1, loadImmLen))
+    Imm_U().do_toImm32(imm_u)
+  }
+}
 
 /**
  * IO bundle for the Decode unit

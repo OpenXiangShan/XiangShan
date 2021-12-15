@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.{Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
@@ -218,6 +219,26 @@ class Rename(implicit p: Parameters) extends XSModule {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
+
+    // For fused-lui-load, load.src(0) is replaced by the imm.
+    val last_is_lui = io.in(i - 1).bits.ctrl.selImm === SelImm.IMM_U && io.in(i - 1).bits.ctrl.srcType(0) =/= SrcType.pc
+    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu && !LSUOpType.isPrefetch(io.in(i).bits.ctrl.fuOpType)
+    val lui_to_load = io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
+    val fused_lui_load = last_is_lui && this_is_load && lui_to_load
+    when (fused_lui_load) {
+      // The first LOAD operand (base address) is replaced by LUI-imm and stored in {psrc, imm}
+      val lui_imm = io.in(i - 1).bits.ctrl.imm
+      val ld_imm = io.in(i).bits.ctrl.imm
+      io.out(i).bits.ctrl.srcType(0) := SrcType.imm
+      io.out(i).bits.ctrl.imm := Imm_LUI_LOAD().immFromLuiLoad(lui_imm, ld_imm)
+      val psrcWidth = uops(i).psrc.head.getWidth
+      val lui_imm_in_imm = uops(i).ctrl.imm.getWidth - Imm_I().len
+      val left_lui_imm = Imm_U().len - lui_imm_in_imm
+      require(2 * psrcWidth >= left_lui_imm, "cannot fused lui and load with psrc")
+      io.out(i).bits.psrc(0) := lui_imm(lui_imm_in_imm + psrcWidth - 1, lui_imm_in_imm)
+      io.out(i).bits.psrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + psrcWidth)
+    }
+
   }
 
   /**
@@ -298,6 +319,8 @@ class Rename(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
+  val is_fused_lui_load = io.out.map(o => o.fire() && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
+  XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
 
   val intfl_perf     = intFreeList.perfEvents.map(_._1).zip(intFreeList.perfinfo.perfEvents.perf_events)
