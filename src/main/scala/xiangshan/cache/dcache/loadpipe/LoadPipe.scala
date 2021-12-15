@@ -264,7 +264,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
     XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   }
-  resp.bits.error := s2_error
+  resp.bits.error := s2_error && s2_hit
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -283,7 +283,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val ecc_resp = VecInit(io.meta_resp.map(r => getECC(r)))
   val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
   val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_addr)).asUInt)
-  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit) && RegNext(dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit && dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
   io.error.ecc_error.bits := true.B
   io.error.paddr.valid := io.error.ecc_error.valid
   io.error.paddr.bits := s2_addr

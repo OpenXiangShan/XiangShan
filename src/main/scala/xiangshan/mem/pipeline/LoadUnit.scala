@@ -282,7 +282,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
   excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || 
     io.pmpResp.ld ||
-    !io.pmpResp.mmio || io.dcacheResp.bits.error && !io.dcacheResp.bits.miss && io.csrCtrl.cache_error_enable
+    !io.pmpResp.mmio && io.dcacheResp.bits.error && io.csrCtrl.cache_error_enable
   when (s2_is_prefetch) {
     excep := 0.U.asTypeOf(excep.cloneType)
   }
