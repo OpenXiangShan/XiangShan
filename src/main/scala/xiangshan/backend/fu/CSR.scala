@@ -823,7 +823,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall)
+  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
   retTarget := DontCare
   // val illegalEret = TODO
@@ -943,8 +943,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // todo
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr // exception in debug mode (except ebrk) changes cmderr. how ???
+  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit)
+  val ebreakEnterParkLoop = debugMode && hasbreakPoint
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
@@ -1113,6 +1113,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
     difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
     difftest.io.exceptionPC := RegNext(RegNext(RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))))
+    if (env.EnableDifftest) {
+      difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
+    }
   }
 
   // Always instantiate basic difftest modules.
@@ -1138,6 +1141,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.sscratch := sscratch
     difftest.io.mideleg := mideleg
     difftest.io.medeleg := medeleg
+  }
+
+  if(env.AlwaysBasicDiff || env.EnableDifftest) {
+    val difftest = Module(new DifftestDebugMode)
+    difftest.io.clock := clock
+    difftest.io.coreid := csrio.hartId
+    difftest.io.debugMode := debugMode
+    difftest.io.dcsr := dcsr
+    difftest.io.dpc := dpc
+    difftest.io.dscratch0 := dscratch
+    difftest.io.dscratch1 := dscratch1
   }
 }
 
