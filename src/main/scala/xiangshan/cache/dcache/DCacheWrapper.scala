@@ -410,10 +410,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
-  val errors = bankedDataArray.io.errors ++ metaArray.io.errors
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
-  // assert(!io.error.ecc_error.valid)
-
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
@@ -426,6 +422,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wb         = Module(new WritebackQueue(edge))
 
   missQueue.io.hartId := io.hartId
+
+  val errors = bankedDataArray.io.errors ++ ldu.map(_.io.error) ++
+    Seq(mainPipe.io.error)
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
   //----------------------------------------
   // meta array
@@ -555,10 +555,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
-  val mainPipeAtomicReqArb = Module(new Arbiter(new MainPipeReq, 2))
-  mainPipeAtomicReqArb.io.in(0) <> missQueue.io.main_pipe_req
-  mainPipeAtomicReqArb.io.in(1) <> atomicsReplayUnit.io.pipe_req
-  mainPipe.io.atomic_req <> mainPipeAtomicReqArb.io.out
+  arbiter_with_pipereg(
+    in = Seq(missQueue.io.main_pipe_req, atomicsReplayUnit.io.pipe_req),
+    out = mainPipe.io.atomic_req,
+    name = Some("main_pipe_atomic_req")
+  )
 
   mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
 

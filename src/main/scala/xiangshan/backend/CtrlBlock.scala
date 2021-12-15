@@ -304,12 +304,18 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   redirectGen.io.flush := flushRedirect.valid
 
   val frontendFlush = DelayN(flushRedirect, 5)
-  val frontendStage2Redirect = Mux(frontendFlush.valid, frontendFlush, redirectGen.io.stage2Redirect)
+  // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
+  // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
+  // Thus, we make all flush reasons to behave the same as exceptions for frontend.
   for (i <- 0 until CommitWidth) {
-    io.frontend.toFtq.rob_commits(i).valid := RegNext(rob.io.commits.valid(i) && !rob.io.commits.isWalk)
-    io.frontend.toFtq.rob_commits(i).bits := RegNext(rob.io.commits.info(i))
+    val is_commit = rob.io.commits.valid(i) && !rob.io.commits.isWalk && !rob.io.flushOut.valid
+    io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
+    io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
-  io.frontend.toFtq.stage2Redirect := frontendStage2Redirect
+  io.frontend.toFtq.stage2Redirect := Mux(frontendFlush.valid, frontendFlush, redirectGen.io.stage2Redirect)
+  when (frontendFlush.valid) {
+    io.frontend.toFtq.stage2Redirect.bits.level := RedirectLevel.flush
+  }
   val pendingRedirect = RegInit(false.B)
   when (stage2Redirect.valid) {
     pendingRedirect := true.B
@@ -318,7 +324,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.csrCtrl := io.csrCtrl
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
 
   // memory dependency predict
   // when decode, send fold pc to mdp

@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utils._
+import xiangshan.L1CacheErrorInfo
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -136,6 +137,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
     val invalid_resv_set = Input(Bool())
     val update_resv_set = Output(Bool())
+
+    // ecc error
+    val error = Output(new L1CacheErrorInfo())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -144,6 +148,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   val s1_s0_set_conflict, s2_s0_set_conlict, s3_s0_set_conflict = Wire(Bool())
   val set_conflict = s1_s0_set_conflict || s2_s0_set_conlict || s3_s0_set_conflict
+  // check sbuffer store req set_conflict in parallel with req arbiter
+  // it will speed up the generation of store_req.ready, which is in crit. path
+  val s1_s0_set_conflict_store, s2_s0_set_conlict_store, s3_s0_set_conflict_store = Wire(Bool())
+  val store_set_conflict = s1_s0_set_conflict_store || s2_s0_set_conlict_store || s3_s0_set_conflict_store
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
 
   // convert store req to main pipe req, and select a req from store and probe
@@ -158,12 +166,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     in = Seq(
       io.probe_req,
       io.replace_req,
-      store_req,
+      store_req, // Note: store_req.ready is now manually assigned for better timing
       io.atomic_req
     ),
     out = req,
     name = Some("main_pipe_req")
   )
+
+  val store_idx = get_idx(io.store_req.bits.vaddr)
+  // manually assign store_req.ready for better timing
+  // now store_req set conflict check is done in parallel with req arbiter
+  store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
+    !io.probe_req.valid && !io.replace_req.valid
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
@@ -212,10 +226,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   }
   s1_ready := !s1_valid || s1_can_go
   s1_s0_set_conflict := s1_valid && s0_idx === s1_idx
+  s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx
 
   def getMeta(encMeta: UInt): UInt = {
     require(encMeta.getWidth == encMetaBits)
     encMeta(metaBits - 1, 0)
+  }
+  def getECC(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(encMetaBits - 1, metaBits)
   }
 
   val tag_resp = Wire(Vec(nWays, UInt(tagBits.W)))
@@ -223,6 +242,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   tag_resp := Mux(RegNext(s0_fire), io.tag_resp, RegNext(tag_resp))
   ecc_meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(ecc_meta_resp))
   val meta_resp = ecc_meta_resp.map(getMeta(_))
+  val ecc_resp = ecc_meta_resp.map(getECC(_))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
@@ -231,6 +251,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   val s1_hit_tag = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => tag_resp(w))), get_tag(s1_req.addr))
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
+  val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
+  val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_req.addr)).asUInt)
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -272,6 +294,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
 
   s2_s0_set_conlict := s2_valid && s0_idx === s2_idx
+  s2_s0_set_conlict_store := s2_valid && store_idx === s2_idx
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_can_go_to_s3 = (s2_req.replace || s2_req.probe || s2_req.miss || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
@@ -513,6 +536,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   }
   s3_ready := !s3_valid || s3_can_go
   s3_s0_set_conflict := s3_valid && s3_idx === s0_idx
+  s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx
   assert(RegNext(!s3_valid || !(s3_req.isStore && !s3_req.probe) || s3_hit)) // miss store should never come to s3
 
   when(s3_fire) {
@@ -668,6 +692,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.status.s3.valid := s3_valid && !s3_req.replace
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
+
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit && !s1_req.replace) &&
+    RegNext(dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := s2_req.addr
 
   val perfEvents = Seq(
     ("dcache_mp_req          ", s0_fire                                                      ),

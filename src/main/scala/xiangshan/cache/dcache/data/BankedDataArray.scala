@@ -333,7 +333,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // Select final read result
   (0 until LoadPipelineWidth).map(rport_index => {
-    io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && row_error.asUInt.orR()
+    io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && row_error.asUInt.orR() &&
+      !io.bank_conflict_slow(rport_index)
     io.errors(rport_index).ecc_error.bits := true.B
     io.errors(rport_index).paddr.valid := io.errors(rport_index).ecc_error.valid
     io.errors(rport_index).paddr.bits := RegNext(io.read(rport_index).bits.addr)
