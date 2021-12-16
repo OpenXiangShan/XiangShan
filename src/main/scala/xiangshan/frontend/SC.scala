@@ -70,7 +70,6 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2, shouldReset=true, holdRead=true, singlePort=false))
 
-  val phistLen = PathHistoryLength
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
   // }
@@ -187,7 +186,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
             req.valid := io.s0_fire
             req.bits.pc := s0_pc
             req.bits.folded_hist := io.in.bits.folded_hist
-            req.bits.phist := DontCare
             if (!EnableSC) {t.io.update := DontCare}
             t
           }
@@ -269,12 +267,12 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           s2_agree(w) := s2_tageTakens(w) === pred
           s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
-          // io.out.resp.s2.preds.br_taken_mask(w) := pred
+          // io.out.resp.s2.full_pred.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
 
-      io.out.resp.s2.preds.br_taken_mask(w) :=
+      io.out.resp.s2.full_pred.br_taken_mask(w) :=
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
           s2_scPreds(s2_chooseBit), s2_tageTakens(w))
   
@@ -283,7 +281,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       when (updateValids(w) && updateSCMeta.scUsed.asBool) {
         val scPred = updateSCMeta.scPred
         val tagePred = updateSCMeta.tageTaken
-        val taken = update.preds.br_taken_mask(w)
+        val taken = update.full_pred.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs
         val pvdrCtr = updateTageMeta.providerCtr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)

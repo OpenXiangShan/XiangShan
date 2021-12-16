@@ -150,21 +150,21 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.in.bits.resp_in(0).s2.preds.fallThroughAddr
+  val spec_new_addr = io.in.bits.resp_in(0).s2.full_pred.fallThroughAddr
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
   spec_ras.spec_new_addr := spec_new_addr
   val spec_top_addr = spec_ras.top.retAddr
 
   // confirm that the call/ret is the taken cfi
-  spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_call
-  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
+  spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_call
+  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_ret
 
-  val jalr_target = io.out.resp.s2.preds.jalr_target
-  val last_target_in = io.in.bits.resp_in(0).s2.preds.targets.last
-  val last_target_out = io.out.resp.s2.preds.targets.last
-  val is_jalr = io.in.bits.resp_in(0).s2.preds.is_jalr
-  val is_ret = io.in.bits.resp_in(0).s2.preds.is_ret
+  val jalr_target = io.out.resp.s2.full_pred.jalr_target
+  val last_target_in = io.in.bits.resp_in(0).s2.full_pred.targets.last
+  val last_target_out = io.out.resp.s2.full_pred.targets.last
+  val is_jalr = io.in.bits.resp_in(0).s2.full_pred.is_jalr
+  val is_ret = io.in.bits.resp_in(0).s2.full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
   when(is_ret) {
     jalr_target := spec_top_addr
@@ -206,7 +206,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   }
   XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
       spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-  XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.target)
+  XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
   val redirectUpdate = redirect.bits.cfiUpdate
   XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
       do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)

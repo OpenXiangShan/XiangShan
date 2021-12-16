@@ -81,7 +81,6 @@ abstract class ITTageModule(implicit p: Parameters)
 class ITTageReq(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val phist = UInt(PathHistoryLength.W)
 }
 
 class ITTageResp(implicit p: Parameters) extends ITTageBundle {
@@ -93,7 +92,6 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val phist = UInt(PathHistoryLength.W)
   // update tag and ctr
   val valid = Bool()
   val correct = Bool()
@@ -169,7 +167,6 @@ class ITTageTable
   // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 4
-  val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
   require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
   val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
@@ -216,7 +213,6 @@ class ITTageTable
   val s0_pc = io.req.bits.pc
   val s0_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  // val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
   val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   val s0_bank_req_1h = get_bank_mask(s0_idx)
@@ -247,7 +243,6 @@ class ITTageTable
 
 
   // Use fetchpc to compute hash
-  // val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
   val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
   val update_req_bank_1h = get_bank_mask(update_idx)
   val update_idx_in_bank = get_bank_idx(update_idx)
@@ -366,7 +361,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       t.io.req.valid := io.s0_fire
       t.io.req.bits.pc := s0_pc
       t.io.req.bits.folded_hist := io.in.bits.folded_hist
-      t.io.req.bits.phist := io.in.bits.phist
       t
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
@@ -380,7 +374,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val base_table_resp = s1_resps(0)
 
-  val s1_bim = io.in.bits.resp_in(0).s1.preds
+  val s1_bim = io.in.bits.resp_in(0).s1.full_pred
   val s2_bim = RegEnable(s1_bim, enable=io.s1_fire)
 
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
@@ -418,7 +412,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   io.out.resp := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
 
-  val ftb_hit = io.in.bits.resp_in(0).s2.preds.hit
+  val ftb_hit = io.in.bits.resp_in(0).s2.full_pred.hit
   val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry
   val resp_s2 = io.out.resp.s2
 
@@ -427,8 +421,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val update = io.update.bits
   val updateValid =
     update.ftb_entry.isJalr && u_valid && update.ftb_entry.jmpValid &&
-    !(update.real_br_taken_mask().reduce(_||_))
-  val updatePhist = update.phist
+    !(update.full_pred.real_br_taken_mask().reduce(_||_))
   val updateFhist = update.folded_hist
 
   // meta is splited by composer
@@ -498,13 +491,13 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   XSDebug(io.s2_fire, p"hit_taken_jalr:")
   when(s2_tageTaken) {
-    io.out.resp.s2.preds.jalr_target := s2_tageTarget
+    io.out.resp.s2.full_pred.jalr_target := s2_tageTarget
     // FIXME: should use s1 globally
   }
   // this is handled in RAS
-  // val is_jalr = io.in.bits.resp_in(0).s2.preds.is_jalr
-  // val last_target_in = io.in.bits.resp_in(0).s2.preds.targets.last
-  // val last_target_out = io.out.resp.s2.preds.targets.last
+  // val is_jalr = io.in.bits.resp_in(0).s2.full_pred.is_jalr
+  // val last_target_in = io.in.bits.resp_in(0).s2.full_pred.targets.last
+  // val last_target_out = io.out.resp.s2.full_pred.targets.last
   // last_target_out := Mux(is_jalr, jalr_target, last_target_in)
 
   resp_meta.provider.valid    := s2_provided
@@ -533,7 +526,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   resp_meta.allocate.bits  := allocEntry
 
   // Update in loop
-  val updateTaken = updateValid && update.ftb_entry.jmpValid
   val updateRealTarget = update.full_target
   when (updateValid) {
     when (updateMeta.provider.valid) {
@@ -620,8 +612,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   /*
   val fallThruAddr = getFallThroughAddr(s2_pc, ftb_entry.carry, ftb_entry.pftAddr)
   when(ftb_hit) {
-    io.out.resp.s2.preds.target := Mux(resp_s2.preds.is_jalr & ftb_entry.isJalr,
-      resp_s2.preds.target,
+    io.out.resp.s2.full_pred.target := Mux(resp_s2.full_pred.is_jalr & ftb_entry.isJalr,
+      resp_s2.full_pred.target,
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }*/
 
@@ -639,7 +631,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.u := RegNext(updateU(i))
     tables(i).io.update.pc := RegNext(update.pc)
     // use fetch pc instead of instruction pc
-    tables(i).io.update.phist := RegNext(updatePhist)
     tables(i).io.update.folded_hist := RegNext(updateFhist)
   }
 
@@ -703,7 +694,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     //   val m = updateMetas(b)
     //   // val bri = u.metas(b)
     //   XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-    //     b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
+    //     b.U, update.pc, 0.U, updateHist.predHist, update.full_pred.taken_mask(b), update.mispred_mask(b),
     //     0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
     //   )
     // }
@@ -711,7 +702,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b, taken=%b\n",
-      debug_pc_s2, io.out.resp.s2.target, s2_provided, s2_tageTaken)
+      debug_pc_s2, io.out.resp.s2.getTarget, s2_provided, s2_tageTaken)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,
