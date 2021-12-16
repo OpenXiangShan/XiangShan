@@ -310,6 +310,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
   val f3_pAddrs   = RegEnable(next = f2_paddrs, enable = f2_fire)
 
+  val f3_oversize_target = f3_pc.last + 2.U
+
   /*** MMIO State Machine***/
   val f3_mmio_data    = Reg(UInt(maxInstrLen.W))
 
@@ -535,6 +537,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_half_flush = wb_false_lastHalf
   val wb_half_target = wb_false_target
 
+  /* false oversize */
+  val lastIsRVC = wb_instr_range.asTypeOf(Vec(PredictWidth,Bool())).last  && wb_pd.last.isRVC
+  val lastIsRVI = wb_instr_range.asTypeOf(Vec(PredictWidth,Bool()))(PredictWidth - 2) && !wb_pd(PredictWidth - 2).isRVC 
+  val lastTaken = wb_check_result.fixedTaken.last
+  val wb_false_oversize = wb_valid &&  wb_ftq_req.oversize && (lastIsRVC || lastIsRVI) && !lastTaken
+  val wb_oversize_target = RegNext(f3_oversize_target)
+
+  when(wb_valid){
+    assert(!wb_false_oversize || !wb_half_flush, "False oversize and false half should be exclusive. ")
+  }
+
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
   val checkFlushWb = Wire(Valid(new PredecodeWritebackBundle))
@@ -544,11 +557,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)}
   checkFlushWb.bits.ftqIdx            := wb_ftq_req.ftqIdx
   checkFlushWb.bits.ftqOffset         := wb_ftq_req.ftqOffset.bits
-  checkFlushWb.bits.misOffset.valid   := ParallelOR(wb_check_result.fixedMissPred) || wb_half_flush
+  checkFlushWb.bits.misOffset.valid   := ParallelOR(wb_check_result.fixedMissPred) || wb_half_flush || wb_false_oversize
   checkFlushWb.bits.misOffset.bits    := Mux(wb_half_flush, (PredictWidth - 1).U, ParallelPriorityEncoder(wb_check_result.fixedMissPred))
   checkFlushWb.bits.cfiOffset.valid   := ParallelOR(wb_check_result.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits    := ParallelPriorityEncoder(wb_check_result.fixedTaken)
-  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result.fixedTarget(ParallelPriorityEncoder(wb_check_result.fixedMissPred)))
+  checkFlushWb.bits.target            := Mux(wb_false_oversize, wb_oversize_target,
+                                            Mux(wb_half_flush, wb_half_target, wb_check_result.fixedTarget(ParallelPriorityEncoder(wb_check_result.fixedMissPred))))
   checkFlushWb.bits.jalTarget         := wb_check_result.fixedTarget(ParallelPriorityEncoder(VecInit(wb_pd.map{pd => pd.isJal })))
   checkFlushWb.bits.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
 
