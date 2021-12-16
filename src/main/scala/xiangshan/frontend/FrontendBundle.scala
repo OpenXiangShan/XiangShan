@@ -26,14 +26,14 @@ import scala.math._
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr       = UInt(VAddrBits.W)
-  //val fallThruAddr    = UInt(VAddrBits.W)
-  val crossCacheline  = Bool()
   val nextlineStart   = UInt(VAddrBits.W)
-  val fallThruError   = Bool()
+  // val fallThruError   = Bool()
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target          = UInt(VAddrBits.W)
+  val nextStartAddr   = UInt(VAddrBits.W)
   val oversize        = Bool()
+
+  def crossCacheline = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     val ftError = b.fallThroughError()
