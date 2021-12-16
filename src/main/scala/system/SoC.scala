@@ -32,6 +32,7 @@ import huancun.debug.TLLogger
 import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
 import utils.{BinaryArbiter, TLEdgeBuffer}
+import device.lvna._
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -286,6 +287,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
+
+  val controlPlane = LazyModule(new ControlPlane(8)(p))
+  controlPlane.tlNode := peripheralXbar
 
   lazy val module = new LazyModuleImp(this){
 
