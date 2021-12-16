@@ -167,9 +167,9 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
 
 //  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
 //  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.getHitBackend || trigger.frontendException
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.hit
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.getHitBackend || trigger.frontendException
+  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.hit
 }
 
 class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -459,13 +459,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
-    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.getHitFrontend || exceptionDataRead.bits.trigger.getHitBackend)
+    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
-  XSDebug(deqHasException && exceptionDataRead.bits.trigger.frontendException, "Debug Mode: Deq has frontend trigger exception\n")
+  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitFrontend, "Debug Mode: Deq has frontend trigger exception\n")
   XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitBackend, "Debug Mode: Deq has backend trigger exception\n")
 
   val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)

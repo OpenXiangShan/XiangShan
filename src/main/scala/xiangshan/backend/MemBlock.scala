@@ -267,24 +267,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
       loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
-      hit(j) := loadUnits(i).io.trigger(j).addrHit // TODO .&& the select bit Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
+      hit(j) := loadUnits(i).io.trigger(j).addrHit && tdata(j).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
       io.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
-      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
+//      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
       //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
     }
     when(tdata(2).chain) {
       io.writeback(i).bits.uop.cf.trigger.backendHit(2) := hit(0) && hit(1)
       io.writeback(i).bits.uop.cf.trigger.backendHit(3) := hit(0) && hit(1)
     }
-    when(io.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
-      io.writeback(i).bits.uop.cf.trigger.backendHit(5) := Mux(io.writeback(i).bits.uop.cf.trigger.backendConsiderTiming(1),
-      tdata(5).timing === io.writeback(i).bits.uop.cf.trigger.backendChainTiming(1), true.B) && hit(2)
-    } .otherwise{
+    when(!io.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
       io.writeback(i).bits.uop.cf.trigger.backendHit(5) := false.B
     }
+
     XSDebug(io.writeback(i).bits.uop.cf.trigger.getHitBackend && io.writeback(i).valid, p"Debug Mode: Load Inst No.${i}" +
-    p"has trigger hit vec ${io.writeback(i).bits.uop.cf.trigger.backendHit}" +
-    p"with timing ${io.writeback(i).bits.uop.cf.trigger.backendTiming}\n")
+    p"has trigger hit vec ${io.writeback(i).bits.uop.cf.trigger.backendHit}\n")
 
   }
 
@@ -329,16 +326,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
        when(!tdata(sTriggerMapping(j)).select) {
          hit(j) := TriggerCmp(stOut(i).bits.data, tdata(sTriggerMapping(j)).tdata2, tdata(sTriggerMapping(j)).matchType, tEnable(sTriggerMapping(j)))
          stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
-         stOut(i).bits.uop.cf.trigger.backendTiming(sTriggerMapping(j)) := tdata(sTriggerMapping(j)).timing
+//         stOut(i).bits.uop.cf.trigger.backendTiming(sTriggerMapping(j)) := tdata(sTriggerMapping(j)).timing
 //          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
        } .otherwise {
          hit := VecInit(Seq.fill(3)(false.B))
        }
 
-       when(stOut(i).bits.uop.cf.trigger.backendEn(0)) {
-         stOut(i).bits.uop.cf.trigger.backendHit(4) := Mux(stOut(i).bits.uop.cf.trigger.backendConsiderTiming(0),
-           tdata(4).timing === io.writeback(i).bits.uop.cf.trigger.backendChainTiming(0), true.B) && hit(2)
-       } .otherwise{
+       when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
          stOut(i).bits.uop.cf.trigger.backendHit(4) := false.B
        }
      }

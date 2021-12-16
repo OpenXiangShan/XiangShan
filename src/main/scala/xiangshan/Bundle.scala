@@ -466,6 +466,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 
+  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   val trigger_enable = Output(Vec(10, Bool()))
@@ -528,32 +529,21 @@ xret csr to pc + 4/ + 2
 class TriggerCf(implicit p: Parameters) extends XSBundle {
   // frontend
   val frontendHit = Vec(4, Bool())
-  val frontendTiming = Vec(4, Bool())
+//  val frontendTiming = Vec(4, Bool())
+//  val frontendHitNext = Vec(4, Bool())
 
-  val frontendHitNext = Vec(4, Bool())
-
-  val frontendException = Bool()
+//  val frontendException = Bool()
   // backend
   val backendEn = Vec(2, Bool()) // Hit(6) && chain(4) , Hit(8) && chain(4)
-  val backendConsiderTiming = Vec(2, Bool())
-  val backendChainTiming = Vec(2, Bool())
   val backendHit = Vec(6, Bool())
-  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
+//  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
 
   // Two situations not allowed:
   // 1. load data comparison
   // 2. store chaining with store
-
-  def frontendChain = Seq(false.B, false.B) ++ backendChainTiming
-  def getTimingFrontend = (frontendHit.zip(frontendTiming).zip(frontendChain).map {
-    case ((h, t), c) => Mux(h, t, true.B) && !c
-  }).reduce(_ && _) // unless all 1 the timing is one
   def getHitFrontend = frontendHit.reduce(_ || _)
-
-  def getTimingBackend = (backendHit.zip(backendTiming).map {
-    case (h, t) => Mux(h, t, true.B)
-  }).reduce(_ && _)
   def getHitBackend = backendHit.reduce(_ || _)
+  def hit = getHitFrontend || getHitBackend
 }
 
 // these 3 bundles help distribute trigger control signals from CSR

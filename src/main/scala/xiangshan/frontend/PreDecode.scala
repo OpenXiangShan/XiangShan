@@ -183,17 +183,13 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pd(i).isRet         := isRet
     io.out.pc(i)               := currentPC
     io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U)&& !pageFault(0) && pageFault(1) && !currentIsRVC
-//    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
-//    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
-//    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
-//    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
+
     val triggerHitVec = Wire(Vec(4, Bool()))
     for (j <- 0 until 4) {
       val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
       triggerHitVec(j) := hit
 //      io.out.triggered(i).frontendHit(triggerMapping(j)) := hit
-      io.out.triggered(i).frontendTiming(j) := tdata(j).timing
     }
     // fix chains this could be moved further into the pipeline
     io.out.triggered(i).frontendHit := triggerHitVec
@@ -204,11 +200,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     }
     for(j <- 0 until 2) {
       io.out.triggered(i).backendEn(j) := Mux(tdata(j+2).chain, triggerHitVec(j+2), true.B)
-      io.out.triggered(i).backendConsiderTiming(j) := tdata(j+2).chain
-      io.out.triggered(i).backendChainTiming(j) := tdata(j+2).timing
+      io.out.triggered(i).frontendHit(j+2) := !(tdata(j+2).chain && triggerHitVec(j+2)) // temporary workaround
     }
     XSDebug(io.out.triggered(i).getHitFrontend, p"Debug Mode: Predecode Inst No. ${i} has trigger hit vec ${io.out.triggered(i).frontendHit}" +
-      p"with timing ${io.out.triggered(i).frontendTiming} and backend ${io.out.triggered(i).backendEn} + ${io.out.triggered(i).backendConsiderTiming}\n")
+      p"and backend en ${io.out.triggered(i).backendEn}\n")
 
     io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i)
     io.out.accessFault(i)      := hasAccessFault
