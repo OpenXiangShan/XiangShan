@@ -222,7 +222,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // For fused-lui-load, load.src(0) is replaced by the imm.
     val last_is_lui = io.in(i - 1).bits.ctrl.selImm === SelImm.IMM_U && io.in(i - 1).bits.ctrl.srcType(0) =/= SrcType.pc
     val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu && !LSUOpType.isPrefetch(io.in(i).bits.ctrl.fuOpType)
-    val lui_to_load = io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
+    val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
     val fused_lui_load = last_is_lui && this_is_load && lui_to_load
     when (fused_lui_load) {
       // The first LOAD operand (base address) is replaced by LUI-imm and stored in {psrc, imm}
