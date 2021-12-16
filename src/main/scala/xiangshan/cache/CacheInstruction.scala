@@ -180,7 +180,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   update_cache_req_when_write("CACHE_BANK_NUM", translated_cache_req.bank_num)
   update_cache_req_when_write("CACHE_TAG_HIGH", translated_cache_req.write_tag_high)
   update_cache_req_when_write("CACHE_TAG_LOW", translated_cache_req.write_tag_low)
-  update_cache_req_when_write("CACHE_DATA_ECC", translated_cache_req.write_tag_ecc)
+  update_cache_req_when_write("CACHE_TAG_ECC", translated_cache_req.write_tag_ecc)
   update_cache_req_when_write("CACHE_DATA_0", translated_cache_req.write_data_vec(0))
   update_cache_req_when_write("CACHE_DATA_1", translated_cache_req.write_data_vec(1))
   update_cache_req_when_write("CACHE_DATA_2", translated_cache_req.write_data_vec(2))
@@ -239,13 +239,13 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   when(schedule_csr_op_resp_data){
     io.csr.update.w.bits.addr := Mux1H(List(
       isReadTagECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_TAG_ECC")("offset").toInt + Scachebase).U,
-      isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_BANK_NUM")("offset").toInt + Scachebase).U,
+      isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_DATA_ECC")("offset").toInt + Scachebase).U,
       isReadTag -> ((CacheInstrucion.CacheInsRegisterList("CACHE_TAG_LOW")("offset").toInt + Scachebase).U + data_transfer_cnt),
       isReadData -> ((CacheInstrucion.CacheInsRegisterList("CACHE_DATA_0")("offset").toInt + Scachebase).U + data_transfer_cnt), 
     ))
     io.csr.update.w.bits.data := Mux1H(List(
       isReadTagECC -> raw_cache_resp.read_tag_ecc,
-      isReadDataECC -> raw_cache_resp.read_tag_ecc,
+      isReadDataECC -> raw_cache_resp.read_data_ecc,
       isReadTag -> raw_cache_resp.read_tag_low,
       isReadData -> raw_cache_resp.read_data_vec(data_transfer_cnt),
     ))
