@@ -153,16 +153,24 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val pmpResp = Flipped(new PMPRespBundle)
+    val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
   })
+  val pmp = WireInit(io.pmpResp)
+  when (io.static_pm.valid) {
+    pmp.ld := false.B
+    pmp.st := false.B
+    pmp.instr := false.B
+    pmp.mmio := io.static_pm.bits
+  }
 
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
-  val is_mmio = io.in.bits.mmio || io.pmpResp.mmio
+  val is_mmio = io.in.bits.mmio || pmp.mmio
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
-  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.st
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
   io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
 
@@ -221,6 +229,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
+  store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   io.lsq_replenish := store_s2.io.out.bits // mmio and exception
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
