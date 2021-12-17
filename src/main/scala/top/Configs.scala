@@ -224,6 +224,7 @@ class WithNKBL2
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
         enablePerf = true,
+        sramDepthDiv = 2,
         tagECC = Some("secded"),
         dataECC = Some("secded")
       )),
@@ -256,6 +257,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           numCores = tiles.size
         )),
         sramClkDivBy2 = true,
+        sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded")
       ))
@@ -289,7 +291,7 @@ class MediumConfig(n: Int = 1) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(8 * 1024, inclusive = false, banks = 4, ways = 8)
+  new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
