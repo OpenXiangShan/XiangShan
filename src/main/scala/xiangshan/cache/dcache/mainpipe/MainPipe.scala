@@ -467,7 +467,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       )
     )
   )
-  val update_data = banked_wmask.asUInt.orR
+  val update_data = s3_req.miss || s3_store_hit || s3_can_do_amo_write
+  assert(!(banked_wmask.orR && !update_data))
 
   // generate write data
   // AMO hits
@@ -528,6 +529,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_replace_nothing = s3_req.replace && s3_coh.state === ClientStates.Nothing
   val s3_replace_can_go = s3_req.replace && (s3_replace_nothing || io.wb.ready)
   val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go
+  val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
   when (s2_fire_to_s3) {
     s3_valid := true.B
@@ -635,7 +637,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_write.bits.way_en := s3_way_en
   io.tag_write.bits.tag := get_tag(s3_req.addr)
 
-  io.data_write.valid := s3_fire && update_data
+  io.data_write.valid := s3_valid && s3_update_data_cango && update_data
   io.data_write.bits.way_en := s3_way_en
   io.data_write.bits.addr := s3_req.vaddr
   io.data_write.bits.wmask := banked_wmask
