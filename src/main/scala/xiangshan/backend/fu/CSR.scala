@@ -919,7 +919,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.uop.cf.pc, intrNO)
+  val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
   val raiseDebugIntr = intrNO === IRQ_DEBUG.U && raiseIntr
 
   // exceptions
@@ -947,11 +951,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val ebreakEnterParkLoop = debugMode && hasbreakPoint
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+    dexceptionPC, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    csrio.exception.bits.uop.cf.pc,
+    dexceptionPC,
     mstatus,
     mideleg,
     medeleg,
@@ -977,7 +981,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       RegNext(Mux(
         csrio.exception.bits.uop.cf.crossPageIPFFix,
         SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        iexceptionPC
       )),
       memExceptionAddr
     ))
@@ -1027,7 +1031,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (raiseDebugIntr) {
         debugModeNew := true.B
         mstatusNew.mprv := false.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := 1.U
         dcsrNew.prv := priviledgeMode
         priviledgeMode := ModeM
@@ -1035,7 +1039,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := Mux(hasbreakPoint, 3.U, 0.U)
         dcsrNew.prv := priviledgeMode // TODO
         priviledgeMode := ModeM
@@ -1045,7 +1049,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       debugIntrEnable := false.B
     }.elsewhen (delegS) {
       scause := causeNO
-      sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -1053,7 +1057,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
@@ -1112,7 +1116,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.coreid := csrio.hartId
     difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
     difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
-    difftest.io.exceptionPC := RegNext(RegNext(RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))))
+    difftest.io.exceptionPC := RegNext(RegNext(RegNext(dexceptionPC)))
     if (env.EnableDifftest) {
       difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
     }
