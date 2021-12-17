@@ -115,8 +115,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val meta_write = DecoupledIO(new MetaWriteReq)
-    val error_resp = Input(Vec(nWays, Bool()))
-    val error_write = DecoupledIO(new ErrorWriteReq)
+    val error_flag_resp = Input(Vec(nWays, Bool()))
+    val error_flag_write = DecoupledIO(new ErrorWriteReq)
 
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(tagBits.W)))
@@ -255,7 +255,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
   val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
   val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_req.addr)).asUInt)
-  val s1_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_resp(w))), false.B)
+  val s1_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_flag_resp(w))), false.B)
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -638,10 +638,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.meta_write.bits.tag := get_tag(s3_req.addr)
   io.meta_write.bits.meta.coh := new_coh
 
-  io.error_write.valid := s3_fire && update_meta
-  io.error_write.bits.idx := s3_idx
-  io.error_write.bits.way_en := s3_way_en
-  io.error_write.bits.error := s3_error
+  io.error_flag_write.valid := s3_fire && update_meta
+  io.error_flag_write.bits.idx := s3_idx
+  io.error_flag_write.bits.way_en := s3_way_en
+  io.error_flag_write.bits.error := s3_error
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx

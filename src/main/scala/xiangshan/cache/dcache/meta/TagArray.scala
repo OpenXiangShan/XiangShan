@@ -113,7 +113,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(tagBits.W))))
     val write = Flipped(DecoupledIO(new TagWriteReq))
     // customized cache op port
-    val cacheOp = Flipped(new DCacheInnerOpIO)
+    val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }

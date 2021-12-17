@@ -426,8 +426,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.hartId := io.hartId
 
-  val errors = bankedDataArray.io.errors ++ ldu.map(_.io.error) ++
-    Seq(mainPipe.io.error)
+  val errors = bankedDataArray.io.errors ++ // data ecc error
+    ldu.map(_.io.tag_error) ++ // load tag ecc error
+    Seq(mainPipe.io.error) // store / misc tag ecc error 
   io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
   //----------------------------------------
@@ -444,15 +445,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
-  val error_resp_ports = ldu.map(_.io.error_resp) ++
-    Seq(mainPipe.io.error_resp)
-  val error_write_ports = Seq(
-    mainPipe.io.error_write,
-    refillPipe.io.error_write
+  val error_flag_resp_ports = ldu.map(_.io.error_flag_resp) ++
+    Seq(mainPipe.io.error_flag_resp)
+  val error_flag_write_ports = Seq(
+    mainPipe.io.error_flag_write,
+    refillPipe.io.error_flag_write
   )
   meta_read_ports.zip(errorArray.io.read).foreach { case (p, r) => r <> p }
-  error_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => p := r }
-  error_write_ports.zip(errorArray.io.write).foreach { case (p, w) => w <> p }
+  error_flag_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => p := r }
+  error_flag_write_ports.zip(errorArray.io.write).foreach { case (p, w) => w <> p }
 
   //----------------------------------------
   // tag array
@@ -674,6 +675,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
     tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
   ))
+  cacheOpDecoder.io.error := io.error
   assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------

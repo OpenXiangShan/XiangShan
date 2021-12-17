@@ -81,7 +81,7 @@ class AsynchronousECCArray(readPorts: Int, writePorts: Int)(implicit p: Paramete
     val read = Vec(readPorts, Flipped(ValidIO(new ECCReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encBits.W))))
     val write = Vec(writePorts, Flipped(ValidIO(new ECCWriteReq)))
-    val cacheOp = Flipped(new DCacheInnerOpIO)
+    val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
   val ecc_array = Reg(Vec(nSets, Vec(nWays, UInt(encBits.W))))
@@ -138,8 +138,8 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encMetaBits.W))))
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
-    // customized cache op port
-    val cacheOp = Flipped(new DCacheInnerOpIO)
+    // customized cache op port 
+    val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
   val meta_array = Reg(Vec(nSets, Vec(nWays, new Meta)))
@@ -183,7 +183,7 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
     val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
     val write = Vec(writePorts, Flipped(DecoupledIO(new ErrorWriteReq)))
     // customized cache op port 
-    // val cacheOp = Flipped(new DCacheInnerOpIO)
+    // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
   val meta_array = Reg(Vec(nSets, Vec(nWays, Bool())))

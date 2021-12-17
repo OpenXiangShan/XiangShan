@@ -47,7 +47,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
 
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val meta_write = DecoupledIO(new MetaWriteReq)
-    val error_write = DecoupledIO(new ErrorWriteReq)
+    val error_flag_write = DecoupledIO(new ErrorWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
     val store_resp = ValidIO(new DCacheLineResp)
     val release_wakeup = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
@@ -81,10 +81,10 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.meta_write.bits.meta := refill_w_req.meta
   io.meta_write.bits.tag := tag
 
-  io.error_write.valid := refill_w_valid
-  io.error_write.bits.idx := idx
-  io.error_write.bits.way_en := refill_w_req.way_en
-  io.error_write.bits.error := refill_w_req.error
+  io.error_flag_write.valid := refill_w_valid
+  io.error_flag_write.bits.idx := idx
+  io.error_flag_write.bits.way_en := refill_w_req.way_en
+  io.error_flag_write.bits.error := refill_w_req.error
 
   io.tag_write.valid := refill_w_valid
   io.tag_write.bits.idx := idx
