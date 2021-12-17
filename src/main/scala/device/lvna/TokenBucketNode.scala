@@ -30,6 +30,7 @@ class TokenBucketNodeImp(outer: TokenBucketNode) extends LazyModuleImp(outer) {
 
   out.a.valid := in.a.valid && (phy || bucketIO.enable)
   in.a.ready := out.a.ready && (phy || bucketIO.enable)
+  val DEBUG_TB_FETCH = false
   if (DEBUG_TB_FETCH) {
     when(in.a.valid && !out.a.valid) {
       printf(p"request blocked by token bucket: 0x${Hexadecimal(in.a.bits.address)}\n")

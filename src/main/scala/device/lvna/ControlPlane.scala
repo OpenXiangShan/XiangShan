@@ -6,11 +6,12 @@ import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, SimpleDevice}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.TLRegisterNode
-import freechips.rocketchip.util.{AsyncQueue, GTimer}
+import freechips.rocketchip.util.{AsyncQueue}
 import freechips.rocketchip.devices.debug.DMI_RegAddrs._
 import freechips.rocketchip.devices.debug.RWNotify
 import freechips.rocketchip.regmapper.{RegField, RegReadFn, RegWriteFn}
-import utils.{HasTLDump, XSDebug}
+import chisel3.util._
+import utils._
 
 object log2Safe {
   def apply(n: BigInt): Int = {
@@ -22,10 +23,15 @@ object log2Safe {
 }
 
 case object ProcDSidWidth extends Field[Int](3)
+case object NumCores extends Field[Int](2)
+case object NL2CacheCapacity extends Field[Int](1024)
+case object NL2CacheWays extends Field[Int](16)
+
 
 trait HasControlPlaneParameters {
   implicit val p: Parameters
-  val nTiles = p(NumCores)
+  // val nTiles = p(NumCores)
+  val nTiles = 2
   // val ldomDSidWidth = log2Up(nTiles)
   val ldomDSidWidth = 3
   val procDSidWidth = p(ProcDSidWidth)
@@ -33,64 +39,151 @@ trait HasControlPlaneParameters {
   val nDSID = 1 << dsidWidth
   val cycle_counter_width = 64
   val cacheCapacityWidth = log2Safe(p(NL2CacheCapacity) * 1024 / 64) + 1
+
+  /* Access current dsid */
+  def CP_HART_DSID = 0x41
+
+  /* Access dsid selector */
+  def CP_HART_SEL = 0x42
+
+  /* Read total dsid count */
+  def CP_DSID_COUNT = 0x43
+
+  /* Access mem base with current dsid */
+  def CP_MEM_BASE_LO = 0x44
+
+  def CP_MEM_BASE_HI = 0x45
+
+  /* Access mem mask with current dsid */
+  def CP_MEM_MASK_LO = 0x46
+
+  def CP_MEM_MASK_HI = 0x47
+
+  def CP_BUCKET_FREQ = 0x48
+
+  def CP_BUCKET_SIZE = 0x49
+
+  def CP_BUCKET_INC = 0x4a
+
+  def CP_TRAFFIC = 0x4b
+
+  def CP_WAYMASK = 0x4c
+
+  def CP_L2_CAPACITY = 0x4d
+
+  def CP_DSID_SEL = 0x4e
+
+  def CP_LIMIT_INDEX = 0x4f
+
+  def CP_LIMIT = 0x50
+
+  def CP_LOW_THRESHOLD = 0x51
+
+  def CP_HIGH_THRESHOLD = 0x52
+
+  def CP_MAX_QUOTA = 0x53
+
+  def CP_MIN_QUOTA = 0x54
+
+  def CP_QUOTA_STEP = 0x55
+
+  def CP_TIMER_LO = 0x56
+
+  def CP_TIMER_HI = 0x57
+
+  def CORE_PC_HI    = 0x70
+
+  def CORE_PC_LO    = 0x71
+
+  def CORE_PC_SNAP  = 0x72
+
+  def CORE_PC_READ_DONE  = 0x73
+
+  def CORE_PC_READ  = 0x74
+
+  def CORE_INT_DEBUG = 0x75
+
+  def CORE_N_INT_DEBUG = 0x76
+
+  def CORE_N_INT_DEBUG_LOCAL = 0x77
+
+  def CORE_CSR_INT_VALID = 0x78
+
+  def CORE_CSR_PENDING_INT_LO = 0x79
+
+  def CORE_CSR_PENDING_INT_HI = 0x7a
+
+
+  def CP_HART_ID = 0x7b
+
+  /* L2 Miss */
+  def CP_L2_REQ_MISS = 0x7c
+
+  def CP_L2_REQ_TOTAL = 0x7d
+
+  def CP_L2_STAT_RESET = 0x7e
+
+  def CP_L2_REQ_EN = 0x7f
 }
 
 /**
  * From ControlPlane's side of view.
  */
 class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters {
-  private val indexWidth = 64
+  private val indexWidth = 32
 
-  val updateData   = Input(UInt(32.w))
-  val traffic      = Output(UInt(32.w))
-  val cycle        = Output(UInt(cycle_counter_width.w))
-  val capacity     = Output(UInt(cacheCapacityWidth.w))
-  val hartDsid     = Output(UInt(ldomDSidWidth.w))
+  val updateData   = Input(UInt(32.W))
+  val traffic      = Output(UInt(32.W))
+  val cycle        = Output(UInt(cycle_counter_width.W))
+  val capacity     = Output(UInt(cacheCapacityWidth.W))
+  val hartDsid     = Output(UInt(ldomDSidWidth.W))
   val hartDsidWen  = Input(Bool())
-  val memBase      = Output(UInt(64.w))
-  val memBaseWen = Input(Bool())
-  val memMask      = Output(UInt(64.w))
-  val memMaskWen = Input(Bool())
-  val bucket       = new BucketBundle().asOutput
+  val memBase      = Output(UInt(64.W))
+  val memBaseLoWen = Input(Bool())
+  val memBaseHiWen = Input(Bool())
+  val memMask      = Output(UInt(64.W))
+  val memMaskLoWen = Input(Bool())
+  val memMaskHiWen = Input(Bool())
+  val bucket       = Output(new BucketBundle())
   val bktFreqWen   = Input(Bool())
   val bktSizeWen   = Input(Bool())
   val bktIncWen    = Input(Bool())
-  val waymask      = Output(UInt(p(NL2CacheWays).w))
+  val waymask      = Output(UInt(p(NL2CacheWays).W))
   val waymaskWen   = Input(Bool())
-  val hartSel      = Output(UInt(indexWidth.w))
+  val hartSel      = Output(UInt(indexWidth.W))
   val hartSelWen   = Input(Bool())
-  val dsidSel      = Output(UInt(dsidWidth.w))
+  val dsidSel      = Output(UInt(dsidWidth.W))
   val dsidSelWen   = Input(Bool())
-  val progHartId   = Output(UInt(log2Safe(nTiles).w))
+  val progHartId   = Output(UInt(log2Safe(nTiles).W))
   val progHartIdWen = Input(Bool())
 
-  val limitIndex        = Output(UInt(4.w))
+  val limitIndex        = Output(UInt(4.W))
   val limitIndexWen     = Input(Bool())
-  val limit             = Output(UInt(16.w))
+  val limit             = Output(UInt(16.W))
   val limitWen          = Input(Bool())
-  val lowThreshold      = Output(UInt(8.w))
+  val lowThreshold      = Output(UInt(8.W))
   val lowThresholdWen   = Input(Bool())
-  val highThreshold     = Output(UInt(8.w))
+  val highThreshold     = Output(UInt(8.W))
   val highThresholdWen  = Input(Bool())
 
-  val maxQuota      = Output(UInt(8.w))
+  val maxQuota      = Output(UInt(8.W))
   val maxQuotaWen   = Input(Bool())
-  val minQuota      = Output(UInt(8.w))
+  val minQuota      = Output(UInt(8.W))
   val minQuotaWen   = Input(Bool())
-  val quotaStep     = Output(UInt(8.w))
+  val quotaStep     = Output(UInt(8.W))
   val quotaStepWen  = Input(Bool())
 
   val readPC              = Input(Bool())
   val doneReadPC          = Input(Bool())
   val autoPCSnapShotWen   = Input(Bool())
   val autoPCSnapShotEn    = Output(Bool())
-  val PC                  = Output(UInt(64.w))
+  val PC                  = Output(UInt(64.W))
 
   val assertDebugInt      = Input(Bool())
 
   val l2_miss_en        = Input(Bool())
-  val l2_req_miss       = Output(UInt(32.w))
-  val l2_req_total      = Output(UInt(32.w))
+  val l2_req_miss       = Output(UInt(32.W))
+  val l2_req_total      = Output(UInt(32.W))
   val l2_stat_reset_wen = Input(Bool())
 }
 
@@ -120,54 +213,6 @@ class BucketIO(implicit val p: Parameters) extends Bundle with HasControlPlanePa
   val enable = Output(Bool())
 }
 
-trait HasTokenBucketPlane extends HasControlPlaneParameters with HasTokenBucketParameters {
-  private val bucket_debug = false
-
-  val bucketParams = RegInit(Vec(Seq.fill(nDSID){
-    Cat(128.U(tokenBucketSizeWidth.W), 128.U(tokenBucketFreqWidth.W), 128.U(tokenBucketSizeWidth.W)).asTypeOf(new BucketBundle)
-  }))
-
-  val bucketState = RegInit(Vec(Seq.fill(nDSID){
-    Cat(0.U(tokenBucketSizeWidth.W), 0.U(tokenBucketSizeWidth.W), 0.U(32.W), true.B).asTypeOf(new BucketState)
-  }))
-
-  val bucketIO = IO(Vec(nTiles, new BucketIO()))
-
-  val timer = RegInit(0.U(cycle_counter_width.W))
-  timer := Mux(timer === (~0.U(timer.getWidth.W)).asUInt, 0.U, timer + 1.U)
-
-  bucketState.zipWithIndex.foreach { case (state, i) =>
-    state.counter := Mux(state.counter >= bucketParams(i).freq, 0.U, state.counter + 1.U)
-    val req_sizes = bucketIO.map{bio => Mux(bio.dsid === i.U && bio.fire, bio.size, 0.U) }
-    val req_all = req_sizes.reduce(_ + _)
-    val updating = state.counter >= bucketParams(i).freq
-    val inc_size = Mux(updating, bucketParams(i).inc.asSInt(), 0.S)
-    val enable_next = state.nToken + inc_size > req_all.asSInt
-    val calc_next = state.nToken + inc_size - req_all.asSInt
-    val limit_next = Mux(calc_next < bucketParams(i).size.asSInt, calc_next, bucketParams(i).size.asSInt)
-
-    val has_requester = bucketIO.map{bio => bio.dsid === i.U && bio.fire}.reduce(_ || _)
-    when (has_requester) {
-      state.traffic := state.traffic + req_all.asUInt
-    }
-
-    when (has_requester || updating) {
-//      state.nToken := Mux(enable_next, limit_next, 0.U)
-      state.nToken := limit_next
-      state.enable := enable_next || (bucketParams(i).freq === 0.U)
-    }
-
-    if (bucket_debug && i <= 1) {
-      printf(s"cycle: %d bucket %d req_all %d tokens %d inc %d enable_next %b counter %d traffic %d\n",
-        GTimer(), i.U(dsidWidth.W), req_all, state.nToken, inc_size, enable_next, state.counter, state.traffic)
-    }
-  }
-
-  bucketIO.foreach { bio =>
-    bio.enable := bucketState(bio.dsid).enable
-  }
-}
-
 class CPToCore(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters
 {
   val hartDsid = UInt(ldomDSidWidth.W)
@@ -180,9 +225,10 @@ class ControlPlane(tlBeatBytes: Int)(implicit p: Parameters) extends LazyModule
 with HasControlPlaneParameters
 with HasTokenBucketParameters
 {
-  private val memAddrWidth = p(XLen)
-  private val instAddrWidth = p(XLen)
-  private val totalBW = if (p(UseEmu)) 55*8 else 20*8
+  private val memAddrWidth = 64
+  private val instAddrWidth = 64
+  // private val totalBW = if (p(UseEmu)) 55*8 else 20*8
+  private val totalBW = 20*8
 
 
   val tlNode = TLRegisterNode(
@@ -192,33 +238,33 @@ with HasTokenBucketParameters
   )
 
 
-  override lazy val module = new LazyModuleImp(this) with HasTokenBucketPlane {
+  override lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val hartDsids = Vec(nTiles, UInt(ldomDSidWidth.W)).asOutput
-      val memBases  = Vec(nTiles, UInt(memAddrWidth.W)).asOutput
-      val memMasks  = Vec(nTiles, UInt(memAddrWidth.W)).asOutput
-      val pc        = Vec(nTiles, UInt(instAddrWidth.W)).asInput
+      val hartDsids = Vec(nTiles, Output(UInt(ldomDSidWidth.W)))
+      val memBases  = Vec(nTiles, Output(UInt(memAddrWidth.W)))
+      val memMasks  = Vec(nTiles, Output(UInt(memAddrWidth.W)))
+      val pc        = Vec(nTiles, Input(UInt(instAddrWidth.W)))
       val l2        = new CPToL2CacheIO()
       val cp        = new ControlPlaneIO()
-      val mem_part_en = Bool().asInput
-      val distinct_hart_dsid_en = Bool().asInput
-      val progHartIds = Vec(nTiles, UInt(log2Safe(nTiles).W)).asOutput
+      val mem_part_en = Input(Bool())
+      val distinct_hart_dsid_en = Input(Bool())
+      val progHartIds = Vec(nTiles, Output(UInt(log2Safe(nTiles).W)))
     })
 
     val hartSel   = RegInit(0.U(ldomDSidWidth.W))
-    val hartDsids = RegInit(Vec(Seq.tabulate(nTiles){ i =>
+    val hartDsids = RegInit(VecInit(Seq.tabulate(nTiles){ i =>
       Mux(io.distinct_hart_dsid_en, i.U(ldomDSidWidth.W), 0.U(ldomDSidWidth.W))
     }))
-    val memBases  = RegInit(Vec(Seq.tabulate(nTiles){ i =>
+    val memBases  = RegInit(VecInit(Seq.tabulate(nTiles){ i =>
       val memSize: BigInt = p(ExtMem).map { m => m.master.size }.getOrElse(0x80000000)
       Mux(io.mem_part_en, (i * memSize / nTiles).U(memAddrWidth.W), 0.U(memAddrWidth.W))
     }))
-    val memMasks  = RegInit(Vec(Seq.fill(nTiles)(~0.U(memAddrWidth.W))))
-    val waymasks  = RegInit(Vec(Seq.fill(1 << dsidWidth){ ((1L << p(NL2CacheWays)) - 1).U }))
+    val memMasks  = RegInit(VecInit(Seq.fill(nTiles)(~0.U(memAddrWidth.W))))
+    val waymasks  = RegInit(VecInit(Seq.fill(1 << dsidWidth){ ((1L << p(NL2CacheWays)) - 1).U }))
     /**
       * Programmable hartid.
       */
-    val progHartIds = RegInit(Vec(Seq.fill(nTiles){ 0.U(log2Safe(nTiles).W) }))
+    val progHartIds = RegInit(VecInit(Seq.fill(nTiles){ 0.U(log2Safe(nTiles).W) }))
     io.progHartIds := progHartIds
     val l2dsid_reg = RegNext(io.l2.dsid)  // 1 cycle delay
     io.l2.waymask := waymasks(l2dsid_reg)
@@ -348,12 +394,59 @@ with HasTokenBucketParameters
     )
 
 
+    //token buckets
+    private val bucket_debug = false
+
+    val bucketParams = RegInit(VecInit(Seq.fill(nDSID){
+      Cat(128.U(tokenBucketSizeWidth.W), 128.U(tokenBucketFreqWidth.W), 128.U(tokenBucketSizeWidth.W)).asTypeOf(new BucketBundle)
+    }))
+
+    val bucketState = RegInit(VecInit(Seq.fill(nDSID){
+      Cat(0.U(tokenBucketSizeWidth.W), 0.U(tokenBucketSizeWidth.W), 0.U(32.W), true.B).asTypeOf(new BucketState)
+    }))
+
+    val bucketIO = IO(Vec(nTiles, new BucketIO()))
+
+    val timer = RegInit(0.U(cycle_counter_width.W))
+    timer := Mux(timer === (~0.U(timer.getWidth.W)).asUInt, 0.U, timer + 1.U)
+
+    bucketState.zipWithIndex.foreach { case (state, i) =>
+      state.counter := Mux(state.counter >= bucketParams(i).freq, 0.U, state.counter + 1.U)
+      val req_sizes = bucketIO.map{bio => Mux(bio.dsid === i.U && bio.fire, bio.size, 0.U) }
+      val req_all = req_sizes.reduce(_ + _)
+      val updating = state.counter >= bucketParams(i).freq
+      val inc_size = Mux(updating, bucketParams(i).inc.asSInt(), 0.S)
+      val enable_next = state.nToken + inc_size > req_all.asSInt
+      val calc_next = state.nToken + inc_size - req_all.asSInt
+      val limit_next = Mux(calc_next < bucketParams(i).size.asSInt, calc_next, bucketParams(i).size.asSInt)
+
+      val has_requester = bucketIO.map{bio => bio.dsid === i.U && bio.fire}.reduce(_ || _)
+      when (has_requester) {
+        state.traffic := state.traffic + req_all.asUInt
+      }
+
+      when (has_requester || updating) {
+  //      state.nToken := Mux(enable_next, limit_next, 0.U)
+        state.nToken := limit_next
+        state.enable := enable_next || (bucketParams(i).freq === 0.U)
+      }
+
+      if (bucket_debug && i <= 1) {
+        printf(s"cycle: %d bucket %d req_all %d tokens %d inc %d enable_next %b counter %d traffic %d\n",
+          GTimer(), i.U(dsidWidth.W), req_all, state.nToken, inc_size, enable_next, state.counter, state.traffic)
+      }
+    }
+
+    bucketIO.foreach { bio =>
+      bio.enable := bucketState(bio.dsid).enable
+    }
+
     if (false) {
     // AutoMBA goes here
 
     val accountingCycle = 10000
     val cycleCounter = RegInit(0.asUInt(64.W))
-    val lastTraffic = RegInit(Vec(Seq.fill(nTiles){ 0.U(32.W) }))
+    val lastTraffic = RegInit(VecInit(Seq.fill(nTiles){ 0.U(32.W) }))
 
     when (GTimer() >= cycleCounter) {
       for (i <- 0 until nTiles) {
@@ -366,9 +459,12 @@ with HasTokenBucketParameters
 
     val policy = "yzh"
 
-    val highPriorIndex = if (p(UseEmu)) 0 else nTiles
-    val startIndex = if (p(UseEmu)) 1 else 0
-    val limitScaleIndex= if (p(UseEmu)) 1 else 3
+    // val highPriorIndex = if (p(UseEmu)) 0 else nTiles
+    // val startIndex = if (p(UseEmu)) 1 else 0
+    // val limitScaleIndex= if (p(UseEmu)) 1 else 3
+    val highPriorIndex = nTiles
+    val startIndex = 0
+    val limitScaleIndex= 3
 
     val quota = RegInit((totalBW/10*5).U(8.W))
     val curLevel = RegInit(4.asUInt(4.W))
@@ -382,7 +478,7 @@ with HasTokenBucketParameters
     io.cp.quotaStep := quotaStep
 
     val nLevels = 9
-    val lowPriorFreqLimits = RegInit(Vec(Seq.fill(nLevels){ 8.U(16.W) })) // bigger is more strict
+    val lowPriorFreqLimits = RegInit(VecInit(Seq.fill(nLevels){ 8.U(16.W) })) // bigger is more strict
     val limitIndex = RegEnable(io.cp.updateData, 0.U(4.W), io.cp.limitIndexWen)
     val lowerThreshold = RegEnable(io.cp.updateData, 64.U(8.W), io.cp.lowThresholdWen)
     val higherThreshold = RegEnable(io.cp.updateData, 112.U(8.W), io.cp.highThresholdWen)
@@ -472,8 +568,8 @@ with HasTokenBucketParameters
       val samplingCounter = RegInit(0.asUInt(32.W))
       val regulationCounter = RegInit(0.asUInt(32.W))
 
-      val s_sample :: s_regulate :: Nil = Enum(UInt(), 2)
-      val state = Reg(init = s_sample)
+      val s_sample :: s_regulate :: Nil = Enum(2)
+      val state = RegInit(s_sample)
 
       // during s_sample state, high priority app runs alone
       // all others' memory requests are blocked
@@ -551,55 +647,5 @@ with HasTokenBucketParameters
     }
     io.cp.autoPCSnapShotEn := autoSnapshot
     io.cp.PC := snapshotPC
-  }
-}
-
-
-trait HasControlPlaneModuleImpl extends HasRocketTilesModuleImp {
-  val outer: HasControlPlane
-  val mem_part_en = IO(Input(Bool()))
-  val distinct_hart_dsid_en = IO(Input(Bool()))
-
-  (outer.rocketTiles zip outer.tokenBuckets).zipWithIndex.foreach { case((tile, token), i) =>
-    val cpio = outer.controlPlane.module.io
-    val cp2core = Wire(new CPToCore())
-    cp2core.hartDsid := cpio.hartDsids(i)
-    cp2core.memBase := cpio.memBases(i)
-    cp2core.memMask := cpio.memMasks(i)
-    cp2core.progHartId := cpio.progHartIds(i)
-
-    val crossing = Module(new AsyncQueue(new CPToCore()))
-    crossing.io.deq_clock := tile.module.clock
-    crossing.io.deq_reset := tile.module.reset
-    crossing.io.enq_clock := outer.controlPlane.module.clock
-    crossing.io.enq_reset := outer.controlPlane.module.reset
-    crossing.io.enq.valid := true.B
-    crossing.io.enq.bits  := cp2core
-    crossing.io.deq.ready := true.B
-
-    tile.module.dsid := crossing.io.deq.bits.hartDsid
-    tile.module.memBase := crossing.io.deq.bits.memBase
-    tile.module.memMask := crossing.io.deq.bits.memMask
-    tile.module.progHartId := crossing.io.deq.bits.progHartId
-
-    token.module.bucketIO <> outer.controlPlane.module.bucketIO(i)
-  }
-
-  outer.debug.module.io.cp <> outer.controlPlane.module.io.cp
-  outer.controlPlane.module.io.mem_part_en := mem_part_en
-  outer.controlPlane.module.io.distinct_hart_dsid_en := distinct_hart_dsid_en
-}
-
-trait BindL2WayMask extends HasRocketTiles {
-  this: BaseSubsystem with HasControlPlane with CanHaveMasterAXI4MemPort =>
-  val _cp = controlPlane
-  val _l2 = l2cache
-}
-
-trait BindL2WayMaskModuleImp extends HasRocketTilesModuleImp {
-  val outer: BindL2WayMask
-
-  if (p(NL2CacheCapacity) != 0) {
-    outer._l2.module.cp <> outer._cp.module.io.l2
   }
 }

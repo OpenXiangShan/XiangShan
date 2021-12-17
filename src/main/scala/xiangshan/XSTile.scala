@@ -14,7 +14,7 @@ import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils.{ResetGen, TLEdgeBuffer}
 
-import  device.lvna._
+import device.lvna._
 
 class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val paddr = Valid(UInt(soc.PAddrBits.W))
@@ -55,9 +55,9 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
 
-  val l1d_bucket = TokenBucketNode()
+  val l1d_bucket = LazyModule(new TokenBucketNode())
 
-  busPMU := l1d_bucket := l1d_logger
+  busPMU := l1d_bucket.node := l1d_logger
   l1_xbar :=* busPMU
 
   l2_binder match {
@@ -126,7 +126,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
-      val bucketIO = new BucketIO().flip
+      val bucketIO = Flipped(new BucketIO())
     })
 
     dontTouch(io.hartId)
