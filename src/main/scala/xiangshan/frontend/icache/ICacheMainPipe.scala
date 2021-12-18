@@ -85,12 +85,14 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val metaArray   = new ICacheMetaReqBundle
   val dataArray   = new ICacheDataReqBundle
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
+  val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val respStall   = Input(Bool())
   val perfInfo = Output(new ICachePerfInfo)
+
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -223,7 +225,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
+  val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
+
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
+  val s1_data_errors             = ResultHoldBypass(data = dataResp.errors, valid = RegNext(s0_fire))
+
+  val s1_parity_error = VecInit((0 until PortNumber).map(i => s1_meta_errors(i).reduce(_||_) || s1_data_errors(i).reduce(_||_)))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
   val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
@@ -240,6 +247,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
 
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
+
+  for(i <- 0 until PortNumber){
+    io.errors(i).ecc_error.valid  := RegNext(s1_parity_error(i) && RegNext(s0_fire))
+    io.errors(i).ecc_error.bits   := true.B
+    io.errors(i).paddr.valid      := RegNext(io.errors(i).ecc_error.valid)  
+    io.errors(i).paddr.bits       := RegNext(tlbRespPAddr(i))  
+  }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
@@ -312,7 +326,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
   //exception information
   val s2_except_pf = RegEnable(next =tlbExcpPF, enable = s1_fire)
-  val s2_except_af = VecInit(RegEnable(next = tlbExcpAF, enable = s1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(s1_fire)).asBool))
+  val s2_except_af = VecInit(RegEnable(next = tlbExcpAF, enable = s1_fire).zip(RegEnable(next = s1_parity_error, enable = s1_fire)).zip(pmpExcpAF).map{
+                                  case((tlbAf, parityError), pmpAf) => tlbAf || parityError || DataHoldBypass(pmpAf, RegNext(s1_fire)).asBool})
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_af(i)})
   val s2_has_except = s2_valid && (s2_except_af.reduce(_||_) || s2_except_pf.reduce(_||_))
   //MMIO
