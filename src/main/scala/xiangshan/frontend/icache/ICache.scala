@@ -22,12 +22,13 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, PreferCacheField, PrefetchField,DirtyField}
+import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
 import utils._
-import xiangshan.cache.mmu.BlockTlbRequestIO
+import xiangshan.backend.fu.PMPReqBundle
+import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -40,6 +41,8 @@ case class ICacheParameters(
     nMissEntries: Int = 2,
     nReleaseEntries: Int = 2,
     nProbeEntries: Int = 2,
+    nPrefetchEntries: Int = 4,
+    hasPrefetch: Boolean = false,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -77,14 +80,11 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
 
   def ReplacePipeKey = 0
-  def mainPipeKey = 1
-  def ReleaseKey = 2
-  def MissQueueKey = 3
-  def ProbeKey = 4
-
+  def MainPipeKey = 1
   def PortNumber = 2
+  def ProbeKey   = 3
 
-  def nMissEntries = cacheParams.nMissEntries
+  def nPrefetchEntries = cacheParams.nPrefetchEntries
 
   def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
     val valid  = RegInit(false.B)
@@ -98,7 +98,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     Mux(valid, data, RegEnable(data, valid))
   }
 
-  require(isPow2(nMissEntries), s"nMissEntries($nMissEntries) must be pow2")
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }
@@ -407,13 +406,14 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val fencei      = Input(Bool())
-  val stop        = Input(Bool())
-  val csr         = new L1CacheToCsrIO
-  val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
-  val pmp         = Vec(PortNumber, new ICachePMPBundle)
-  val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
-  val perfInfo = Output(new ICachePerfInfo)
+  val prefetch        = Flipped(new FtqPrefechBundle)
+  val fencei          = Input(Bool())
+  val stop            = Input(Bool())
+  val csr             = new L1CacheToCsrIO
+  val fetch           = Vec(PortNumber, new ICacheMainPipeBundle)
+  val pmp             = Vec(PortNumber, new ICachePMPBundle)
+  val itlb            = Vec(PortNumber, new BlockTlbRequestIO)
+  val perfInfo        = Output(new ICachePerfInfo)
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -437,6 +437,15 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io = IO(new ICacheIO)
 
+  println("ICache:")
+  println("  ICacheSets: "          + cacheParams.nSets)
+  println("  ICacheWays: "          + cacheParams.nWays)
+  println("  ICacheBanks: "         + PortNumber)
+  println("  hasPrefetch: "         + cacheParams.hasPrefetch)
+  if(cacheParams.hasPrefetch){
+    println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
+  }
+
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray      = Module(new ICacheMetaArray)
@@ -446,20 +455,25 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val releaseUnit    = Module(new ReleaseUnit(edge))
   val replacePipe     = Module(new ReplacePipe)
   val probeQueue     = Module(new ICacheProbeQueue(edge))
+  val prefetchPipe    = Module(new IPrefetchPipe)
 
-  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
+  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  3))
   val data_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
-  val replace_req_arb     = Module(new Arbiter(new ReplacePipeReq, 2))
+  val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
+  val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
   meta_read_arb.io.in(ReplacePipeKey)   <> replacePipe.io.meta_read
-  meta_read_arb.io.in(mainPipeKey)      <> mainPipe.io.metaArray.toIMeta
+  meta_read_arb.io.in(MainPipeKey)      <> mainPipe.io.metaArray.toIMeta
+  meta_read_arb.io.in(2)                <> prefetchPipe.io.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
+
   replacePipe.io.meta_response          <> metaArray.io.readResp
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
+  prefetchPipe.io.fromIMeta             <> metaArray.io.readResp
 
   data_read_arb.io.in(ReplacePipeKey) <> replacePipe.io.data_read
-  data_read_arb.io.in(mainPipeKey)    <> mainPipe.io.dataArray.toIData
+  data_read_arb.io.in(MainPipeKey)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
   replacePipe.io.data_response        <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
@@ -468,13 +482,42 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.perfInfo := mainPipe.io.perfInfo
 
   meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
-  meta_write_arb.io.in(mainPipeKey)     <> missUnit.io.meta_write
+  meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
 
-  io.itlb           <>    mainPipe.io.itlb
-  io.pmp            <>    mainPipe.io.pmp
+  if(cacheParams.hasPrefetch){
+    prefetchPipe.io.fromFtq <> io.prefetch
+  } else {
+    prefetchPipe.io.fromFtq <> DontCare
+  }
+
+  io.pmp(0).req.valid := mainPipe.io.pmp(0).req.valid ||  prefetchPipe.io.pmp.req.valid
+  io.pmp(0).req.bits := Mux(prefetchPipe.io.pmp.req.valid, prefetchPipe.io.pmp.req.bits, mainPipe.io.pmp(0).req.bits)
+  prefetchPipe.io.pmp.req.ready := !mainPipe.io.pmp(0).req.valid
+
+  mainPipe.io.pmp(0).resp <> io.pmp(0).resp
+  prefetchPipe.io.pmp.resp <> io.pmp(0).resp
+
+  io.pmp(1) <> mainPipe.io.pmp(1)
+
+
+  tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
+  tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
+  io.itlb(0).req       <>    tlb_req_arb.io.out
+
+  mainPipe.io.itlb(0).resp  <>  io.itlb(0).resp
+  prefetchPipe.io.iTLBInter.resp  <>  io.itlb(0).resp
+
+  when(mainPipe.io.itlb(0).req.fire() && prefetchPipe.io.iTLBInter.req.fire())
+  {
+    assert(false.B, "Both mainPipe ITLB and prefetchPipe ITLB fire!")
+  }
+
+  io.itlb(1)        <>    mainPipe.io.itlb(1)
+
+
   for(i <- 0 until PortNumber){
     io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp
 
@@ -482,6 +525,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     mainPipe.io.mshr(i).fromMSHR <>   missUnit.io.resp(i)
 
   }
+
+  missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -534,8 +579,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
   replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
-  replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
-  replace_req_arb.io.in(mainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
+  replace_req_arb.io.in(MainPipeKey)   <> missUnit.io.release_req
+  replace_req_arb.io.in(MainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
   replacePipe.io.pipe_req               <> replace_req_arb.io.out
 
   when(releaseShouldBlock){
