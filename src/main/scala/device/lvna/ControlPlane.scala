@@ -232,7 +232,7 @@ with HasTokenBucketParameters
 
 
   val tlNode = TLRegisterNode(
-    address = Seq(AddressSet(0x20000, 0xffff)),
+    address = Seq(AddressSet(0x39010000, 0xffff)),
     device = new SimpleDevice("control-plane", Seq("LvNA,test", "LvNA,test")),
     beatBytes = tlBeatBytes
   )

@@ -107,12 +107,12 @@ trait PMAMethod extends PMAConst {
       MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
       MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
       MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
-      MemMap("h00_3802_1000", "h00_3802_11FF",   "h0", "MMPMA",       "RW"),
-      MemMap("h00_3802_1200", "h00_3900_0FFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3900_1000", "h00_3900_103F",   "h0", "Core_reset",  "RW"),
-      MemMap("h00_3900_1020", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3A00_0000", "h00_3A00_003F",   "h0", "PLL0",        "RW),
-      MemMap('h00_3A00_0020", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3802_1000", "h00_3802_1FFF",   "h0", "MMPMA",       "RW"),
+      MemMap("h00_3802_2000", "h00_3900_0FFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3900_1000", "h00_3900_1FFF",   "h0", "Core_reset",  "RW"),
+      MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    "RW"),
+      MemMap("h00_3A00_0000", "h00_3A00_0FFF",   "h0", "PLL0",        "RW),
+      MemMap('h00_3A00_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
       MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
       MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
@@ -159,7 +159,7 @@ trait PMAMethod extends PMAConst {
     idx = idx - 1
 
     addr(idx) := shift_addr(0x3A000000)
-    cfg(idx).a := 1.U
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr(0x39001040)
