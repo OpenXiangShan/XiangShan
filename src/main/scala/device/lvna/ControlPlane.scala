@@ -256,11 +256,61 @@ with HasTokenBucketParameters
       Mux(io.distinct_hart_dsid_en, i.U(ldomDSidWidth.W), 0.U(ldomDSidWidth.W))
     }))
     val memBases  = RegInit(VecInit(Seq.tabulate(nTiles){ i =>
-      val memSize: BigInt = p(ExtMem).map { m => m.master.size }.getOrElse(0x80000000)
+      val memSize: BigInt = p(ExtMem).map { m => m.master.size }.getOrElse(0x80000000L)
       Mux(io.mem_part_en, (i * memSize / nTiles).U(memAddrWidth.W), 0.U(memAddrWidth.W))
     }))
     val memMasks  = RegInit(VecInit(Seq.fill(nTiles)(~0.U(memAddrWidth.W))))
     val waymasks  = RegInit(VecInit(Seq.fill(1 << dsidWidth){ ((1L << p(NL2CacheWays)) - 1).U }))
+
+    //token buckets
+    private val bucket_debug = false
+
+    val bucketParams = RegInit(VecInit(Seq.fill(nDSID){
+      Cat(128.U(tokenBucketSizeWidth.W), 128.U(tokenBucketFreqWidth.W), 128.U(tokenBucketSizeWidth.W)).asTypeOf(new BucketBundle)
+    }))
+
+    val bucketState = RegInit(VecInit(Seq.fill(nDSID){
+      Cat(0.U(tokenBucketSizeWidth.W), 0.U(tokenBucketSizeWidth.W), 0.U(32.W), true.B).asTypeOf(new BucketState)
+    }))
+
+    val bucketIO = IO(Vec(nTiles, new BucketIO()))
+
+    val timer = RegInit(0.U(cycle_counter_width.W))
+    timer := Mux(timer === (~0.U(timer.getWidth.W)).asUInt, 0.U, timer + 1.U)
+
+    bucketState.zipWithIndex.foreach { case (state, i) =>
+      state.counter := Mux(state.counter >= bucketParams(i).freq, 0.U, state.counter + 1.U)
+      val req_sizes = bucketIO.map{bio => Mux(bio.dsid === i.U && bio.fire, bio.size, 0.U) }
+      val req_all = req_sizes.reduce(_ + _)
+      val updating = state.counter >= bucketParams(i).freq
+      val inc_size = Mux(updating, bucketParams(i).inc.asSInt(), 0.S)
+      val enable_next = state.nToken + inc_size > req_all.asSInt
+      val calc_next = state.nToken + inc_size - req_all.asSInt
+      val limit_next = Mux(calc_next < bucketParams(i).size.asSInt, calc_next, bucketParams(i).size.asSInt)
+
+      val has_requester = bucketIO.map{bio => bio.dsid === i.U && bio.fire}.reduce(_ || _)
+      when (has_requester) {
+        state.traffic := state.traffic + req_all.asUInt
+      }
+
+      when (has_requester || updating) {
+  //      state.nToken := Mux(enable_next, limit_next, 0.U)
+        state.nToken := limit_next
+        state.enable := enable_next || (bucketParams(i).freq === 0.U)
+      }
+
+      if (bucket_debug && i <= 1) {
+        printf(s"cycle: %d bucket %d req_all %d tokens %d inc %d enable_next %b counter %d traffic %d\n",
+          GTimer(), i.U(dsidWidth.W), req_all, state.nToken, inc_size, enable_next, state.counter, state.traffic)
+      }
+    }
+
+    bucketIO.foreach { bio =>
+      bio.enable := bucketState(bio.dsid).enable
+    }
+    
+    
+    
     /**
       * Programmable hartid.
       */
@@ -380,7 +430,7 @@ with HasTokenBucketParameters
       offset(CP_BUCKET_FREQ) -> Seq(RegField(32, bucketParams(currDsid).freq)),
       offset(CP_BUCKET_SIZE) -> Seq(RegField(32, bucketParams(currDsid).size)),
       offset(CP_BUCKET_INC)  -> Seq(RegField(32, bucketParams(currDsid).inc)),
-      offset(CP_TRAFFIC)     -> Seq(RWNotify(32, bucketState(currDsid).traffic, Wire(UInt()), traffic_read, Wire(Bool()))),
+      offset(CP_TRAFFIC)     -> Seq(RWNotify(32, bucketState(currDsid).traffic, bucketState(currDsid).traffic, traffic_read, Wire(Bool()))),
       offset(CP_WAYMASK)     -> Seq(RegField(32, waymasks(currDsid))),
       offset(CP_L2_CAPACITY) -> Seq(RegField(32, io.l2.capacity, ())),
       offset(CP_DSID_SEL)    -> Seq(RegField(32, currDsid)),
@@ -394,52 +444,6 @@ with HasTokenBucketParameters
     )
 
 
-    //token buckets
-    private val bucket_debug = false
-
-    val bucketParams = RegInit(VecInit(Seq.fill(nDSID){
-      Cat(128.U(tokenBucketSizeWidth.W), 128.U(tokenBucketFreqWidth.W), 128.U(tokenBucketSizeWidth.W)).asTypeOf(new BucketBundle)
-    }))
-
-    val bucketState = RegInit(VecInit(Seq.fill(nDSID){
-      Cat(0.U(tokenBucketSizeWidth.W), 0.U(tokenBucketSizeWidth.W), 0.U(32.W), true.B).asTypeOf(new BucketState)
-    }))
-
-    val bucketIO = IO(Vec(nTiles, new BucketIO()))
-
-    val timer = RegInit(0.U(cycle_counter_width.W))
-    timer := Mux(timer === (~0.U(timer.getWidth.W)).asUInt, 0.U, timer + 1.U)
-
-    bucketState.zipWithIndex.foreach { case (state, i) =>
-      state.counter := Mux(state.counter >= bucketParams(i).freq, 0.U, state.counter + 1.U)
-      val req_sizes = bucketIO.map{bio => Mux(bio.dsid === i.U && bio.fire, bio.size, 0.U) }
-      val req_all = req_sizes.reduce(_ + _)
-      val updating = state.counter >= bucketParams(i).freq
-      val inc_size = Mux(updating, bucketParams(i).inc.asSInt(), 0.S)
-      val enable_next = state.nToken + inc_size > req_all.asSInt
-      val calc_next = state.nToken + inc_size - req_all.asSInt
-      val limit_next = Mux(calc_next < bucketParams(i).size.asSInt, calc_next, bucketParams(i).size.asSInt)
-
-      val has_requester = bucketIO.map{bio => bio.dsid === i.U && bio.fire}.reduce(_ || _)
-      when (has_requester) {
-        state.traffic := state.traffic + req_all.asUInt
-      }
-
-      when (has_requester || updating) {
-  //      state.nToken := Mux(enable_next, limit_next, 0.U)
-        state.nToken := limit_next
-        state.enable := enable_next || (bucketParams(i).freq === 0.U)
-      }
-
-      if (bucket_debug && i <= 1) {
-        printf(s"cycle: %d bucket %d req_all %d tokens %d inc %d enable_next %b counter %d traffic %d\n",
-          GTimer(), i.U(dsidWidth.W), req_all, state.nToken, inc_size, enable_next, state.counter, state.traffic)
-      }
-    }
-
-    bucketIO.foreach { bio =>
-      bio.enable := bucketState(bio.dsid).enable
-    }
 
     if (false) {
     // AutoMBA goes here

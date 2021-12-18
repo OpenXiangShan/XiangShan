@@ -309,6 +309,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     plicSource.module.in := ext_intrs_wire.asBools
     pma.module.io <> cacheable_check
 
+    val cp_l1d_buckets_io = IO(Vec(NumCores,new BucketIO()))
+    (cp_l1d_buckets_io zip controlPlane.module.bucketIO) map { case (out_bucket_io, cp_bucket_io) =>
+      out_bucket_io <> cp_bucket_io
+    }
+    
     val freq = 100
     val cnt = RegInit(freq.U)
     val tick = cnt === 0.U

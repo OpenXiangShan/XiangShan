@@ -76,6 +76,8 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
     beu.module.io.errors <> beu_errors
+    val l1d_bucket_io = IO(Flipped(new BucketIO()))
+    l1d_bucket.module.bucketIO <> l1d_bucket_io
   }
 }
 
@@ -145,7 +147,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     misc.module.beu_errors <> core.module.io.beu_errors
 
-    misc.l1d_bucket.module.bucketIO := io.bucketIO
+    misc.module.l1d_bucket_io <> io.bucketIO
 
     // Modules are reset one by one
     // io_reset ----
