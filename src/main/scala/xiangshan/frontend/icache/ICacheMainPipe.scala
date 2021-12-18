@@ -333,6 +333,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val m_vSetIdx   = UInt(idxBits.W)
     val m_pTag      = UInt(tagBits.W)
     val m_data      = UInt(blockBits.W)
+    val m_corrupt   = Bool()
   }
 
   val missSlot    = Seq.fill(2)(RegInit(0.U.asTypeOf(new MissSlot)))
@@ -484,8 +485,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
 
     when(fromMSHR(i).fire() && missStateQueue(i) === m_valid ){
-      missStateQueue(i)     := m_refilled
-      missSlot(i).m_data    := fromMSHR(i).bits.data
+      missStateQueue(i)         := m_refilled
+      missSlot(i).m_data        := fromMSHR(i).bits.data
+      missSlot(i).m_corrupt     := fromMSHR(i).bits.corrupt
     }
 
 
@@ -545,7 +547,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
-    toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i)
+    toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i) || missSlot(i).m_corrupt
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
   }
 
