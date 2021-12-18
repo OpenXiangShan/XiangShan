@@ -30,7 +30,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
-  val needReplayFromRS = Output(Bool())
+  val dcacheRequireReplay = Output(Bool())
   val forward = new PipeLoadForwardQueryIO
   val loadViolationQuery = new LoadViolationQueryIO
 }
@@ -270,7 +270,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val dataInvalidSqIdx = Input(UInt())
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
-    val needReplayFromRS = Output(Bool())
+    val dcacheRequireReplay = Output(Bool())
     val fullForward = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
     val dcache_kill = Output(Bool())
@@ -396,8 +396,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
       !s2_tlb_miss && // replay if dtlb miss
       !s2_data_invalid // replay if store to load forward data is not ready 
   } else {
+    // Note that if all parts of data are available in sq / sbuffer, replay required by dcache will not be schedule    
     io.rsFeedback.bits.hit := 
-      (!s2_cache_replay || s2_mmio || s2_exception) && // replay if dcache miss queue full / busy
+      (!s2_cache_replay || s2_mmio || s2_exception || io.dataForwarded) && // replay if dcache miss queue full / busy
       !s2_tlb_miss && // replay if dtlb miss
       !s2_data_invalid // replay if store to load forward data is not ready
   }
@@ -417,9 +418,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   if (EnableFastForward) {
-    io.needReplayFromRS := s2_cache_replay && !fullForward
+    io.dcacheRequireReplay := s2_cache_replay && !fullForward
   } else {
-    io.needReplayFromRS := s2_cache_replay
+    io.dcacheRequireReplay := s2_cache_replay && 
+      !io.rsFeedback.bits.hit && 
+      !io.dataForwarded &&
+      !s2_is_prefetch &&
+      io.out.bits.miss
   }
 
   // fast load to load forward
@@ -515,7 +520,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   load_s2.io.loadViolationQueryResp <> io.lsq.loadViolationQuery.resp
   load_s2.io.csrCtrl <> io.csrCtrl
   load_s2.io.sentFastUop := RegEnable(io.fastUop.valid, load_s1.io.out.fire()) // RegNext is also ok
-  io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
+  io.lsq.dcacheRequireReplay := load_s2.io.dcacheRequireReplay
 
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
@@ -582,6 +587,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
   io.lsq.ldout.ready := !hitLoadOut.valid
+
+  when(io.feedbackSlow.valid && !io.feedbackSlow.bits.hit){
+    assert(RegNext(!hitLoadOut.valid))
+    assert(RegNext(!io.lsq.loadIn.valid) || RegNext(load_s2.io.dcacheRequireReplay))
+  }
 
   val perfEvents = Seq(
     ("load_s0_in_fire         ", load_s0.io.in.fire()                                                                                                            ),
