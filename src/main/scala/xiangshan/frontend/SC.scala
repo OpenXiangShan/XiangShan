@@ -225,9 +225,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       0.U.asTypeOf(Vec(TageBanks, Bool()))
   
     // for sc ctrs
-    def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
-    // for tage ctrs
-    def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext -& 4.S) << 1).asSInt + 1.S) << 3).asSInt
+    def getCentered(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
+    // for tage ctrs, (2*(ctr-4)+1)*8
+    def getPvdrCentered(ctr: UInt): SInt = Cat(ctr ^ (1 << (TageCtrBits-1)).U, 1.U(1.W), 0.U(3.W)).asSInt
   
     for (w <- 0 until TageBanks) {
       val scMeta = resp_meta(w).scMeta
@@ -238,6 +238,12 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps(w) map (r => getCentered(r.ctr(i)))) // TODO: rewrite with wallace tree
         }
       )
+
+      val tage_hit_vec = VecInit(s1_resps(w).map(_.valid))
+      val tage_pvdr_oh = VecInit((0 until BankTageNTables(w)).map(i =>
+        tage_hit_vec(i) && !tage_hit_vec.drop(i+1).reduceOption(_||_).getOrElse(false.B)
+      ))
+      val tage_table_ctrs = s1_resps(w).map(_.bits.ctr)
   
       val providerCtr = s1_providerCtrs(w)
       val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
