@@ -277,7 +277,16 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val loadViolationQueryResp = Flipped(Valid(new LoadViolationQueryResp))
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val sentFastUop = Input(Bool())
+    val static_pm = Input(Valid(Bool())) // valid for static, bits for mmio
   })
+
+  val pmp = WireInit(io.pmpResp)
+  when (io.static_pm.valid) {
+    pmp.ld := false.B
+    pmp.st := false.B
+    pmp.instr := false.B
+    pmp.mmio := io.static_pm.bits
+  }
 
   val s2_is_prefetch = io.in.bits.isSoftPrefetch
 
@@ -286,8 +295,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob 
   val s2_exception_vec = WireInit(io.in.bits.uop.cf.exceptionVec)
-  s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || 
-    io.pmpResp.ld
+  s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || pmp.ld
   // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
   when (s2_is_prefetch) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
@@ -307,7 +315,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     io.csrCtrl.cache_error_enable
   val debug_s2_exception_with_error = ExceptionNO.selectByFu(s2_exception_with_error_vec, lduCfg).asUInt.orR
 
-  val actually_mmio = io.pmpResp.mmio
+  val actually_mmio = pmp.mmio
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
@@ -324,7 +332,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   // assert(!s2_forward_fail)
-  io.dcache_kill := false.B // move pmp resp kill to outside
+  io.dcache_kill := pmp.ld || pmp.mmio // false.B // move pmp resp kill to outside
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio || s2_is_prefetch)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid)), "DCache response got lost")
@@ -518,9 +526,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  io.dcache.s2_kill := load_s2.io.dcache_kill || (io.pmp.ld || io.pmp.mmio) // to kill mmio resp which are redirected
+  io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
+  load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2

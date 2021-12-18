@@ -186,6 +186,7 @@ case class XSCoreParameters
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true,
+    partialStaticPMP = true,
     saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -197,6 +198,7 @@ case class XSCoreParameters
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true,
+    partialStaticPMP = true,
     saveLevel = true
   ),
   refillBothTlb: Boolean = false,

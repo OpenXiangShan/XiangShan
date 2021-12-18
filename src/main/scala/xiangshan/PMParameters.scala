@@ -29,10 +29,10 @@ case class PMParameters
   NumPMP: Int = 16,
   NumPMA: Int = 16,
 
-  PlatformGrain: Int = log2Ceil(512/8), // 512 bits
+  PlatformGrain: Int = log2Ceil(4*1024), // 4KB, a normal page
   mmpma: MMPMAConfig = MMPMAConfig(
     address = 0x38021000,
-    mask = 0x1ff,
+    mask = 0xfff,
     lgMaxSize = 3,
     sameCycle = true,
     num = 2

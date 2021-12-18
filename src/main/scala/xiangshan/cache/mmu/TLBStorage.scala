@@ -80,7 +80,7 @@ class TLBFA(
 
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid)
+    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
@@ -213,8 +213,12 @@ class TLBSA(
 
     entries.io.w.apply(
       valid = io.w.valid || io.victim.in.valid,
-      setIdx = Mux(io.w.valid, get_set_idx(io.w.bits.data.entry.tag, nSets), get_set_idx(io.victim.in.bits.entry.tag, nSets)),
-      data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid)), io.victim.in.bits.entry),
+      setIdx = Mux(io.w.valid,
+        get_set_idx(io.w.bits.data.entry.tag, nSets),
+        get_set_idx(io.victim.in.bits.entry.tag, nSets)),
+      data = Mux(io.w.valid,
+        (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
+        io.victim.in.bits.entry),
       waymask = UIntToOH(io.w.bits.wayIdx)
     )
   }
