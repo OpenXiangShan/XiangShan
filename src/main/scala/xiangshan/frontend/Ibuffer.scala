@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.ExceptionNO._
 
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
   p => p(XSCoreParamsKey).IBufSize
@@ -35,7 +36,7 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val full = Output(Bool())
 }
 
-class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
   class IBufEntry(implicit p: Parameters) extends XSBundle {
@@ -98,19 +99,20 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     inWire.ipf := io.in.bits.ipf(i)
     inWire.acf := io.in.bits.acf(i)
     inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
-    inWire.triggered := io.in.bits.triggered(i)
     for(k<-0 until 10){
     inWire.triggered.triggerHitVec(k) := false.B
     }
+    inWire.triggered := io.in.bits.triggered(i)
 
+    dontTouch(inWire.triggered.triggerHitVec)
 
     ibuf.io.waddr(i) := tail_vec(offset(i)).value
     ibuf.io.wdata(i) := inWire
-    ibuf.io.wen(i)   := io.in.bits.valid(i) && io.in.fire && !io.flush
+    ibuf.io.wen(i)   := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
   }
 
   when (io.in.fire && !io.flush) {
-    tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.valid)))
+    tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.enqEnable)))
   }
 
   // Dequeue
@@ -132,7 +134,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
-    io.out(i).bits.waitForSqIdx := DontCare
+    io.out(i).bits.waitForRobIdx := DontCare
     io.out(i).bits.storeSetHit := DontCare
     io.out(i).bits.loadWaitStrict := DontCare
     io.out(i).bits.ssid := DontCare
@@ -187,21 +189,16 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   QueuePerf(IBufSize, validEntries, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(8))
-  })
-  val perfEvents = Seq(
-    ("IBuffer_Flushed        ", io.flush                                                                     ),
-    ("IBuffer_hungry         ", instrHungry                                                                  ),
-    ("IBuffer_1/4_valid      ", (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)   ),
-    ("IBuffer_2/4_valid      ", (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)   ),
-    ("IBuffer_3/4_valid      ", (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)   ),
-    ("IBuffer_4/4_valid      ", (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)   ),
-    ("IBuffer_full           ",  validEntries.andR                                                           ),
-    ("Front_Bubble           ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid))),
-  )
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  val perfEvents = Seq(
+    ("IBuffer_Flushed  ", io.flush                                                                     ),
+    ("IBuffer_hungry   ", instrHungry                                                                  ),
+    ("IBuffer_1_4_valid", (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)   ),
+    ("IBuffer_2_4_valid", (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)   ),
+    ("IBuffer_3_4_valid", (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)   ),
+    ("IBuffer_4_4_valid", (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)   ),
+    ("IBuffer_full     ",  validEntries.andR                                                           ),
+    ("Front_Bubble     ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid)))
+  )
+  generatePerfEvent()
 }

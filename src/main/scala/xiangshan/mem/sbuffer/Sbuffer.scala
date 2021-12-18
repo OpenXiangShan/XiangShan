@@ -50,12 +50,15 @@ trait HasSbufferConst extends HasXSParameter {
 class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
   val state_valid    = Bool() // this entry is active
   val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
-  val w_timeout = Bool() // waiting for resend store pipeline req timeout
+  val w_timeout = Bool() // with timeout resp, waiting for resend store pipeline req timeout
+  val w_sameblock_inflight = Bool() // same cache block dcache req is inflight
+  val s_recheck_inflight = Bool() // recheck if same cache block dcache req is inflight
 
   def isInvalid(): Bool = !state_valid
   def isValid(): Bool = state_valid
   def isActive(): Bool = state_valid && !state_inflight
   def isInflight(): Bool = state_inflight
+  def isDcacheReqCandidate(): Bool = state_valid && !state_inflight && !w_sameblock_inflight
 }
 
 class SbufferBundle(implicit p: Parameters) extends XSBundle with HasSbufferConst
@@ -96,7 +99,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   io.dataOut := data
 }
 
-class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst {
+class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
@@ -114,6 +117,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
   val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+  val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
   val data = dataModule.io.dataOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
@@ -236,7 +240,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
   def wordReqToBufLine(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
+    val sameBlockInflightMask = genSameBlockInflightMask(reqptag)
     stateVec(insertIdx).state_valid := true.B
+    stateVec(insertIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
+    when(sameBlockInflightMask.orR){
+      waitInflightMask(insertIdx) := sameBlockInflightMask
+    }
     cohCount(insertIdx) := 0.U
     // missqReplayCount(insertIdx) := 0.U
     ptag(insertIdx) := reqptag
@@ -349,7 +358,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       }
     }
     is(x_drain_sbuffer){
-      when(sbuffer_empty){
+      when(io.flush.valid){
+        sbuffer_state := x_drain_all
+      }.elsewhen(sbuffer_empty){
         sbuffer_state := x_idle
       }
     }
@@ -370,6 +381,16 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR()
   }
 
+  def genSameBlockInflightMask(ptag_in: UInt): UInt = {
+    val mask = VecInit(widthMap(i => inflightMask(i) && ptag_in === ptag(i))).asUInt // quite slow, use it with care
+    assert(!(PopCount(mask) > 1.U))
+    mask
+  }
+
+  def haveSameBlockInflight(ptag_in: UInt): Bool = {
+    genSameBlockInflightMask(ptag_in).orR
+  }
+
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(missqReplayHasTimeOut,
@@ -385,7 +406,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       current eviction should be blocked.
    */
   val prepareValid = missqReplayHasTimeOut || 
-    activeMask(evictionIdx) && (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
+    stateVec(evictionIdx).isDcacheReqCandidate() && (need_drain || cohHasTimeOut || need_replace)
+  assert(!(stateVec(evictionIdx).isDcacheReqCandidate && !noSameBlockInflight(evictionIdx)))
   val prepareValidReg = RegInit(false.B)
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
@@ -434,12 +456,16 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     p"send buf [$evictionIdxReg] to Dcache, req fire\n"
   )
 
-  // TODO: for timing reasons, dcache store pipe resp may need to be delayed
   // update sbuffer status according to dcache resp source
+
+  def id_to_sbuffer_id(id: UInt): UInt = {
+    require(id.getWidth >= log2Up(StoreBufferSize))
+    id(log2Up(StoreBufferSize)-1, 0)
+  }
 
   // hit resp
   io.dcache.hit_resps.map(resp => {
-  val dcache_resp_id = resp.bits.id
+    val dcache_resp_id = resp.bits.id
     when (resp.fire()) {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
@@ -447,7 +473,24 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       assert(!resp.bits.miss) // not need to resp if miss, to be opted
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
+
+    // Update w_sameblock_inflight flag is delayed for 1 cycle
+    //
+    // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore 
+    // current dcache.hit_resps. Then, in the next cycle, we have plenty of time to check
+    // if the same block is still inflight
+    (0 until StoreBufferSize).map(i => {
+      when(
+        stateVec(i).w_sameblock_inflight && 
+        stateVec(i).state_valid &&
+        RegNext(resp.fire()) &&
+        waitInflightMask(i) === UIntToOH(RegNext(id_to_sbuffer_id(dcache_resp_id)))
+      ){
+        stateVec(i).w_sameblock_inflight := false.B
+      }
+    })
   })
+
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
@@ -511,19 +554,26 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
     val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
     val line_offset_reg = RegNext(line_offset_mask)
+    val forward_mask_candidate_reg = RegEnable(
+      VecInit(mask.map(entry => entry(getWordOffset(forward.paddr)))),
+      forward.valid
+    )
     val forward_data_candidate_reg = RegEnable(
       VecInit(data.map(entry => entry(getWordOffset(forward.paddr)))),
       forward.valid
     )
 
-    val selectedValidMask = Mux1H(line_offset_reg, Mux1H(valid_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedValidMask = Mux1H(valid_tag_match_reg, forward_mask_candidate_reg)
     val selectedValidData = Mux1H(valid_tag_match_reg, forward_data_candidate_reg)
+    selectedValidMask.suggestName("selectedValidMask_"+i)
     selectedValidData.suggestName("selectedValidData_"+i)
 
-    val selectedInflightMask = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedInflightMask = Mux1H(inflight_tag_match_reg, forward_mask_candidate_reg)
     val selectedInflightData = Mux1H(inflight_tag_match_reg, forward_data_candidate_reg)
+    selectedInflightMask.suggestName("selectedInflightMask_"+i)
     selectedInflightData.suggestName("selectedInflightData_"+i)
 
+    // currently not being used
     val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
     val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
 
@@ -580,9 +630,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
   // XSPerfAccumulate("store_req", io.lsu.req.fire())
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(10))
-  })
   val perfEvents = Seq(
     ("sbuffer_req_valid ", PopCount(VecInit(io.in.map(_.valid)).asUInt)                                                                ),
     ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire())).asUInt)                                                               ),
@@ -597,13 +644,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     ("refill_resp_valid ", io.dcache.refill_hit_resp.fire()                                                                            ),
     ("replay_resp_valid ", io.dcache.replay_resp.fire()                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
-    ("sbuffer_1/4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
-    ("sbuffer_2/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
-    ("sbuffer_3/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
+    ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
+    ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
+    ("sbuffer_3_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
     ("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
   )
+  generatePerfEvent()
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
 }

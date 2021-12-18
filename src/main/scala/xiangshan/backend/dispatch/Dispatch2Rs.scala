@@ -179,6 +179,8 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   io.in.zip(in).foreach(x => x._1.ready := x._2.ready)
 
   // dirty code for lsq enq
+  val is_blocked = Wire(Vec(io.in.length, Bool()))
+  is_blocked.foreach(_ := false.B)
   if (io.enqLsq.isDefined) {
     val enqLsq = io.enqLsq.get
     val fuType = io.in.map(_.bits.ctrl.fuType)
@@ -189,7 +191,6 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     def isBlocked(index: Int): Bool = {
       if (index >= 2) {
         val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
-        println(pairs)
         val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
         val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
         Mux(isStore(index), VecInit(foundStore).asUInt.orR, VecInit(foundLoad).asUInt.orR) || isBlocked(index - 1)
@@ -199,39 +200,34 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       }
     }
     for (i <- io.in.indices) {
-      // if at least two load/store is found in previous instructions,
-      // the instruction is blocked.
-      val blocked = isBlocked(i)
-      in(i).valid := io.in(i).valid && !blocked && enqLsq.canAccept
-      io.in(i).ready := in(i).ready && !blocked && enqLsq.canAccept
+      is_blocked(i) := isBlocked(i)
+      in(i).valid := io.in(i).valid && !is_blocked(i)
+      io.in(i).ready := in(i).ready && !is_blocked(i)
 
-      enqLsq.needAlloc(i) := Mux(in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
+      enqLsq.needAlloc(i) := Mux(io.in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
       enqLsq.req(i).bits := io.in(i).bits
       in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
       in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
 
-      enqLsq.req(i).valid := in(i).valid && io.in(i).ready
+      enqLsq.req(i).valid := in(i).valid && VecInit(io.out.map(_.ready)).asUInt.andR
     }
   }
 
   for ((config, i) <- outer.exuConfigCases) {
     val outIndices = outer.exuConfigTypes.zipWithIndex.filter(_._1 == i).map(_._2)
     val numOfThisExu = outIndices.length
-    val canAccept = in.map(in => in.valid && config.map(_.canAccept(in.bits.ctrl.fuType)).reduce(_ || _))
+    val canAccept = io.in.map(in => in.valid && config.map(_.canAccept(in.bits.ctrl.fuType)).reduce(_ || _))
     val select = SelectOne("naive", canAccept, numOfThisExu)
     for ((idx, j) <- outIndices.zipWithIndex) {
       val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      io.out(idx).valid := selectValid
+      io.out(idx).valid := selectValid && !Mux1H(selectIdxOH, is_blocked)
       io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
-        println(s"std: $idx")
         val sta = io.out(idx - 2)
-        io.out(idx).valid := selectValid && sta.ready
-        sta.valid := selectValid && io.out(idx).ready
-        io.out(idx).bits.ctrl.srcType(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.srcType(1)))
-        io.out(idx).bits.psrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.psrc(1)))
-        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready && sta.ready }}
+        sta.valid := io.out(idx).valid
+        io.out(idx).bits.ctrl.srcType(0) := io.out(idx).bits.ctrl.srcType(1)
+        io.out(idx).bits.psrc(0) := io.out(idx).bits.psrc(1)
         XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !io.out(idx).ready))
         XSPerfAccumulate(s"sta_rs_not_ready_$idx", selectValid && !sta.ready && io.out(idx).ready)
         XSPerfAccumulate(s"std_rs_not_ready_$idx", selectValid && sta.ready && !io.out(idx).ready)
@@ -266,7 +262,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   // dispatch is allowed when lsq and rs can accept all the instructions
   // TODO: better algorithm here?
   if (io.enqLsq.isDefined) {
-    when (!VecInit(io.out.map(_.ready)).asUInt.andR) {
+    when (!VecInit(io.out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
       in.foreach(_.ready := false.B)
       io.out.foreach(_.valid := false.B)
     }

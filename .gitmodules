@@ -1,15 +1,6 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/OpenXiangShan/rocket-chip.git
-[submodule "chiseltest"]
-	path = chiseltest
-	url = https://github.com/ucb-bar/chisel-testers2.git
-[submodule "api-config-chipsalliance"]
-	path = api-config-chipsalliance
-	url = https://github.com/chipsalliance/api-config-chipsalliance.git
-[submodule "berkeley-hardfloat"]
-	path = berkeley-hardfloat
-	url = https://github.com/OpenXiangShan/berkeley-hardfloat.git
 [submodule "difftest"]
 	path = difftest
 	url = https://github.com/OpenXiangShan/difftest.git

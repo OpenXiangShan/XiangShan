@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.{ImmUnion, Imm_U}
+import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.exu.ExuConfig
 
 class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
@@ -66,9 +66,9 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new DataArrayIO(params))
 
   for (i <- 0 until params.numSrc) {
-    val delayedWen = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
-    val delayedWaddr = if (i == 1 && params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
-    val delayedWdata = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
+    val delayedWen = if (params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
+    val delayedWaddr = if (params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
+    val delayedWdata = if (params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
 
     val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(_.enable) else Seq()
     val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(_.addr) else Seq()
@@ -134,20 +134,25 @@ class MduImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
   }
 }
 
+class LoadImmExtractor(implicit p: Parameters) extends ImmExtractor(1, 64) {
+  when (SrcType.isImm(io.uop.ctrl.srcType(0))) {
+    io.data_out(0) := SignExt(Imm_LUI_LOAD().getLuiImm(io.uop), XLEN)
+  }
+}
+
 object ImmExtractor {
   def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
            (implicit p: Parameters): Vec[UInt] = {
-    val immExt = (params.isJump, params.isAlu, params.isMul) match {
-      case (true, false, false) => {
-        val ext = Module(new JumpImmExtractor)
-        ext.jump_pc := pc.get
-        ext.jalr_target := target.get
-        ext
-      }
-      case (false, true, false) => Module(new AluImmExtractor)
-      case (false, false, true) => Module(new MduImmExtractor)
-      case _ => Module(new ImmExtractor(params.numSrc, params.dataBits))
+    val immExt = if (params.isJump) {
+      val ext = Module(new JumpImmExtractor)
+      ext.jump_pc := pc.get
+      ext.jalr_target := target.get
+      ext
     }
+    else if (params.isAlu) { Module(new AluImmExtractor) }
+    else if (params.isMul) { Module(new MduImmExtractor) }
+    else if (params.isLoad) { Module(new LoadImmExtractor) }
+    else { Module(new ImmExtractor(params.numSrc, params.dataBits)) }
     immExt.io.uop := uop
     immExt.io.data_in := data_in
     immExt.io.data_out

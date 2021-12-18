@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 
 
-class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) {
+class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 32).U(PhyRegIdxWidth.W) )))
   val headPtr  = RegInit(FreeListPtr(false.B, 0.U))
@@ -84,17 +84,12 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   XSPerfAccumulate("utilization", freeRegCnt)
   XSPerfAccumulate("allocation_blocked", !io.canAllocate)
   XSPerfAccumulate("can_alloc_wrong", !io.canAllocate && freeRegCnt >= RenameWidth.U)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(4))
-  })
-  val perfEvents = Seq(
-    ("std_freelist_1/4_valid          ", (freeRegCnt < (StdFreeListSize.U/4.U))                                              ),
-    ("std_freelist_2/4_valid          ", (freeRegCnt > (StdFreeListSize.U/4.U)) & (freeRegCnt <= (StdFreeListSize.U/2.U))    ),
-    ("std_freelist_3/4_valid          ", (freeRegCnt > (StdFreeListSize.U/2.U)) & (freeRegCnt <= (StdFreeListSize.U*3.U/4.U))),
-    ("std_freelist_4/4_valid          ", (freeRegCnt > (StdFreeListSize.U*3.U/4.U))                                          ),
-  )
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  val perfEvents = Seq(
+    ("std_freelist_1_4_valid", (freeRegCnt < (size / 4).U)                                   ),
+    ("std_freelist_2_4_valid", (freeRegCnt > (size / 4).U) & (freeRegCnt <= (size / 2).U)    ),
+    ("std_freelist_3_4_valid", (freeRegCnt > (size / 2).U) & (freeRegCnt <= (size * 3 / 4).U)),
+    ("std_freelist_4_4_valid", (freeRegCnt > (size * 3 / 4).U)                               )
+  )
+  generatePerfEvent()
 }

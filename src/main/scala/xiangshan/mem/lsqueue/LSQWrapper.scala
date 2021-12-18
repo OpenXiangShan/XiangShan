@@ -28,7 +28,6 @@ import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
-  val lsIdx = Input(new LSIdx)
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
 }
@@ -53,7 +52,7 @@ class LsqEnqIO(implicit p: Parameters) extends XSBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val enq = new LsqEnqIO
@@ -61,7 +60,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr))
@@ -119,7 +118,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.rollback <> io.rollback
   loadQueue.io.dcache <> io.dcache
   loadQueue.io.release <> io.release
-  loadQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   loadQueue.io.exceptionAddr.isStore := DontCare
 
   // store queue wiring
@@ -131,7 +129,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.rob <> io.rob
-  storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt
 
@@ -142,7 +139,13 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   storeQueue.io.sqempty <> io.sqempty
 
-  io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
+  // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
+  // s0: commit
+  // s1:               exception find
+  // s2:               exception triggered
+  // s3: ptr updated & new address
+  // address will be used at the next cycle after exception is triggered
+  io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
@@ -188,12 +191,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull
 
-  val ldq_perf = loadQueue.perfEvents.map(_._1).zip(loadQueue.perfinfo.perfEvents.perf_events)
-  val stq_perf = storeQueue.perfEvents.map(_._1).zip(storeQueue.perfinfo.perfEvents.perf_events)
-  val perfEvents = ldq_perf ++ stq_perf
-  val perf_list = storeQueue.perfinfo.perfEvents.perf_events ++ loadQueue.perfinfo.perfEvents.perf_events
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perf_list
-}                          
+  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEvents)
+  generatePerfEvent()
+}

@@ -20,14 +20,19 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{XSDebug, XSPerfAccumulate, PerfEventsBundle}
+import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import xiangshan.L1CacheErrorInfo
 
-class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
+class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   def metaBits = (new Meta).getWidth
   def encMetaBits = cacheParams.tagCode.width((new MetaAndTag).getWidth) - tagBits
   def getMeta(encMeta: UInt): UInt = {
     require(encMeta.getWidth == encMetaBits)
     encMeta(metaBits - 1, 0)
+  }
+  def getECC(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(encMetaBits - 1, metaBits)
   }
 
   val io = IO(new DCacheBundle {
@@ -62,6 +67,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
+
+    // ecc error
+    val error = Output(new L1CacheErrorInfo())
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -108,6 +116,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_vaddr = s1_req.addr
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_req.addr))
   val s1_nack = RegNext(io.nack)
+  val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
 
@@ -154,8 +163,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
+  // TODO: optimize implementation
+  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
+  val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
+  val s1_hit = s1_tag_match && s1_has_permission && s1_hit_coh === s1_new_hit_coh
+  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_nack_data && !s1_hit
+
   // tag ecc check
-//  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
+  //  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -209,8 +224,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   dump_pipeline_valids("LoadPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
+  val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
+
   // send load miss to miss queue
-  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit && !io.lsu.s2_kill
+  io.miss_req.valid := s2_valid && s2_can_send_miss_req
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd
@@ -220,6 +237,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
+  io.miss_req.bits.cancel := io.lsu.s2_kill
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
@@ -233,7 +251,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
-  val real_miss = !s2_hit || s2_nack
+  val real_miss = !s2_hit
   resp.bits.miss := real_miss || io.bank_conflict_slow
   if (id == 0) {
     // load pipe 0 will not be influenced by bank conflict
@@ -258,6 +276,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
+
+  // check ecc error
+  val ecc_resp = VecInit(io.meta_resp.map(r => getECC(r)))
+  val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
+  val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_addr)).asUInt)
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit) && RegNext(dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error)
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := s2_addr
 
   // -------
   // Debug logging functions
@@ -285,23 +312,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("load_replay_for_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
-  XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss && !resp.bits.replay)
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire() && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(5))
-  })
   val perfEvents = Seq(
-    ("load_req                     ", io.lsu.req.fire()                                               ),
-    ("load_replay                  ", io.lsu.resp.fire() && resp.bits.replay                          ),
-    ("load_replay_for_data_nack    ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
-    ("load_replay_for_no_mshr      ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
-    ("load_replay_for_conflict     ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
+    ("load_req                 ", io.lsu.req.fire()                                               ),
+    ("load_replay              ", io.lsu.resp.fire() && resp.bits.replay                          ),
+    ("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
+    ("load_replay_for_no_mshr  ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
+    ("load_replay_for_conflict ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
   )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
+  generatePerfEvent()
 }

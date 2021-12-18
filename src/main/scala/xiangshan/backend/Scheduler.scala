@@ -16,22 +16,20 @@
 
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xiangshan._
 import utils._
+import xiangshan._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper, RsPerfCounter}
-import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
+import xiangshan.backend.issue.ReservationStationWrapper
+import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr, StoreDataBundle}
-
-import scala.collection.mutable.ArrayBuffer
+import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr}
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -57,19 +55,67 @@ object DispatchArbiter {
   }
 }
 
-trait HasExuWbMappingHelper {
+trait HasExuWbHelper {
   def findInWbPorts(wb: Seq[Seq[ExuConfig]], target: ExuConfig) : Seq[Int] = {
     wb.zipWithIndex.filter(_._1.contains(target)).map(_._2)
   }
+
   def findInWbPorts(wb: Seq[Seq[ExuConfig]], targets: Seq[ExuConfig]) : Seq[Int] = {
     targets.map(findInWbPorts(wb, _)).fold(Seq())(_ ++ _)
   }
+
   def getFastWakeupIndex(cfg: ExuConfig, intSource: Seq[Int], fpSource: Seq[Int], offset: Int) : Seq[Int] = {
     val sources = Seq(
       (cfg.readIntRf, intSource),
       (cfg.readFpRf, fpSource.map(_ + offset))
     )
     sources.map(c => if (c._1) c._2 else Seq()).reduce(_ ++ _)
+  }
+  def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+    val uop = WireInit(x)
+    uop.valid := x.valid && x.bits.ctrl.fpWen
+    uop
+  }
+  def fpOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
+    val out = WireInit(x)
+    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out
+  }
+  def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
+    val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
+    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out
+  }
+  def intUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+    val uop = WireInit(x)
+    uop.valid := x.valid && x.bits.ctrl.rfWen
+    uop
+  }
+  def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
+    val out = WireInit(x)
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out
+  }
+  def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
+    val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out
+  }
+  def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
+    val v = Wire(Valid(d.bits.cloneType))
+    v.valid := d.valid
+    v.bits := d.bits
+    v
+  }
+
+  def validIOToDecoupledIO[T <: Data](v: Valid[T]): DecoupledIO[T] = {
+    val d = Wire(DecoupledIO(v.bits.cloneType))
+    d.valid := v.valid
+    d.ready := true.B
+    d.bits := v.bits
+    d
   }
 }
 
@@ -83,7 +129,7 @@ class Scheduler(
   val outFpRfReadPorts: Int,
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
-)(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbMappingHelper {
+)(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbHelper {
   val numDpPorts = dpPorts.length
   val dpExuConfigs = dpPorts.map(port => port.map(_._1).map(configs(_)._1))
   def getDispatch2 = {
@@ -145,12 +191,11 @@ class Scheduler(
 
   lazy val module = new SchedulerImp(this)
 
-  def canAccept(fuType: UInt): Bool = {
-    VecInit(configs.map(_._1.canAccept(fuType))).asUInt.orR
-  }
+  def canAccept(fuType: UInt): Bool = VecInit(configs.map(_._1.canAccept(fuType))).asUInt.orR
+  def numRs: Int = reservationStations.map(_.numRS).sum
 }
 
-class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter {
+class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter with HasPerfEvents {
   val memRsEntries = outer.getMemRsEntries
   val updatedP = p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
@@ -163,7 +208,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val fpRfConfig = (outer.numFpRfReadPorts > 0 && outer.hasFpRf, outer.numFpRfReadPorts, fpRfWritePorts)
 
   val rs_all = outer.reservationStations
-  val numPerfPorts = outer.reservationStations.map(_.module.perf.length).sum
 
   // print rs info
   println("Scheduler: ")
@@ -173,7 +217,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of std ports: ${outer.numSTDPorts}")
   val numLoadPorts = outer.reservationStations.map(_.module.io.load).filter(_.isDefined).map(_.get.fastMatch.length).sum
   println(s"  number of load ports: ${numLoadPorts}")
-  println(s"  number of perf ports: ${numPerfPorts}")
   if (intRfConfig._1) {
     println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
   }
@@ -212,7 +255,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
-    val perf = Vec(numPerfPorts, Output(new RsPerfCounter))
 
     override def cloneType: SchedulerExtraIO.this.type =
       new SchedulerExtraIO().asInstanceOf[this.type]
@@ -245,11 +287,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
-  val intbtperfEvents = Wire(new PerfEventsBundle(4))
-  val fpbtperfEvents = Wire(new PerfEventsBundle(4))
-  intbtperfEvents := DontCare
-  fpbtperfEvents  := DontCare
-  if (readIntState.nonEmpty) {
+  val intBusyTable = if (readIntState.nonEmpty) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
     busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
       pregAlloc.valid := allocReq.isInt
@@ -259,16 +297,16 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
       pregWb.bits := exuWb.bits.uop.pdest
     }
-    intbtperfEvents <> busyTable.perfinfo.perfEvents
     busyTable.io.read <> readIntState
-  }
+    Some(busyTable)
+  } else None
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
-  if (readFpState.nonEmpty) {
+  val fpBusyTable = if (readFpState.nonEmpty) {
     // Some fp states are read from outside
     val numInFpStateRead = io.extra.fpStateReadIn.getOrElse(Seq()).length
     // The left read requests are serviced by internal busytable
     val numBusyTableRead = readFpState.length - numInFpStateRead
-    if (numBusyTableRead > 0) {
+    val busyTable = if (numBusyTableRead > 0) {
       val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
       busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
         pregAlloc.valid := allocReq.isFp
@@ -279,13 +317,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         pregWb.bits := exuWb.bits.uop.pdest
       }
       busyTable.io.read <> readFpState.take(numBusyTableRead)
-      fpbtperfEvents <> busyTable.perfinfo.perfEvents
       busyTable.io.read <> readFpState
-    }
+      Some(busyTable)
+    } else None
     if (io.extra.fpStateReadIn.isDefined) {
       io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
     }
-  }
+    busyTable
+  } else None
   val allocate = dispatch2.flatMap(_.io.out)
 
   if (io.fmaMid.isDefined) {
@@ -316,7 +355,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   val intRfReadData = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
-  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)
+  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else DelayN(VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)), 1)
 
   if (io.extra.intRfReadIn.isDefined) {
     io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
@@ -378,10 +417,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       feedbackIdx += width
     }
 
+    val intWriteback = io.writeback.take(intRfWritePorts)
+    val fpWriteback  = io.writeback.drop(intRfWritePorts)
     (cfg.intSrcCnt > 0, cfg.fpSrcCnt > 0) match {
-      case (true,  false) => rs.io.slowPorts := io.writeback.take(intRfWritePorts)
-      case (false, true) => rs.io.slowPorts := io.writeback.drop(intRfWritePorts)
-      case (true,  true) => rs.io.slowPorts := io.writeback
+      case (true,  false) => rs.io.slowPorts := intWriteback
+      case (false, true) => rs.io.slowPorts := fpWriteback
+      // delay fp for extra one cycle
+      case (true,  true) => rs.io.slowPorts := intWriteback ++ RegNext(VecInit(fpWriteback))
       case _ => throw new RuntimeException("unknown wakeup source")
     }
 
@@ -402,7 +444,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val allLoadRS = outer.reservationStations.map(_.module.io.load).filter(_.isDefined)
     io.extra.loadFastMatch.get := allLoadRS.map(_.get.fastMatch).fold(Seq())(_ ++ _)
   }
-  io.extra.perf <> rs_all.flatMap(_.module.perf)
 
   var intReadPort = 0
   var fpReadPort = 0
@@ -434,15 +475,18 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val fpRfPorts = VecInit(fpRfReadData.slice(fpReadPort, fpReadPort + numFpRfPorts))
       for ((rs, idx) <- dp) {
         val mod = rs_all(rs).module
-        val target = mod.io.srcRegValue(idx)
-        // dirty code for store
-        val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
-        val fromFp = if (numIntRfPorts > 0) isFp else false.B
         if (numIntRfPorts > 0) {
           require(numFpRfPorts == 1 && numIntRfPorts == 1)
+          // dirty code for store
+          mod.io.fpRegValue.get(idx) := fpRfPorts.head
         }
-        when (fromFp) {
-          target := fpRfPorts.take(target.length)
+        else {
+          val target = mod.io.srcRegValue(idx)
+          val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
+          val fromFp = if (numIntRfPorts > 0) isFp else false.B
+          when (fromFp) {
+            target := fpRfPorts.take(target.length)
+          }
         }
       }
       fpReadPort += numFpRfPorts
@@ -466,18 +510,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
-  val perfEvents_list = Wire(new PerfEventsBundle(2))
-  val perfEvents = Seq(
-    ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))   ),
-    ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))     ),
-  )
-  for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
 
-  val perf_list =  perfEvents_list.perf_events ++ intbtperfEvents.perf_events ++ fpbtperfEvents.perf_events
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perf_list
+  val schedulerPerf = Seq(
+    ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))),
+    ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))  )
+  )
+  val intBtPerf = if (intBusyTable.isDefined) intBusyTable.get.getPerfEvents else Seq()
+  val fpBtPerf = if (fpBusyTable.isDefined) fpBusyTable.get.getPerfEvents else Seq()
+  val perfEvents = schedulerPerf ++ intBtPerf ++ fpBtPerf ++ rs_all.flatMap(_.module.getPerfEvents)
+  generatePerfEvent()
 }

@@ -19,110 +19,14 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest._
 import freechips.rocketchip.util._
 import utils.MaskedRegMap.WritableMask
 import utils._
+import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend._
-import xiangshan.cache._
-import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
-import difftest._
-
-trait HasExceptionNO {
-  def instrAddrMisaligned = 0
-  def instrAccessFault    = 1
-  def illegalInstr        = 2
-  def breakPoint          = 3
-  def loadAddrMisaligned  = 4
-  def loadAccessFault     = 5
-  def storeAddrMisaligned = 6
-  def storeAccessFault    = 7
-  def ecallU              = 8
-  def ecallS              = 9
-  def ecallM              = 11
-  def instrPageFault      = 12
-  def loadPageFault       = 13
-  def storePageFault      = 15
-
-//  def singleStep          = 14
-
-  val ExcPriority = Seq(
-    breakPoint, // TODO: different BP has different priority
-    instrPageFault,
-    instrAccessFault,
-    illegalInstr,
-    instrAddrMisaligned,
-    ecallM, ecallS, ecallU,
-    storePageFault,
-    loadPageFault,
-    storeAccessFault,
-    loadAccessFault,
-    storeAddrMisaligned,
-    loadAddrMisaligned
-  )
-  val frontendSet = List(
-    // instrAddrMisaligned,
-    instrAccessFault,
-    illegalInstr,
-    instrPageFault
-  )
-  val csrSet = List(
-    illegalInstr,
-    breakPoint,
-    ecallU,
-    ecallS,
-    ecallM
-  )
-  val loadUnitSet = List(
-    loadAddrMisaligned,
-    loadAccessFault,
-    loadPageFault
-  )
-  val storeUnitSet = List(
-    storeAddrMisaligned,
-    storeAccessFault,
-    storePageFault
-  )
-  val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
-  val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
-  val csrWbCount = (0 until 16).map(i => if (csrSet.contains(i)) 1 else 0)
-  val loadWbCount = (0 until 16).map(i => if (loadUnitSet.contains(i)) 1 else 0)
-  val storeWbCount = (0 until 16).map(i => if (storeUnitSet.contains(i)) 1 else 0)
-  val atomicsWbCount = (0 until 16).map(i => if (atomicsUnitSet.contains(i)) 1 else 0)
-  val writebackCount = (0 until 16).map(i => csrWbCount(i) + atomicsWbCount(i) + loadWbCount(i) + 2 * storeWbCount(i))
-  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] = {
-    if (dontCareBits) {
-      val new_vec = Wire(ExceptionVec())
-      new_vec := DontCare
-      select.map(i => new_vec(i) := vec(i))
-      return new_vec
-    }
-    else if (falseBits) {
-      val new_vec = Wire(ExceptionVec())
-      new_vec.map(_ := false.B)
-      select.map(i => new_vec(i) := vec(i))
-      return new_vec
-    }
-    else {
-      val new_vec = Wire(Vec(select.length, Bool()))
-      select.zipWithIndex.map{ case(s, i) => new_vec(i) := vec(s) }
-      return new_vec
-    }
-  }
-  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, frontendSet, dontCareBits, falseBits)
-  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, csrSet, dontCareBits, falseBits)
-  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, loadUnitSet, dontCareBits, falseBits)
-  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, storeUnitSet, dontCareBits, falseBits)
-  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, atomicsUnitSet, dontCareBits, falseBits)
-  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
-    partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
-}
+import xiangshan.cache._
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
@@ -155,10 +59,10 @@ class FpuCsrIO extends Bundle {
 
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
-  val perfEventsFrontend  = (new PerfEventsBundle(numCSRPCntFrontend ))
-  val perfEventsCtrl      = (new PerfEventsBundle(numCSRPCntCtrl     ))
-  val perfEventsLsu       = (new PerfEventsBundle(numCSRPCntLsu      ))
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks,(UInt(6.W)))
+  val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
+  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
+  val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -216,7 +120,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
   // distributed csr write
-  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
+  val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
   // To Dcache, Icache, PTW
   val mhartid = Output(UInt(XLEN.W))
 }
@@ -268,7 +172,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
 
-    val pad1 = if (XLEN == 64) Output(UInt(27.W)) else null
+    val pad1 = if (XLEN == 64) Output(UInt(25.W)) else null
+    val mbe  = if (XLEN == 64) Output(UInt(1.W)) else null
+    val sbe  = if (XLEN == 64) Output(UInt(1.W)) else null
     val sxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val uxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val pad0 = if (XLEN == 64) Output(UInt(9.W))  else Output(UInt(8.W))
@@ -287,6 +193,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val pie = new Priv
     val ie = new Priv
     assert(this.getWidth == XLEN)
+
+    def ube = pie.h // a little ugly
+    def ube_(r: UInt): Unit = {
+      pie.h := r(0)
+    }
   }
 
   class Interrupt extends Bundle {
@@ -432,12 +343,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.mem_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy), tdata2Phy(tselectPhy))
 
   // Machine-Level CSRs
-
+  // mtvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
+  val mtvecMask = ~(0x2.U(XLEN.W))
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mepc = Reg(UInt(XLEN.W))
+  // Page 36 in riscv-priv: The low bit of mepc (mepc[0]) is always zero.
+  val mepcMask = ~(0x1.U(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
@@ -461,14 +375,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), 0.U)
-  csrio.mhartid := mhartid + 1.U               // Luoshan: for test
+  val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
+  val mstatus = RegInit("ha00000000".U(XLEN.W))
 
+  csrio.mhartid := mhartid + 1.U               // Luoshan: for test
+  
   // mstatus Value Table
   // | sd   |
   // | pad1 |
   // | sxl  | hardlinked to 10, use 00 to pass xv6 test
-  // | uxl  | hardlinked to 00
+  // | uxl  | hardlinked to 10
   // | pad0 |
   // | tsr  |
   // | tw   |
@@ -491,11 +407,21 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew
   }
 
+  val mstatusWMask = (~ZeroExt((
+    GenMask(XLEN - 2, 36) | // WPRI
+    GenMask(35, 32)       | // SXL and UXL cannot be changed
+    GenMask(31, 23)       | // WPRI
+    GenMask(16, 15)       | // XS is read-only
+    GenMask(10, 9)        | // WPRI
+    GenMask(6)            | // WPRI
+    GenMask(2)              // WPRI
+  ), 64)).asUInt()
   val mstatusMask = (~ZeroExt((
-    GenMask(XLEN-2, 38) | GenMask(31, 23) | GenMask(10, 9) | GenMask(2) |
-    GenMask(37) | // MBE
-    GenMask(36) | // SBE
-    GenMask(6)    // UBE
+    GenMask(XLEN - 2, 36) | // WPRI
+    GenMask(31, 23)       | // WPRI
+    GenMask(10, 9)        | // WPRI
+    GenMask(6)            | // WPRI
+    GenMask(2)              // WPRI
   ), 64)).asUInt()
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
@@ -520,6 +446,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // -------------------------------------------------------
   val sstatusRmask = sstatusWmask | "h8000000300018000".U
   // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
+  // stvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
+  val stvecMask = ~(0x2.U(XLEN.W))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
@@ -530,8 +458,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
   // TODO: use config to control the length of asid
   // val satpMask = "h8fffffffffffffff".U(XLEN.W) // enable asid, mode can only be 8 / 0
-  val satpMask = Cat("h8".U(4.W),Asid_true_mask(AsidLength),"hfffffffffff".U((XLEN - 4 - 16).W))
+  val satpMask = Cat("h8".U(Satp_Mode_len.W), satp_part_wmask(Satp_Asid_len, AsidLength), satp_part_wmask(Satp_Addr_len, PAddrBits-12))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
+  // Page 60 in riscv-priv: The low bit of sepc (sepc[0]) is always zero.
+  val sepcMask = ~(0x1.U(XLEN.W))
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
@@ -570,11 +500,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // bits 0-3: store buffer flush threshold (default: 8 entries)
   val smblockctl_init_val =
     ("hf".U & StoreBufferThreshold.U) |
-    (EnableLdVioCheckAfterReset.B.asUInt << 4)
+    (EnableLdVioCheckAfterReset.B.asUInt << 4) |
+    GenMask(5) // enable soft prefetch by default
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
-  csrio.customCtrl.ldld_vio_check := smblockctl(4)
+  csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
+  csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
 
   val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
@@ -641,56 +573,33 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val priviledgeModeOH = UIntToOH(priviledgeMode)
   val perfEventscounten = RegInit(0.U.asTypeOf(Vec(nrPerfCnts, Bool())))
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfEvents = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
+                   List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
   for (i <-0 until nrPerfCnts) {
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
   }
 
-  val hpmEvents = Wire(new PerfEventsBundle(numPCntHc * coreParams.L2NBanks))
-  val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := csrio.customCtrl.distribute_csr
-  for(i <- 0 until numPCntHc * coreParams.L2NBanks) {
-    hpmEvents.perf_events(i).incr_step := csrio.perf.perfEventsHc(i)
+  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+  for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
+    hpmEvents(i) := csrio.perf.perfEventsHc(i)
   }
 
-  val hpm_hc = Module(new HPerfmonitor(numPCntHc * coreParams.L2NBanks,numCSRPCntHc))
-  val csrevents = pfevent.io.hpmevent.slice(24,29)
-  hpm_hc.io.hpm_event := csrevents
-  hpm_hc.io.events_sets := hpmEvents
+  val csrevents = perfEvents.slice(24, 29)
+  val hpm_hc = HPerfMonitor(csrevents, hpmEvents)
   val mcountinhibit = RegInit(0.U(XLEN.W))
   val mcycle = RegInit(0.U(XLEN.W))
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
+  val perf_events = csrio.perf.perfEventsFrontend ++
+                    csrio.perf.perfEventsCtrl ++
+                    csrio.perf.perfEventsLsu ++
+                    hpm_hc.getPerf
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
-  perfCnts( 0)  := Mux((mcountinhibit( 3) | perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.perf_events(0 ).incr_step)))
-  perfCnts( 1)  := Mux((mcountinhibit( 4) | perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.perf_events(1 ).incr_step)))
-  perfCnts( 2)  := Mux((mcountinhibit( 5) | perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.perf_events(2 ).incr_step)))
-  perfCnts( 3)  := Mux((mcountinhibit( 6) | perfEventscounten( 3)),perfCnts( 3) , (perfCnts( 3) + RegNext(csrio.perf.perfEventsFrontend.perf_events(3 ).incr_step)))
-  perfCnts( 4)  := Mux((mcountinhibit( 7) | perfEventscounten( 4)),perfCnts( 4) , (perfCnts( 4) + RegNext(csrio.perf.perfEventsFrontend.perf_events(4 ).incr_step)))
-  perfCnts( 5)  := Mux((mcountinhibit( 8) | perfEventscounten( 5)),perfCnts( 5) , (perfCnts( 5) + RegNext(csrio.perf.perfEventsFrontend.perf_events(5 ).incr_step)))
-  perfCnts( 6)  := Mux((mcountinhibit( 9) | perfEventscounten( 6)),perfCnts( 6) , (perfCnts( 6) + RegNext(csrio.perf.perfEventsFrontend.perf_events(6 ).incr_step)))
-  perfCnts( 7)  := Mux((mcountinhibit(10) | perfEventscounten( 7)),perfCnts( 7) , (perfCnts( 7) + RegNext(csrio.perf.perfEventsFrontend.perf_events(7 ).incr_step)))
-  perfCnts( 8)  := Mux((mcountinhibit(11) | perfEventscounten( 8)),perfCnts( 8) , (perfCnts( 8) + RegNext(csrio.perf.perfEventsCtrl.perf_events(0 ).incr_step)))
-  perfCnts( 9)  := Mux((mcountinhibit(12) | perfEventscounten( 9)),perfCnts( 9) , (perfCnts( 9) + RegNext(csrio.perf.perfEventsCtrl.perf_events(1 ).incr_step)))
-  perfCnts(10)  := Mux((mcountinhibit(13) | perfEventscounten(10)),perfCnts(10) , (perfCnts(10) + RegNext(csrio.perf.perfEventsCtrl.perf_events(2 ).incr_step)))
-  perfCnts(11)  := Mux((mcountinhibit(14) | perfEventscounten(11)),perfCnts(11) , (perfCnts(11) + RegNext(csrio.perf.perfEventsCtrl.perf_events(3 ).incr_step)))
-  perfCnts(12)  := Mux((mcountinhibit(15) | perfEventscounten(12)),perfCnts(12) , (perfCnts(12) + RegNext(csrio.perf.perfEventsCtrl.perf_events(4 ).incr_step)))
-  perfCnts(13)  := Mux((mcountinhibit(16) | perfEventscounten(13)),perfCnts(13) , (perfCnts(13) + RegNext(csrio.perf.perfEventsCtrl.perf_events(5 ).incr_step)))
-  perfCnts(14)  := Mux((mcountinhibit(17) | perfEventscounten(14)),perfCnts(14) , (perfCnts(14) + RegNext(csrio.perf.perfEventsCtrl.perf_events(6 ).incr_step)))
-  perfCnts(15)  := Mux((mcountinhibit(18) | perfEventscounten(15)),perfCnts(15) , (perfCnts(15) + RegNext(csrio.perf.perfEventsCtrl.perf_events(7 ).incr_step)))
-  perfCnts(16)  := Mux((mcountinhibit(19) | perfEventscounten(16)),perfCnts(16) , (perfCnts(16) + RegNext(csrio.perf.perfEventsLsu.perf_events(0 ).incr_step)))
-  perfCnts(17)  := Mux((mcountinhibit(20) | perfEventscounten(17)),perfCnts(17) , (perfCnts(17) + RegNext(csrio.perf.perfEventsLsu.perf_events(1 ).incr_step)))
-  perfCnts(18)  := Mux((mcountinhibit(21) | perfEventscounten(18)),perfCnts(18) , (perfCnts(18) + RegNext(csrio.perf.perfEventsLsu.perf_events(2 ).incr_step)))
-  perfCnts(19)  := Mux((mcountinhibit(22) | perfEventscounten(19)),perfCnts(19) , (perfCnts(19) + RegNext(csrio.perf.perfEventsLsu.perf_events(3 ).incr_step)))
-  perfCnts(20)  := Mux((mcountinhibit(23) | perfEventscounten(20)),perfCnts(20) , (perfCnts(20) + RegNext(csrio.perf.perfEventsLsu.perf_events(4 ).incr_step)))
-  perfCnts(21)  := Mux((mcountinhibit(24) | perfEventscounten(21)),perfCnts(21) , (perfCnts(21) + RegNext(csrio.perf.perfEventsLsu.perf_events(5 ).incr_step)))
-  perfCnts(22)  := Mux((mcountinhibit(25) | perfEventscounten(22)),perfCnts(22) , (perfCnts(22) + RegNext(csrio.perf.perfEventsLsu.perf_events(6 ).incr_step)))
-  perfCnts(23)  := Mux((mcountinhibit(26) | perfEventscounten(23)),perfCnts(23) , (perfCnts(23) + RegNext(csrio.perf.perfEventsLsu.perf_events(7 ).incr_step)))
-  perfCnts(24)  := Mux((mcountinhibit(27) | perfEventscounten(24)),perfCnts(24) , (perfCnts(24) + RegNext(hpm_hc.io.events_selected.perf_events(0 ).incr_step)))
-  perfCnts(25)  := Mux((mcountinhibit(28) | perfEventscounten(25)),perfCnts(25) , (perfCnts(25) + RegNext(hpm_hc.io.events_selected.perf_events(1 ).incr_step)))
-  perfCnts(26)  := Mux((mcountinhibit(29) | perfEventscounten(26)),perfCnts(26) , (perfCnts(26) + RegNext(hpm_hc.io.events_selected.perf_events(2 ).incr_step)))
-  perfCnts(27)  := Mux((mcountinhibit(30) | perfEventscounten(27)),perfCnts(27) , (perfCnts(27) + RegNext(hpm_hc.io.events_selected.perf_events(3 ).incr_step)))
-  perfCnts(28)  := Mux((mcountinhibit(31) | perfEventscounten(28)),perfCnts(28) , (perfCnts(28) + RegNext(hpm_hc.io.events_selected.perf_events(4 ).incr_step)))
+  for(i <- 0 until 29){
+    perfCnts(i) := Mux(mcountinhibit(i+3) | !perfEventscounten(i), perfCnts(i), perfCnts(i) + perf_events(i).value)
+  }
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -717,12 +626,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
-    MaskedRegMap(Stvec, stvec),
+    MaskedRegMap(Stvec, stvec, stvecMask, MaskedRegMap.NoSideEffect, stvecMask),
     MaskedRegMap(Scounteren, scounteren),
 
     //--- Supervisor Trap Handling ---
     MaskedRegMap(Sscratch, sscratch),
-    MaskedRegMap(Sepc, sepc),
+    MaskedRegMap(Sepc, sepc, sepcMask, MaskedRegMap.NoSideEffect, sepcMask),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
     MaskedRegMap(Sip, mip.asUInt, sipWMask, MaskedRegMap.Unwritable, sipMask),
@@ -743,19 +652,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Marchid, marchid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Mimpid, mimpid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Mconfigptr, mconfigptr, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
-    MaskedRegMap(Mstatus, mstatus, mstatusMask, mstatusUpdateSideEffect, mstatusMask),
+    MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
-    MaskedRegMap(Mtvec, mtvec),
+    MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
 
     //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),
-    MaskedRegMap(Mepc, mepc),
+    MaskedRegMap(Mepc, mepc, mepcMask, MaskedRegMap.NoSideEffect, mepcMask),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
@@ -771,72 +681,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
     MaskedRegMap(Dscratch, dscratch),
-    MaskedRegMap(Dscratch1, dscratch1)
-  )
-
-  var perfCntMapping = Map(
+    MaskedRegMap(Dscratch1, dscratch1),
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
-    MaskedRegMap(Mhpmevent3 , perfEvents( 0)),
-    MaskedRegMap(Mhpmevent4 , perfEvents( 1)),
-    MaskedRegMap(Mhpmevent5 , perfEvents( 2)),
-    MaskedRegMap(Mhpmevent6 , perfEvents( 3)),
-    MaskedRegMap(Mhpmevent7 , perfEvents( 4)),
-    MaskedRegMap(Mhpmevent8 , perfEvents( 5)),
-    MaskedRegMap(Mhpmevent9 , perfEvents( 6)),
-    MaskedRegMap(Mhpmevent10, perfEvents( 7)),
-    MaskedRegMap(Mhpmevent11, perfEvents( 8)),
-    MaskedRegMap(Mhpmevent12, perfEvents( 9)),
-    MaskedRegMap(Mhpmevent13, perfEvents(10)),
-    MaskedRegMap(Mhpmevent14, perfEvents(11)),
-    MaskedRegMap(Mhpmevent15, perfEvents(12)),
-    MaskedRegMap(Mhpmevent16, perfEvents(13)),
-    MaskedRegMap(Mhpmevent17, perfEvents(14)),
-    MaskedRegMap(Mhpmevent18, perfEvents(15)),
-    MaskedRegMap(Mhpmevent19, perfEvents(16)),
-    MaskedRegMap(Mhpmevent20, perfEvents(17)),
-    MaskedRegMap(Mhpmevent21, perfEvents(18)),
-    MaskedRegMap(Mhpmevent22, perfEvents(19)),
-    MaskedRegMap(Mhpmevent23, perfEvents(20)),
-    MaskedRegMap(Mhpmevent24, perfEvents(21)),
-    MaskedRegMap(Mhpmevent25, perfEvents(22)),
-    MaskedRegMap(Mhpmevent26, perfEvents(23)),
-    MaskedRegMap(Mhpmevent27, perfEvents(24)),
-    MaskedRegMap(Mhpmevent28, perfEvents(25)),
-    MaskedRegMap(Mhpmevent29, perfEvents(26)),
-    MaskedRegMap(Mhpmevent30, perfEvents(27)),
-    MaskedRegMap(Mhpmevent31, perfEvents(28)),
-    MaskedRegMap(Mhpmcounter3 , perfCnts( 0)),
-    MaskedRegMap(Mhpmcounter4 , perfCnts( 1)),
-    MaskedRegMap(Mhpmcounter5 , perfCnts( 2)),
-    MaskedRegMap(Mhpmcounter6 , perfCnts( 3)),
-    MaskedRegMap(Mhpmcounter7 , perfCnts( 4)),
-    MaskedRegMap(Mhpmcounter8 , perfCnts( 5)),
-    MaskedRegMap(Mhpmcounter9 , perfCnts( 6)),
-    MaskedRegMap(Mhpmcounter10, perfCnts( 7)),
-    MaskedRegMap(Mhpmcounter11, perfCnts( 8)),
-    MaskedRegMap(Mhpmcounter12, perfCnts( 9)),
-    MaskedRegMap(Mhpmcounter13, perfCnts(10)),
-    MaskedRegMap(Mhpmcounter14, perfCnts(11)),
-    MaskedRegMap(Mhpmcounter15, perfCnts(12)),
-    MaskedRegMap(Mhpmcounter16, perfCnts(13)),
-    MaskedRegMap(Mhpmcounter17, perfCnts(14)),
-    MaskedRegMap(Mhpmcounter18, perfCnts(15)),
-    MaskedRegMap(Mhpmcounter19, perfCnts(16)),
-    MaskedRegMap(Mhpmcounter20, perfCnts(17)),
-    MaskedRegMap(Mhpmcounter21, perfCnts(18)),
-    MaskedRegMap(Mhpmcounter22, perfCnts(19)),
-    MaskedRegMap(Mhpmcounter23, perfCnts(20)),
-    MaskedRegMap(Mhpmcounter24, perfCnts(21)),
-    MaskedRegMap(Mhpmcounter25, perfCnts(22)),
-    MaskedRegMap(Mhpmcounter26, perfCnts(23)),
-    MaskedRegMap(Mhpmcounter27, perfCnts(24)),
-    MaskedRegMap(Mhpmcounter28, perfCnts(25)),
-    MaskedRegMap(Mhpmcounter29, perfCnts(26)),
-    MaskedRegMap(Mhpmcounter30, perfCnts(27)),
-    MaskedRegMap(Mhpmcounter31, perfCnts(28)),
   )
+
+  val perfCntMapping = (0 until 29).map(i => {Map(
+    MaskedRegMap(addr = Mhpmevent3 +i,
+                 reg  = perfEvents(i),
+                 wmask = "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(addr = Mhpmcounter3 +i,
+                 reg  = perfCnts(i))
+  )}).fold(Map())((a,b) => a ++ b)
   // TODO: mechanism should be implemented later
   // val MhpmcounterStart = Mhpmcounter3
   // val MhpmeventStart   = Mhpmevent3
@@ -921,11 +778,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ))
   MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
-  when (csrio.fpu.fflags.valid) {
-    fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
+  when (RegNext(csrio.fpu.fflags.valid)) {
+    fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
   }
   // set fs and sd in mstatus
-  when (csrw_dirty_fp_state || csrio.fpu.dirty_fs) {
+  when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
@@ -970,7 +827,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall)
+  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
   retTarget := DontCare
   // val illegalEret = TODO
@@ -1011,7 +868,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew.pie.s := true.B
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
-    mstatusNew.mprv := 0.U
+    when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
     // lr := false.B
     retTarget := sepc(VAddrBits-1, 0)
   }
@@ -1066,7 +923,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.uop.cf.pc, intrNO)
+  val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
   val raiseDebugIntr = intrNO === IRQ_DEBUG.U && raiseIntr
 
   // exceptions
@@ -1084,21 +945,21 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasTriggerHit = csrio.exception.bits.uop.cf.trigger.triggerHitVec.orR && raiseException
 
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
-  val regularExceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val exceptionNO = Mux(hasSingleStep || hasTriggerHit, 3.U, regularExceptionNO)
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // todo
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr // exception in debug mode (except ebrk) changes cmderr. how ???
+  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit)
+  val ebreakEnterParkLoop = debugMode && hasbreakPoint
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+    dexceptionPC, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    csrio.exception.bits.uop.cf.pc,
+    dexceptionPC,
     mstatus,
     mideleg,
     medeleg,
@@ -1106,33 +967,40 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   )
 
   // mtval write logic
+  // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when (hasInstrPageFault || hasLoadPageFault || hasStorePageFault) {
-    val tval = Mux(
-      hasInstrPageFault,
-      Mux(
+  val updateTval = VecInit(Seq(
+    hasInstrPageFault,
+    hasLoadPageFault,
+    hasStorePageFault,
+    hasInstrAccessFault,
+    hasLoadAccessFault,
+    hasStoreAccessFault,
+    hasLoadAddrMisaligned,
+    hasStoreAddrMisaligned
+  )).asUInt.orR
+  when (RegNext(RegNext(updateTval))) {
+      val tval = RegNext(Mux(
+      RegNext(hasInstrPageFault || hasInstrAccessFault),
+      RegNext(Mux(
         csrio.exception.bits.uop.cf.crossPageIPFFix,
         SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
-      ),
+        iexceptionPC
+      )),
       memExceptionAddr
-    )
-    when (priviledgeMode === ModeM) {
+    ))
+    when (RegNext(priviledgeMode === ModeM)) {
       mtval := tval
     }.otherwise {
       stval := tval
     }
   }
 
-  when (hasLoadAddrMisaligned || hasStoreAddrMisaligned) {
-    mtval := memExceptionAddr
-  }
-
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
+  val clearTval = !updateTval || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
@@ -1145,11 +1013,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     retTargetReg := retTarget
   }
   csrio.isXRet := isXRetFlag
+  val tvec = Mux(delegS, stvec, mtvec)
+  val tvecBase = tvec(VAddrBits - 1, 2)
   csrio.trapTarget := Mux(isXRetFlag,
     retTargetReg,
     Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      Mux(delegS, stvec, mtvec))(VAddrBits-1, 0)
-  )
+      // When MODE=Vectored, all synchronous exceptions into M/S mode
+      // cause the pc to be set to the address in the BASE field, whereas
+      // interrupts cause the pc to be set to the address in the BASE field
+      // plus four times the interrupt cause number.
+      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+  ))
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1161,7 +1035,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (raiseDebugIntr) {
         debugModeNew := true.B
         mstatusNew.mprv := false.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := 1.U
         dcsrNew.prv := priviledgeMode
         priviledgeMode := ModeM
@@ -1169,7 +1043,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := Mux(hasbreakPoint, 3.U, 0.U)
         dcsrNew.prv := priviledgeMode // TODO
         priviledgeMode := ModeM
@@ -1179,20 +1053,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       debugIntrEnable := false.B
     }.elsewhen (delegS) {
       scause := causeNO
-      sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when (tvalWen) { stval := 0.U }
+      when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when (tvalWen) { mtval := 0.U }
+      when (clearTval) { mtval := 0.U }
     }
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
@@ -1203,14 +1077,36 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Distributed CSR update req
   //
   // For now we use it to implement customized cache op
+  // It can be delayed if necessary
 
-  when(csrio.distributedUpdate.w.valid){
+  val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
+  val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
+  val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
+  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid, 
+    delayedUpdate0.w.bits.addr,
+    delayedUpdate1.w.bits.addr
+  )
+  val distributedUpdateData = Mux(delayedUpdate0.w.valid, 
+    delayedUpdate0.w.bits.data,
+    delayedUpdate1.w.bits.data
+  )
+
+  assert(!(delayedUpdate0.w.valid && delayedUpdate1.w.valid))
+
+  when(distributedUpdateValid){
     // cacheopRegs can be distributed updated
     CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
-      when((Scachebase + attribute("offset").toInt).U === csrio.distributedUpdate.w.bits.addr){
-        cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
+      when((Scachebase + attribute("offset").toInt).U === distributedUpdateAddr){
+        cacheopRegs(name) := distributedUpdateData
       }
     }}
+  }
+
+  // Implicit add reset values for mepc[0] and sepc[0]
+  // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
+  when (reset.asBool) {
+    mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
+    sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
   }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
@@ -1222,9 +1118,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := csrio.hartId
-    difftest.io.intrNO := RegNext(difftestIntrNO)
-    difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
-    difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
+    difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
+    difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
+    difftest.io.exceptionPC := RegNext(RegNext(RegNext(dexceptionPC)))
+    if (env.EnableDifftest) {
+      difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
+    }
   }
 
   // Always instantiate basic difftest modules.
@@ -1251,6 +1150,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.mideleg := mideleg
     difftest.io.medeleg := medeleg
   }
+
+  if(env.AlwaysBasicDiff || env.EnableDifftest) {
+    val difftest = Module(new DifftestDebugMode)
+    difftest.io.clock := clock
+    difftest.io.coreid := csrio.hartId
+    difftest.io.debugMode := debugMode
+    difftest.io.dcsr := dcsr
+    difftest.io.dpc := dpc
+    difftest.io.dscratch0 := dscratch
+    difftest.io.dscratch1 := dscratch1
+  }
 }
 
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
@@ -1261,99 +1171,21 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
 
   val w = io.distribute_csr.w
 
-  //val csrevents = Vec(29,RegInit(UInt(XLEN.W), 0.U))
-  val csrevent3  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent4  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent5  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent6  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent7  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent8  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent9  = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent10 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent11 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent12 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent13 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent14 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent15 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent16 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent17 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent18 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent19 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent20 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent21 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent22 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent23 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent24 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent25 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent26 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent27 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent28 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent29 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent30 = RegInit(UInt(XLEN.W), 0.U)
-  val csrevent31 = RegInit(UInt(XLEN.W), 0.U)
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
+                   List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
 
-  var perfEventMapping = Map(
-    MaskedRegMap(Mhpmevent3, csrevent3 ),
-    MaskedRegMap(Mhpmevent4, csrevent4 ),
-    MaskedRegMap(Mhpmevent5, csrevent5 ),
-    MaskedRegMap(Mhpmevent6, csrevent6 ),
-    MaskedRegMap(Mhpmevent7, csrevent7 ),
-    MaskedRegMap(Mhpmevent8, csrevent8 ),
-    MaskedRegMap(Mhpmevent9, csrevent9 ),
-    MaskedRegMap(Mhpmevent10,csrevent10),
-    MaskedRegMap(Mhpmevent11,csrevent11),
-    MaskedRegMap(Mhpmevent12,csrevent12),
-    MaskedRegMap(Mhpmevent13,csrevent13),
-    MaskedRegMap(Mhpmevent14,csrevent14),
-    MaskedRegMap(Mhpmevent15,csrevent15),
-    MaskedRegMap(Mhpmevent16,csrevent16),
-    MaskedRegMap(Mhpmevent17,csrevent17),
-    MaskedRegMap(Mhpmevent18,csrevent18),
-    MaskedRegMap(Mhpmevent19,csrevent19),
-    MaskedRegMap(Mhpmevent20,csrevent20),
-    MaskedRegMap(Mhpmevent21,csrevent21),
-    MaskedRegMap(Mhpmevent22,csrevent22),
-    MaskedRegMap(Mhpmevent23,csrevent23),
-    MaskedRegMap(Mhpmevent24,csrevent24),
-    MaskedRegMap(Mhpmevent25,csrevent25),
-    MaskedRegMap(Mhpmevent26,csrevent26),
-    MaskedRegMap(Mhpmevent27,csrevent27),
-    MaskedRegMap(Mhpmevent28,csrevent28),
-    MaskedRegMap(Mhpmevent29,csrevent29),
-    MaskedRegMap(Mhpmevent30,csrevent30),
-    MaskedRegMap(Mhpmevent31,csrevent31),
-  )
+  val perfEventMapping = (0 until 29).map(i => {Map(
+    MaskedRegMap(addr = Mhpmevent3 +i,
+                 reg  = perfEvents(i),
+                 wmask = "hf87fff3fcff3fcff".U(XLEN.W))
+  )}).fold(Map())((a,b) => a ++ b)
 
   val rdata = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(perfEventMapping, w.bits.addr, rdata, w.valid, w.bits.data)
-  io.hpmevent( 0) := csrevent3 
-  io.hpmevent( 1) := csrevent4 
-  io.hpmevent( 2) := csrevent5 
-  io.hpmevent( 3) := csrevent6 
-  io.hpmevent( 4) := csrevent7 
-  io.hpmevent( 5) := csrevent8 
-  io.hpmevent( 6) := csrevent9 
-  io.hpmevent( 7) := csrevent10
-  io.hpmevent( 8) := csrevent11
-  io.hpmevent( 9) := csrevent12
-  io.hpmevent(10) := csrevent13
-  io.hpmevent(11) := csrevent14
-  io.hpmevent(12) := csrevent15
-  io.hpmevent(13) := csrevent16
-  io.hpmevent(14) := csrevent17
-  io.hpmevent(15) := csrevent18
-  io.hpmevent(16) := csrevent19
-  io.hpmevent(17) := csrevent20
-  io.hpmevent(18) := csrevent21
-  io.hpmevent(19) := csrevent22
-  io.hpmevent(20) := csrevent23
-  io.hpmevent(21) := csrevent24
-  io.hpmevent(22) := csrevent25
-  io.hpmevent(23) := csrevent26
-  io.hpmevent(24) := csrevent27
-  io.hpmevent(25) := csrevent28
-  io.hpmevent(26) := csrevent29
-  io.hpmevent(27) := csrevent30
-  io.hpmevent(28) := csrevent31
+  for(i <- 0 until 29){
+    io.hpmevent(i) := perfEvents(i)
+  }
 }             
 

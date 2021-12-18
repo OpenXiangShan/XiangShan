@@ -25,7 +25,6 @@ import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.mem.StoreDataBundle
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -35,67 +34,16 @@ class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends X
   override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
 }
 
-trait HasExeBlockHelper {
-  def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
-    val uop = WireInit(x)
-    uop.valid := x.valid && x.bits.ctrl.fpWen
-    uop
-  }
-  def fpOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
-    val out = WireInit(x)
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
-    out
-  }
-  def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
-    val out = WireInit(x)
-    if(connectReady) x.ready := out.ready
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
-    out
-  }
-  def intUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
-    val uop = WireInit(x)
-    uop.valid := x.valid && x.bits.ctrl.rfWen
-    uop
-  }
-  def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
-    val out = WireInit(x)
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
-    out
-  }
-  def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
-    val out = WireInit(x)
-    if(connectReady) x.ready := out.ready
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
-    out
-  }
-  def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
-    val v = Wire(Valid(d.bits.cloneType))
-    v.valid := d.valid
-    v.bits := d.bits
-    v
-  }
-
-  def validIOToDecoupledIO[T <: Data](v: Valid[T]): DecoupledIO[T] = {
-    val d = Wire(DecoupledIO(v.bits.cloneType))
-    d.valid := v.valid
-    d.ready := true.B
-    d.bits := v.bits
-    d
-  }
-}
-
 class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSBundle {
   val hasCSR = configs.map(_._1).contains(JumpCSRExeUnitCfg)
   val hasFence = configs.map(_._1).contains(JumpCSRExeUnitCfg)
   val hasFrm = configs.map(_._1).contains(FmacExeUnitCfg) || configs.map(_._1).contains(FmiscExeUnitCfg)
   val numRedirectOut = configs.filter(_._1.hasRedirect).map(_._2).sum
-  val numStd = configs.filter(_._1 == StdExeUnitCfg).map(_._2).sum
 
   val exuRedirect = Vec(numRedirectOut, ValidIO(new ExuOutput))
   val csrio = if (hasCSR) Some(new CSRFileIO) else None
   val fenceio = if (hasFence) Some(new FenceIO) else None
   val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
-  val stData = if (numStd > 0) Some(Vec(numStd, ValidIO(new StoreDataBundle))) else None
 
   override def cloneType: FUBlockExtraIO.this.type =
     new FUBlockExtraIO(configs).asInstanceOf[this.type]
@@ -118,7 +66,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
 
   val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
   val exeUnits = configs.zip(exuDefs).map(x => Seq.fill(x._1._2)(Instance(x._2))).reduce(_ ++ _)
-  println(exeUnits)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
   // TODO: deal with Std units
   val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
@@ -151,10 +98,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     if (exu.frm.isDefined) {
       exu.frm.get := io.extra.frm.get
     }
-  }
-
-  if (io.extra.stData.isDefined) {
-    io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
   }
 
   if (io.fmaMid.isDefined) {

@@ -21,15 +21,21 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.{Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
+import xiangshan.mem.mdp._
 
-class Rename(implicit p: Parameters) extends XSModule {
+class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val robCommits = Flipped(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
+    // ssit read result
+    val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
+    // waittable read result
+    val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
@@ -40,9 +46,9 @@ class Rename(implicit p: Parameters) extends XSModule {
   })
 
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(MEFreeListSize))
-  val intRefCounter = Module(new RefCounter(MEFreeListSize))
-  val fpFreeList = Module(new StdFreeList(StdFreeListSize))
+  val intFreeList = Module(new MEFreeList(NRPhyRegs))
+  val intRefCounter = Module(new RefCounter(NRPhyRegs))
+  val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
@@ -88,7 +94,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     uop.srcState(1) := DontCare
     uop.srcState(2) := DontCare
     uop.robIdx := DontCare
-    uop.diffTestDebugLrScValid := DontCare
     uop.debugInfo := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
@@ -108,6 +113,14 @@ class Rename(implicit p: Parameters) extends XSModule {
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+
+    // update cf according to ssit result
+    uops(i).cf.storeSetHit := io.ssit(i).valid
+    uops(i).cf.loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid
+    uops(i).cf.ssid := io.ssit(i).ssid
+
+    // update cf according to waittable result
+    uops(i).cf.loadWaitBit := io.waittable(i)
 
     val inValid = io.in(i).valid
 
@@ -205,6 +218,26 @@ class Rename(implicit p: Parameters) extends XSModule {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
+
+    // For fused-lui-load, load.src(0) is replaced by the imm.
+    val last_is_lui = io.in(i - 1).bits.ctrl.selImm === SelImm.IMM_U && io.in(i - 1).bits.ctrl.srcType(0) =/= SrcType.pc
+    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu && !LSUOpType.isPrefetch(io.in(i).bits.ctrl.fuOpType)
+    val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
+    val fused_lui_load = last_is_lui && this_is_load && lui_to_load
+    when (fused_lui_load) {
+      // The first LOAD operand (base address) is replaced by LUI-imm and stored in {psrc, imm}
+      val lui_imm = io.in(i - 1).bits.ctrl.imm
+      val ld_imm = io.in(i).bits.ctrl.imm
+      io.out(i).bits.ctrl.srcType(0) := SrcType.imm
+      io.out(i).bits.ctrl.imm := Imm_LUI_LOAD().immFromLuiLoad(lui_imm, ld_imm)
+      val psrcWidth = uops(i).psrc.head.getWidth
+      val lui_imm_in_imm = uops(i).ctrl.imm.getWidth - Imm_I().len
+      val left_lui_imm = Imm_U().len - lui_imm_in_imm
+      require(2 * psrcWidth >= left_lui_imm, "cannot fused lui and load with psrc")
+      io.out(i).bits.psrc(0) := lui_imm(lui_imm_in_imm + psrcWidth - 1, lui_imm_in_imm)
+      io.out(i).bits.psrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + psrcWidth)
+    }
+
   }
 
   /**
@@ -285,30 +318,20 @@ class Rename(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
+  val is_fused_lui_load = io.out.map(o => o.fire() && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
+  XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
-
-  val intfl_perf     = intFreeList.perfEvents.map(_._1).zip(intFreeList.perfinfo.perfEvents.perf_events)
-  val fpfl_perf      = fpFreeList.perfEvents.map(_._1).zip(fpFreeList.perfinfo.perfEvents.perf_events)
-  val perf_list = Wire(new PerfEventsBundle(6))
-  val perf_seq = Seq(
-    ("rename_in                   ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
-    ("rename_waitinstr            ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
-    ("rename_stall_cycle_dispatch ", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_fp       ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_int      ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk ),
-    ("rename_stall_cycle_walk     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk ),
-  ) 
-  for (((perf_out,(perf_name,perf)),i) <- perf_list.perf_events.zip(perf_seq).zipWithIndex) {
-    perf_out.incr_step := RegNext(perf)
-  }
-
-  val perfEvents_list = perf_list.perf_events ++
-                        intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++
-                        fpFreeList.perfinfo.perfEvents.perf_events
-
-  val perfEvents = perf_seq ++ intfl_perf ++ fpfl_perf
-  val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perfEvents_list.length))
-  })
-  perfinfo.perfEvents.perf_events := perfEvents_list
+  
+  val renamePerf = Seq(
+    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
+    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_stall_cycle_dispatch", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_fp      ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_int     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk),
+    ("rename_stall_cycle_walk    ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk)
+  )
+  val intFlPerf = intFreeList.getPerfEvents
+  val fpFlPerf = fpFreeList.getPerfEvents
+  val perfEvents = renamePerf ++ intFlPerf ++ fpFlPerf
+  generatePerfEvent()
 }

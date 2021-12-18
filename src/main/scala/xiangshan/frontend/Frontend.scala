@@ -15,15 +15,15 @@
 ***************************************************************************************/
 
 package xiangshan.frontend
-import utils._
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker}
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
+import xiangshan.frontend.icache._
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
@@ -37,7 +37,7 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasExceptionNO
+  with HasPerfEvents
 {
   val io = IO(new Bundle() {
     val fencei = Input(Bool())
@@ -59,49 +59,42 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   })
 
   //decouped-frontend modules
+  val instrUncache = outer.instrUncache.module
+  val icache       = outer.icache.module
   val bpu     = Module(new Predictor)
   val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
-  //icache
 
-  //PFEvent
-  val pfevent = Module(new PFEvent)
-  val tlbCsr = RegNext(io.tlbCsr)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  val tlbCsr = DelayN(io.tlbCsr, 2)
+  val csrCtrl = DelayN(io.csrCtrl, 2)
 
   // trigger
-  ifu.io.frontendTrigger := io.csrCtrl.frontend_trigger
-  val triggerEn = io.csrCtrl.trigger_enable
+  ifu.io.frontendTrigger := csrCtrl.frontend_trigger
+  val triggerEn = csrCtrl.trigger_enable
   ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
   // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
-  pmp.io.distribute_csr := io.csrCtrl.distribute_csr
+  pmp.io.distribute_csr := csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
-    pmp_check(i).env.pmp  := pmp.io.pmp
-    pmp_check(i).env.pma  := pmp.io.pma
-    pmp_check(i).env.mode := tlbCsr.priv.imode
-    pmp_check(i).req <> ifu.io.pmp(i).req
-    ifu.io.pmp(i).resp <> pmp_check(i).resp
+    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp(i).req)
+    icache.io.pmp(i).resp <> pmp_check(i).resp
   }
 
   io.ptw <> TLB(
-    in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
+    in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
     sfence = io.sfence,
     csr = tlbCsr,
     width = 2,
     shouldBlock = true,
     itlbParams
   )
-  //TODO: modules need to be removed
-  val instrUncache = outer.instrUncache.module
-  val icache       = outer.icache.module
 
   icache.io.fencei := RegNext(io.fencei)
 
-  val needFlush = io.backend.toFtq.stage3Redirect.valid
+  val needFlush = RegNext(io.backend.toFtq.stage2Redirect.valid)
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
@@ -109,20 +102,20 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   bpu.io.ftq_to_bpu       <> ftq.io.toBpu
   ftq.io.fromBpu          <> bpu.io.bpu_to_ftq
   //IFU-ICache
-  ifu.io.icacheInter.toIMeta    <>      icache.io.metaRead.req
-  ifu.io.icacheInter.fromIMeta  <>      icache.io.metaRead.resp
-  ifu.io.icacheInter.toIData    <>      icache.io.dataRead.req
-  ifu.io.icacheInter.fromIData  <>      icache.io.dataRead.resp
-
   for(i <- 0 until 2){
-    ifu.io.icacheInter.toMissQueue(i)         <> icache.io.missQueue.req(i)
-    ifu.io.icacheInter.fromMissQueue(i)       <> icache.io.missQueue.resp(i)
+    ifu.io.icacheInter(i).req       <>      icache.io.fetch(i).req
+    icache.io.fetch(i).req <> ifu.io.icacheInter(i).req
+    ifu.io.icacheInter(i).resp <> icache.io.fetch(i).resp
   }
+  icache.io.stop := ifu.io.icacheStop
 
-  icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
+  ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
-  icache.io.csr.update <> io.csrUpdate
+  //icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
+
+  icache.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  io.csrUpdate := RegNext(icache.io.csr.update)
+
   icache.io.hartid <> io.hartid
 
   //IFU-Ibuffer
@@ -139,36 +132,19 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
-  instrUncache.io.flush := icache.io.missQueue.flush
+  instrUncache.io.flush := false.B//icache.io.missQueue.flush
   io.error <> DontCare
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 
-  if(print_perfcounter){
-    val ifu_perf     = ifu.perfEvents.map(_._1).zip(ifu.perfinfo.perfEvents.perf_events)
-    val ibuffer_perf = ibuffer.perfEvents.map(_._1).zip(ibuffer.perfinfo.perfEvents.perf_events)
-    val icache_perf  = icache.perfEvents.map(_._1).zip(icache.perfinfo.perfEvents.perf_events)
-    val ftq_perf     = ftq.perfEvents.map(_._1).zip(ftq.perfinfo.perfEvents.perf_events)
-    val bpu_perf     = bpu.perfEvents.map(_._1).zip(bpu.perfinfo.perfEvents.perf_events)
-    val perfEvents = ifu_perf ++ ibuffer_perf ++ icache_perf ++ ftq_perf ++ bpu_perf
+  // PFEvent
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  val csrevents = pfevent.io.hpmevent.take(8)
 
-    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-      println(s"frontend perf $i: $perf_name")
-    }
-  }
-
-  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++
-                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ 
-                  bpu.perfinfo.perfEvents.perf_events
-  val perf_length = hpmEvents.length
-  val csrevents = pfevent.io.hpmevent.slice(0,8)
-  val perfinfo = IO(new Bundle(){
-    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
-  })
-  val hpm_frontend = Module(new HPerfmonitor(perf_length,csrevents.length))
-  hpm_frontend.io.hpm_event := csrevents
-  hpm_frontend.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := RegNext(hpm_frontend.io.events_selected)
+  val allPerfEvents = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerf)
+  override val perfEvents = HPerfMonitor(csrevents, allPerfEvents).getPerfEvents
+  generatePerfEvent()
 }
