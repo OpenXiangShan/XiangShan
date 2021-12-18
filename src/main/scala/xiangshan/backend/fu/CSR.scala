@@ -1001,17 +1001,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
-  val retTargetReg = Reg(retTarget.cloneType)
-  when (io.redirectIn.valid) {
+  when (DelayN(io.redirectIn.valid, 5)) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B
-    retTargetReg := retTarget
   }
   csrio.isXRet := isXRetFlag
+  val retTargetReg = RegEnable(retTarget, isXRet)
+
   val tvec = Mux(delegS, stvec, mtvec)
   val tvecBase = tvec(VAddrBits - 1, 2)
-  csrio.trapTarget := Mux(isXRetFlag,
+  // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
+  // ROB sends exception at T0 while CSR receives at T2.
+  // We add a RegNext here and trapTarget is valid at T3.
+  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
     retTargetReg,
     Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
       // When MODE=Vectored, all synchronous exceptions into M/S mode
@@ -1019,7 +1022,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       // interrupts cause the pc to be set to the address in the BASE field
       // plus four times the interrupt cause number.
       Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  ))
+  )), isXRetFlag || csrio.exception.valid)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
