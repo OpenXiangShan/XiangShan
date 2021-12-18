@@ -33,7 +33,7 @@ import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
-  val stage2Redirect = Valid(new Redirect)
+  val redirect = Valid(new Redirect)
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -267,13 +267,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
   flushRedirect.bits := RegEnable(rob.io.flushOut.bits, rob.io.flushOut.valid)
-  flushRedirect.bits.cfiUpdate.target := Mux(io.robio.toCSR.isXRet || rob.io.exception.valid,
-    io.robio.toCSR.trapTarget,
-    Mux(flushRedirect.bits.flushItself(),
-      flushPC, // replay inst
-      flushPC + 4.U // flush pipe
-    )
-  )
 
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
@@ -303,7 +296,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushRedirect.valid
 
-  val frontendFlush = DelayN(flushRedirect, 5)
+  val frontendFlushValid = DelayN(flushRedirect.valid, 5)
+  val frontendFlushBits = RegEnable(flushRedirect.bits, flushRedirect.valid)
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
   // Thus, we make all flush reasons to behave the same as exceptions for frontend.
@@ -312,14 +306,29 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
-  io.frontend.toFtq.stage2Redirect := Mux(frontendFlush.valid, frontendFlush, redirectGen.io.stage2Redirect)
-  when (frontendFlush.valid) {
-    io.frontend.toFtq.stage2Redirect.bits.level := RedirectLevel.flush
+  io.frontend.toFtq.redirect.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.redirect.bits := Mux(frontendFlushValid, frontendFlushBits, redirectGen.io.stage2Redirect.bits)
+  when (frontendFlushValid) {
+    io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
+    // Be careful here:
+    // T0: flushRedirect.valid, exception.valid
+    // T1: csr.redirect.valid
+    // T2: csr.exception.valid
+    // T3: csr.trapTarget
+    // T4: ctrlBlock.trapTarget
+    // T5: io.frontend.toFtq.stage2Redirect.valid
+    val pc_from_csr = io.robio.toCSR.isXRet || DelayN(rob.io.exception.valid, 4)
+    val rob_flush_pc = RegEnable(Mux(flushRedirect.bits.flushItself(),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    ), flushRedirect.valid)
+    val flushTarget = Mux(pc_from_csr, io.robio.toCSR.trapTarget, rob_flush_pc)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
   }
   val pendingRedirect = RegInit(false.B)
   when (stage2Redirect.valid) {
     pendingRedirect := true.B
-  }.elsewhen (RegNext(io.frontend.toFtq.stage2Redirect.valid)) {
+  }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
     pendingRedirect := false.B
   }
 
