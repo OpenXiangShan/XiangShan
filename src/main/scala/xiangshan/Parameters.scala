@@ -69,23 +69,23 @@ case class XSCoreParameters
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    Seq(( 128*8,    2,    9),
-        ( 128*8,    8,    9),
-        ( 128*8,   12,    9),
-        ( 128*8,   13,    9),
-        ( 128*8,   28,    9),
-        ( 128*8,   54,    9),
-        ( 128*8,  119,    9),
-        ( 128*8,  256,    9)),
+    Seq(( 128*8,    2,   10),
+        ( 128*8,    8,   10),
+        ( 128*8,   12,   10),
+        ( 128*8,   16,   10),
+        ( 128*8,   28,   10),
+        ( 128*8,   54,   10),
+        ( 128*8,  119,   10),
+        ( 128*8,  256,   10)),
   TageBanks: Int = 2,
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 512,    0,    0),
-        ( 256,    4,    8),
-        ( 256,    8,    8),
-        ( 512,   12,    8),
-        ( 512,   16,    8),
-        ( 512,   32,    8)),
+        ( 256,    4,    9),
+        ( 256,    8,    9),
+        ( 512,   12,    9),
+        ( 512,   16,    9),
+        ( 512,   32,    9)),
   SCNRows: Int = 512,
   SCNTables: Int = 4,
   SCCtrBits: Int = 6,
@@ -340,7 +340,9 @@ trait HasXSParameter {
         Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
       else
         Set[FoldedHistoryInfo]()
-    }.reduce(_++_)).toList
+    }.reduce(_++_) ++
+      Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
+    ).toList
 
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
