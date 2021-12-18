@@ -430,7 +430,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
 
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val ghr = UInt(UbtbGHRLength.W)
   val histPtr = new CGHPtr
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
@@ -506,7 +505,6 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     folded_hist := entry.folded_hist
-    ghr := entry.ghr
     histPtr := entry.histPtr
     rasSp := entry.rasSp
     rasTop := entry.rasEntry

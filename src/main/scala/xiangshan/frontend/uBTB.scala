@@ -88,7 +88,10 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   
   def getIdx(pc: UInt) = pc(log2Ceil(numEntries)+instOffsetBits-1, instOffsetBits)
 
-  val s0_ridx = getIdx(s0_pc) ^ io.in.bits.ghr
+  val fh_info = (UbtbGHRLength, log2Ceil(UbtbSize))
+  println(s"ubtb fh info ${fh_info}")
+  def get_ghist_from_fh(afh: AllFoldedHistories) = afh.getHistWithInfo(fh_info)
+  val s0_ridx = getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
   val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=false))
   dataMem.io.r.req.valid := io.s0_fire
   dataMem.io.r.req.bits.setIdx := s0_ridx
@@ -116,7 +119,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
   val u_data = Wire(new NewMicroBTBEntry)
   u_data.fromBpuUpdateBundle(update)
-  val u_idx = getIdx(update.pc) ^ update.ghr
+  val u_idx = getIdx(update.pc) ^ get_ghist_from_fh(update.folded_hist).folded_hist
 
   dataMem.io.w.apply(u_valid, u_data, u_idx, 1.U(1.W))
   when (u_valid) {
