@@ -92,6 +92,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   )
 
   icache.io.fencei := RegNext(io.fencei)
+  icache.io.prefetch <> ftq.io.toPrefetch
 
   val needFlush = RegNext(io.backend.toFtq.stage2Redirect.valid)
 
