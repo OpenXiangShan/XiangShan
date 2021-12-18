@@ -146,8 +146,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
+    // for timing optimization, pmp check is divided into dynamic and static
+    // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
+    // static: 4K pages (or sram entries) -> check pmp with pre-checked results
+    val pmp_paddr = Mux(vmEnable, Cat(super_ppn, offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
     pmp(i).valid := resp(i).valid
-    pmp(i).bits.addr := resp(i).bits.paddr
+    pmp(i).bits.addr := pmp_paddr
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
@@ -169,9 +173,14 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(i).bits.excp.af.ld := af && TlbCmd.isRead(cmdReg) && fault_valid
-    resp(i).bits.excp.af.st := af && TlbCmd.isWrite(cmdReg) && fault_valid
-    resp(i).bits.excp.af.instr := af && TlbCmd.isExec(cmdReg) && fault_valid
+    val spm = normal_perm.pm // static physical memory protection or attribute
+    val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+    // for tlb without sram, tlb will miss, pm should be ignored outsize
+    resp(i).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
+    resp(i).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
+    resp(i).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
+    resp(i).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
+    resp(i).bits.static_pm.bits := !spm.c
 
     (hit, miss, validReg)
   }
@@ -218,13 +227,15 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },
     wayIdx = normal_refill_idx,
-    data = ptw.resp.bits
+    data = ptw.resp.bits,
+    data_replenish = io.ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
     else refill && ptw.resp.bits.entry.level.get =/= 2.U },
     wayIdx = super_refill_idx,
-    data = ptw.resp.bits
+    data = ptw.resp.bits,
+    data_replenish = io.ptw_replenish
   )
 
   // if sameCycle, just req.valid
@@ -381,6 +392,7 @@ object TLB {
         in(i).resp.bits := tlb.io.requestor(i).resp.bits
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
+      tlb.io.ptw_replenish <> DontCare // itlb only use reg, so no static pmp/pma
     }
     tlb.io.ptw
   }

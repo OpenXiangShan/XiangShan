@@ -154,7 +154,7 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x3A000040)
+    addr(idx) := shift_addr(0x3A001000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
@@ -162,7 +162,7 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x39001040)
+    addr(idx) := shift_addr(0x39002000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
@@ -170,7 +170,7 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x38021200)
+    addr(idx) := shift_addr(0x38022000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 

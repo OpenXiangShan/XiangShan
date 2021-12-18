@@ -25,7 +25,8 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import xiangshan.backend.fu.PMPReqBundle
+import xiangshan.backend.fu.{PMPReqBundle, PMPConfig}
+
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
@@ -50,6 +51,22 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   }
 }
 
+class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
+  val r = Bool()
+  val w = Bool()
+  val x = Bool()
+  val c = Bool()
+  val atomic = Bool()
+
+  def assign_ap(pm: PMPConfig) = {
+    r := pm.r
+    w := pm.w
+    x := pm.x
+    c := pm.c
+    atomic := pm.atomic
+  }
+}
+
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
@@ -62,8 +79,11 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val w = Bool()
   val r = Bool()
 
+  val pm = new TlbPMBundle
+
   override def toPrintable: Printable = {
-    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
+    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} " +
+    p"pm:${pm}"
   }
 }
 
@@ -191,7 +211,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     ))
   }
 
-  def apply(item: PtwResp, asid: UInt): TlbEntry = {
+  def apply(item: PtwResp, asid: UInt, pm: PMPConfig): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
@@ -210,6 +230,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.x := ptePerm.x
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
+
+    this.perm.pm.assign_ap(pm)
 
     this
   }
@@ -271,6 +293,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
+    val data_replenish = Output(new PMPConfig)
   }))
   val victim = new Bundle {
     val out = ValidIO(Output(new Bundle {
@@ -291,10 +314,11 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
     (this.r.resp_hit_sameCycle(i), this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
+    this.w.bits.data_replenish := data_replenish
   }
 
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
@@ -364,6 +388,7 @@ class TlbResp(implicit p: Parameters) extends TlbBundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
   }
+  val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
 
   override def toPrintable: Printable = {
@@ -401,6 +426,7 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
+  val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
