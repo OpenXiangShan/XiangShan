@@ -306,7 +306,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     io.dcacheResp.bits.error &&
     io.csrCtrl.cache_error_enable
   val debug_s2_exception_with_error = ExceptionNO.selectByFu(s2_exception_with_error_vec, lduCfg).asUInt.orR
-  dontTouch(debug_s2_exception_with_error)
 
   val actually_mmio = io.pmpResp.mmio
   val s2_uop = io.in.bits.uop
