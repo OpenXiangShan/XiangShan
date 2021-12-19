@@ -116,12 +116,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val atomicsUnit = Module(new AtomicsUnit)
 
+  // Atom inst comes from sta / std, then its result 
+  // will be writebacked using load writeback port
+  // 
+  // However, atom exception will be writebacked to rob
+  // using store writeback port
+
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
   val ldOut0 = Wire(Decoupled(new ExuOutput))
   ldOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
   ldOut0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
+  when(atomicsUnit.io.out.valid){
+    ldOut0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
+  }
 
   val ldExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
   io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
@@ -174,19 +183,28 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   val dtlb = dtlb_ld ++ dtlb_st
 
+  val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
+  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
+  io.ptw.resp.ready := true.B
+
   (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
     tlb(0) <> io.ptw.req(i)
+    val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
+      else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
+      else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
+    io.ptw.req(i).valid := tlb(0).valid && !(ptw_resp_v && vector_hit &&
+      ptw_resp_next.data.entry.hit(tlb(0).bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
-  dtlb_ld.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
-  dtlb_st.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
+  dtlb_ld.map(_.ptw.resp.bits := ptw_resp_next.data)
+  dtlb_st.map(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
-    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
-    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
+    dtlb_ld.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
+    dtlb_st.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
   } else {
-    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
-    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
+    dtlb_ld.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR)
+    dtlb_st.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR)
   }
-  io.ptw.resp.ready := true.B
+
 
   // pmp
   val pmp = Module(new PMP())
@@ -197,6 +215,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
+  val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
+  pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
+    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt)
+  dtlb_ld.map(_.ptw_replenish := pmp_check_ptw.io.resp)
+  dtlb_st.map(_.ptw_replenish := pmp_check_ptw.io.resp)
+
   val tdata = Reg(Vec(6, new MatchTriggerIO))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
   val en = csrCtrl.trigger_enable
@@ -352,6 +376,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).valid := true.B
     stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
+  }
+
+  // atom inst will use store writeback port 0 to writeback exception info
+  when (atomicsUnit.io.out.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := atomicsUnit.io.out.bits
+    assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
   }
 
   // Lsq

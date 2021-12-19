@@ -43,6 +43,7 @@ case class TLBParameters
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
   outReplace: Boolean = false,
   shouldBlock: Boolean = false, // only for perf, not support for io
+  partialStaticPMP: Boolean = false, // partila static pmp result stored in entries
   saveLevel: Boolean = false
 )
 
