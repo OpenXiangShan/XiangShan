@@ -108,6 +108,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
   val released = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // load data has been released by dcache
+  val error = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // load data has been corrupted
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
@@ -147,8 +148,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       writebacked(index) := false.B
       released(index) := false.B
       miss(index) := false.B
-      // listening(index) := false.B
       pending(index) := false.B
+      error(index) := false.B
     }
     io.enq.resp(i) := lqIdx
   }
@@ -241,6 +242,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       datavalid(i) := true.B
       miss(i) := false.B
       refilling(i) := true.B
+      when(io.dcache.bits.error) {
+        error(i) := true.B
+      }
     }
   })
 
