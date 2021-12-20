@@ -69,6 +69,7 @@ object CacheInstrucion{
     CacheRegMap("17",     "64",    "RW",      "CACHE_DATA_5"),
     CacheRegMap("18",     "64",    "RW",      "CACHE_DATA_6"),
     CacheRegMap("19",     "64",    "RW",      "CACHE_DATA_7"),
+    CacheRegMap("20",     "64",    "RW",      "CACHE_ERROR"),
   )
 
   // Usage:
@@ -131,7 +132,7 @@ class L1CacheToCsrIO(implicit p: Parameters) extends DCacheBundle {
   val update = new DistributedCSRUpdateReq
 }
 
-class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
+class L1CacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
   val req  = Valid(new CacheCtrlReqInfo)
   val resp = Flipped(Valid(new CacheCtrlRespInfo))
 }
@@ -139,7 +140,8 @@ class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
 class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) extends CacheCtrlModule {
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
-    val cache = new DCacheInnerOpIO
+    val cache = new L1CacheInnerOpIO
+    val error = Flipped(new L1CacheErrorInfo)
   })
 
   // CSRCacheOpDecoder state
@@ -180,7 +182,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   update_cache_req_when_write("CACHE_BANK_NUM", translated_cache_req.bank_num)
   update_cache_req_when_write("CACHE_TAG_HIGH", translated_cache_req.write_tag_high)
   update_cache_req_when_write("CACHE_TAG_LOW", translated_cache_req.write_tag_low)
-  update_cache_req_when_write("CACHE_DATA_ECC", translated_cache_req.write_tag_ecc)
+  update_cache_req_when_write("CACHE_TAG_ECC", translated_cache_req.write_tag_ecc)
   update_cache_req_when_write("CACHE_DATA_0", translated_cache_req.write_data_vec(0))
   update_cache_req_when_write("CACHE_DATA_1", translated_cache_req.write_data_vec(1))
   update_cache_req_when_write("CACHE_DATA_2", translated_cache_req.write_data_vec(2))
@@ -239,13 +241,13 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   when(schedule_csr_op_resp_data){
     io.csr.update.w.bits.addr := Mux1H(List(
       isReadTagECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_TAG_ECC")("offset").toInt + Scachebase).U,
-      isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_BANK_NUM")("offset").toInt + Scachebase).U,
+      isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_DATA_ECC")("offset").toInt + Scachebase).U,
       isReadTag -> ((CacheInstrucion.CacheInsRegisterList("CACHE_TAG_LOW")("offset").toInt + Scachebase).U + data_transfer_cnt),
       isReadData -> ((CacheInstrucion.CacheInsRegisterList("CACHE_DATA_0")("offset").toInt + Scachebase).U + data_transfer_cnt), 
     ))
     io.csr.update.w.bits.data := Mux1H(List(
       isReadTagECC -> raw_cache_resp.read_tag_ecc,
-      isReadDataECC -> raw_cache_resp.read_tag_ecc,
+      isReadDataECC -> raw_cache_resp.read_data_ecc,
       isReadTag -> raw_cache_resp.read_tag_low,
       isReadData -> raw_cache_resp.read_data_vec(data_transfer_cnt),
     ))
@@ -260,5 +262,12 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("OP_FINISH")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := CacheInstrucion.COP_RESULT_CODE_OK
     data_transfer_cnt := 0.U
+  }
+
+  val error = DelayN(io.error, 1)
+  when(error.ecc_error.valid) {
+    io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
+    io.csr.update.w.bits.data := error.ecc_error.valid | (error.paddr.bits >> 1 << 1)
+    // CACHE_ERROR CSR bit 0 indicates if an cache error has been raised, other bits contains error paddr
   }
 }

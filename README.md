@@ -41,7 +41,7 @@ Some of the key directories are shown below.
 
 ```
 .
-├── read-to-run            # pre-built simulation images
+├── ready-to-run           # pre-built simulation images
 ├── scripts                # scripts for agile development
 └── src
     ├── test               # test files (including diff-test, module-test, etc.)
