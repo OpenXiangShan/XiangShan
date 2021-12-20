@@ -53,6 +53,8 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     csr.csrio <> csrio.get
     csrio.get.tlb := DelayN(csr.csrio.tlb, 2)
     csrio.get.customCtrl := DelayN(csr.csrio.customCtrl, 2)
+    csrio.get.trapTarget := RegNext(csr.csrio.trapTarget)
+    csr.csrio.exception := DelayN(csrio.get.exception, 2)
     disableSfence := csr.csrio.disableSfence
     csr_frm := csr.csrio.fpu.frm
     // setup skip for hpm CSR read

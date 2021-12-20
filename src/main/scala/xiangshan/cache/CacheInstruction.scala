@@ -69,6 +69,7 @@ object CacheInstrucion{
     CacheRegMap("17",     "64",    "RW",      "CACHE_DATA_5"),
     CacheRegMap("18",     "64",    "RW",      "CACHE_DATA_6"),
     CacheRegMap("19",     "64",    "RW",      "CACHE_DATA_7"),
+    CacheRegMap("20",     "64",    "RW",      "CACHE_ERROR"),
   )
 
   // Usage:
@@ -131,7 +132,7 @@ class L1CacheToCsrIO(implicit p: Parameters) extends DCacheBundle {
   val update = new DistributedCSRUpdateReq
 }
 
-class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
+class L1CacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
   val req  = Valid(new CacheCtrlReqInfo)
   val resp = Flipped(Valid(new CacheCtrlRespInfo))
 }
@@ -139,7 +140,8 @@ class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
 class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) extends CacheCtrlModule {
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
-    val cache = new DCacheInnerOpIO
+    val cache = new L1CacheInnerOpIO
+    val error = Flipped(new L1CacheErrorInfo)
   })
 
   // CSRCacheOpDecoder state
@@ -260,5 +262,12 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("OP_FINISH")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := CacheInstrucion.COP_RESULT_CODE_OK
     data_transfer_cnt := 0.U
+  }
+
+  val error = DelayN(io.error, 1)
+  when(error.ecc_error.valid) {
+    io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
+    io.csr.update.w.bits.data := error.ecc_error.valid | (error.paddr.bits >> 1 << 1)
+    // CACHE_ERROR CSR bit 0 indicates if an cache error has been raised, other bits contains error paddr
   }
 }

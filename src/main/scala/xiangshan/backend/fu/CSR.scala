@@ -497,12 +497,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val smblockctl_init_val =
     ("hf".U & StoreBufferThreshold.U) |
     (EnableLdVioCheckAfterReset.B.asUInt << 4) |
-    GenMask(5) // enable soft prefetch by default
+    (EnableSoftPrefetchAfterReset.B.asUInt << 5) |
+    (EnableCacheErrorAfterReset.B.asUInt << 6)
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
   csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
+  csrio.customCtrl.cache_error_enable := smblockctl(6)
+
+  println("CSR smblockctl init value:")
+  println("  Store buffer replace threshold: " + StoreBufferThreshold)
+  println("  Enable ld-ld vio check after reset: " + EnableLdVioCheckAfterReset)
+  println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
+  println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
 
   val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
@@ -1001,17 +1009,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
-  val retTargetReg = Reg(retTarget.cloneType)
-  when (io.redirectIn.valid) {
+  when (DelayN(io.redirectIn.valid, 5)) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B
-    retTargetReg := retTarget
   }
   csrio.isXRet := isXRetFlag
+  val retTargetReg = RegEnable(retTarget, isXRet)
+
   val tvec = Mux(delegS, stvec, mtvec)
   val tvecBase = tvec(VAddrBits - 1, 2)
-  csrio.trapTarget := Mux(isXRetFlag,
+  // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
+  // ROB sends exception at T0 while CSR receives at T2.
+  // We add a RegNext here and trapTarget is valid at T3.
+  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
     retTargetReg,
     Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
       // When MODE=Vectored, all synchronous exceptions into M/S mode
@@ -1019,7 +1030,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       // interrupts cause the pc to be set to the address in the BASE field
       // plus four times the interrupt cause number.
       Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  ))
+  )), isXRetFlag || csrio.exception.valid)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))

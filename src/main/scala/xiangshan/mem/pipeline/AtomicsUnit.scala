@@ -41,6 +41,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
+    val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
   //-------------------------------------------------------
@@ -265,6 +266,14 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         LSUOpType.amominu_d -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
       ))
+
+      when (io.dcache.resp.bits.error && io.csrCtrl.cache_error_enable) {
+        val isLr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
+        exceptionVec(loadAccessFault)  := isLr
+        exceptionVec(storeAccessFault) := !isLr
+        assert(!exceptionVec(loadAccessFault))
+        assert(!exceptionVec(storeAccessFault))
+      }
 
       resp_data := resp_data_wire
       state := s_finish

@@ -22,10 +22,11 @@ import chisel3.util._
 import utils.XSDebug
 
 class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
-  val data   = UInt(DataBits.W)
-  val miss   = Bool()
+  val data    = UInt(DataBits.W)
+  val miss    = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
-  val replay = Bool()
+  val replay  = Bool()
+  val error   = Bool()
 
   val ack_miss_queue = Bool()
 
@@ -96,8 +97,9 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     }
   }
 
-  val resp_data = Reg(UInt())
-  val resp_id   = Reg(UInt())
+  val resp_data  = Reg(UInt())
+  val resp_id    = Reg(UInt())
+  val resp_error = Reg(Bool())
   when (state === s_pipe_resp) {
     // when not miss
     // everything is OK, simply send response back to sbuffer
@@ -114,8 +116,9 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
           state := s_pipe_req
         }
       } .otherwise {
-        resp_data := io.pipe_resp.bits.data
-        resp_id   := io.pipe_resp.bits.id
+        resp_data  := io.pipe_resp.bits.data
+        resp_id    := io.pipe_resp.bits.id
+        resp_error := io.pipe_resp.bits.error
         state := s_resp
       }
     }
@@ -125,8 +128,9 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   when (state === s_resp) {
     io.lsu.resp.valid := true.B
     io.lsu.resp.bits  := DontCare
-    io.lsu.resp.bits.data := resp_data
-    io.lsu.resp.bits.id   := resp_id
+    io.lsu.resp.bits.data  := resp_data
+    io.lsu.resp.bits.id    := resp_id
+    io.lsu.resp.bits.error := resp_error
 
     when (io.lsu.resp.fire()) {
       state := s_invalid
