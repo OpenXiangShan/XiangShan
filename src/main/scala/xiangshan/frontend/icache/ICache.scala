@@ -138,7 +138,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
     val fencei   = Input(Bool())
-    val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
   io.read.ready := !io.write.valid
@@ -290,7 +290,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheDataRespBundle)
-    val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
   io.read.ready := !io.write.valid
@@ -583,6 +583,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     dataArray.io.cacheOp.resp.valid -> dataArray.io.cacheOp.resp.bits,
     metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
   ))
+  // TODO
+  cacheOpDecoder.io.error := DontCare
+  cacheOpDecoder.io.error.ecc_error.valid := false.B
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
 } 

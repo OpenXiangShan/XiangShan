@@ -348,15 +348,21 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   sec_meet_vec := VecInit(Seq(sec_meet_0_miss,sec_meet_1_miss ))
   
   /*** miss/hit pattern: <Control Signal> only raise at the first cycle of s2_valid ***/
-  val  only_0_miss      = RegNext(s1_fire) && !s2_hit && !s2_double_line && !s2_has_except && !sec_meet_0_miss && !s2_mmio
-  val  only_0_hit       = RegNext(s1_fire) && s2_hit && !s2_double_line && !s2_mmio
-  val  hit_0_hit_1      = RegNext(s1_fire) && s2_hit && s2_double_line && !s2_mmio
-  val  hit_0_miss_1     = RegNext(s1_fire) && !s2_port_hit(1) && !sec_meet_1_miss && (s2_port_hit(0) || sec_meet_0_miss) && s2_double_line  && !s2_has_except && !s2_mmio
-  val  miss_0_hit_1     = RegNext(s1_fire) && !s2_port_hit(0) && !sec_meet_0_miss && (s2_port_hit(1) || sec_meet_1_miss) && s2_double_line  && !s2_has_except && !s2_mmio
-  val  miss_0_miss_1    = RegNext(s1_fire) && !s2_port_hit(0) && !s2_port_hit(1) && !sec_meet_0_miss && !sec_meet_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
+  val cacheline_0_hit  = (s2_port_hit(0) || sec_meet_0_miss)
+  val cacheline_0_miss = !s2_port_hit(0) && !sec_meet_0_miss
 
-  val  hit_0_except_1   = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  &&  s2_port_hit(0)
-  val  miss_0_except_1  = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  && !s2_port_hit(0)
+  val cacheline_1_hit  = (s2_port_hit(1) || sec_meet_1_miss)
+  val cacheline_1_miss = !s2_port_hit(1) && !sec_meet_1_miss
+
+  val  only_0_miss      = RegNext(s1_fire) && cacheline_0_miss && !s2_double_line && !s2_has_except && !s2_mmio
+  val  only_0_hit       = RegNext(s1_fire) && cacheline_0_hit && !s2_double_line && !s2_mmio
+  val  hit_0_hit_1      = RegNext(s1_fire) && cacheline_0_hit && cacheline_1_hit  && s2_double_line && !s2_mmio
+  val  hit_0_miss_1     = RegNext(s1_fire) && cacheline_0_hit && cacheline_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
+  val  miss_0_hit_1     = RegNext(s1_fire) && cacheline_0_miss && cacheline_1_hit && s2_double_line  && !s2_has_except && !s2_mmio
+  val  miss_0_miss_1    = RegNext(s1_fire) && cacheline_0_miss && cacheline_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
+
+  val  hit_0_except_1   = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  &&  cacheline_0_hit
+  val  miss_0_except_1  = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  &&  cacheline_0_miss
   val  except_0         = RegNext(s1_fire) && s2_except(0)
 
   def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
