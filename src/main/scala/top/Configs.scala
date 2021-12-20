@@ -43,7 +43,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
-  case EnableJtag => false.B
+  case EnableJtag => true.B
 })
 
 // Synthesizable minimal XiangShan
@@ -110,7 +110,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           name = "itlb",
           fetchi = true,
           useDmode = false,
-          sameCycle = true,
+          sameCycle = false,
+          missSameCycle = true,
           normalReplacer = Some("plru"),
           superReplacer = Some("plru"),
           normalNWays = 4,
@@ -126,6 +127,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalReplacer = Some("setplru"),
           superNWays = 4,
           normalAsVictim = true,
+          partialStaticPMP = true,
           outReplace = true
         ),
         sttlbParameters = TLBParameters(
@@ -136,6 +138,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalReplacer = Some("setplru"),
           normalAsVictim = true,
           superNWays = 4,
+          partialStaticPMP = true,
           outReplace = true
         ),
         btlbParameters = TLBParameters(
@@ -215,14 +218,17 @@ class WithNKBL2
         alwaysReleaseData = alwaysReleaseData,
         clientCaches = Seq(CacheParameters(
           "dcache",
-          sets = 2 * p.dcacheParametersOpt.get.nSets,
+          sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
         reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
-        enablePerf = true
+        enablePerf = true,
+        sramDepthDiv = 2,
+        tagECC = Some("secded"),
+        dataECC = Some("secded")
       )),
       L2NBanks = banks
     ))
@@ -232,6 +238,9 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
   case SoCParamsKey =>
     val sets = n * 1024 / banks / ways / 64
     val tiles = site(XSTileKey)
+    val clientDirBytes = tiles.map{ t =>
+      t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+    }.sum
     up(SoCParamsKey).copy(
       L3NBanks = banks,
       L3CacheParamsOpt = Some(HCCacheParameters(
@@ -242,14 +251,17 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = tiles.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
+          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
         )),
-        sramClkDivBy2 = true
+        sramClkDivBy2 = true,
+        sramDepthDiv = 4,
+        tagECC = Some("secded"),
+        dataECC = Some("secded")
       ))
     )
 })
@@ -281,7 +293,7 @@ class MediumConfig(n: Int = 1) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(8 * 1024, inclusive = false, banks = 4, ways = 8)
+  new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)

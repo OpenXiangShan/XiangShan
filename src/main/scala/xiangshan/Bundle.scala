@@ -223,7 +223,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
-  val diffTestDebugLrScValid = Bool()
   val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
@@ -457,7 +456,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
-  val ldld_vio_check = Output(Bool())
+  val ldld_vio_check_enable = Output(Bool())
+  val soft_prefetch_enable = Output(Bool())
+  val cache_error_enable = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // Decode

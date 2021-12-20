@@ -33,9 +33,7 @@ import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
-  val stage2Redirect = Valid(new Redirect)
-  val stage3Redirect = ValidIO(new Redirect)
-  val robFlush = ValidIO(new Redirect)
+  val redirect = Valid(new Redirect)
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -114,7 +112,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
   io.stage2Redirect.bits := s1_redirect_bits_reg
-  io.stage2Redirect.bits.cfiUpdate := DontCare
 
   val s1_isReplay = s1_redirect_onehot.last
   val s1_isJump = s1_redirect_onehot.head
@@ -128,6 +125,22 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
       snpc
     )
   )
+
+  val stage2CfiUpdate = io.stage2Redirect.bits.cfiUpdate
+  stage2CfiUpdate.pc := real_pc
+  stage2CfiUpdate.pd := s1_pd
+  stage2CfiUpdate.predTaken := s1_redirect_bits_reg.cfiUpdate.predTaken
+  stage2CfiUpdate.target := target
+  stage2CfiUpdate.taken := s1_redirect_bits_reg.cfiUpdate.taken
+  stage2CfiUpdate.isMisPred := s1_redirect_bits_reg.cfiUpdate.isMisPred
+
+  val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
+  val s2_pc = RegEnable(real_pc, enable = s1_redirect_valid_reg)
+  val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, enable = s1_redirect_valid_reg)
+  val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
+
+  io.stage3Redirect.valid := s2_redirect_valid_reg
+  io.stage3Redirect.bits := s2_redirect_bits_reg
 
   // get pc from ftq
   // valid only if redirect is caused by load violation
@@ -143,22 +156,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
-
-  val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
-  val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
-  val s2_pc = RegEnable(real_pc, enable = s1_redirect_valid_reg)
-  val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, enable = s1_redirect_valid_reg)
-  val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
-
-  io.stage3Redirect.valid := s2_redirect_valid_reg
-  io.stage3Redirect.bits := s2_redirect_bits_reg
-  val stage3CfiUpdate = io.stage3Redirect.bits.cfiUpdate
-  stage3CfiUpdate.pc := s2_pc
-  stage3CfiUpdate.pd := s2_pd
-  stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
-  stage3CfiUpdate.target := s2_target
-  stage3CfiUpdate.taken := s2_redirect_bits_reg.cfiUpdate.taken
-  stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
 
   // recover runahead checkpoint if redirect
   if (!env.FPGAPlatform) {
@@ -270,13 +267,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
   flushRedirect.bits := RegEnable(rob.io.flushOut.bits, rob.io.flushOut.valid)
-  flushRedirect.bits.cfiUpdate.target := Mux(io.robio.toCSR.isXRet || rob.io.exception.valid,
-    io.robio.toCSR.trapTarget,
-    Mux(flushRedirect.bits.flushItself(),
-      flushPC, // replay inst
-      flushPC + 4.U // flush pipe
-    )
-  )
 
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
@@ -304,18 +294,46 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   redirectGen.io.hartId := io.hartId
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
-  redirectGen.io.flush := RegNext(rob.io.flushOut.valid)
+  redirectGen.io.flush := flushRedirect.valid
 
-  for(i <- 0 until CommitWidth){
-    io.frontend.toFtq.rob_commits(i).valid := rob.io.commits.valid(i) && !rob.io.commits.isWalk
-    io.frontend.toFtq.rob_commits(i).bits := rob.io.commits.info(i)
+  val frontendFlushValid = DelayN(flushRedirect.valid, 5)
+  val frontendFlushBits = RegEnable(flushRedirect.bits, flushRedirect.valid)
+  // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
+  // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
+  // Thus, we make all flush reasons to behave the same as exceptions for frontend.
+  for (i <- 0 until CommitWidth) {
+    val is_commit = rob.io.commits.valid(i) && !rob.io.commits.isWalk && !rob.io.flushOut.valid
+    io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
+    io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
-  io.frontend.toFtq.stage2Redirect <> stage2Redirect
-  io.frontend.toFtq.robFlush <> RegNext(rob.io.flushOut)
-  io.frontend.toFtq.stage3Redirect := stage3Redirect
+  io.frontend.toFtq.redirect.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.redirect.bits := Mux(frontendFlushValid, frontendFlushBits, redirectGen.io.stage2Redirect.bits)
+  when (frontendFlushValid) {
+    io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
+    // Be careful here:
+    // T0: flushRedirect.valid, exception.valid
+    // T1: csr.redirect.valid
+    // T2: csr.exception.valid
+    // T3: csr.trapTarget
+    // T4: ctrlBlock.trapTarget
+    // T5: io.frontend.toFtq.stage2Redirect.valid
+    val pc_from_csr = io.robio.toCSR.isXRet || DelayN(rob.io.exception.valid, 4)
+    val rob_flush_pc = RegEnable(Mux(flushRedirect.bits.flushItself(),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    ), flushRedirect.valid)
+    val flushTarget = Mux(pc_from_csr, io.robio.toCSR.trapTarget, rob_flush_pc)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
+  }
+  val pendingRedirect = RegInit(false.B)
+  when (stage2Redirect.valid) {
+    pendingRedirect := true.B
+  }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
+    pendingRedirect := false.B
+  }
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.csrCtrl := io.csrCtrl
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
 
   // memory dependency predict
   // when decode, send fold pc to mdp
@@ -362,7 +380,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // pipeline between decode and rename
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      stage2Redirect.valid || stage3Redirect.valid)
+      stage2Redirect.valid || pendingRedirect)
   }
 
   rename.io.redirect <> stage2Redirect

@@ -114,6 +114,8 @@ trait HaveSlaveAXI4Port {
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4IdIndexer(1) :=
     l3FrontendAXI4Node
   errorDevice.node := error_xbar
@@ -163,10 +165,12 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4Buffer() :=
     AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
+    TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
     TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
     mem_xbar
@@ -206,9 +210,12 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4IdIndexer(idBits = 2) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
+    TLBuffer() :=
     peripheralXbar
 
   val peripheral = InModuleBody {
@@ -238,7 +245,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for(port <- peripheral_ports) {
-    peripheralXbar := TLBuffer.chainNode(1, Some("L2_to_L3_peripheral_buffer")) := port
+    peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
@@ -247,7 +254,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
       TLBuffer() :=
       core_out
   }
-  l3_banked_xbar := l3_xbar
+  l3_banked_xbar := TLBuffer() := l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar

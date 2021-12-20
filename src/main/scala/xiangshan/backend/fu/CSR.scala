@@ -366,7 +366,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.mem_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle), tdata2Phy(tselectPhy))
 
   // Machine-Level CSRs
-
+  // mtvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
+  val mtvecMask = ~(0x2.U(XLEN.W))
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
@@ -466,6 +467,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // -------------------------------------------------------
   val sstatusRmask = sstatusWmask | "h8000000300018000".U
   // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
+  // stvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
+  val stvecMask = ~(0x2.U(XLEN.W))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
@@ -518,11 +521,21 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // bits 0-3: store buffer flush threshold (default: 8 entries)
   val smblockctl_init_val =
     ("hf".U & StoreBufferThreshold.U) |
-    (EnableLdVioCheckAfterReset.B.asUInt << 4)
+    (EnableLdVioCheckAfterReset.B.asUInt << 4) |
+    (EnableSoftPrefetchAfterReset.B.asUInt << 5) |
+    (EnableCacheErrorAfterReset.B.asUInt << 6)
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
-  csrio.customCtrl.ldld_vio_check := smblockctl(4)
+  csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
+  csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
+  csrio.customCtrl.cache_error_enable := smblockctl(6)
+
+  println("CSR smblockctl init value:")
+  println("  Store buffer replace threshold: " + StoreBufferThreshold)
+  println("  Enable ld-ld vio check after reset: " + EnableLdVioCheckAfterReset)
+  println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
+  println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
 
   val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
@@ -642,7 +655,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
-    MaskedRegMap(Stvec, stvec),
+    MaskedRegMap(Stvec, stvec, stvecMask, MaskedRegMap.NoSideEffect, stvecMask),
     MaskedRegMap(Scounteren, scounteren),
 
     //--- Supervisor Trap Handling ---
@@ -676,7 +689,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
-    MaskedRegMap(Mtvec, mtvec),
+    MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
 
     //--- Machine Trap Handling ---
@@ -794,11 +807,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ))
   MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
-  when (csrio.fpu.fflags.valid) {
-    fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
+  when (RegNext(csrio.fpu.fflags.valid)) {
+    fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
   }
   // set fs and sd in mstatus
-  when (csrw_dirty_fp_state || csrio.fpu.dirty_fs) {
+  when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
@@ -943,7 +956,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.uop.cf.pc, intrNO)
+  val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
+  val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
   val raiseDebugIntr = intrNO === IRQ_DEBUG.U && raiseIntr
 
   // exceptions
@@ -975,11 +992,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val ebreakEnterParkLoop = debugMode && raiseExceptionIntr
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+    dexceptionPC, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    csrio.exception.bits.uop.cf.pc,
+    dexceptionPC,
     mstatus,
     mideleg,
     medeleg,
@@ -989,49 +1006,64 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // mtval write logic
   // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when (RegNext(RegNext(hasInstrPageFault || hasLoadPageFault || hasStorePageFault))) {
+  val updateTval = VecInit(Seq(
+    hasInstrPageFault,
+    hasLoadPageFault,
+    hasStorePageFault,
+    hasInstrAccessFault,
+    hasLoadAccessFault,
+    hasStoreAccessFault,
+    hasLoadAddrMisaligned,
+    hasStoreAddrMisaligned
+  )).asUInt.orR
+  when (RegNext(RegNext(updateTval))) {
       val tval = RegNext(Mux(
-      RegNext(hasInstrPageFault),
+      RegNext(hasInstrPageFault || hasInstrAccessFault),
       RegNext(Mux(
         csrio.exception.bits.uop.cf.crossPageIPFFix,
         SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        iexceptionPC
       )),
       memExceptionAddr
     ))
-    when (RegNext(RegNext(priviledgeMode === ModeM))) {
+    when (RegNext(priviledgeMode === ModeM)) {
       mtval := tval
     }.otherwise {
       stval := tval
     }
   }
 
-  when (RegNext(RegNext(hasLoadAddrMisaligned || hasStoreAddrMisaligned))) {
-    mtval := RegNext(memExceptionAddr)
-  }
-
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
+  val clearTval = !updateTval || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
-  val retTargetReg = Reg(retTarget.cloneType)
-  when (io.redirectIn.valid) {
+  when (DelayN(io.redirectIn.valid, 5)) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B
-    retTargetReg := retTarget
   }
   csrio.isXRet := isXRetFlag
-  csrio.trapTarget := Mux(isXRetFlag,
+  val retTargetReg = RegEnable(retTarget, isXRet)
+
+  val tvec = Mux(delegS, stvec, mtvec)
+  val tvecBase = tvec(VAddrBits - 1, 2)
+  // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
+  // ROB sends exception at T0 while CSR receives at T2.
+  // We add a RegNext here and trapTarget is valid at T3.
+  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
     retTargetReg,
     Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      Mux(delegS, stvec, mtvec))(VAddrBits-1, 0)
-  )
+      // When MODE=Vectored, all synchronous exceptions into M/S mode
+      // cause the pc to be set to the address in the BASE field, whereas
+      // interrupts cause the pc to be set to the address in the BASE field
+      // plus four times the interrupt cause number.
+      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+  )), isXRetFlag || csrio.exception.valid)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1043,7 +1075,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (raiseDebugIntr) {
         debugModeNew := true.B
         mstatusNew.mprv := false.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := 1.U
         dcsrNew.prv := priviledgeMode
         priviledgeMode := ModeM
@@ -1051,7 +1083,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
-        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+        dpc := iexceptionPC
         dcsrNew.cause := Mux(hasbreakPoint, 3.U, 0.U)
         dcsrNew.prv := priviledgeMode // TODO
         priviledgeMode := ModeM
@@ -1061,20 +1093,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       debugIntrEnable := false.B
     }.elsewhen (delegS) {
       scause := causeNO
-      sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when (tvalWen) { stval := 0.U }
+      when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when (tvalWen) { mtval := 0.U }
+      when (clearTval) { mtval := 0.U }
     }
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
@@ -1128,7 +1160,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.coreid := csrio.hartId
     difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
     difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
-    difftest.io.exceptionPC := RegNext(RegNext(RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))))
+    difftest.io.exceptionPC := RegNext(RegNext(RegNext(dexceptionPC)))
+    if (env.EnableDifftest) {
+      difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
+    }
   }
 
   // Always instantiate basic difftest modules.
@@ -1154,6 +1189,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.sscratch := sscratch
     difftest.io.mideleg := mideleg
     difftest.io.medeleg := medeleg
+  }
+
+  if(env.AlwaysBasicDiff || env.EnableDifftest) {
+    val difftest = Module(new DifftestDebugMode)
+    difftest.io.clock := clock
+    difftest.io.coreid := csrio.hartId
+    difftest.io.debugMode := debugMode
+    difftest.io.dcsr := dcsr
+    difftest.io.dpc := dpc
+    difftest.io.dscratch0 := dscratch
+    difftest.io.dscratch1 := dscratch1
   }
 }
 

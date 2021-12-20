@@ -231,7 +231,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   // * need redo ld-ld violation check
   val needLdVioCheckRedo = io.loadViolationQueryReq.valid &&
     !io.loadViolationQueryReq.ready &&
-    RegNext(io.csrCtrl.ldld_vio_check)
+    RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.needLdVioCheckRedo := needLdVioCheckRedo
   io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo)
   io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict / re do ld-ld violation check
@@ -286,25 +286,54 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val loadViolationQueryResp = Flipped(Valid(new LoadViolationQueryResp))
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val sentFastUop = Input(Bool())
+    val static_pm = Input(Valid(Bool())) // valid for static, bits for mmio
   })
-  val isSoftPrefetch = io.in.bits.isSoftPrefetch
-  val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
-  excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
-  when (isSoftPrefetch) {
-    excep := 0.U.asTypeOf(excep.cloneType)
-  }
-  val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
 
-  val actually_mmio = io.pmpResp.mmio
+  val pmp = WireInit(io.pmpResp)
+  when (io.static_pm.valid) {
+    pmp.ld := false.B
+    pmp.st := false.B
+    pmp.instr := false.B
+    pmp.mmio := io.static_pm.bits
+  }
+
+  val s2_is_prefetch = io.in.bits.isSoftPrefetch
+
+  // exception that may cause load addr to be invalid / illegal
+  //
+  // if such exception happen, that inst and its exception info
+  // will be force writebacked to rob 
+  val s2_exception_vec = WireInit(io.in.bits.uop.cf.exceptionVec)
+  s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || pmp.ld
+  // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
+  when (s2_is_prefetch) {
+    s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
+  } 
+  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR
+
+  // s2_exception_vec add exception caused by ecc error
+  //
+  // ecc data error is slow to generate, so we will not use it until the last moment
+  // (s2_exception_with_error_vec is the final output: io.out.bits.uop.cf.exceptionVec)
+  val s2_exception_with_error_vec = WireInit(s2_exception_vec)
+  // now cache ecc error will raise an access fault
+  // at the same time, error info (including error paddr) will be write to
+  // an customized CSR "CACHE_ERROR"
+  s2_exception_with_error_vec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
+    io.dcacheResp.bits.error &&
+    io.csrCtrl.cache_error_enable
+  val debug_s2_exception_with_error = ExceptionNO.selectByFu(s2_exception_with_error_vec, lduCfg).asUInt.orR
+
+  val actually_mmio = pmp.mmio
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_data_invalid = io.lsq.dataInvalid
-  val s2_mmio = !isSoftPrefetch && actually_mmio && !s2_exception
+  val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
-  val s2_is_prefetch = io.in.bits.isSoftPrefetch
+  val s2_cache_error = io.dcacheResp.bits.error
 
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
@@ -312,7 +341,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   // assert(!s2_forward_fail)
-  io.dcache_kill := false.B // move pmp resp kill to outside
+  io.dcache_kill := pmp.ld || pmp.mmio // false.B // move pmp resp kill to outside
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio || s2_is_prefetch)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid)), "DCache response got lost")
@@ -375,15 +404,15 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   // if forward fail, replay this inst from fetch
-  val forwardFailReplay = s2_forward_fail && !s2_mmio
+  val forwardFailReplay = s2_forward_fail && !s2_mmio && !s2_is_prefetch
   // if ld-ld violation is detected, replay from this inst from fetch
   val ldldVioReplay = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
-    RegNext(io.csrCtrl.ldld_vio_check)
+    RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.out.bits.uop.ctrl.replayInst := forwardFailReplay || ldldVioReplay
   io.out.bits.mmio := s2_mmio
   io.out.bits.uop.ctrl.flushPipe := s2_mmio && io.sentFastUop
-  io.out.bits.uop.cf.exceptionVec := excep
+  io.out.bits.uop.cf.exceptionVec := s2_exception_with_error_vec
 
   // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
@@ -400,14 +429,19 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // feedback tlb result to RS
   io.rsFeedback.valid := io.in.valid
-  when (io.in.bits.isSoftPrefetch) {
-    io.rsFeedback.bits.hit := (!s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception))
-  }.otherwise {
-    if (EnableFastForward) {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
-    } else {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
-    }
+  if (EnableFastForward) {
+    io.rsFeedback.bits.hit := 
+      (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && // replay if dcache miss queue full / busy
+      !s2_tlb_miss && // replay if dtlb miss
+      !s2_data_invalid // replay if store to load forward data is not ready 
+  } else {
+    io.rsFeedback.bits.hit := 
+      (!s2_cache_replay || s2_mmio || s2_exception) && // replay if dcache miss queue full / busy
+      !s2_tlb_miss && // replay if dtlb miss
+      !s2_data_invalid // replay if store to load forward data is not ready
+  }
+  when(s2_is_prefetch){
+    io.rsFeedback.bits.hit := !s2_tlb_miss // replay if dtlb miss
   }
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
@@ -502,9 +536,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  io.dcache.s2_kill := load_s2.io.dcache_kill || (io.pmp.ld || io.pmp.mmio) // to kill mmio resp which are redirected
+  io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
+  load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2

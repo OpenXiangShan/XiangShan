@@ -429,7 +429,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   for (wb <- exuWriteback) {
     when (wb.valid) {
       val wbIdx = wb.bits.uop.robIdx.value
-      debug_microOp(wbIdx).diffTestDebugLrScValid := wb.bits.uop.diffTestDebugLrScValid
       debug_exuData(wbIdx) := wb.bits.data
       debug_exuDebug(wbIdx) := wb.bits.debug
       debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.uop.debugInfo.enqRsTime
@@ -593,8 +592,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
 
   // sync fflags/dirty_fs to csr
-  io.csr.fflags := fflags
-  io.csr.dirty_fs := dirty_fs
+  io.csr.fflags := RegNext(fflags)
+  io.csr.dirty_fs := RegNext(dirty_fs)
 
   // commit branch to brq
   val cfiCommitVec = VecInit(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{case(v, t) => v && CommitType.isBranch(t)})
@@ -975,9 +974,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // we must make sure that skip is properly set to false (output from EXU is random value)
       difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
       difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)
-      difftest.io.scFailed := RegNext(!uop.diffTestDebugLrScValid &&
-        uop.ctrl.fuType === FuType.mou &&
-        (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
       difftest.io.wen      := RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)
       difftest.io.wpdest   := RegNext(io.commits.info(i).pdest)
       difftest.io.wdest    := RegNext(io.commits.info(i).ldest)

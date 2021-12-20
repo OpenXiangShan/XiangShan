@@ -52,7 +52,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
   else (satp.mode === 8.U && (mode < ModeM))
 
-  val reqAddr = req.map(_.bits.vaddr.asTypeOf((new VaBundle).cloneType))
+  val reqAddr = req.map(_.bits.vaddr.asTypeOf(new VaBundle))
   val vpn = reqAddr.map(_.vpn)
   val cmd = req.map(_.bits.cmd)
   val valid = req.map(_.valid)
@@ -146,8 +146,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
+    // for timing optimization, pmp check is divided into dynamic and static
+    // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
+    // static: 4K pages (or sram entries) -> check pmp with pre-checked results
+    val pmp_paddr = Mux(vmEnable, Cat(super_ppn, offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
     pmp(i).valid := resp(i).valid
-    pmp(i).bits.addr := resp(i).bits.paddr
+    pmp(i).bits.addr := pmp_paddr
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
@@ -160,8 +164,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val fault_valid = vmEnable
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+    val fault_valid = vmEnable
     resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
@@ -169,9 +173,14 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(i).bits.excp.af.ld := af && TlbCmd.isRead(cmdReg) && fault_valid
-    resp(i).bits.excp.af.st := af && TlbCmd.isWrite(cmdReg) && fault_valid
-    resp(i).bits.excp.af.instr := af && TlbCmd.isExec(cmdReg) && fault_valid
+    val spm = normal_perm.pm // static physical memory protection or attribute
+    val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+    // for tlb without sram, tlb will miss, pm should be ignored outsize
+    resp(i).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
+    resp(i).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
+    resp(i).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
+    resp(i).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
+    resp(i).bits.static_pm.bits := !spm.c
 
     (hit, miss, validReg)
   }
@@ -218,20 +227,41 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },
     wayIdx = normal_refill_idx,
-    data = ptw.resp.bits
+    data = ptw.resp.bits,
+    data_replenish = io.ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
     else refill && ptw.resp.bits.entry.level.get =/= 2.U },
     wayIdx = super_refill_idx,
-    data = ptw.resp.bits
+    data = ptw.resp.bits,
+    data_replenish = io.ptw_replenish
   )
 
+  // if sameCycle, just req.valid
+  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
+  // because sram is too slow and dtlb is too distant from dtlbRepeater
   for (i <- 0 until Width) {
-    io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
-    io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
+    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) && 
+      !RegNext(refill, init = false.B) &&
+      param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
+    io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
   }
   io.ptw.resp.ready := true.B
+
+  def need_RegNext[T <: Data](need: Boolean, data: T): T = {
+    if (need) RegNext(data)
+    else data
+  }
+  def need_RegNextInit[T <: Data](need: Boolean, data: T, init_value: T): T = {
+    if (need) RegNext(data, init = init_value)
+    else data
+  }
+
+  def param_choose[T <: Data](need: Boolean, truedata: T, falsedata: T): T = {
+    if (need) truedata
+    else falsedata
+  }
 
   if (!q.shouldBlock) {
     for (i <- 0 until Width) {
@@ -362,6 +392,7 @@ object TLB {
         in(i).resp.bits := tlb.io.requestor(i).resp.bits
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
+      tlb.io.ptw_replenish <> DontCare // itlb only use reg, so no static pmp/pma
     }
     tlb.io.ptw
   }
