@@ -147,11 +147,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   p2_fire  :=   p2_valid && !p2_exception && p3_ready && p2_pmp_fire
   p2_discard := p2_valid && ((p2_exception && p2_pmp_fire) || !io.pmp.req.ready)
 
-  io.pmp.req.valid      := p2_valid
-  io.pmp.req.bits.addr  := p2_paddr
-  io.pmp.req.bits.size  := 3.U
-  io.pmp.req.bits.cmd   := TlbCmd.exec
-
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire, thisFlush = false.B, lastFlush = false.B)
 

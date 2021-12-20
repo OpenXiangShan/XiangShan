@@ -494,7 +494,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   io.pmp(0).req.valid := mainPipe.io.pmp(0).req.valid ||  prefetchPipe.io.pmp.req.valid
-  io.pmp(0).req.bits := Mux(prefetchPipe.io.pmp.req.valid, prefetchPipe.io.pmp.req.bits, mainPipe.io.pmp(0).req.bits)
+  io.pmp(0).req.bits := Mux(mainPipe.io.pmp(0).req.valid, mainPipe.io.pmp(0).req.bits, prefetchPipe.io.pmp.req.bits)
   prefetchPipe.io.pmp.req.ready := !mainPipe.io.pmp(0).req.valid
 
   mainPipe.io.pmp(0).resp <> io.pmp(0).resp
@@ -502,6 +502,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.pmp(1) <> mainPipe.io.pmp(1)
 
+  when(mainPipe.io.pmp(0).req.valid && prefetchPipe.io.pmp.req.valid)
+  {
+    assert(false.B, "Both mainPipe PMP and prefetchPipe PMP valid!")
+  }
 
   tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
   tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
