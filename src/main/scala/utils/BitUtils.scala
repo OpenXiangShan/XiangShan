@@ -146,12 +146,22 @@ object GetEvenBits {
   def apply(input: UInt): UInt = {
     VecInit((0 until input.getWidth/2).map(i => {input(2*i)})).asUInt
   }
+  def reverse(input: UInt): UInt = {
+    VecInit((0 until input.getWidth * 2).map(i => {
+      if(i % 2 == 0) input(i/2) else false.B 
+    })).asUInt
+  }
 }
 
 
 object GetOddBits {
   def apply(input: UInt): UInt = {
     VecInit((0 until input.getWidth/2).map(i => {input(2*i+1)})).asUInt
+  }
+  def reverse(input: UInt): UInt = {
+    VecInit((0 until input.getWidth * 2).map(i => {
+      if(i % 2 == 0) false.B else input(i/2) 
+    })).asUInt
   }
 }
 
