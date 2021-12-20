@@ -50,6 +50,7 @@ class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
 {
     val data     = UInt(blockBits.W)
+    val corrupt  = Bool()
 }
 
 class ICacheMissBundle(implicit p: Parameters) extends ICacheBundle{
@@ -97,6 +98,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
   val release_id  = Cat(MissQueueKey.U, id.U)
+  val req_corrupt = RegInit(false.B)
 
   io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
   io.victimInfor.vidx  := req_idx
@@ -152,6 +154,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
         when(io.mem_grant.fire()) {
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
+          req_corrupt := io.mem_grant.bits.corrupt
           grant_param := io.mem_grant.bits.param
           is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
           when(readBeatCnt === (refillCycles - 1).U) {
@@ -186,6 +189,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt
+      io.resp.bits.corrupt := req_corrupt
       when(io.resp.fire()) {
         state := s_idle
       }

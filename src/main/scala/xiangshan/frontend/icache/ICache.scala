@@ -137,7 +137,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val fencei   = Input(Bool())
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
@@ -155,6 +154,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
@@ -195,31 +195,15 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_meta_wrong(w)}
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := read_meta_wrong(w) && RegNext(io.read.fire)}
   }
 
   //Parity Encode
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-  //  when(io.write.valid){
-  //      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-  //  }
-
-  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
-  val validArray = RegInit(0.U((nSets * nWays).W))
-  val validMetas = VecInit((0 until 2).map{ bank =>
-    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
-    validMeta
-  })
-
   val wayNum   = OHToUInt(io.write.bits.waymask)
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
-  when(io.write.valid){
-    validArray := validArray.bitSet(validPtr, true.B)
-  }
-
-  when(io.fencei){ validArray := 0.U }
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
@@ -234,7 +218,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     io.readResp.metaData(1) := read_metas(1)
   }
 
-  (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
 
   io.write.ready := true.B
   // deal with customized cache op
@@ -305,6 +288,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
@@ -407,13 +391,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val fencei      = Input(Bool())
   val stop        = Input(Bool())
   val csr         = new L1CacheToCsrIO
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val perfInfo = Output(new ICachePerfInfo)
+  val error  = new L1CacheErrorInfo
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -488,7 +472,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  metaArray.io.fencei := io.fencei
   bus.a <> missUnit.io.mem_acquire
   bus.e <> missUnit.io.mem_finish
 
@@ -505,6 +488,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
+
+  //Parity error port
+  val errors = mainPipe.io.errors ++ Seq(replacePipe.io.error)
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
 
   /** Block set-conflict request */
