@@ -98,7 +98,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_idx = req.getVirSetIdx //virtual index
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
-  val release_id  = Cat(MissQueueKey.U, id.U)
+  val release_id  = Cat(MainPipeKey.U, id.U)
   val req_corrupt = RegInit(false.B)
 
   io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
