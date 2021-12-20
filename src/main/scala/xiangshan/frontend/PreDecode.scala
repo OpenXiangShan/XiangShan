@@ -101,8 +101,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
   else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-
-
   for (i <- 0 until PredictWidth) {
     val inst           =WireInit(rawInsts(i))
     val expander       = Module(new RVCExpander)
