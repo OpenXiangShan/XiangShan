@@ -466,6 +466,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
+  atomicsUnit.io.csrCtrl := csrCtrl
+
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
   when (state === s_atomics_0 || state === s_atomics_1) {
