@@ -408,7 +408,11 @@ trait HasXSParameter {
   val icacheParameters = coreParams.icacheParameters
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
-  val LRSCCycles = 100
+  // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
+  // for constrained LR/SC loop 
+  val LRSCCycles = 64
+  // for lr storm
+  val LRSCBackOff = 8
 
   // cache hierarchy configurations
   val l1BusDataWidth = 256
