@@ -98,12 +98,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
     singleStepStatus := true.B
   }
+  XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
+
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire()
   ))
+
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -132,7 +135,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
-
+    when (io.fromRename(i).fire()) {
+      XSDebug(updatedUop(i).cf.trigger.getHitFrontend, s"Debug Mode: inst ${i} has frontend trigger exception\n")
+      XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
+    }
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
@@ -210,7 +216,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(io.fromRename.map(r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR))
+  val hasException = VecInit(io.fromRename.map(
+    r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR || r.bits.ctrl.singleStep || r.bits.cf.trigger.getHitFrontend))
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isNoSpecExec(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)

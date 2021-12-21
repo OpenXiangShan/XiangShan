@@ -70,6 +70,11 @@ class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
 }
 
+class LqTriggerIO(implicit p: Parameters) extends XSBundle {
+  val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
+  val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
+}
+
 // Load Queue
 class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -95,6 +100,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
+    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
   println("LoadQueue: size:" + LoadQueueSize)
@@ -105,6 +111,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   dataModule.io := DontCare
   val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
+  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
+  vaddrTriggerResultModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
@@ -176,6 +184,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
+    vaddrTriggerResultModule.io.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
@@ -215,6 +224,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
       dataModule.io.wb.wen(i) := true.B
 
+      vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
+      vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
+      vaddrTriggerResultModule.io.wen(i) := true.B
 
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
       debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
@@ -736,11 +748,15 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
-  // Read vaddr for debug trigger
+  // Read vaddr for debug
   (0 until LoadPipelineWidth).map(i => {
     vaddrModule.io.raddr(i+1) := loadWbSel(i)
   })
 
+  (0 until LoadPipelineWidth).map(i => {
+    vaddrTriggerResultModule.io.raddr(i) := loadWbSelGen(i)
+    io.trigger(i).lqLoadAddrTriggerHitVec := vaddrTriggerResultModule.io.rdata(i)
+  })
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
