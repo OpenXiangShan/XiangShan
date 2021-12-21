@@ -46,6 +46,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(new ICacheReadBundle)
 
+    val error      = Output(new L1CacheErrorInfo)
+
     val meta_response     = Input(new ICacheMetaRespBundle)
     val data_response     = Input(new ICacheDataRespBundle)
 
@@ -62,9 +64,16 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
   val (toData, dataResp) =  (io.data_read, io.data_response.datas(0))
+  val (metaError, dataError) = (io.meta_response.errors(0), io.data_response.errors(0))
 
   val r0_ready, r1_ready, r2_ready = WireInit(false.B)
   val r0_fire,  r1_fire , r2_fire  = WireInit(false.B)
+
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 0
+    ******************************************************************************
+    */  
 
   val r0_valid       = io.pipe_req.valid
 
@@ -83,10 +92,12 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
-  //---------------------------------------------
-
-  //---------------------------------------------
-
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 1
+    ******************************************************************************
+    */  
+  
   val r1_valid = generatePipeControl(lastFire = r0_fire, thisFire = r1_fire, thisFlush = false.B, lastFlush = false.B)
   r1_ready := r2_ready  || !r1_valid
   r1_fire  := r1_valid && r2_ready
@@ -96,7 +107,14 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
   val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
+  val r1_meta_errors             = ResultHoldBypass(data = metaError, valid = RegNext(r0_fire))
+
   val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
+  val r1_data_errors             = ResultHoldBypass(data = dataError, valid = RegNext(r0_fire))
+
+
+  val r1_parity_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) || r1_data_errors.reduce(_||_),valid = RegNext(r0_fire))
+
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
@@ -115,12 +133,14 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.status.r1_set.valid := r1_valid
   io.status.r1_set.bits  := r1_req.vidx
 
+  io.error.ecc_error.valid  := RegNext(r1_parity_error && RegNext(r0_fire))
+  io.error.ecc_error.bits   := true.B
+  io.error.paddr.valid      := RegNext(io.error.ecc_error.valid)  
+  io.error.paddr.bits       := RegNext(r1_req.paddr) 
 
   /**
     ******************************************************************************
-    * 
-    * 
-    * 
+    * ReplacePipe Stage 2
     ******************************************************************************
     */
     

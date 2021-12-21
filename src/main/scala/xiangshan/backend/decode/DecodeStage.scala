@@ -55,7 +55,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   fusionDecoder.io.dec := decoders.map(_.io.deq.cf_ctrl.ctrl)
   fusionDecoder.io.out.zip(io.out.dropRight(1)).zipWithIndex.foreach{ case ((d, out), i) =>
     d.ready := out.ready
-    when (d.valid) {
+    when (d.valid && !io.csrCtrl.singlestep) { // TODO && nosinglestep
       out.bits.ctrl := d.bits
       // TODO: remove this
       // Dirty code for ftq update
