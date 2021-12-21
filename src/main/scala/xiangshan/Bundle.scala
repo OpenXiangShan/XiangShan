@@ -467,6 +467,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 
+  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   val trigger_enable = Output(Vec(10, Bool()))
@@ -500,12 +501,54 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class TriggerCf (implicit p: Parameters) extends XSBundle {
-  val triggerHitVec = Vec(10, Bool())
-  val triggerTiming = Vec(10, Bool())
-  val triggerChainVec = Vec(5, Bool())
+
+/* TODO how to trigger on next inst?
+1. If hit is determined at frontend, then set a "next instr" trap at dispatch like singlestep
+2. If it is determined at Load(meaning it must be "hit after", then it must not be a jump. So we can let it commit and set
+xret csr to pc + 4/ + 2
+2.5 The problem is to let it commit. This is the real TODO
+3. If it is load and hit before just treat it as regular load exception
+ */
+
+// This bundle carries trigger hit info along the pipeline
+// Now there are 10 triggers divided into 5 groups of 2
+// These groups are
+// (if if) (store store) (load loid) (if store) (if load)
+
+// Triggers in the same group can chain, meaning that they only
+// fire is both triggers in the group matches (the triggerHitVec bit is asserted)
+// Chaining of trigger No. (2i) and (2i+1) is indicated by triggerChainVec(i)
+// Timing of 0 means trap at current inst, 1 means trap at next inst
+// Chaining and timing and the validness of a trigger is controlled by csr
+// In two chained triggers, if they have different timing, both won't fire
+//class TriggerCf (implicit p: Parameters) extends XSBundle {
+//  val triggerHitVec = Vec(10, Bool())
+//  val triggerTiming = Vec(10, Bool())
+//  val triggerChainVec = Vec(5, Bool())
+//}
+
+class TriggerCf(implicit p: Parameters) extends XSBundle {
+  // frontend
+  val frontendHit = Vec(4, Bool())
+//  val frontendTiming = Vec(4, Bool())
+//  val frontendHitNext = Vec(4, Bool())
+
+//  val frontendException = Bool()
+  // backend
+  val backendEn = Vec(2, Bool()) // Hit(6) && chain(4) , Hit(8) && chain(4)
+  val backendHit = Vec(6, Bool())
+//  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
+
+  // Two situations not allowed:
+  // 1. load data comparison
+  // 2. store chaining with store
+  def getHitFrontend = frontendHit.reduce(_ || _)
+  def getHitBackend = backendHit.reduce(_ || _)
+  def hit = getHitFrontend || getHitBackend
 }
 
+// these 3 bundles help distribute trigger control signals from CSR
+// to Frontend, Load and Store.
 class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
     val t = Valid(new Bundle {
       val addr = Output(UInt(2.W))
