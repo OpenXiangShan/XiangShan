@@ -185,11 +185,11 @@ class XiangShan(object):
         self.show()
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
-        # numa_info = get_free_cores(self.args.threads)
-        # numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}" if self.args.numa else ""
+        numa_info = get_free_cores(self.args.threads)
+        numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}" if self.args.numa else ""
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
-        return_code = self.__exec_cmd(f'$NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
         return return_code
 
     def run(self, args):
