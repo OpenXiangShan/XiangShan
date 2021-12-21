@@ -79,7 +79,6 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.meta_write.bits.idx := idx
   io.meta_write.bits.way_en := refill_w_req.way_en
   io.meta_write.bits.meta := refill_w_req.meta
-  io.meta_write.bits.tag := tag
 
   io.error_flag_write.valid := refill_w_valid
   io.error_flag_write.bits.idx := idx
