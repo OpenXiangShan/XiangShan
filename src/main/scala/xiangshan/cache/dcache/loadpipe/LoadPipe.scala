@@ -24,17 +24,6 @@ import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
-  def metaBits = (new Meta).getWidth
-  def encMetaBits = cacheParams.tagCode.width((new MetaAndTag).getWidth) - tagBits
-  def getMeta(encMeta: UInt): UInt = {
-    require(encMeta.getWidth == encMetaBits)
-    encMeta(metaBits - 1, 0)
-  }
-  def getECC(encMeta: UInt): UInt = {
-    require(encMeta.getWidth == encMetaBits)
-    encMeta(encMetaBits - 1, metaBits)
-  }
-
   val io = IO(new DCacheBundle {
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
@@ -43,11 +32,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // meta and data array read port
     val meta_read = DecoupledIO(new MetaReadReq)
-    val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
+    val meta_resp = Input(Vec(nWays, new Meta))
     val error_flag_resp = Input(Vec(nWays, Bool()))
 
     val tag_read = DecoupledIO(new TagReadReq)
-    val tag_resp = Input(Vec(nWays, UInt(tagBits.W)))
+    val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
@@ -125,9 +114,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
   // tag check
-  val meta_resp = VecInit(io.meta_resp.map(r => getMeta(r).asTypeOf(new Meta)))
+  val meta_resp = io.meta_resp
+  val tag_resp = io.tag_resp.map(r => r(tagBits - 1, 0))
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_eq_way = wayMap((w: Int) => io.tag_resp(w) === (get_tag(s1_addr))).asUInt
+  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way) <= 1.U), "tag should not match with more than 1 way")
@@ -146,7 +136,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
   val s1_repl_way_en = UIntToOH(io.replace_way.way)
-  val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => io.tag_resp(w)))
+  val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).coh))
 
   val s1_need_replacement = !s1_tag_match
@@ -170,10 +160,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_nack_data && !s1_hit
 
   // check ecc error
-  val ecc_resp = VecInit(io.meta_resp.map(r => getECC(r)))
-  val s1_ecc = Mux1H(s1_tag_match_way, wayMap((w: Int) => ecc_resp(w)))
-  val s1_eccMetaAndTag = Cat(s1_ecc, MetaAndTag(s1_hit_coh, get_tag(s1_addr)).asUInt)
-  val s1_tag_ecc_error = s1_hit && dcacheParameters.dataCode.decode(s1_eccMetaAndTag).error // error reported by tag ecc check
+  val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => io.tag_resp(w)))
+  val s1_tag_ecc_error = s1_hit && dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
   val s1_cache_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
   val s1_error = s1_cache_flag_error || s1_tag_ecc_error
 
