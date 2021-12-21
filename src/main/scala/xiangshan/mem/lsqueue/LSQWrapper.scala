@@ -230,8 +230,10 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   // (1) by default, updated according to enq/commit
   // (2) when redirect and dispatch queue is empty, update according to lsq
   val t1_redirect = RegNext(io.redirect.valid)
-  val t2_empty = RegNext(t1_redirect)
-  val t3_update = RegNext(t2_empty && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR)
+  // redirect.valid may last more than one clock cycle.
+  // t2_redirect tracks the last clock cycle of redirect.valid.
+  val t2_redirect = RegNext(t1_redirect && !io.redirect.valid)
+  val t3_update = RegNext(t2_redirect && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR)
   val t3_lqCancelCnt = RegNext(io.lqCancelCnt)
   val t3_sqCancelCnt = RegNext(io.sqCancelCnt)
   when (t3_update) {
