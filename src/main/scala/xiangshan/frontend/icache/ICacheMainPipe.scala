@@ -111,10 +111,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_ready, s1_ready, s2_ready = WireInit(false.B)
   val s0_fire,  s1_fire , s2_fire  = WireInit(false.B)
 
+  val missSwitchBit = RegInit(false.B)
+  
   /** replacement status register */
   val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
-
 
   /**
     ******************************************************************************
@@ -134,18 +135,18 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** SRAM request */
   val fetch_req = List(toMeta, toData)
   for(i <- 0 until 2) {
-    fetch_req(i).valid             := s0_valid
+    fetch_req(i).valid             := s0_valid && !missSwitchBit
     fetch_req(i).bits.isDoubleLine := s0_double_line
     fetch_req(i).bits.vSetIdx      := s0_req_vsetIdx
   }
 
-  /** ITLB request */
-  toITLB(0).valid         := s0_valid
+  toITLB(0).valid         := s0_valid && !missSwitchBit
+
   toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := s0_req_vaddr(0)
   toITLB(0).bits.debug.pc := s0_req_vaddr(0)
 
-  toITLB(1).valid         := s0_valid && s0_double_line
+  toITLB(1).valid         := s0_valid && s0_double_line && !missSwitchBit
   toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := s0_req_vaddr(1)
   toITLB(1).bits.debug.pc := s0_req_vaddr(1)
@@ -177,8 +178,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  s0_fire        := s0_valid && s1_ready && tlb_all_resp && fetch_req(0).ready && fetch_req(1).ready
-  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready  && 
+  s0_fire        := s0_valid && !missSwitchBit && s1_ready && tlb_all_resp && fetch_req(0).ready && fetch_req(1).ready
+
+  //TODO: fix GTimer() condition
+  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
                          tlb_all_resp && 
                          s1_ready && GTimer() > 500.U )
                          
@@ -335,7 +338,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   //send physical address to PMP
   io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_fire 
+    p.req.valid := s2_valid
     p.req.bits.addr := s2_req_paddr(i)
     p.req.bits.size := 3.U // TODO
     p.req.bits.cmd := TlbCmd.exec
@@ -546,6 +549,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }.elsewhen(missStateQueue(i) === m_check_final) {
       missStateQueue(i)     :=  m_invalid
     }
+  }
+
+  when(toMSHR.map(_.valid).reduce(_||_)){
+    missSwitchBit := true.B
+  }.elsewhen(missSwitchBit && s2_fetch_finish){
+    missSwitchBit := false.B
   }
 
   val miss_all_fix       =  wait_state === wait_finish

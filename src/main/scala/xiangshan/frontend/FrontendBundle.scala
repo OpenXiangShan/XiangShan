@@ -69,8 +69,13 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val instrRange   = Vec(PredictWidth, Bool())
 }
 
-class Exception(implicit p: Parameters) extends XSBundle {
+// Ftq send req to Prefetch
+class PrefetchRequest(implicit p:Parameters) extends XSBundle {
+  val target          = UInt(VAddrBits.W)
+}
 
+class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
+  val req = DecoupledIO(new PrefetchRequest)
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {

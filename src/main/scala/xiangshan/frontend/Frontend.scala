@@ -91,6 +91,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     itlbParams
   )
 
+  icache.io.prefetch <> ftq.io.toPrefetch
 
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
 
