@@ -99,6 +99,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
+    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
@@ -128,10 +129,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val deqPtrExtNext = Wire(new LqPtr)
-  val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt.value
+
+  val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
+  val allowEnqueue = validCount <= (LoadQueueSize - 2).U
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
@@ -145,12 +148,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   io.enq.canAccept := allowEnqueue
 
+  val canEnqueue = io.enq.req.map(_.valid)
+  val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
-    val index = lqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
-      uop(index) := io.enq.req(i).bits
+    val index = io.enq.req(i).bits.lqIdx.value
+    when (canEnqueue(i) && !enqCancel(i)) {
+      uop(index).robIdx := io.enq.req(i).bits.robIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
@@ -158,6 +163,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       miss(index) := false.B
       pending(index) := false.B
       error(index) := false.B
+      XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
+      XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
     }
     io.enq.resp(i) := lqIdx
   }
@@ -227,10 +234,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.needReplayFromRS(i)
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
+      // dirty code for load instr
+      uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
+      uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
+      uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
       uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
-      // update replayInst (replay from fetch) bit, 
-      // for replayInst may be set to true in load pipeline
-      uop(loadWbIndex).ctrl.replayInst := io.loadIn(i).bits.uop.ctrl.replayInst
     }
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
@@ -378,6 +386,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   (0 until CommitWidth).map(i => {
     when(commitCount > i.U){
       allocated((deqPtrExt+i.U).value) := false.B
+      XSError(!allocated((deqPtrExt+i.U).value), s"why commit invalid entry $i?\n")
     }
   })
 
@@ -755,19 +764,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueSize) {
     needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i)
     when (needCancel(i)) {
-        allocated(i) := false.B
+      allocated(i) := false.B
     }
   }
 
   /**
     * update pointers
     */
+  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
-  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   when (lastCycleRedirect.valid) {
     // we recover the pointers in the next cycle after redirect
-    enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
+    enqPtrExt := VecInit(enqPtrExt.map(_ - (lastCycleCancelCount + lastEnqCancel)))
   }.otherwise {
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
@@ -775,9 +784,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   deqPtrExtNext := deqPtrExt + commitCount
   deqPtrExt := deqPtrExtNext
 
-  val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
-
-  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - io.enq.req.length).U
+  io.lqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
 
   /**
     * misc

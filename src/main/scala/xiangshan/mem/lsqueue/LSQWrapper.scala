@@ -78,6 +78,9 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val issuePtrExt = Output(new SqPtr)
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
+    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+    val sqDeq = Output(UInt(2.W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
@@ -121,6 +124,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.release <> io.release
   loadQueue.io.trigger <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
+  loadQueue.io.lqCancelCnt <> io.lqCancelCnt
 
   // store queue wiring
   // storeQueue.io <> DontCare
@@ -133,6 +137,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.rob <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt
+  storeQueue.io.sqCancelCnt <> io.sqCancelCnt
+  storeQueue.io.sqDeq <> io.sqDeq
 
   loadQueue.io.load_s1 <> io.forward
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
@@ -195,4 +201,81 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEvents)
   generatePerfEvent()
+}
+
+class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val redirect = Flipped(ValidIO(new Redirect))
+    // to dispatch
+    val enq = new LsqEnqIO
+    // from rob
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    // from/tp lsq
+    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    val enqLsq = Flipped(new LsqEnqIO)
+  })
+
+  val lqPtr = RegInit(0.U.asTypeOf(new LqPtr))
+  val sqPtr = RegInit(0.U.asTypeOf(new SqPtr))
+  val lqCounter = RegInit(LoadQueueSize.U(log2Up(LoadQueueSize + 1).W))
+  val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  val canAccept = RegInit(false.B)
+
+  val loadEnqNumber = PopCount(io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0)))
+  val storeEnqNumber = PopCount(io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(1)))
+
+  // How to update ptr and counter:
+  // (1) by default, updated according to enq/commit
+  // (2) when redirect and dispatch queue is empty, update according to lsq
+  val t1_redirect = RegNext(io.redirect.valid)
+  val t2_redirect = RegNext(t1_redirect)
+  val t2_update = t2_redirect && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR
+  val t3_update = RegNext(t2_update)
+  val t3_lqCancelCnt = RegNext(io.lqCancelCnt)
+  val t3_sqCancelCnt = RegNext(io.sqCancelCnt)
+  when (t3_update) {
+    lqPtr := lqPtr - t3_lqCancelCnt
+    lqCounter := lqCounter + io.lcommit + t3_lqCancelCnt
+    sqPtr := sqPtr - t3_sqCancelCnt
+    sqCounter := sqCounter + io.scommit + t3_sqCancelCnt
+  }.elsewhen (!io.redirect.valid && io.enq.canAccept) {
+    lqPtr := lqPtr + loadEnqNumber
+    lqCounter := lqCounter + io.lcommit - loadEnqNumber
+    sqPtr := sqPtr + storeEnqNumber
+    sqCounter := sqCounter + io.scommit - storeEnqNumber
+  }.otherwise {
+    lqCounter := lqCounter + io.lcommit
+    sqCounter := sqCounter + io.scommit
+  }
+
+
+  val maxAllocate = Seq(exuParameters.LduCnt, exuParameters.StuCnt).max
+  val ldCanAccept = lqCounter >= loadEnqNumber +& maxAllocate.U
+  val sqCanAccept = sqCounter >= storeEnqNumber +& maxAllocate.U
+  // It is possible that t3_update and enq are true at the same clock cycle.
+  // For example, if redirect.valid lasts more than one clock cycle,
+  // after the last redirect, new instructions may enter but previously redirect
+  // has not been resolved (updated according to the cancel count from LSQ).
+  // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
+  io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
+  val lqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
+  val sqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
+  for ((resp, i) <- io.enq.resp.zipWithIndex) {
+    lqOffset(i) := PopCount(io.enq.needAlloc.take(i).map(a => a(0)))
+    resp.lqIdx := lqPtr + lqOffset(i)
+    sqOffset(i) := PopCount(io.enq.needAlloc.take(i).map(a => a(1)))
+    resp.sqIdx := sqPtr + sqOffset(i)
+  }
+
+  io.enqLsq.needAlloc := RegNext(io.enq.needAlloc)
+  io.enqLsq.req.zip(io.enq.req).zip(io.enq.resp).foreach{ case ((toLsq, enq), resp) =>
+    val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept
+    toLsq.valid := RegNext(do_enq)
+    toLsq.bits := RegEnable(enq.bits, do_enq)
+    toLsq.bits.lqIdx := RegEnable(resp.lqIdx, do_enq)
+    toLsq.bits.sqIdx := RegEnable(resp.sqIdx, do_enq)
+  }
+
 }

@@ -29,7 +29,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -251,6 +251,11 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val stIssuePtr = Input(new SqPtr())
     // special ports for load / store rs
     val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    // from lsq
+    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
@@ -283,7 +288,16 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val dispatch2 = outer.dispatch2.map(_.module)
 
   // dirty code for ls dp
-  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) dp.io.enqLsq.get <> io.extra.enqLsq.get)
+  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
+    val lsqCtrl = Module(new LsqEnqCtrl)
+    lsqCtrl.io.redirect <> io.redirect
+    lsqCtrl.io.enq <> dp.io.enqLsq.get
+    lsqCtrl.io.lcommit := io.extra.lcommit
+    lsqCtrl.io.scommit := io.extra.scommit
+    lsqCtrl.io.lqCancelCnt := io.extra.lqCancelCnt
+    lsqCtrl.io.sqCancelCnt := io.extra.sqCancelCnt
+    io.extra.enqLsq.get <> lsqCtrl.io.enqLsq
+  })
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
