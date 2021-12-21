@@ -230,10 +230,9 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   // (1) by default, updated according to enq/commit
   // (2) when redirect and dispatch queue is empty, update according to lsq
   val t1_redirect = RegNext(io.redirect.valid)
-  // redirect.valid may last more than one clock cycle.
-  // t2_redirect tracks the last clock cycle of redirect.valid.
-  val t2_redirect = RegNext(t1_redirect && !io.redirect.valid)
-  val t3_update = RegNext(t2_redirect && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR)
+  val t2_redirect = RegNext(t1_redirect)
+  val t2_update = t2_redirect && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR
+  val t3_update = RegNext(t2_update)
   val t3_lqCancelCnt = RegNext(io.lqCancelCnt)
   val t3_sqCancelCnt = RegNext(io.sqCancelCnt)
   when (t3_update) {
@@ -253,7 +252,14 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
 
 
   val maxAllocate = Seq(exuParameters.LduCnt, exuParameters.StuCnt).max
-  io.enq.canAccept := RegNext(lqCounter >= loadEnqNumber +& maxAllocate.U && sqCounter >= storeEnqNumber +& maxAllocate.U)
+  val ldCanAccept = lqCounter >= loadEnqNumber +& maxAllocate.U
+  val sqCanAccept = sqCounter >= storeEnqNumber +& maxAllocate.U
+  // It is possible that t3_update and enq are true at the same clock cycle.
+  // For example, if redirect.valid lasts more than one clock cycle,
+  // after the last redirect, new instructions may enter but previously redirect
+  // has not been resolved (updated according to the cancel count from LSQ).
+  // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
+  io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
   val lqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
   val sqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {
