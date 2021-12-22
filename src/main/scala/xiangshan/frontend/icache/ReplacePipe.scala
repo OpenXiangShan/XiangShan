@@ -133,10 +133,14 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.status.r1_set.valid := r1_valid
   io.status.r1_set.bits  := r1_req.vidx
 
-  io.error.ecc_error.valid  := RegNext(r1_parity_error && RegNext(r0_fire))
-  io.error.ecc_error.bits   := true.B
-  io.error.paddr.valid      := RegNext(io.error.ecc_error.valid)  
-  io.error.paddr.bits       := RegNext(r1_req.paddr) 
+  io.error.ecc_error.valid      := RegNext(r1_parity_error && RegNext(r0_fire))
+  io.error.ecc_error.bits       := RegNext(r1_req.paddr)
+  io.error.source               := DontCare
+  io.error.source.instr         := true.B
+  io.error.opType               := DontCare
+  io.error.opType.release       := RegNext(r1_req.isRelease)
+  io.error.opType.probe         := RegNext(r1_req.isProbe)
+
 
   /**
     ******************************************************************************

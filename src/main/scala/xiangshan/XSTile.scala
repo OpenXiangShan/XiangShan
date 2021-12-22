@@ -22,8 +22,10 @@ class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCPar
     val tag = Bool() // l1 tag array
     val data = Bool() // l1 data array
     val l2 = Bool()
+    val instr = Bool()  // l1I parity wrong
   }
   val opType = new Bundle() {
+    val fetch = Bool()
     val load = Bool()
     val store = Bool()
     val probe = Bool()

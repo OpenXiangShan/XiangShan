@@ -253,9 +253,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   for(i <- 0 until PortNumber){
     io.errors(i).ecc_error.valid  := RegNext(s1_parity_error(i) && RegNext(s0_fire))
-    io.errors(i).ecc_error.bits   := true.B
-    io.errors(i).paddr.valid      := RegNext(io.errors(i).ecc_error.valid)  
-    io.errors(i).paddr.bits       := RegNext(tlbRespPAddr(i))  
+    io.errors(i).ecc_error.bits   := RegNext(tlbRespPAddr(i))
+    io.errors(i).source           := DontCare
+    io.errors(i).source.instr     := true.B
+    io.errors(i).opType           := DontCare
+    io.errors(i).opType.fetch     := true.B
   }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
