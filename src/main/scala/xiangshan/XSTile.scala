@@ -15,9 +15,7 @@ import top.BusPerfMonitor
 import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
-//  val paddr = Valid(UInt(soc.PAddrBits.W))
-  // for now, we only detect ecc
-  val ecc_error = Valid(UInt(soc.PAddrBits.W))
+  // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
   val source = Output(new Bundle() {
     val tag = Bool() // l1 tag array
     val data = Bool() // l1 data array
@@ -32,6 +30,8 @@ class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCPar
     val release = Bool()
     val atom = Bool()
   })
+  // for now, we only detect ecc
+  val ecc_error = Valid(UInt(soc.PAddrBits.W))
 }
 
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {

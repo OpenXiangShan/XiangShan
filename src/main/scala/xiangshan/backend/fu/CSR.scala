@@ -1142,6 +1142,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     }}
   }
 
+  // Cache error debug support
+  if(HasCustomCSRCacheOp){
+    val cache_error_decoder = Module(new CSRCacheErrorDecoder)
+    cache_error_decoder.io.encoded_cache_error := cacheopRegs("CACHE_ERROR")
+  }
+
   // Implicit add reset values for mepc[0] and sepc[0]
   // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
   when (reset.asBool) {
