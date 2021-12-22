@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{XSPerfAccumulate, XSPerfHistogram}
+import utils._
 import xiangshan._
 import xiangshan.backend.HasExuWbHelper
 
@@ -256,7 +256,8 @@ class WbArbiterWrapper(
       for ((sink, source) <- duplicateSink.zip(duplicateSource)) {
         writeback(sink).valid := io.in(source).valid
       }
-      Some(Seq(writeback))
+      val extra_latency = 1
+      Some(Seq(DelayN(writeback, extra_latency)))
     }
 
     // ready is set to true.B as default (to be override later)
@@ -327,14 +328,29 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
       val out = Vec(configs.length, ValidIO(new ExuOutput))
     })
 
-    for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
+    val out_wire = Wire(io.out.cloneType)
+    for (((out, in), config) <- out_wire.zip(io.in).zip(configs)) {
       out.valid := in.fire
       out.bits := in.bits
       if (config.hasFastUopOut) {
-        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits.uop := RegNext(in.bits.uop)
+        val valid = in.fire && !in.bits.uop.robIdx.needFlush(io.redirect)
+        out.valid := RegNext(valid)
+        out.bits.uop := RegEnable(in.bits.uop, valid)
       }
     }
+
+    val extra_latency = 1
+    var extra_stage = WireInit(out_wire)
+    for (_ <- 0 until extra_latency) {
+      val next_stage = Wire(extra_stage.cloneType)
+      for ((in, out) <- extra_stage.zip(next_stage)) {
+        val valid = in.valid && !in.bits.uop.robIdx.needFlush(io.redirect)
+        out.valid := RegNext(valid)
+        out.bits := RegEnable(in.bits, valid)
+      }
+      extra_stage = next_stage
+    }
+    io.out := extra_stage
 
     override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))
   }
