@@ -769,7 +769,7 @@ package object xiangshan {
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",
-    Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
+    Seq(f2iCfg, fdivSqrtCfg, f2fCfg),
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
