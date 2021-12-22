@@ -273,10 +273,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // report tag error (with paddr) to bus error unit
+  io.tag_error := 0.U.asTypeOf(new L1CacheErrorInfo())
   io.tag_error.ecc_error.valid := RegNext(s1_fire && s1_tag_ecc_error)
-  io.tag_error.ecc_error.bits := true.B
-  io.tag_error.paddr.valid := io.tag_error.ecc_error.valid
-  io.tag_error.paddr.bits := s2_addr
+  io.tag_error.ecc_error.bits := s2_addr
+  io.tag_error.source.tag := true.B
+  io.tag_error.opType.load := true.B
 
   // -------
   // Debug logging functions

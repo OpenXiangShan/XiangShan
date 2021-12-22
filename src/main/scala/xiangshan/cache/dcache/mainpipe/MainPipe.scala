@@ -696,11 +696,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
 
-  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit && !s1_req.replace) &&
+  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
+  io.error.ecc_error.valid := RegNext(s1_fire && s1_hit) &&
     RegNext(dcacheParameters.tagCode.decode(s1_encTag).error)
-  io.error.ecc_error.bits := true.B
-  io.error.paddr.valid := io.error.ecc_error.valid
-  io.error.paddr.bits := s2_req.addr
+  io.error.ecc_error.bits := s2_req.addr
+  io.error.source.tag := true.B
+  io.error.opType.store := s2_req.isStore && !s2_req.probe
+  io.error.opType.probe := s2_req.probe
+  io.error.opType.release := s2_req.replace
+  io.error.opType.atom := s2_req.isAMO && !s2_req.probe
 
   val perfEvents = Seq(
     ("dcache_mp_req          ", s0_fire                                                      ),

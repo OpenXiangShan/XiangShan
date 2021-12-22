@@ -425,6 +425,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.hartId := io.hartId
 
+  bankedDataArray.io.errors.last.opType := mainPipe.io.error.opType
   val errors = bankedDataArray.io.errors ++ // data ecc error
     ldu.map(_.io.tag_error) ++ // load tag ecc error
     Seq(mainPipe.io.error) // store / misc tag ecc error 

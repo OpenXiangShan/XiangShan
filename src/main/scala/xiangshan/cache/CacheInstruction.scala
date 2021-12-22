@@ -267,7 +267,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val error = DelayN(io.error, 1)
   when(error.ecc_error.valid) {
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
-    io.csr.update.w.bits.data := error.ecc_error.valid | (error.paddr.bits >> 1 << 1)
+    io.csr.update.w.bits.data := error.ecc_error.valid | (error.ecc_error.bits >> 1 << 1)
     // CACHE_ERROR CSR bit 0 indicates if an cache error has been raised, other bits contains error paddr
   }
 }

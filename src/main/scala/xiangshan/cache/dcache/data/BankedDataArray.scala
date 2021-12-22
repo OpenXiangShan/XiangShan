@@ -339,20 +339,20 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // error detection
   // normal read ports
+  io.errors.foreach(_ := 0.U.asTypeOf(new L1CacheErrorInfo()))
   (0 until LoadPipelineWidth).map(rport_index => {
     io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && 
       read_bank_error.asUInt.orR() &&
       !io.bank_conflict_slow(rport_index)
-    io.errors(rport_index).ecc_error.bits := true.B
-    io.errors(rport_index).paddr.valid := io.errors(rport_index).ecc_error.valid
-    io.errors(rport_index).paddr.bits := RegNext(io.read(rport_index).bits.addr)
+    io.errors(rport_index).ecc_error.bits := RegNext(io.read(rport_index).bits.addr)
+    io.errors(rport_index).source.data := true.B
+    io.errors(rport_index).opType.load := true.B
   })
   // readline port
   io.errors(ReadlinePortErrorIndex).ecc_error.valid := RegNext(io.readline.fire()) && 
     VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
-  io.errors(ReadlinePortErrorIndex).ecc_error.bits := true.B
-  io.errors(ReadlinePortErrorIndex).paddr.valid := io.errors(ReadlinePortErrorIndex).ecc_error.valid
-  io.errors(ReadlinePortErrorIndex).paddr.bits := RegNext(io.readline.bits.addr)
+  io.errors(ReadlinePortErrorIndex).ecc_error.bits := RegNext(io.readline.bits.addr)
+  io.errors(ReadlinePortErrorIndex).source.data := true.B
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
