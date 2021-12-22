@@ -196,12 +196,16 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   
     val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
     val useThresholds = VecInit(scThresholds map (_.thres))
-    def aboveThreshold(sum: SInt, threshold: UInt) = {
-      def sign(x: SInt) = x(x.getWidth-1)
-      def pos(x: SInt) = !sign(x)
-      def neg(x: SInt) = sign(x)
+
+    def sign(x: SInt) = x(x.getWidth-1)
+    def pos(x: SInt) = !sign(x)
+    def neg(x: SInt) = sign(x)
+
+    def aboveThreshold(scSum: SInt, tagePvdr: SInt, threshold: UInt): Bool = {
       val signedThres = threshold.zext
-      sum > signedThres && pos(sum) || sum < -signedThres && neg(sum)
+      val totalSum = scSum +& tagePvdr
+      (scSum >  signedThres - tagePvdr) && pos(totalSum) ||
+      (scSum < -signedThres - tagePvdr) && neg(totalSum)
     }
     val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
   
@@ -243,12 +247,22 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val tage_pvdr_oh = VecInit((0 until BankTageNTables(w)).map(i =>
         tage_hit_vec(i) && !tage_hit_vec.drop(i+1).reduceOption(_||_).getOrElse(false.B)
       ))
-      val tage_table_ctrs = s1_resps(w).map(_.bits.ctr)
+      val tage_table_centered_ctrs = s1_resps(w).map(r => getPvdrCentered(r.bits.ctr))
   
-      val providerCtr = s1_providerCtrs(w)
-      val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
-      val s1_totalSums = VecInit(s1_scTableSums.map(_  +& s1_pvdrCtrCentered))
-      val s1_sumAboveThresholds = VecInit((s1_totalSums zip useThresholds) map { case (sum, thres) => aboveThreshold(sum, thres)})
+      val s1_sumAboveThresholdsForAllTageCtrs =
+        VecInit(s1_scTableSums.map(s =>
+          VecInit(tage_table_centered_ctrs.map(tctr =>
+            aboveThreshold(s, tctr, useThresholds(w))
+          ))
+        ))
+      val s1_totalSumsForAllTageCtrs =
+        VecInit(s1_scTableSums.map(s =>
+          VecInit(tage_table_centered_ctrs.map(tctr =>
+            s +& tctr
+          ))
+        ))
+      val s1_totalSums = VecInit(s1_totalSumsForAllTageCtrs.map(i => Mux1H(tage_pvdr_oh, i)))
+      val s1_sumAboveThresholds = VecInit(s1_sumAboveThresholdsForAllTageCtrs.map(i => Mux1H(tage_pvdr_oh, i)))
       val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
       
       val s2_sumAboveThresholds = RegEnable(s1_sumAboveThresholds, io.s1_fire)
@@ -292,7 +306,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         val pvdrCtr = updateTageMeta.providerCtr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
         val sumAbs = sum.abs.asUInt
-        val sumAboveThreshold = aboveThreshold(sum, useThresholds(w))
+        val sumAboveThreshold = aboveThreshold(sum, getPvdrCentered(pvdrCtr), useThresholds(w))
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
