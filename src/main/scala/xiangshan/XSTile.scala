@@ -18,20 +18,20 @@ class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCPar
 //  val paddr = Valid(UInt(soc.PAddrBits.W))
   // for now, we only detect ecc
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
-  val source = new Bundle() {
+  val source = Output(new Bundle() {
     val tag = Bool() // l1 tag array
     val data = Bool() // l1 data array
     val l2 = Bool()
     val instr = Bool()  // l1I parity wrong
-  }
-  val opType = new Bundle() {
+  })
+  val opType = Output(new Bundle() {
     val fetch = Bool()
     val load = Bool()
     val store = Bool()
     val probe = Bool()
     val release = Bool()
     val atom = Bool()
-  }
+  })
 }
 
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
