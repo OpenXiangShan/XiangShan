@@ -360,13 +360,12 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b }.reduce(_||_)
 
   def target(pc: UInt): UInt = {
-    val targetVecOnHit = targets :+ fallThroughAddr
-    val targetOnNotHit = pc + (FetchWidth * 4).U
-    val taken_mask = taken_mask_on_slot
-    val selVecOHOnHit =
-      taken_mask.zipWithIndex.map{ case (t, i) => !taken_mask.take(i).fold(false.B)(_||_) && t} :+ !taken_mask.asUInt.orR
-    val targetOnHit = Mux1H(selVecOHOnHit, targetVecOnHit)
-    Mux(hit, targetOnHit, targetOnNotHit)
+    val targetVec = targets :+ fallThroughAddr :+ (pc + (FetchWidth * 4).U)
+    val tm = taken_mask_on_slot
+    val selVecOH =
+      tm.zipWithIndex.map{ case (t, i) => !tm.take(i).fold(false.B)(_||_) && t && hit} :+
+      (!tm.asUInt.orR && hit) :+ !hit
+    Mux1H(selVecOH, targetVec)
   }
 
   def fallThruError: Bool = hit && fallThroughErr
