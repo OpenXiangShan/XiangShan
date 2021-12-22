@@ -95,7 +95,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     // this.hist := entry.ghist
     this.folded_hist := entry.folded_hist
     this.histPtr := entry.histPtr
-    this.ghr := entry.ghr
     this.rasSp := entry.rasSp
     this.rasEntry := entry.rasEntry
     this

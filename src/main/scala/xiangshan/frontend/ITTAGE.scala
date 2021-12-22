@@ -504,7 +504,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   resp_meta.provider.bits     := s2_provider
   resp_meta.altProvider.valid := s2_altProvided
   resp_meta.altProvider.bits  := s2_altProvider
-  resp_meta.altDiffers        := s2_finalAltPred =/= s2_tageTaken
+  resp_meta.altDiffers        := s2_finalAltPred =/= s2_tageTaken || s1_altProviderTarget =/= s2_providerTarget
   resp_meta.providerU         := s2_providerU
   resp_meta.providerCtr       := s2_providerCtr
   resp_meta.altProviderCtr    := s2_altProviderCtr
