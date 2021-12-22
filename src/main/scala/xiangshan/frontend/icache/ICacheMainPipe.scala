@@ -93,6 +93,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val respStall   = Input(Bool())
   val perfInfo = Output(new ICachePerfInfo)
 
+  val csr_parity_enable = Input(Bool())
+
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
