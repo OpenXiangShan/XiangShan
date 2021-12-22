@@ -98,11 +98,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p1_vaddr   =  RegEnable(next = p0_vaddr,    enable=p0_fire)
 
   //tlb resp
-  val tlb_resp_valid = RegNext(p0_fire)
+  val tlb_resp_valid = RegInit(false.B)
+  when(p0_fire) {tlb_resp_valid := true.B} 
+  .elsewhen(tlb_resp_valid && (p1_fire || p1_discard)) {tlb_resp_valid := false.B}
 
-  val tlb_resp_paddr = ResultHoldBypass(valid = tlb_resp_valid, data = fromITLB.bits.paddr)
-  val tlb_resp_pf    = ResultHoldBypass(valid = tlb_resp_valid, data = fromITLB.bits.excp.pf.instr && tlb_resp_valid)
-  val tlb_resp_af    = ResultHoldBypass(valid = tlb_resp_valid, data = fromITLB.bits.excp.af.instr && tlb_resp_valid)
+  val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr)
+  val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.pf.instr && tlb_resp_valid)
+  val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.af.instr && tlb_resp_valid)
 
   val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)
@@ -150,7 +152,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire, thisFlush = false.B, lastFlush = false.B)
 
-  val p3_paddr = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
+  val p3_paddr = RegEnable(next = tlb_resp_paddr,  enable = p2_fire)
 
   toMissUnit.enqReq.valid             := p3_valid
   toMissUnit.enqReq.bits.paddr        := p3_paddr
