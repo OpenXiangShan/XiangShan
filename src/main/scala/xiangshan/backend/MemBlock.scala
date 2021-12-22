@@ -277,7 +277,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // update mem dependency predictor
     io.memPredUpdate(i) := DontCare
-    lsq.io.needReplayFromRS(i) <> loadUnits(i).io.lsq.needReplayFromRS
+    lsq.io.dcacheRequireReplay(i)    <> loadUnits(i).io.lsq.dcacheRequireReplay
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
