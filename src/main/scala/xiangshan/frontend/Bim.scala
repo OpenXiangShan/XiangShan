@@ -41,7 +41,8 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   val s0_idx = bimAddr.getIdx(s0_pc)
 
-  bim.io.r.req.valid := io.s0_fire
+  // bim.io.r.req.valid := io.s0_fire
+  bim.io.r.req.valid := false.B
   bim.io.r.req.bits.setIdx := s0_idx
 
   io.in.ready := bim.io.r.req.ready
@@ -55,8 +56,8 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val s1_latch_meta       = s1_read.asUInt()
   override val meta_size = s1_latch_meta.getWidth
 
-  io.out.resp.s1.full_pred.br_taken_mask := s1_latch_taken_mask
-  io.out.resp.s2.full_pred.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
+  // io.out.resp.s1.full_pred.br_taken_mask := s1_latch_taken_mask
+  // io.out.resp.s2.full_pred.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
   io.out.last_stage_meta := RegEnable(s1_latch_meta, io.s1_fire) // TODO: configurable with total-stages
 
@@ -91,7 +92,8 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
 
   bim.io.w.apply(
-    valid = need_to_update.asUInt.orR || doing_reset,
+    valid = false.B,
+    // valid = need_to_update.asUInt.orR || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
