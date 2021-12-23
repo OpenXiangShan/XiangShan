@@ -186,6 +186,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
             req.valid := io.s0_fire
             req.bits.pc := s0_pc
             req.bits.folded_hist := io.in.bits.folded_hist
+            req.bits.ghist := DontCare
             if (!EnableSC) {t.io.update := DontCare}
             t
           }

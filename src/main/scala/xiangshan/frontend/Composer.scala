@@ -34,6 +34,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.in.valid            := io.in.valid
     c.io.in.bits.s0_pc       := io.in.bits.s0_pc
     c.io.in.bits.folded_hist := io.in.bits.folded_hist
+    c.io.in.bits.ghist       := io.in.bits.ghist
 
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire

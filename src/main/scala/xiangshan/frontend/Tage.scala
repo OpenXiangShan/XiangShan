@@ -81,6 +81,7 @@ abstract class TageModule(implicit p: Parameters)
 
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
+  val ghist = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
 }
 
@@ -92,6 +93,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghist = UInt(HistoryLength.W)
   // update tag and ctr
   val mask = Bool()
   val taken = Bool()
@@ -256,16 +258,21 @@ class TageTable
   }
 
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, TageCtrBits, taken)
-
+  
   class TageEntry() extends TageBundle {
     // val valid = Bool()
     val tag = UInt(tagLen.W)
     val ctr = UInt(TageCtrBits.W)
   }
-
+  
   val validArray = RegInit(0.U(nRows.W))
-
-
+  
+  if (EnableGHistDiff) {
+    val idx_history = compute_folded_ghist(io.req.bits.ghist, log2Ceil(nRows))
+    val idx_fh = io.req.bits.folded_hist.getHistWithInfo(idxFhInfo)
+    XSError(idx_history =/= idx_fh.folded_hist, p"tage table $tableIdx has different fh," +
+      p" ghist: ${Binary(idx_history)}, fh: ${Binary(idx_fh.folded_hist)}\n")
+  }
   // pc is start address of basic block, most 2 branch inst in block
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
   def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
@@ -309,7 +316,14 @@ class TageTable
   // reset all us in 32 cycles
   us.io.resetEn.map(_ := io.update.reset_u)
 
-
+  if (EnableGHistDiff) {
+    val update_idx_history = compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
+    val update_idx_info = (histLen, min(log2Ceil(nRows), histLen))
+    val update_idx_fh = io.update.folded_hist.getHistWithInfo(update_idx_info)
+    XSError(update_idx_history =/= update_idx_fh.folded_hist && io.update.mask,
+      p"tage table $tableIdx has different fh when update," +
+      p" ghist: ${Binary(update_idx_history)}, fh: ${Binary(update_idx_fh.folded_hist)}\n")
+  }
   // Use fetchpc to compute hash
   val update_wdata = Wire(new TageEntry)
 
@@ -439,6 +453,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
           t.io.req.valid := io.s0_fire
           t.io.req.bits.pc := s0_pc
           t.io.req.bits.folded_hist := io.in.bits.folded_hist
+          t.io.req.bits.ghist := io.in.bits.ghist
           t
       }
       tables
@@ -595,7 +610,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     // Update in loop
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
-    val isUpdateTaken = updateValid && update.full_pred.br_taken_mask(w) && update.full_pred.br_valids(w)
+    val isUpdateTaken = updateValid && update.full_pred.br_taken_mask(w)
     val updateMisPred = updateMisPreds(w)
     val up_altpredhit = updateMeta.altpredhit
     val up_prednum    = updateMeta.prednum.bits
@@ -692,6 +707,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       bank_tables(w)(i).io.update.pc := RegNext(update.pc)
       // use fetch pc instead of instruction pc
       bank_tables(w)(i).io.update.folded_hist := RegNext(updateFHist)
+      bank_tables(w)(i).io.update.ghist := RegNext(io.update.bits.ghist)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)

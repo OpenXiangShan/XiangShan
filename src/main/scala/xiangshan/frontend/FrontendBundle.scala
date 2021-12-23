@@ -195,7 +195,7 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
         // println(f"bit[$i], ${resArr(i).mkString}")
         if (resArr(i).length > 2) {
           println(f"[warning] update logic of foldest history has two or more levels of xor gates! " +
-            f"histlen:${this.len}, compLen:$compLen")
+            f"histlen:${this.len}, compLen:$compLen, at bit $i")
         }
         if (resArr(i).length == 0) {
           println(f"[error] bits $i is not assigned in folded hist update logic! histlen:${this.len}, compLen:$compLen")
@@ -357,7 +357,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
       )
     )
 
-  def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b }.reduce(_||_)
+  def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b && hit}.reduce(_||_)
 
   def target(pc: UInt): UInt = {
     val targetVec = targets :+ fallThroughAddr :+ (pc + (FetchWidth * 4).U)
@@ -394,17 +394,17 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     targets := entry.getTargetVec(pc)
     jalr_target := targets.last
     offsets := entry.getOffsetVec
-    fallThroughAddr := entry.getFallThrough(pc)
     oversize := entry.oversize
     is_jal := entry.tailSlot.valid && entry.isJal
     is_jalr := entry.tailSlot.valid && entry.isJalr
     is_call := entry.tailSlot.valid && entry.isCall
     is_ret := entry.tailSlot.valid && entry.isRet
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
-
+    
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
     fallThroughErr := startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
+    fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc))
   }
 
   def display(cond: Bool): Unit = {
@@ -501,6 +501,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val old_entry = Bool()
   val meta = UInt(MaxMetaLength.W)
   val full_target = UInt(VAddrBits.W)
+  val ghist = UInt(HistoryLength.W)
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     folded_hist := entry.folded_hist
