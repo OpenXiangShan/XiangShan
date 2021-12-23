@@ -259,7 +259,7 @@ class ITTageTable
   }
 
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
-  io.req.ready := true.B
+  io.req.ready := !io.update.valid
   // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"ittage_table_bank_conflict", bank_conflict)
 

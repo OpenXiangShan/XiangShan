@@ -120,6 +120,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
+    
     update(io.recover_valid)(
       Mux(io.recover_valid, io.recover_push,     io.push_valid),
       Mux(io.recover_valid, io.recover_pop,      io.pop_valid),
@@ -128,9 +129,19 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(io.recover_valid, io.recover_sp - 1.U, topPtr),
       Mux(io.recover_valid, io.recover_new_addr, io.spec_new_addr),
       Mux(io.recover_valid, io.recover_top,      top))
-
+      
     io.sp := sp
     io.top := top
+    
+    val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
+    val do_reset = RegInit(true.B)
+    when (do_reset) {
+      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
+    }
+    resetIdx := resetIdx + do_reset
+    when (resetIdx === (RasSize-1).U) {
+      do_reset := false.B
+    }
 
     debugIO.push_entry := RASEntry(io.spec_new_addr, Mux(alloc_new, 1.U, top.ctr + 1.U))
     debugIO.alloc_new := alloc_new
