@@ -599,7 +599,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr) */
     ) {
       entry_hit_status(ifuPtr.value) := h_false_hit
-      XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
+      // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
     }
     XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
   }
@@ -675,7 +675,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
     XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
 
-    assert(!has_false_hit)
+    // assert(!has_false_hit)
   }
 
   when (has_false_hit) {
