@@ -572,6 +572,44 @@ class Tage(implicit p: Parameters) extends BaseTage {
   resp_meta.allocate.valid := allocatableSlots =/= 0.U
   resp_meta.allocate.bits  := allocEntry
 
+  val updateProvided    = updateMeta.provider.valid
+  val updateProvider    = updateMeta.provider.bits
+  val updateAltProvided = updateMeta.altProvider.valid
+  val updateAltProvider = updateMeta.altProvider.bits
+
+  val hasUpdate = updateValids.reduce(_||_)
+  val needToAllocate = (updateValids zip updateMisPreds).zipWithIndex.map {
+    case ((v, m), i) => v && m && !(updateProvided &&
+      (negUnconf(updateMeta.providerResp.ctrs(i)) && !update.full_pred.br_taken_mask(i) ||
+       posUnconf(updateMeta.providerResp.ctrs(i)) &&  update.full_pred.br_taken_mask(i))
+    )
+  }.reduce(_||_)
+  val canAllocate = updateMeta.allocate.valid
+  val decrMask = Mux(updateProvided,
+    ~LowerMask(UIntToOH(updateProvider), TageNTables),
+    0.U(TageNTables.W)
+  )
+  for (i <- 0 until TageNTables) {
+    updateUMask(i) := hasUpdate && (
+      updateProvided && updateProvider === i.U ||
+      needToAllocate && (canAllocate && updateMeta.allocate.bits === i.U || !canAllocate && decrMask(i))
+    )
+    updateU(i) := updateProvided && updateProvider === i.U && (
+      !updateMeta.altDiffers.reduce(_||_) && updateMeta.providerResp.u ||
+       updateMeta.altDiffers.reduce(_||_) && !updateMisPreds.reduce(_||_)
+    )
+    updateAlloc(i) := needToAllocate && updateMeta.allocate.bits === i.U && canAllocate
+  }
+
+  when (needToAllocate) {
+    tickCtr := satUpdate(tickCtr, TickWidth, !canAllocate)
+  }
+
+  when (tickCtr === ((1 << TickWidth) - 1).U) {
+    tickCtr := 0.U
+    updateResetU := true.B
+  }
+
   for (w <- 0 until TageBanks) {
     val providerUnconf = unconf(providerInfo.resp.ctrs(w))
 
@@ -595,35 +633,29 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val updateValid = updateValids(w)
     val isUpdateTaken = updateValid && update.full_pred.br_taken_mask(w)
     val updateMisPred = updateMisPreds(w)
-    val up_altpredhit = updateMeta.altProvider.valid
-    val up_prednum    = updateMeta.provider.bits
-    val up_altprednum = updateMeta.altProvider.bits
 
     val updateProviderWeakTaken = posUnconf(updateMeta.providerResp.ctrs(w))
     val updateProviderWeaknotTaken = negUnconf(updateMeta.providerResp.ctrs(w))
     val updateProviderWeak = unconf(updateMeta.providerResp.ctrs(w))
 
-    when (updateValid) {
-      when (updateMeta.provider.valid) {
-        when (updateMisPred && up_altpredhit && (updateProviderWeak)) {
-          updateMask(w)(up_altprednum)   := true.B
-          updateUMask(up_altprednum)  := false.B
-          updateTakens(w)(up_altprednum)  := isUpdateTaken
-          updateOldCtrs(w)(up_altprednum) := updateMeta.altProviderResp.ctrs(w)
-        }
-        updateMask(w)(up_prednum)   := true.B
-        updateUMask(up_prednum)  := true.B
+    updateTakens(w).map(_ := isUpdateTaken)
 
-        updateU(up_prednum) := Mux(!updateMeta.altDiffers(w), updateMeta.providerResp.u, !updateMisPred)
-        updateTakens(w)(up_prednum)  := isUpdateTaken
-        updateOldCtrs(w)(up_prednum) := updateMeta.providerResp.ctrs(w)
+    when (updateValid) {
+      when (updateProvided) {
+        when (updateMisPred && updateAltProvided && updateProviderWeak) {
+          updateMask(w)(updateAltProvider) := true.B
+          updateOldCtrs(w)(updateAltProvider) := updateMeta.altProviderResp.ctrs(w)
+        }
+
+        updateMask(w)(updateProvider)   := true.B
+        updateOldCtrs(w)(updateProvider) := updateMeta.providerResp.ctrs(w)
       }
     }
 
     // update base table if used base table to predict
     baseupdate(w) := updateValid && (
-      (updateMeta.provider.valid && !up_altpredhit && updateMisPred && updateProviderWeak) ||
-      !updateMeta.provider.valid
+      (updateProvided && !updateAltProvided && updateMisPred && updateProviderWeak) ||
+      !updateProvided
     )
     updatebcnt(w) := updateMeta.basecnt(w)
     bUpdateTakens(w) := isUpdateTaken
@@ -633,34 +665,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     when (updateValid && updateMisPred && 
       ~((updateProviderWeaknotTaken && ~isUpdateTaken ||
         updateProviderWeakTaken && isUpdateTaken) &&
-        updateMeta.provider.valid)
+        updateProvided)
     ) {
-    //when (updateValid && updateMisPred) {
-      val allocate = updateMeta.allocate
-      tickCtr := satUpdate(tickCtr, TickWidth, allocate.valid)
-      when (allocate.valid) {
-        updateMask(w)(allocate.bits)  := true.B
-        updateTakens(w)(allocate.bits) := isUpdateTaken
-        updateAlloc(allocate.bits) := true.B
-        updateUMask(allocate.bits) := true.B
-        updateU(allocate.bits) := false.B
-      }.otherwise {
-
-        val provider = updateMeta.provider
-        val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
-        for (i <- 0 until TageNTables) {
-          when (decrMask(i)) {
-            updateUMask(i) := true.B
-            updateU(i) := false.B
-          }
-        }
+      when (canAllocate) {
+        updateMask(w)(updateMeta.allocate.bits)  := true.B
       }
     }
-    when (tickCtr === ((1 << TickWidth) - 1).U) {
-      tickCtr := 0.U
-      updateResetU := true.B
-    }
-
     XSPerfAccumulate(s"tage_bank_${w}_mispred", updateValid && updateMisPred)
   }
   XSPerfAccumulate(s"tage_reset_u", updateResetU)
@@ -709,7 +719,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       val pred_i_provided =
         s2_provided && s2_provider === i.U
       val commit_i_provided =
-        updateMeta.provider.valid && updateMeta.provider.bits === i.U && updateValids(b)
+        updateProvided && updateProvider === i.U && updateValids(b)
       tage_perf(
         s"bank_${b}_tage_table_${i}_provided",
         PopCount(pred_i_provided),
@@ -719,19 +729,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
     tage_perf(
       s"bank_${b}_tage_use_bim",
       PopCount(!s2_provided),
-      PopCount(!updateMeta.provider.valid && updateValids(b))
+      PopCount(!updateProvided && updateValids(b))
     )
     def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
     tage_perf(
       s"bank_${b}_tage_use_altpred",
       PopCount(s2_provided && unconf(s2_providerResp.ctrs(b))),
-      PopCount(updateMeta.provider.valid &&
+      PopCount(updateProvided &&
         unconf(updateMeta.providerResp.ctrs(b)) && updateValids(b))
     )
     tage_perf(
       s"bank_${b}_tage_provided",
       PopCount(s2_provided),
-      PopCount(updateMeta.provider.valid && updateValids(b))
+      PopCount(updateProvided && updateValids(b))
     )
   }
 
