@@ -810,11 +810,12 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
-    exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.ctrl.replayInst
-    assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
+    exceptionGen.io.enq(i).bits.replayInst := false.B
+    assert(io.enq.req(i).bits.ctrl.replayInst === false.B)
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
-    exceptionGen.io.enq(i).bits.trigger := io.enq.req(i).bits.cf.trigger
+    exceptionGen.io.enq(i).bits.trigger.clear()
+    exceptionGen.io.enq(i).bits.trigger.frontendHit := io.enq.req(i).bits.cf.trigger.frontendHit
   }
 
   println(s"ExceptionGen:")
@@ -829,7 +830,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
     // TODO: make trigger configurable
-    exc_wb.bits.trigger         := wb.bits.uop.cf.trigger
+    exc_wb.bits.trigger.clear()
+    exc_wb.bits.trigger.backendHit := wb.bits.uop.cf.trigger
     println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
       s"flushPipe ${configs.exists(_.flushPipe)}, " +
       s"replayInst ${configs.exists(_.replayInst)}")
