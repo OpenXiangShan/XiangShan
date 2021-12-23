@@ -40,10 +40,11 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
 
   def fromBpuUpdateBundle(u: BranchPredictionUpdate) = {
     // this.valid := true.B
+    assert(!u.is_minimal)
     this.nextAddr := u.getTarget
     this.cfiOffset := u.cfiIndex.bits
     this.taken := u.taken
-    this.takenOnBr := (u.lastBrPosOH.init zip u.full_pred.br_taken_mask).map{case (a, b) => a && b}.reduce(_||_)
+    this.takenOnBr := (u.lastBrPosOH.tail zip u.full_pred.br_taken_mask).map{case (a, b) => a && b}.reduce(_||_)
     this.brNumOH := u.lastBrPosOH.asUInt()
     this.oversize := u.full_pred.oversize && (!u.taken || u.taken && u.cfiIndex.bits.andR)
   }
@@ -92,13 +93,13 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   println(s"ubtb fh info ${fh_info}")
   def get_ghist_from_fh(afh: AllFoldedHistories) = afh.getHistWithInfo(fh_info)
   val s0_ridx = getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
-  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=false))
+  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=false, bypassWrite=true))
   dataMem.io.r.req.valid := io.s0_fire
   dataMem.io.r.req.bits.setIdx := s0_ridx
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
   // io.out.resp
   val s1_ridx = RegEnable(s0_ridx, io.s0_fire)
-  val resp_valid = validArray(s1_ridx)
+  val resp_valid = RegEnable(validArray(s0_ridx), io.s0_fire)
 
 
   val outMeta = Wire(new MicroBTBOutMeta)
@@ -125,10 +126,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   when (u_valid) {
     validArray(u_idx) := true.B
   }
-
-  // bank.update_valid := u_valid && u_taken && ((u_meta.hit && !update.old_entry) || !u_meta.hit)
-  // bank.update_pc := u_pc
-  // bank.update_write_entry.fromBpuUpdateBundle(update)
 
   // XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
   XSDebug("target=%x\n", io.out.resp.s1.getTarget)
