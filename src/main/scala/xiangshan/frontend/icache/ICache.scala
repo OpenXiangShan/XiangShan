@@ -22,12 +22,13 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, PreferCacheField, PrefetchField,DirtyField}
+import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
 import utils._
-import xiangshan.cache.mmu.BlockTlbRequestIO
+import xiangshan.backend.fu.PMPReqBundle
+import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -40,6 +41,8 @@ case class ICacheParameters(
     nMissEntries: Int = 2,
     nReleaseEntries: Int = 2,
     nProbeEntries: Int = 2,
+    nPrefetchEntries: Int = 4,
+    hasPrefetch: Boolean = false,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -77,14 +80,11 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
 
   def ReplacePipeKey = 0
-  def mainPipeKey = 1
-  def ReleaseKey = 2
-  def MissQueueKey = 3
-  def ProbeKey = 4
-
+  def MainPipeKey = 1
   def PortNumber = 2
+  def ProbeKey   = 3
 
-  def nMissEntries = cacheParams.nMissEntries
+  def nPrefetchEntries = cacheParams.nPrefetchEntries
 
   def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
     val valid  = RegInit(false.B)
@@ -98,7 +98,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     Mux(valid, data, RegEnable(data, valid))
   }
 
-  require(isPow2(nMissEntries), s"nMissEntries($nMissEntries) must be pow2")
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }
@@ -137,8 +136,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val fencei   = Input(Bool())
-    val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
   io.read.ready := !io.write.valid
@@ -155,6 +153,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
@@ -195,31 +194,15 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_meta_wrong(w)}
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := read_meta_wrong(w) && RegNext(io.read.fire)}
   }
 
   //Parity Encode
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-  //  when(io.write.valid){
-  //      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-  //  }
-
-  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
-  val validArray = RegInit(0.U((nSets * nWays).W))
-  val validMetas = VecInit((0 until 2).map{ bank =>
-    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
-    validMeta
-  })
-
   val wayNum   = OHToUInt(io.write.bits.waymask)
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
-  when(io.write.valid){
-    validArray := validArray.bitSet(validPtr, true.B)
-  }
-
-  when(io.fencei){ validArray := 0.U }
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
@@ -234,7 +217,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     io.readResp.metaData(1) := read_metas(1)
   }
 
-  (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
 
   io.write.ready := true.B
   // deal with customized cache op
@@ -290,7 +272,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheDataRespBundle)
-    val cacheOp  = Flipped(new DCacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
   io.read.ready := !io.write.valid
@@ -305,6 +287,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
+  val bank_idx   = Seq(bank_0_idx, bank_1_idx)
 
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
@@ -407,13 +390,14 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val fencei      = Input(Bool())
+  val prefetch        = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val csr         = new L1CacheToCsrIO
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val perfInfo = Output(new ICachePerfInfo)
+  val error  = new L1CacheErrorInfo
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -422,7 +406,8 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     Seq(TLMasterParameters.v1(
       name = "icache",
       sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries),
-      supportsProbe = TransferSizes(blockBytes)
+      supportsProbe = TransferSizes(blockBytes),
+      supportsHint = TransferSizes(blockBytes)
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields
@@ -436,6 +421,15 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io = IO(new ICacheIO)
 
+  println("ICache:")
+  println("  ICacheSets: "          + cacheParams.nSets)
+  println("  ICacheWays: "          + cacheParams.nWays)
+  println("  ICacheBanks: "         + PortNumber)
+  println("  hasPrefetch: "         + cacheParams.hasPrefetch)
+  if(cacheParams.hasPrefetch){
+    println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
+  }
+
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray      = Module(new ICacheMetaArray)
@@ -445,20 +439,25 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val releaseUnit    = Module(new ReleaseUnit(edge))
   val replacePipe     = Module(new ReplacePipe)
   val probeQueue     = Module(new ICacheProbeQueue(edge))
+  val prefetchPipe    = Module(new IPrefetchPipe)
 
-  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
+  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  3))
   val data_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
-  val replace_req_arb     = Module(new Arbiter(new ReplacePipeReq, 2))
+  val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
+  val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
   meta_read_arb.io.in(ReplacePipeKey)   <> replacePipe.io.meta_read
-  meta_read_arb.io.in(mainPipeKey)      <> mainPipe.io.metaArray.toIMeta
+  meta_read_arb.io.in(MainPipeKey)      <> mainPipe.io.metaArray.toIMeta
+  meta_read_arb.io.in(2)                <> prefetchPipe.io.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
+
   replacePipe.io.meta_response          <> metaArray.io.readResp
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
+  prefetchPipe.io.fromIMeta             <> metaArray.io.readResp
 
   data_read_arb.io.in(ReplacePipeKey) <> replacePipe.io.data_read
-  data_read_arb.io.in(mainPipeKey)    <> mainPipe.io.dataArray.toIData
+  data_read_arb.io.in(MainPipeKey)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
   replacePipe.io.data_response        <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
@@ -467,13 +466,46 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.perfInfo := mainPipe.io.perfInfo
 
   meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
-  meta_write_arb.io.in(mainPipeKey)     <> missUnit.io.meta_write
+  meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
 
-  io.itlb           <>    mainPipe.io.itlb
-  io.pmp            <>    mainPipe.io.pmp
+  if(cacheParams.hasPrefetch){
+    prefetchPipe.io.fromFtq <> io.prefetch
+  } else {
+    prefetchPipe.io.fromFtq <> DontCare
+  }
+
+  io.pmp(0).req.valid := mainPipe.io.pmp(0).req.valid ||  prefetchPipe.io.pmp.req.valid
+  io.pmp(0).req.bits := Mux(mainPipe.io.pmp(0).req.valid, mainPipe.io.pmp(0).req.bits, prefetchPipe.io.pmp.req.bits)
+  prefetchPipe.io.pmp.req.ready := !mainPipe.io.pmp(0).req.valid
+
+  mainPipe.io.pmp(0).resp <> io.pmp(0).resp
+  prefetchPipe.io.pmp.resp <> io.pmp(0).resp
+
+  io.pmp(1) <> mainPipe.io.pmp(1)
+
+  when(mainPipe.io.pmp(0).req.valid && prefetchPipe.io.pmp.req.valid)
+  {
+    assert(false.B, "Both mainPipe PMP and prefetchPipe PMP valid!")
+  }
+
+  tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
+  tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
+  io.itlb(0).req       <>    tlb_req_arb.io.out
+
+  mainPipe.io.itlb(0).resp  <>  io.itlb(0).resp
+  prefetchPipe.io.iTLBInter.resp  <>  io.itlb(0).resp
+
+  when(mainPipe.io.itlb(0).req.fire() && prefetchPipe.io.iTLBInter.req.fire())
+  {
+    assert(false.B, "Both mainPipe ITLB and prefetchPipe ITLB fire!")
+  }
+
+  io.itlb(1)        <>    mainPipe.io.itlb(1)
+
+
   for(i <- 0 until PortNumber){
     io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp
 
@@ -482,13 +514,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   }
 
+  missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
+
   bus.b.ready := false.B
   bus.c.valid := false.B
   bus.c.bits  := DontCare
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  metaArray.io.fencei := io.fencei
   bus.a <> missUnit.io.mem_acquire
   bus.e <> missUnit.io.mem_finish
 
@@ -505,6 +538,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
+
+  //Parity error port
+  val errors = mainPipe.io.errors ++ Seq(replacePipe.io.error)
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
 
   /** Block set-conflict request */
@@ -533,8 +570,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
   replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
-  replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
-  replace_req_arb.io.in(mainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
+  replace_req_arb.io.in(MainPipeKey)   <> missUnit.io.release_req
+  replace_req_arb.io.in(MainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
   replacePipe.io.pipe_req               <> replace_req_arb.io.out
 
   when(releaseShouldBlock){
@@ -583,6 +620,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     dataArray.io.cacheOp.resp.valid -> dataArray.io.cacheOp.resp.bits,
     metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
   ))
+  // TODO
+  cacheOpDecoder.io.error := DontCare
+  cacheOpDecoder.io.error.ecc_error.valid := false.B
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
 } 

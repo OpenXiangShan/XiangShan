@@ -162,6 +162,8 @@ case class XSCoreParameters
   EnableLoadToLoadForward: Boolean = false,
   EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
+  EnableSoftPrefetchAfterReset: Boolean = true,
+  EnableCacheErrorAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
@@ -185,6 +187,7 @@ case class XSCoreParameters
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true,
+    partialStaticPMP = true,
     saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -196,6 +199,7 @@ case class XSCoreParameters
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true,
+    partialStaticPMP = true,
     saveLevel = true
   ),
   refillBothTlb: Boolean = false,
@@ -212,7 +216,10 @@ case class XSCoreParameters
     dataECC = Some("parity"),
     replacer = Some("setplru"),
     nMissEntries = 2,
-    nReleaseEntries = 2
+    nReleaseEntries = 2,
+    nProbeEntries = 2,
+    nPrefetchEntries = 4,
+    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -376,6 +383,8 @@ trait HasXSParameter {
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
+  val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
+  val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   val RefillSize = coreParams.RefillSize
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth

@@ -64,6 +64,7 @@ class XSArgs(object):
         self.numa = args.numa
         self.diff = args.diff
         self.fork = not args.disable_fork
+        self.disable_diff = args.no_diff
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -187,7 +188,8 @@ class XiangShan(object):
         numa_info = get_free_cores(self.args.threads)
         numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}" if self.args.numa else ""
         fork_args = "--enable-fork" if self.args.fork else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args}')
+        diff_args = "--no-diff" if self.args.disable_diff else ""
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
         return return_code
 
     def run(self, args):
@@ -247,10 +249,18 @@ class XiangShan(object):
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
-            "cache-management/softprefetch-riscv64-noop.bin"
+            "cache-management/softprefetchtest-riscv64-xs.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
+
+    def __get_ci_nodiff(self, name=None):
+        base_dir = "/home/ci-runner/xsenv/workloads"
+        workloads = [
+            "cache-management/cacheoptest-riscv64-xs.bin"
+        ]
+        tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return tests
 
     def __am_apps_path(self, bench):
         filename = f"{bench}-riscv64-noop.bin"
@@ -277,6 +287,7 @@ class XiangShan(object):
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
             "misc-tests": self.__get_ci_misc,
+            "nodiff-tests": self.__get_ci_nodiff,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
         }
@@ -332,6 +343,7 @@ if __name__ == "__main__":
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
+    parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     # ci action head sha
 
     args = parser.parse_args()

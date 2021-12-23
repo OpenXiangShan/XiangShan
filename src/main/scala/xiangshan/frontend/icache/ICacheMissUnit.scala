@@ -50,6 +50,7 @@ class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
 {
     val data     = UInt(blockBits.W)
+    val corrupt  = Bool()
 }
 
 class ICacheMissBundle(implicit p: Parameters) extends ICacheBundle{
@@ -63,7 +64,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   with MemoryOpConstants
 {
   val io = IO(new Bundle {
-    val id = Input(UInt(log2Ceil(nMissEntries).W))
+    val id = Input(UInt(log2Ceil(PortNumber).W))
 
     val req = Flipped(DecoupledIO(new ICacheMissReq))
     val resp = ValidIO(new ICacheMissResp)
@@ -79,6 +80,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val release_req    =  DecoupledIO(new ReplacePipeReq)
     val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
     val victimInfor        =  Output(new ICacheVictimInfor())
+
   })
 
   /** default value for control signals */
@@ -96,7 +98,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_idx = req.getVirSetIdx //virtual index
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
-  val release_id  = Cat(MissQueueKey.U, id.U)
+  val release_id  = Cat(MainPipeKey.U, id.U)
+  val req_corrupt = RegInit(false.B)
 
   io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
   io.victimInfor.vidx  := req_idx
@@ -152,6 +155,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
         when(io.mem_grant.fire()) {
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
+          req_corrupt := io.mem_grant.bits.corrupt
           grant_param := io.mem_grant.bits.param
           is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
           when(readBeatCnt === (refillCycles - 1).U) {
@@ -186,6 +190,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt
+      io.resp.bits.corrupt := req_corrupt
       when(io.resp.fire()) {
         state := s_idle
       }
@@ -259,6 +264,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     val victimInfor = Vec(PortNumber, Output(new ICacheVictimInfor()))
 
+    val prefetch_req =  Flipped(DecoupledIO(new PIQReq))
+
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
@@ -308,7 +315,35 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     entry
   }
 
-  TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
+  val alloc = Wire(UInt(log2Ceil(nPrefetchEntries).W))
+
+  val prefEntries = (PortNumber until PortNumber + nPrefetchEntries - 1) map { i =>
+    val prefetchEntry = Module(new IPrefetchEntry(edge, PortNumber))
+
+    prefetchEntry.io.mem_hint_ack.valid := false.B
+    prefetchEntry.io.mem_hint_ack.bits := DontCare
+
+    when(io.mem_grant.bits.source === PortNumber.U) {
+      prefetchEntry.io.mem_hint_ack <> io.mem_grant
+    }
+
+    prefetchEntry.io.req <> DontCare
+
+    when(i.U === alloc){
+      prefetchEntry.io.req.valid := io.prefetch_req.valid
+      prefetchEntry.io.req.bits  := io.prefetch_req.bits
+    }
+
+    prefetchEntry.io.id := i.U
+
+    prefetchEntry
+  }
+
+  alloc := PriorityEncoder(prefEntries.map(_.io.req.ready))
+  io.prefetch_req.ready := ParallelOR(prefEntries.map(_.io.req.ready))
+  val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_hint)
+  TLArbiter.lowest(edge, io.mem_acquire, tl_a_chanel:_*)
+
   TLArbiter.lowest(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
 
   io.meta_write     <> meta_write_arb.io.out

@@ -287,6 +287,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
+  exuBlocks.foreach(b => {
+    b.io.scheExtra.lcommit := ctrlBlock.io.robio.lsq.lcommit
+    b.io.scheExtra.scommit := memBlock.io.sqDeq
+    b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
+    b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
+  })
   val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
   outer.ctrlBlock.generateWritebackIO()
 

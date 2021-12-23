@@ -272,14 +272,16 @@ class WbArbiterWrapper(
         wb.ready := arb.ready
       }
     }
-    intArbiter.module.io.out.foreach(out => {
-      val difftest = Module(new DifftestIntWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.hartId
-      difftest.io.valid := out.valid
-      difftest.io.dest := out.bits.uop.pdest
-      difftest.io.data := out.bits.data
-    })
+    if (env.EnableDifftest || env.AlwaysBasicDiff) {
+      intArbiter.module.io.out.foreach(out => {
+        val difftest = Module(new DifftestIntWriteback)
+        difftest.io.clock := clock
+        difftest.io.coreid := io.hartId
+        difftest.io.valid := out.valid
+        difftest.io.dest := out.bits.uop.pdest
+        difftest.io.data := out.bits.data
+      })
+    }
 
     fpArbiter.module.io.redirect <> io.redirect
     val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
@@ -291,14 +293,16 @@ class WbArbiterWrapper(
         wb.ready := arb.ready
       }
     }
-    fpArbiter.module.io.out.foreach(out => {
-      val difftest = Module(new DifftestFpWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.hartId
-      difftest.io.valid := out.valid
-      difftest.io.dest := out.bits.uop.pdest
-      difftest.io.data := out.bits.data
-    })
+    if (env.EnableDifftest || env.AlwaysBasicDiff) {
+      fpArbiter.module.io.out.foreach(out => {
+        val difftest = Module(new DifftestFpWriteback)
+        difftest.io.clock := clock
+        difftest.io.coreid := io.hartId
+        difftest.io.valid := out.valid
+        difftest.io.dest := out.bits.uop.pdest
+        difftest.io.data := out.bits.data
+      })
+    }
 
     io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
   }

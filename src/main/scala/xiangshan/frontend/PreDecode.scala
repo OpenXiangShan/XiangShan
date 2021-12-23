@@ -101,17 +101,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
   else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  // Frontend Triggers
-  val tdata = Reg(Vec(4, new MatchTriggerIO))
-  when(io.in.frontendTrigger.t.valid) {
-    tdata(io.in.frontendTrigger.t.bits.addr) := io.in.frontendTrigger.t.bits.tdata
-  }
-  io.out.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
-  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
-  triggerEnable := io.in.csrTriggerEnable
-  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
-  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
-
   for (i <- 0 until PredictWidth) {
     val inst           =WireInit(rawInsts(i))
     val expander       = Module(new RVCExpander)
@@ -136,16 +125,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
     io.out.hasHalfValid(i)        := h_validStart(i)
 
-    io.out.triggered(i).triggerTiming   := DontCare//VecInit(Seq.fill(10)(false.B))
-    io.out.triggered(i).triggerHitVec   := DontCare//VecInit(Seq.fill(10)(false.B))
-    io.out.triggered(i).triggerChainVec := DontCare//VecInit(Seq.fill(5)(false.B))
-    for (j <- 0 until 4) {
-      val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
-        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
-      io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
-      io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
-      if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
-    }
+    io.out.triggered(i)   := DontCare//VecInit(Seq.fill(10)(false.B))
+
 
     io.out.pd(i).valid         := validStart(i)
     io.out.pd(i).isRVC         := currentIsRVC
@@ -257,7 +238,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   val jumpTargets          = VecInit(pds.zipWithIndex.map{case(pd,i) => pc(i) + jumpOffset(i)})
   targetFault      := VecInit(pds.zipWithIndex.map{case(pd,i) => fixedRange(i) && instrValid(i) && (pd.isJal || pd.isBr) && takenIdx === i.U && predTaken  && (predTarget =/= jumpTargets(i))})
 
-  val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !pds(i).valid, 2.U, 4.U ) ))
+  val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U ) ))
 
   io.out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVec(i) , FaultType.jalFault ,
                                                                              Mux(retFaultVec(i), FaultType.retFault ,
@@ -293,23 +274,33 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
   io.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
   val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
   triggerEnable := io.csrTriggerEnable
-  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
-  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
+  val triggerHitVec = Wire(Vec(4, Bool()))
+  XSDebug(triggerEnable.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
+
+  for (i <- 0 until 4) {PrintTriggerInfo(triggerEnable(i), tdata(i))}
 
   for (i <- 0 until PredictWidth) {
     val currentPC = io.pc(i)
     val currentIsRVC = io.pds(i).isRVC
     val inst = WireInit(rawInsts(i))
 
-    io.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
-    io.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
-    io.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
     for (j <- 0 until 4) {
-      val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
+      triggerHitVec(j) := Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
-      io.triggered(i).triggerHitVec(triggerMapping(j)) := hit
-      io.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
-      if(chainMapping.contains(j)) io.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
     }
+
+    // fix chains this could be moved further into the pipeline
+    io.triggered(i).frontendHit := triggerHitVec
+    val enableChain = tdata(0).chain
+    when(enableChain){
+      io.triggered(i).frontendHit(0) := triggerHitVec(0) && triggerHitVec(1) && (tdata(0).timing === tdata(1).timing)
+      io.triggered(i).frontendHit(1) := triggerHitVec(0) && triggerHitVec(1) && (tdata(0).timing === tdata(1).timing)
+    }
+    for(j <- 0 until 2) {
+      io.triggered(i).backendEn(j) := Mux(tdata(j+2).chain, triggerHitVec(j+2), true.B)
+      io.triggered(i).frontendHit(j+2) := !tdata(j+2).chain && triggerHitVec(j+2) // temporary workaround
+    }
+    XSDebug(io.triggered(i).getHitFrontend, p"Debug Mode: Predecode Inst No. ${i} has trigger hit vec ${io.triggered(i).frontendHit}" +
+      p"and backend en ${io.triggered(i).backendEn}\n")
   }  
 }

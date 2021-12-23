@@ -48,6 +48,7 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
   // you can choose which bank to read to save power
   val ecc = Bits(eccBits.W)
   val raw_data = Bits(DCacheSRAMRowBits.W)
+  val error = Bool() // slow to generate, use it with care
 
   def asECCData() = {
     Cat(ecc, raw_data)
@@ -64,6 +65,7 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
 // -----------------------------------------------------------------
 abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
+  val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
@@ -73,14 +75,14 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data bank read resp (all banks)
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
+    val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
     // customized cache op port 
-    val cacheOp = Flipped(new DCacheInnerOpIO)
+    val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
-  assert(LoadPipelineWidth == 2) // BankedDataArray is designed for 2 port
+  assert(LoadPipelineWidth <= 2) // BankedDataArray is designed for no more than 2 read ports
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -249,8 +251,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // read each bank, get bank result
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   dontTouch(bank_result)
-  val row_error = Wire(Vec(DCacheBanks, Bool()))
-  dontTouch(row_error)
+  val read_bank_error = Wire(Vec(DCacheBanks, Bool()))
+  dontTouch(read_bank_error)
   val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
   val rrl_bank_conflict_0 = Wire(Bool())
   val rrl_bank_conflict_1 = Wire(Bool())
@@ -328,18 +330,29 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
     // use ECC to check error
     val data = bank_result(bank_index).asECCData()
-    row_error(bank_index) := dcacheParameters.dataCode.decode(data).error && RegNext(bank_addr_matchs.asUInt.orR)
+    bank_result(bank_index).error := dcacheParameters.dataCode.decode(data).error
+    read_bank_error(bank_index) := bank_result(bank_index).error && RegNext(bank_addr_matchs.asUInt.orR)
   }
 
-  // Select final read result
+  // read result: expose banked read result 
+  io.resp := bank_result
+
+  // error detection
+  // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && row_error.asUInt.orR() &&
+    io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && 
+      read_bank_error.asUInt.orR() &&
       !io.bank_conflict_slow(rport_index)
     io.errors(rport_index).ecc_error.bits := true.B
     io.errors(rport_index).paddr.valid := io.errors(rport_index).ecc_error.valid
     io.errors(rport_index).paddr.bits := RegNext(io.read(rport_index).bits.addr)
   })
-  io.resp := bank_result
+  // readline port
+  io.errors(ReadlinePortErrorIndex).ecc_error.valid := RegNext(io.readline.fire()) && 
+    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
+  io.errors(ReadlinePortErrorIndex).ecc_error.bits := true.B
+  io.errors(ReadlinePortErrorIndex).paddr.valid := io.errors(ReadlinePortErrorIndex).ecc_error.valid
+  io.errors(ReadlinePortErrorIndex).paddr.bits := RegNext(io.readline.bits.addr)
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
@@ -372,12 +385,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
+  val eccReadResult = Wire(Vec(DCacheBanks, UInt(eccBits.W)))
   when(io.cacheOp.req.valid){
-    when(
-      CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode) ||
-      CacheInstrucion.isReadDataECC(io.cacheOp.req.bits.opCode)
-    ){
+    when (CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode)) { 
       for (bank_index <- 0 until DCacheBanks) {
         val data_bank = data_banks(bank_index)
         data_bank.io.r.en := true.B
@@ -386,6 +397,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
       cacheOpShouldResp := true.B
     }
+	when (CacheInstrucion.isReadDataECC(io.cacheOp.req.bits.opCode)) {
+      for (bank_index <- 0 until DCacheBanks) {
+        val ecc_bank = ecc_banks(bank_index)
+		ecc_bank.io.r.req.valid := true.B
+		ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+	  }
+	  cacheOpShouldResp := true.B
+	}
     when(CacheInstrucion.isWriteData(io.cacheOp.req.bits.opCode)){
       for (bank_index <- 0 until DCacheBanks) {
         val data_bank = data_banks(bank_index)
@@ -412,9 +431,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(bank_index).raw_data
+	eccReadResult(bank_index) := ecc_banks(bank_index).io.r.resp.data(RegNext(io.cacheOp.req.bits.wayNum(4, 0)))
   }
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
-    bank_result(io.cacheOp.req.bits.bank_num).ecc, 
+    eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
     0.U
   )
 }

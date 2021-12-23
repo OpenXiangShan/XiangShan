@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
-import utils.{ParallelPriorityMux, ZeroExt}
+import utils.{ParallelPriorityMux, ZeroExt, ValidHold}
 import xiangshan.cache.mmu.TlbCmd
 
 /* Memory Mapped PMA */
@@ -58,10 +58,16 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
     val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % pmaCfgPerCSR == 0)))
     val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
 //      println(s"tlbpma i:$i notempty:$notempty")
-      RegField.apply(n = PMXLEN, r = RegReadFn((ivalid, oready) =>
-        if (notempty) { (true.B, ivalid, pmaCfgMerged(pmaCfgIndex(i))) }
-        else { (true.B, ivalid, 0.U) }
-      ), w = RegWriteFn((valid, data) => {
+      RegField.apply(n = PMXLEN, r = RegReadFn{(ivalid, oready) =>
+        val r_ready = Wire(Bool())
+        val o_valid = Wire(Bool())
+        val v_reg = ValidHold(r_ready && ivalid, o_valid && oready, false.B)
+        r_ready := !v_reg
+        o_valid := v_reg
+
+        if (notempty) { (r_ready, o_valid, pmaCfgMerged(pmaCfgIndex(i))) }
+        else { (r_ready, o_valid, 0.U) }
+      }, w = RegWriteFn((valid, data) => {
         if (notempty) { when (valid) { pmaCfgMerged(pmaCfgIndex(i)) := write_cfg_vec(mask, addr, i)(data) } }
         true.B
       }), desc = RegFieldDesc(s"MMPMA_config_${i}", s"pma config register #${i}"))
@@ -101,12 +107,12 @@ trait PMAMethod extends PMAConst {
       MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
       MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
       MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
-      MemMap("h00_3802_1000", "h00_3802_11FF",   "h0", "MMPMA",       "RW"),
-      MemMap("h00_3802_1200", "h00_3900_0FFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3900_1000", "h00_3900_103F",   "h0", "Core_reset",  "RW"),
-      MemMap("h00_3900_1020", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3A00_0000", "h00_3A00_003F",   "h0", "PLL0",        "RW),
-      MemMap('h00_3A00_0020", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3802_1000", "h00_3802_1FFF",   "h0", "MMPMA",       "RW"),
+      MemMap("h00_3802_2000", "h00_3900_0000",   "h0", "Reserved",    ""),
+      MemMap("h00_3900_0000", "h00_3900_1FFF",   "h0", "L3CacheCtrl",  "RW"),
+      MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3A00_0000", "h00_3A00_0FFF",   "h0", "PLL0",        "RW),
+      MemMap('h00_3A00_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
       MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
       MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
@@ -148,7 +154,7 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x3A000040)
+    addr(idx) := shift_addr(0x3A001000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
@@ -156,15 +162,15 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x39001040)
+    addr(idx) := shift_addr(0x39002000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x39001000)
+    addr(idx) := shift_addr(0x39000000)
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x38021200)
+    addr(idx) := shift_addr(0x38022000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
@@ -177,7 +183,7 @@ trait PMAMethod extends PMAConst {
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30050000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).c := true.B
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr( 0x30010000)
@@ -191,10 +197,9 @@ trait PMAMethod extends PMAConst {
     addr(idx) := shift_addr( 0x10000000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
-
-    addr(idx) := shift_addr(0)
-
+    
     require(idx >= 0)
+    addr(idx) := shift_addr(0)
 
     val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(PMXLEN.W)))
     (cfgInitMerge, addr, mask)

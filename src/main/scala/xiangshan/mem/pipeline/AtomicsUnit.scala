@@ -41,6 +41,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
+    val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
   //-------------------------------------------------------
@@ -266,6 +267,14 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
       ))
 
+      when (io.dcache.resp.bits.error && io.csrCtrl.cache_error_enable) {
+        val isLr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
+        exceptionVec(loadAccessFault)  := isLr
+        exceptionVec(storeAccessFault) := !isLr
+        assert(!exceptionVec(loadAccessFault))
+        assert(!exceptionVec(storeAccessFault))
+      }
+
       resp_data := resp_data_wire
       state := s_finish
     }
@@ -275,7 +284,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.out.valid := true.B
     io.out.bits.uop := in.uop
     io.out.bits.uop.cf.exceptionVec := exceptionVec
-    io.out.bits.uop.diffTestDebugLrScValid := is_lrsc_valid
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
@@ -302,5 +310,15 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     difftest.io.atomicMask := mask_reg
     difftest.io.atomicFuop := fuop_reg
     difftest.io.atomicOut  := resp_data_wire
+  }
+
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val uop = io.out.bits.uop
+    val difftest = Module(new DifftestLrScEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.valid := io.out.fire &&
+      (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)
+    difftest.io.success := is_lrsc_valid
   }
 }

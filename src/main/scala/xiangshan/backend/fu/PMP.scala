@@ -465,6 +465,30 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   override def cloneType: this.type = (new PMPCheckIO(lgMaxSize)).asInstanceOf[this.type]
 }
 
+class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
+  val check_env = Input(new PMPCheckerEnv())
+  val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
+  val resp = Output(new PMPConfig())
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(mode, pmp, pma)
+    this.req := req
+    resp
+  }
+
+  def req_apply(valid: Bool, addr: UInt): Unit = {
+    this.req.valid := valid
+    this.req.bits.apply(addr)
+  }
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(mode, pmp, pma)
+    req_apply(valid, addr)
+    resp
+  }
+  override def cloneType: this.type = (new PMPCheckv2IO(lgMaxSize)).asInstanceOf[this.type]
+}
+
 @chiselName
 class PMPChecker
 (
@@ -492,5 +516,45 @@ class PMPChecker
     io.resp := resp
   } else {
     io.resp := RegEnable(resp, io.req.valid)
+  }
+}
+
+/* get config with check */
+@chiselName
+class PMPCheckerv2
+(
+  lgMaxSize: Int = 3,
+  sameCycle: Boolean = false,
+  leaveHitMux: Boolean = false
+)(implicit p: Parameters) extends PMPModule
+  with PMPCheckMethod
+  with PMACheckMethod
+{
+  require(!(leaveHitMux && sameCycle))
+  val io = IO(new PMPCheckv2IO(lgMaxSize))
+
+  val req = io.req.bits
+
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+
+  val resp = and(res_pmp, res_pma)
+
+  if (sameCycle || leaveHitMux) {
+    io.resp := resp
+  } else {
+    io.resp := RegEnable(resp, io.req.valid)
+  }
+
+  def and(pmp: PMPEntry, pma: PMPEntry): PMPConfig = {
+    val tmp_res = Wire(new PMPConfig)
+    tmp_res.l := DontCare
+    tmp_res.a := DontCare
+    tmp_res.r := pmp.cfg.r && pma.cfg.r
+    tmp_res.w := pmp.cfg.w && pma.cfg.w
+    tmp_res.x := pmp.cfg.x && pma.cfg.x
+    tmp_res.c := pma.cfg.c
+    tmp_res.atomic := pma.cfg.atomic
+    tmp_res
   }
 }

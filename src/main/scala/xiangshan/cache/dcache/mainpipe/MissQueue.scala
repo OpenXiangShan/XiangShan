@@ -130,6 +130,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
 
+  val error = RegInit(false.B)
+
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
 
@@ -170,6 +172,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     should_refill_data_reg := io.req.bits.isLoad
+    error := false.B
   }
 
   val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
@@ -231,6 +234,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       w_grantlast := true.B
       hasData := false.B
     }
+
+    error := io.mem_grant.bits.denied || io.mem_grant.bits.corrupt || error
 
     refill_data_raw(refill_count) := io.mem_grant.bits.data
     isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
@@ -306,6 +311,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
   io.refill_to_ldq.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count))
+  io.refill_to_ldq.bits.error := RegNext(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied)
   io.refill_to_ldq.bits.refill_done := RegNext(refill_done && io.mem_grant.fire())
   io.refill_to_ldq.bits.hasdata := hasData
   io.refill_to_ldq.bits.data_raw := refill_data_raw.asUInt
@@ -382,6 +388,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       Cat(wr, toT, true.B)   -> Dirty))
   }
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
+  refill.error := error
   refill.alias := req.vaddr(13, 12) // TODO
 
   io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
