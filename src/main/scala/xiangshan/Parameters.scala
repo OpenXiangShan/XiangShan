@@ -322,12 +322,11 @@ trait HasXSParameter {
   val TageBanks = coreParams.TageBanks
   val SCNRows = coreParams.SCNRows
   val SCCtrBits = coreParams.SCCtrBits
-  val BankSCHistLens = Seq.fill(numBr)(coreParams.SCHistLens)
-  val BankSCNTables = Seq.fill(numBr)(coreParams.SCNTables)
+  val SCHistLens = coreParams.SCHistLens
+  val SCNTables = coreParams.SCNTables
 
-  val BankSCTableInfos = (BankSCNTables zip BankSCHistLens).map {
-    case (ntable, histlens) =>
-      Seq.fill(ntable)((SCNRows, SCCtrBits)) zip histlens map {case ((n, cb), h) => (n, cb, h)}
+  val SCTableInfos = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {
+    case ((n, cb), h) => (n, cb, h)
   }
   val ITTageTableInfos = coreParams.ITTageTableInfos
   type FoldedHistoryInfo = Tuple2[Int, Int]
@@ -338,12 +337,12 @@ trait HasXSParameter {
       else
         Set[FoldedHistoryInfo]()
     }.reduce(_++_)).toSet ++
-    BankSCTableInfos.flatMap(_.map{ case (nRows, _, h) =>
+    SCTableInfos.map{ case (nRows, _, h) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows/TageBanks), h)))
       else
         Set[FoldedHistoryInfo]()
-    }.reduce(_++_)).toSet ++
+    }.reduce(_++_).toSet ++
     ITTageTableInfos.map{ case (nRows, h, t) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
