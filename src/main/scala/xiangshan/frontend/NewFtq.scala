@@ -608,9 +608,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       entry_fetch_status(ifuPtr.value) := f_sent
     }
     
-  io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
-  io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
-
   // *********************************************************************
   // **************************** wb from ifu ****************************
   // *********************************************************************
@@ -936,10 +933,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       prefetchPtr := bpu_s2_resp.ftq_idx
     }
 
-    when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
-      prefetchPtr := bpu_s3_resp.ftq_idx
-      XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
-    }
+    // when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
+    //   prefetchPtr := bpu_s3_resp.ftq_idx
+    //   XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
+    // }
 
     io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
     io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
