@@ -89,8 +89,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
 
   val lrsc_blocked = Mux(
     io.req.fire(),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(io.req.bits.addr),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(req.addr)
+    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(io.req.bits.addr),
+    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr)
   )
 
   when (state === s_pipe_req) {
@@ -122,7 +122,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   // perfoemance counters
   XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
   XSPerfAccumulate("probe_penalty", state =/= s_invalid)
-  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(req.addr))
+  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr))
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
@@ -190,8 +190,8 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire())
   val selected_lrsc_blocked = Mux(
     pipe_req_arb.io.out.fire(),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(pipe_req_arb.io.out.bits.addr),
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === get_block_addr(selected_req_bits.addr) && selected_req_valid
+    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(pipe_req_arb.io.out.bits.addr),
+    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(selected_req_bits.addr) && selected_req_valid
   )
   val resvsetProbeBlock = RegNext(io.update_resv_set || selected_lrsc_blocked)
   // When we update update_resv_set, block all probe req in the next cycle
@@ -210,7 +210,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   // print all input/output requests for debug purpose
   when (io.mem_probe.valid) {
     // before a probe finishes, L2 should not further issue probes on this block
-    val probe_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.mem_probe.bits.address)).asUInt.orR
+    val probe_conflict = VecInit(entries.map(e => e.io.block_addr.valid && get_block(e.io.block_addr.bits) === get_block(io.mem_probe.bits.address))).asUInt.orR
     assert (!probe_conflict)
     // for now, we can only deal with ProbeBlock
     assert (io.mem_probe.bits.opcode === TLMessages.Probe)
