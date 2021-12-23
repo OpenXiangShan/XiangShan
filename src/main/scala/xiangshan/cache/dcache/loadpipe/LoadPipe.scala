@@ -153,7 +153,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
-  // TODO: optimize implementation
+  // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
   val s1_hit = s1_tag_match && s1_has_permission && s1_hit_coh === s1_new_hit_coh
@@ -161,7 +161,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // check ecc error
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => io.tag_resp(w)))
-  val s1_tag_ecc_error = s1_hit && dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
+  val s1_tag_ecc_error = dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
   val s1_cache_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
   val s1_error = s1_cache_flag_error || s1_tag_ecc_error
 
@@ -189,8 +189,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3
 
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
-
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
@@ -209,10 +207,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
   dontTouch(s2_bank_addr)
 
+  val s2_instrtype = s2_req.instrtype
+
+  val s2_tag_ecc_error = RegEnable(s1_tag_ecc_error, s1_fire)
   val s2_data_error = banked_data_resp_word.error
   val s2_error = RegEnable(s1_error, s1_fire) || s2_data_error
 
-  val s2_instrtype = s2_req.instrtype
+  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_tag_ecc_error
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
