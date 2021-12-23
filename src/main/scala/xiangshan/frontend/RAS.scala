@@ -120,6 +120,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
+    
     update(io.recover_valid)(
       Mux(io.recover_valid, io.recover_push,     io.push_valid),
       Mux(io.recover_valid, io.recover_pop,      io.pop_valid),
@@ -128,9 +129,19 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(io.recover_valid, io.recover_sp - 1.U, topPtr),
       Mux(io.recover_valid, io.recover_new_addr, io.spec_new_addr),
       Mux(io.recover_valid, io.recover_top,      top))
-
+      
     io.sp := sp
     io.top := top
+    
+    val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
+    val do_reset = RegInit(true.B)
+    when (do_reset) {
+      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
+    }
+    resetIdx := resetIdx + do_reset
+    when (resetIdx === (RasSize-1).U) {
+      do_reset := false.B
+    }
 
     debugIO.push_entry := RASEntry(io.spec_new_addr, Mux(alloc_new, 1.U, top.ctr + 1.U))
     debugIO.alloc_new := alloc_new
@@ -150,24 +161,31 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.in.bits.resp_in(0).s2.fallThroughAddr
+  val spec_new_addr = io.in.bits.resp_in(0).s2.full_pred.fallThroughAddr
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
   spec_ras.spec_new_addr := spec_new_addr
   val spec_top_addr = spec_ras.top.retAddr
 
   // confirm that the call/ret is the taken cfi
-  spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_call
-  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
+  spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_call
+  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_ret
 
-  when (spec_pop) {
-    io.out.resp.s2.preds.targets.last := spec_top_addr
+  val jalr_target = io.out.resp.s2.full_pred.jalr_target
+  val last_target_in = io.in.bits.resp_in(0).s2.full_pred.targets.last
+  val last_target_out = io.out.resp.s2.full_pred.targets.last
+  val is_jalr = io.in.bits.resp_in(0).s2.full_pred.is_jalr
+  val is_ret = io.in.bits.resp_in(0).s2.full_pred.is_ret
+  // assert(is_jalr && is_ret || !is_ret)
+  when(is_ret) {
+    jalr_target := spec_top_addr
+    // FIXME: should use s1 globally
   }
+  last_target_out := Mux(is_jalr, jalr_target, last_target_in)
 
   io.out.resp.s2.rasSp  := spec_ras.sp
   io.out.resp.s2.rasTop := spec_ras.top
 
-  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   val redirect = RegNext(io.redirect)
   val do_recover = redirect.valid
@@ -199,7 +217,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   }
   XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
       spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-  XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.target)
+  XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
   val redirectUpdate = redirect.bits.cfiUpdate
   XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
       do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)

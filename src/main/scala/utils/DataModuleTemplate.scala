@@ -86,13 +86,15 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
 class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, true)
 class AsyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, false)
 
-class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, isSync: Boolean, width: Int) extends Module {
+class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int,
+  isSync: Boolean, width: Int, hasResetEn: Boolean = true) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
     val wen   = Input(Bool())
     val waddr = Input(UInt(log2Up(numEntries).W))
     val wdata = Input(gen)
+    val resetEn = if (hasResetEn) Some(Input(Bool())) else None
   })
 
   require(width > 0 && isPow2(width))
@@ -103,6 +105,9 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
   val data = Mem(nRows, Vec(width, gen))
 
   val doing_reset = RegInit(true.B)
+  if (hasResetEn) {
+    io.resetEn.map(en => when (en) { doing_reset := true.B })
+  }
   val resetRow = RegInit(0.U(log2Ceil(nRows).W))
   resetRow := resetRow + doing_reset
   when (resetRow === (nRows-1).U) { doing_reset := false.B }

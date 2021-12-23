@@ -61,35 +61,36 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 256,
-  PathHistoryLength: Int = 16,
-  BtbSize: Int = 2048,
-  JbtacSize: Int = 1024,
-  JbtacBanks: Int = 8,
+  HistoryLength: Int = 512,
+  EnableGHistDiff: Boolean = false,
+  UbtbSize: Int = 1024,
+  FtbSize: Int = 2048,
   RasSize: Int = 32,
   CacheLineSize: Int = 512,
-  UBtbWays: Int = 16,
-  BtbWays: Int = 2,
+  FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    Seq(( 128*8,    2,    7),
-        ( 128*8,    4,    7),
-        ( 256*8,    8,    8),
-        ( 256*8,   16,    8),
-        ( 128*8,   32,    9),
-        ( 128*8,   65,    9)),
+    Seq(( 128*8,    2,   10),
+        ( 128*8,    8,   10),
+        ( 128*8,   12,   10),
+        ( 128*8,   16,   10),
+        ( 128*8,   28,   10),
+        ( 128*8,   54,   10),
+        ( 128*8,  119,   10),
+        ( 128*8,  256,   10)),
   TageBanks: Int = 2,
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 512,    0,    0),
-        ( 256,    4,    8),
-        ( 256,    8,    8),
-        ( 512,   12,    8),
-        ( 512,   16,    8),
-        ( 512,   32,    8)),
-  SCNRows: Int = 1024,
-  SCNTables: Int = 6,
+        ( 256,    4,    9),
+        ( 256,    8,    9),
+        ( 512,   12,    9),
+        ( 512,   16,    9),
+        ( 512,   32,    9)),
+  SCNRows: Int = 512,
+  SCNTables: Int = 4,
   SCCtrBits: Int = 6,
+  SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
@@ -301,13 +302,11 @@ trait HasXSParameter {
   val EnableSC = coreParams.EnableSC
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
-  val PathHistoryLength = coreParams.PathHistoryLength
-  val BtbSize = coreParams.BtbSize
-  // val BtbWays = 4
-  val BtbBanks = PredictWidth
-  // val BtbSets = BtbSize / BtbWays
-  val JbtacSize = coreParams.JbtacSize
-  val JbtacBanks = coreParams.JbtacBanks
+  val EnableGHistDiff = coreParams.EnableGHistDiff
+  val UbtbGHRLength = log2Ceil(coreParams.UbtbSize)
+  val UbtbSize = coreParams.UbtbSize
+  val FtbSize = coreParams.FtbSize
+  val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
@@ -323,7 +322,7 @@ trait HasXSParameter {
   val TageBanks = coreParams.TageBanks
   val SCNRows = coreParams.SCNRows
   val SCCtrBits = coreParams.SCCtrBits
-  val BankSCHistLens = BankTageTableInfos.map(info => 0 :: info.map{ case (_,h,_) => h}.toList)
+  val BankSCHistLens = Seq.fill(numBr)(coreParams.SCHistLens)
   val BankSCNTables = Seq.fill(numBr)(coreParams.SCNTables)
 
   val BankSCTableInfos = (BankSCNTables zip BankSCHistLens).map {
@@ -350,13 +349,13 @@ trait HasXSParameter {
         Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
       else
         Set[FoldedHistoryInfo]()
-    }.reduce(_++_)).toList
+    }.reduce(_++_) ++
+      Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
+    ).toList
 
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
-  val UBtbWays = coreParams.UBtbWays
-  val BtbWays = coreParams.BtbWays
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
