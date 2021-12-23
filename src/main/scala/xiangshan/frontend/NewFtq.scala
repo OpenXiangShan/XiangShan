@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
+import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
@@ -416,7 +417,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents {
+  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents 
+  with HasICacheParameters{
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -449,7 +451,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   allowBpuIn := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
   allowToIfu := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
 
-  val bpuPtr, ifuPtr, ifuWbPtr, commPtr, prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
+  val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
   val validEntries = distanceBetween(bpuPtr, commPtr)
 
   // **********************************************************************
@@ -527,7 +529,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   bpuPtr := bpuPtr + enq_fire
   ifuPtr := ifuPtr + io.toIfu.req.fire
-  prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
 
   // only use ftb result to assign hit status
   when (bpu_s2_resp.valid) {
@@ -543,10 +544,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     when (!isBefore(ifuPtr, bpu_s2_resp.ftq_idx)) {
       ifuPtr := bpu_s2_resp.ftq_idx
     }
-
-    when (!isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
-      prefetchPtr := bpu_s2_resp.ftq_idx
-    }
   }
 
   // io.toIfu.flushFromBpu.s3.valid := bpu_s3_redirect
@@ -561,7 +558,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // }
 
   XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
-  XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
 
   // ****************************************************************
   // **************************** to ifu ****************************
@@ -612,9 +608,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       entry_fetch_status(ifuPtr.value) := f_sent
     }
     
-  io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
-  io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
-
   // *********************************************************************
   // **************************** wb from ifu ****************************
   // *********************************************************************
@@ -811,7 +804,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val next = idx + 1.U
     bpuPtr := next
     ifuPtr := next
-    prefetchPtr := next
     ifuWbPtr := next
     when (notIfu) {
       commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
@@ -927,6 +919,33 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.full_pred.hit := true.B
   when (update.full_pred.is_jalr) {
     update.full_pred.targets.last := commit_target
+  }
+
+  // ****************************************************************
+  // *********************** to prefetch ****************************
+  // ****************************************************************
+
+  if(cacheParams.hasPrefetch){
+    val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
+    prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
+
+    when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
+      prefetchPtr := bpu_s2_resp.ftq_idx
+    }
+
+    io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
+    io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
+
+    when(redirectVec.map(r => r.valid).reduce(_||_)){
+      val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
+      val next = r.ftqIdx + 1.U
+      prefetchPtr := next
+    }
+
+    XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
+  }
+  else {
+    io.toPrefetch.req <> DontCare
   }
 
   // ******************************************************************************
