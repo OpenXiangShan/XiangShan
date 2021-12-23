@@ -24,7 +24,7 @@ import utils._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-
+import huancun.{PreferCacheKey}
 
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
@@ -217,6 +217,7 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
     param = TLHints.PREFETCH_READ
   )._2
   io.mem_hint.bits := hint
+  io.mem_hint.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
 
 
   XSPerfAccumulate(
