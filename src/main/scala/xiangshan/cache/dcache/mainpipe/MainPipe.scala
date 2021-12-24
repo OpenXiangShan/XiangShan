@@ -136,6 +136,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
     val invalid_resv_set = Input(Bool())
     val update_resv_set = Output(Bool())
+    val block_lr = Output(Bool())
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
@@ -393,8 +394,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val debug_sc_fail_addr = RegInit(0.U)
   val debug_sc_fail_cnt  = RegInit(0.U(8.W))
 
-  val lrsc_count = RegInit(0.U(log2Ceil(lrscCycles).W))
-  val lrsc_valid = lrsc_count > lrscBackoff.U
+  val lrsc_count = RegInit(0.U(log2Ceil(LRSCCycles).W))
+  val lrsc_valid = lrsc_count > LRSCBackOff.U
   val lrsc_addr  = Reg(UInt())
   val s3_lr = !s3_req.probe && s3_req.isAMO && s3_req.cmd === M_XLR
   val s3_sc = !s3_req.probe && s3_req.isAMO && s3_req.cmd === M_XSC
@@ -407,7 +408,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   when (s3_valid && (s3_lr || s3_sc)) {
     when (s3_can_do_amo && s3_lr) {
-      lrsc_count := (lrscCycles - 1).U
+      lrsc_count := (LRSCCycles - 1).U
       lrsc_addr := get_block_addr(s3_req.addr)
     } .otherwise {
       lrsc_count := 0.U
@@ -418,6 +419,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   io.lrsc_locked_block.valid := lrsc_valid
   io.lrsc_locked_block.bits  := lrsc_addr
+  io.block_lr := RegNext(lrsc_count > 0.U)
 
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
