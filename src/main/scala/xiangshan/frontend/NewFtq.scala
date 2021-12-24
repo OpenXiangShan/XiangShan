@@ -546,17 +546,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  // io.toIfu.flushFromBpu.s3.valid := bpu_s3_redirect
-  // io.toIfu.flushFromBpu.s3.bits := bpu_s3_resp.ftq_idx
-  // when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect) {
-  //   bpuPtr := bpu_s3_resp.ftq_idx + 1.U
-  //   // only when ifuPtr runs ahead of bpu s2 resp should we recover it
-  //   when (!isBefore(ifuPtr, bpu_s3_resp.ftq_idx)) {
-  //     ifuPtr := bpu_s3_resp.ftq_idx
-  //   }
-  //   XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
-  // }
-
   XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
 
   // ****************************************************************
@@ -919,6 +908,33 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.full_pred.hit := true.B
   when (update.full_pred.is_jalr) {
     update.full_pred.targets.last := commit_target
+  }
+
+  // ****************************************************************
+  // *********************** to prefetch ****************************
+  // ****************************************************************
+
+  if(cacheParams.hasPrefetch){
+    val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
+    prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
+
+    when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
+      prefetchPtr := bpu_s2_resp.ftq_idx
+    }
+
+    io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
+    io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
+
+    when(redirectVec.map(r => r.valid).reduce(_||_)){
+      val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
+      val next = r.ftqIdx + 1.U
+      prefetchPtr := next
+    }
+
+    XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
+  }
+  else {
+    io.toPrefetch.req <> DontCare
   }
 
   // ****************************************************************
