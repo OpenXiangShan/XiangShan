@@ -545,6 +545,11 @@ class TriggerCf(implicit p: Parameters) extends XSBundle {
   def getHitFrontend = frontendHit.reduce(_ || _)
   def getHitBackend = backendHit.reduce(_ || _)
   def hit = getHitFrontend || getHitBackend
+  def clear(): Unit = {
+    frontendHit.foreach(_ := false.B)
+    backendEn.foreach(_ := false.B)
+    backendHit.foreach(_ := false.B)
+  }
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
