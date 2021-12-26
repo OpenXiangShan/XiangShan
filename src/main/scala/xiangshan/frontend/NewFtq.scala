@@ -922,32 +922,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       prefetchPtr := bpu_s2_resp.ftq_idx
     }
 
-    io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
-    io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
-
-    when(redirectVec.map(r => r.valid).reduce(_||_)){
-      val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
-      val next = r.ftqIdx + 1.U
-      prefetchPtr := next
-    }
-
-    XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-  }
-  else {
-    io.toPrefetch.req <> DontCare
-  }
-
-  // ****************************************************************
-  // *********************** to prefetch ****************************
-  // ****************************************************************
-
-  if(cacheParams.hasPrefetch){
-    val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
-    prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
-
-    when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
-      prefetchPtr := bpu_s2_resp.ftq_idx
-    }
+    // when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
+    //   prefetchPtr := bpu_s3_resp.ftq_idx
+    //   XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
+    // }
 
     io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
     io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)

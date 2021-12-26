@@ -412,6 +412,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       x.lastBrPosOH.asUInt =/= y.lastBrPosOH.asUInt,
       x.taken =/= y.taken,
       (x.taken && y.taken) && x.cfiIndex.bits =/= y.cfiIndex.bits,
+      (!x.taken && !y.taken) && x.oversize =/= y.oversize
       // x.shouldShiftVec.asUInt =/= y.shouldShiftVec.asUInt,
       // x.brTaken =/= y.brTaken
     )
