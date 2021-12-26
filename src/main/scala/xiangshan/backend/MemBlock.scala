@@ -517,7 +517,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   // Exception address is used serveral cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
-  val atomicsException = DelayN(atomicsUnit.io.exceptionAddr.valid, 10)
+  val atomicsException = RegInit(false.B)
+  when (DelayN(io.redirect.valid, 10) && atomicsException) {
+    atomicsException := false.B
+  }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
+    atomicsException := true.B
+  }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr)
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
