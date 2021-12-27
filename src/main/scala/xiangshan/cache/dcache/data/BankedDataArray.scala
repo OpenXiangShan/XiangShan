@@ -326,7 +326,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
     // read ECC
     val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR
+    ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR || readline_match
     ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
     bank_result(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
 
