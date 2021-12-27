@@ -278,6 +278,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
+  val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_idx = get_idx(s2_req.vaddr)
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = RegEnable(s1_tag, s1_fire)
@@ -286,7 +287,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = RegEnable(s1_tag_error, s1_fire)
   // s2_data_error will be reported by data array
-  val s2_data_error = io.readline_error
+  val s2_data_error = io.readline_error && s2_need_data && s2_coh.state =/= ClientStates.Nothing
   val s2_error = s2_flag_error || s2_tag_error || s2_data_error
 
   val s2_hit = s2_tag_match && s2_has_permission
