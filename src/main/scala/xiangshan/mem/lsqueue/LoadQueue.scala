@@ -273,11 +273,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })))
   dontTouch(dcacheRequireReplay)
 
-  val dcacheRequireReplay = WireInit(VecInit((0 until LoadPipelineWidth).map(i =>{
-    RegNext(io.loadIn(i).fire()) && RegNext(io.dcacheRequireReplay(i))
-  })))
-  dontTouch(dcacheRequireReplay)
-
   (0 until LoadQueueSize).map(i => {
     dataModule.io.refill.refillMask(i) := allocated(i) && miss(i)
     when(dataModule.io.refill.valid && dataModule.io.refill.refillMask(i) && dataModule.io.refill.matchMask(i)) {
