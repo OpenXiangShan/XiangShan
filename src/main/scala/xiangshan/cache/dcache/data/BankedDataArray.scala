@@ -343,7 +343,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
     io.read_error(rport_index) := RegNext(io.read(rport_index).fire()) && 
-      read_bank_error(bank_addrs(rport_index)) &&
+      read_bank_error(RegNext(bank_addrs(rport_index))) &&
       !io.bank_conflict_slow(rport_index)
   })
   // readline port
