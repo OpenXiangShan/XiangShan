@@ -93,6 +93,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
       robIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.robIdx
       debug_uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
       stateEntries(tailPtr(sel).value) := s_valid
+      XSError(sel =/= PopCount(io.enq.req.take(i).map(_.valid)), "why not continuous??\n")
     }
   }
 
@@ -101,7 +102,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     when(io.deq(i).fire() && !io.redirect.valid) {
       stateEntries(headPtr(i).value) := s_invalid
 
-      //      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
+      // XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
