@@ -265,7 +265,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   )
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
-  val s1_hit = s1_tag_match && s1_has_permission || s1_tag_error
+  val s1_hit = s1_tag_match && s1_has_permission
   val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO) && !s1_hit
 
   // s2: select data, return resp if this is a store miss
