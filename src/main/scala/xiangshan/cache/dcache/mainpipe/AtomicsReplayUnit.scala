@@ -39,6 +39,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     val lsu  = Flipped(new DCacheWordIOWithVaddr)
     val pipe_req  = Decoupled(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new AtomicsResp))
+    val block_lr = Input(Bool())
 
     val block_addr  = Output(Valid(UInt()))
   })
@@ -76,7 +77,11 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   // --------------------------------------------
   // replay
   when (state === s_pipe_req) {
-    io.pipe_req.valid := true.B
+    io.pipe_req.valid := Mux(
+      io.pipe_req.bits.cmd === M_XLR,
+      !io.block_lr, // block lr to survive in lr storm
+      true.B
+    )
 
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare

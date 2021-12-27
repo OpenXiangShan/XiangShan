@@ -345,7 +345,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   //send physical address to PMP
   io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_valid
+    p.req.valid := s2_valid && !missSwitchBit
     p.req.bits.addr := s2_req_paddr(i)
     p.req.bits.size := 3.U // TODO
     p.req.bits.cmd := TlbCmd.exec
