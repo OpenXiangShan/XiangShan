@@ -227,7 +227,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val tdata = Reg(Vec(6, new MatchTriggerIO))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
   val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
+  tEnable := VecInit(en(2), en (3), en(4), en(5), en(7), en(9))
   when(csrCtrl.mem_trigger.t.valid) {
     tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
   }
@@ -292,7 +292,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // --------------------------------
     val hit = Wire(Vec(3, Bool()))
     for (j <- 0 until 3) {
-      loadUnits(i).io.trigger(j).tdata2 := tdata(j + 3).tdata2
+      loadUnits(i).io.trigger(j).tdata2 := tdata(lTriggerMapping(j)).tdata2
       loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
       loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
