@@ -40,6 +40,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
+    val read_error = Input(Bool())
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
@@ -57,7 +58,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val disable_ld_fast_wakeup = Input(Bool())
 
     // ecc error
-    val tag_error = Output(new L1CacheErrorInfo())
+    val error = Output(new L1CacheErrorInfo())
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -161,9 +162,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // check ecc error
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => io.tag_resp(w)))
-  val s1_tag_ecc_error = dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
-  val s1_cache_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
-  val s1_error = s1_cache_flag_error || s1_tag_ecc_error
+  val s1_tag_error = dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
+  val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
+  val s1_error = s1_flag_error || s1_tag_error
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -209,11 +210,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_instrtype = s2_req.instrtype
 
-  val s2_tag_ecc_error = RegEnable(s1_tag_ecc_error, s1_fire)
-  val s2_data_error = banked_data_resp_word.error
+  val s2_tag_error = RegEnable(s1_tag_error, s1_fire)
+  val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
+  val s2_data_error = io.read_error // banked_data_resp_word.error && !bank_conflict_slow
   val s2_error = RegEnable(s1_error, s1_fire) || s2_data_error
 
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_tag_ecc_error
+  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_tag_error
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -273,12 +275,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
-  // report tag error (with paddr) to bus error unit
-  io.tag_error := 0.U.asTypeOf(new L1CacheErrorInfo())
-  io.tag_error.ecc_error.valid := RegNext(s1_fire && s1_tag_ecc_error)
-  io.tag_error.ecc_error.bits := s2_addr
-  io.tag_error.source.tag := true.B
-  io.tag_error.opType.load := true.B
+  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
+  // report tag / data / l2 error (with paddr) to bus error unit
+  io.error.ecc_error.valid := RegNext((s2_tag_error || s2_data_error) && s2_valid)
+  io.error.ecc_error.bits := RegNext(s2_addr)
+  io.error.source.tag := RegNext(s2_tag_error)
+  io.error.source.data := RegNext(s2_data_error)
+  io.error.source.l2 := RegNext(s2_flag_error)
+  io.error.opType.load := true.B
+  // report tag error / l2 corrupted to CACHE_ERROR csr
+  io.error.valid := RegNext(s2_error && s2_valid)
 
   // -------
   // Debug logging functions

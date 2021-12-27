@@ -288,7 +288,6 @@ class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
     print_cache_error_flag(decoded_cache_error.source.tag, "tag")
     print_cache_error_flag(decoded_cache_error.source.data, "data")
     print_cache_error_flag(decoded_cache_error.source.l2, "l2")
-    print_cache_error_flag(decoded_cache_error.source.instr, "instr")
     print_cache_error_flag(decoded_cache_error.opType.fetch, "fetch")
     print_cache_error_flag(decoded_cache_error.opType.load, "load")
     print_cache_error_flag(decoded_cache_error.opType.store, "store")
