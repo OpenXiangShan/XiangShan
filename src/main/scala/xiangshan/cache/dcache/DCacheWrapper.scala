@@ -95,8 +95,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encTagBits = cacheParams.tagCode.width(tagBits)
   def eccTagBits = encTagBits - tagBits
 
-  def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
-  def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 3
@@ -423,7 +421,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
-//  val replacePipe = Module(new ReplacePipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
@@ -516,6 +513,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
   atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   //----------------------------------------
   // miss queue
@@ -669,18 +667,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
   cacheOpDecoder.io.csr <> io.csr
   bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
-    metaArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
     bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
-    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
     tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
   ))
   cacheOpDecoder.io.error := io.error
-  assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
+  assert(!((bankedDataArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------
   // performance counters

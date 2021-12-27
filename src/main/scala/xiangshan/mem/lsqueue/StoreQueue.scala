@@ -79,6 +79,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr) // used to wake up delayed load/store
     val sqFull = Output(Bool())
+    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+    val sqDeq = Output(UInt(2.W))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -130,11 +132,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
-  val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
   val cmtPtr = cmtPtrExt(0).value
+
+  val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
+  val allowEnqueue = validCount <= (StoreQueueSize - 2).U
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
@@ -151,12 +155,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     )
   ))
   // deqPtrExtNext traces which inst is about to leave store queue
-  val deqPtrExtNext = WireInit(Mux(io.sbuffer(1).fire(),
+  val deqPtrExtNext = Mux(io.sbuffer(1).fire(),
     VecInit(deqPtrExt.map(_ + 2.U)),
     Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
       VecInit(deqPtrExt.map(_ + 1.U)),
       deqPtrExt
     )
+  )
+  io.sqDeq := RegNext(Mux(io.sbuffer(1).fire(), 2.U,
+    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U)
   ))
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.raddr(i) := rdataPtrExtNext(i).value
@@ -173,17 +180,21 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * Currently, StoreQueue only allows enqueue when #emptyEntries > EnqWidth
     */
   io.enq.canAccept := allowEnqueue
+  val canEnqueue = io.enq.req.map(_.valid)
+  val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
-    val index = sqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
-      uop(index) := io.enq.req(i).bits
+    val index = io.enq.req(i).bits.sqIdx.value
+    when (canEnqueue(i) && !enqCancel(i)) {
+      uop(index).robIdx := io.enq.req(i).bits.robIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+      XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
+      XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
     }
     io.enq.resp(i) := sqIdx
   }
@@ -255,6 +266,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       // mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
+      uop(stWbIndex).ctrl := io.storeIn(i).bits.uop.ctrl
       uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
       XSInfo("store addr write to sq idx %d pc 0x%x miss:%d vaddr %x paddr %x mmio %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
@@ -585,20 +597,20 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && !committed(i)
     when (needCancel(i)) {
-        allocated(i) := false.B
+      allocated(i) := false.B
     }
   }
 
   /**
     * update pointers
     */
+  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleRedirect = RegNext(io.brqRedirect.valid)
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
-  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   when (lastCycleRedirect) {
     // we recover the pointers in the next cycle after redirect
-    enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
+    enqPtrExt := VecInit(enqPtrExt.map(_ - (lastCycleCancelCount + lastEnqCancel)))
   }.otherwise {
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
@@ -607,9 +619,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   rdataPtrExt := rdataPtrExtNext
 
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
-  val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
 
-  allowEnqueue := validCount + enqNumber <= (StoreQueueSize - io.enq.req.length).U
+  // If redirect at T0, sqCancelCnt is at T2
+  io.sqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing

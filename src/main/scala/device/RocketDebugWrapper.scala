@@ -38,6 +38,7 @@ import freechips.rocketchip.devices.debug._
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm and dtm
 
+
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
   val debug = LazyModule(new TLDebugModule(8)(p))
