@@ -268,6 +268,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   when(error.ecc_error.valid) {
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := error.asUInt
+    io.csr.update.w.valid := true.B
   }
 }
 
