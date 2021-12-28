@@ -445,10 +445,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.rsFeedback.bits.hit := !s2_need_replay_from_rs
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  // feedback source priority: tlbMiss > dataInvalid > mshrFull
+  // general case priority: tlbMiss > exception (include forward_fail / ldld_violation) > mmio > dataInvalid > mshrFull > normal miss / hit
   io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
-    Mux(s2_cache_replay,
-      RSFeedbackType.mshrFull,
-      RSFeedbackType.dataInvalid
+    Mux(s2_data_invalid,
+      RSFeedbackType.dataInvalid,
+      RSFeedbackType.mshrFull
     )
   )
   io.rsFeedback.bits.dataInvalidSqIdx.value := io.dataInvalidSqIdx
