@@ -344,7 +344,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_oversize_target = f3_pc.last + 2.U
 
   /*** MMIO State Machine***/
-  val f3_mmio_data    = Reg(UInt(maxInstrLen.W))
+  val f3_mmio_data    = Reg(Vec(2, UInt(16.W)))
+  val mmio_is_RVC     = RegInit(false.B)
 
   val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_wait_commit :: mmio_commited :: Nil = Enum(7)
   val mmio_state = RegInit(mmio_idle)
@@ -377,7 +378,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
 
-  when(fromUncache.fire())    {f3_mmio_data   :=  fromUncache.bits.data}
+  // when(fromUncache.fire())    {f3_mmio_data   :=  fromUncache.bits.data}
 
 
   switch(mmio_state){
@@ -394,7 +395,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(mmio_w_resp){
       when(fromUncache.fire()){
           val isRVC =  fromUncache.bits.data(1,0) =/= 3.U
-          mmio_state :=  Mux(isRVC, mmio_resend , mmio_wait_commit)
+          val needResend = !isRVC && f3_pAddrs(0)(2,1) === 3.U
+          mmio_state :=  Mux(needResend, mmio_resend , mmio_wait_commit)
+
+          mmio_is_RVC := isRVC
+          f3_mmio_data(0)   :=  fromUncache.bits.data(15,0)
+          f3_mmio_data(1)   :=  fromUncache.bits.data(31,16)
       }
     }  
 
@@ -405,6 +411,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(mmio_resend_w_resp){
       when(fromUncache.fire()){
           mmio_state :=  mmio_wait_commit
+          f3_mmio_data(1)   :=  fromUncache.bits.data(15,0)
       }
     }  
 
@@ -421,7 +428,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   when(f3_ftq_flush_self || f3_ftq_flush_by_older)  {
     mmio_state := mmio_idle 
-    f3_mmio_data := 0.U
+    f3_mmio_data.map(_ := 0.U) 
   }
 
   toUncache.valid     :=  ((mmio_state === mmio_send_req) || (mmio_state === mmio_resend)) && f3_req_is_mmio
@@ -501,7 +508,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio){
-    val inst  = Cat(f3_mmio_data(31,16), f3_mmio_data(15,0))
+    val inst  = Cat(f3_mmio_data(1), f3_mmio_data(0))
     val currentIsRVC   = isRVC(inst)
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -537,7 +544,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.ftqOffset  := f3_ftq_req.ftqOffset.bits
   mmioFlushWb.bits.misOffset  := f3_mmio_missOffset
   mmioFlushWb.bits.cfiOffset  := DontCare
-  mmioFlushWb.bits.target     := Mux((f3_mmio_data(1,0) =/= 3.U), f3_ftq_req.startAddr + 2.U , f3_ftq_req.startAddr + 4.U)
+  mmioFlushWb.bits.target     := Mux(mmio_is_RVC, f3_ftq_req.startAddr + 2.U , f3_ftq_req.startAddr + 4.U)
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
