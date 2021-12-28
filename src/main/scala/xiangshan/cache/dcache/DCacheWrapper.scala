@@ -95,8 +95,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encTagBits = cacheParams.tagCode.width(tagBits)
   def eccTagBits = encTagBits - tagBits
 
-  def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
-  def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 3
@@ -511,6 +509,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
   atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   //----------------------------------------
   // miss queue
