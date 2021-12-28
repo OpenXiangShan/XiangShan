@@ -96,6 +96,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val respStall   = Input(Bool())
   val perfInfo = Output(new ICachePerfInfo)
 
+  val prefetchEnable = Output(Bool())
+  val prefetchDisable = Output(Bool())
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -115,7 +117,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_fire,  s1_fire , s2_fire  = WireInit(false.B)
 
   val missSwitchBit = RegInit(false.B)
-  
+
+  io.prefetchEnable := false.B
+  io.prefetchDisable := false.B
   /** replacement status register */
   val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
@@ -556,9 +560,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   when(toMSHR.map(_.valid).reduce(_||_)){
     missSwitchBit := true.B
+    io.prefetchEnable := true.B
   }.elsewhen(missSwitchBit && s2_fetch_finish){
     missSwitchBit := false.B
+    io.prefetchDisable := true.B
   }
+
 
   val miss_all_fix       =  wait_state === wait_finish
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio)
