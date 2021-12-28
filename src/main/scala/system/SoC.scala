@@ -153,9 +153,9 @@ trait HaveAXI4MemPort {
   val mem_xbar = TLXbar()
   mem_xbar :=*
     TLXbar() :=*
-    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_1")) :=*
+    TLBuffer() :=*
     BinaryArbiter() :=*
-    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_0")) :=*
+    TLBuffer() :=*
     TLCacheCork() :=*
     bankedNode
 
@@ -172,7 +172,7 @@ trait HaveAXI4MemPort {
     TLToAXI4() :=
     TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
-    TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
+    TLBuffer() :=
     mem_xbar
 
   val memory = InModuleBody {
