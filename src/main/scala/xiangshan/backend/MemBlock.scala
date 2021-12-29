@@ -224,7 +224,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_ld.map(_.ptw_replenish := pmp_check_ptw.io.resp)
   dtlb_st.map(_.ptw_replenish := pmp_check_ptw.io.resp)
 
-  val tdata = Reg(Vec(6, new MatchTriggerIO))
+  val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
   val en = csrCtrl.trigger_enable
   tEnable := VecInit(en(2), en (3), en(4), en(5), en(7), en(9))
@@ -348,22 +348,28 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.stout.ready := true.B
 
-   // store vaddr
-   when(stOut(i).fire()){
-     val hit = Wire(Vec(3, Bool()))
-     for (j <- 0 until 3) {
-       when(!tdata(sTriggerMapping(j)).select) {
-         hit(j) := TriggerCmp(stOut(i).bits.debug.vaddr, tdata(sTriggerMapping(j)).tdata2, tdata(sTriggerMapping(j)).matchType, tEnable(sTriggerMapping(j)))
-         stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
-//         stOut(i).bits.uop.cf.trigger.backendTiming(sTriggerMapping(j)) := tdata(sTriggerMapping(j)).timing
-//          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
-       } .otherwise {
-         hit := VecInit(Seq.fill(3)(false.B))
-       }
+    // -------------------------
+    // Store Triggers
+    // -------------------------
+    when(stOut(i).fire()){
+      val hit = Wire(Vec(3, Bool()))
+      for (j <- 0 until 3) {
+         hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
+           stOut(i).bits.debug.vaddr,
+           tdata(sTriggerMapping(j)).tdata2,
+           tdata(sTriggerMapping(j)).matchType,
+           tEnable(sTriggerMapping(j))
+         )
+       stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
+     }
 
-       when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
-         stOut(i).bits.uop.cf.trigger.backendHit(4) := false.B
-       }
+     when(tdata(0).chain) {
+       io.writeback(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
+       io.writeback(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
+     }
+
+     when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
+       stOut(i).bits.uop.cf.trigger.backendHit(4) := false.B
      }
    }
     // store data
