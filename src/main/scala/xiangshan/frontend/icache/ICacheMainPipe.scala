@@ -255,8 +255,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   for(i <- 0 until PortNumber){
     io.errors(i).valid            := RegNext(s1_parity_error(i) && RegNext(s0_fire))
-    io.errors(i).ecc_error.valid  := RegNext(s1_parity_error(i) && RegNext(s0_fire))
-    io.errors(i).ecc_error.bits   := RegNext(tlbRespPAddr(i))
+    io.errors(i).report_to_beu    := RegNext(s1_parity_error(i) && RegNext(s0_fire))
+    io.errors(i).paddr            := RegNext(tlbRespPAddr(i))
     io.errors(i).source           := DontCare
     io.errors(i).source.tag       := RegNext(s1_parity_meta_error(i))
     io.errors(i).source.data      := RegNext(s1_parity_data_error(i))
@@ -600,8 +600,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){
       io.errors(i).valid            := true.B
-      io.errors(i).ecc_error.valid  := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).ecc_error.bits   := RegNext(s2_req_paddr(i))
+      io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
+      io.errors(i).paddr            := RegNext(s2_req_paddr(i))
       io.errors(i).source.tag       := false.B
       io.errors(i).source.data      := false.B
       io.errors(i).source.l2        := true.B

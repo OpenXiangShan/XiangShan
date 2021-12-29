@@ -349,7 +349,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
   // readline port
   io.readline_error := RegNext(io.readline.fire()) && 
-    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR || GTimer() > 5000.U
+    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)

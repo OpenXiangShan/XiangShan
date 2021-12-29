@@ -709,8 +709,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.status.s3.bits.way_en := s3_way_en
 
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
-  io.error.ecc_error.valid := RegNext((s2_tag_error || s2_data_error) && s2_fire)
-  io.error.ecc_error.bits := RegNext(s2_req.addr)
+  io.error.report_to_beu := RegNext((s2_tag_error || s2_data_error) && s2_fire)
+  io.error.paddr := RegNext(s2_req.addr)
   io.error.source.tag := RegNext(s2_tag_error)
   io.error.source.data := RegNext(s2_data_error)
   io.error.source.l2 := RegNext(s2_flag_error || s2_l2_error)
