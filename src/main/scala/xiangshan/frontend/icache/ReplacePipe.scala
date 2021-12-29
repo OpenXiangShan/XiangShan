@@ -113,7 +113,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r1_data_errors             = ResultHoldBypass(data = dataError, valid = RegNext(r0_fire))
 
 
-  val r1_parity_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) || r1_data_errors.reduce(_||_),valid = RegNext(r0_fire))
+  val r1_parity_meta_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_), valid = RegNext(r0_fire))
+  val r1_parity_data_error = ResultHoldBypass(data = r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
+  val r1_parity_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) || r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
 
 
   /*** for Probe hit check ***/
@@ -133,10 +135,17 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.status.r1_set.valid := r1_valid
   io.status.r1_set.bits  := r1_req.vidx
 
-  io.error.ecc_error.valid  := RegNext(r1_parity_error && RegNext(r0_fire))
-  io.error.ecc_error.bits   := true.B
-  io.error.paddr.valid      := RegNext(io.error.ecc_error.valid)  
-  io.error.paddr.bits       := RegNext(r1_req.paddr) 
+  io.error.valid                := RegNext(r1_parity_error && RegNext(r0_fire))
+  io.error.ecc_error.valid      := RegNext(r1_parity_error && RegNext(r0_fire))
+  io.error.ecc_error.bits       := RegNext(r1_req.paddr)
+  io.error.source.tag           := r1_parity_meta_error
+  io.error.source.data          := r1_parity_data_error
+  io.error.source.l2            := false.B
+  io.error.opType               := DontCare
+  io.error.opType.fetch         := true.B
+  io.error.opType.release       := RegNext(r1_req.isRelease)
+  io.error.opType.probe         := RegNext(r1_req.isProbe)
+
 
   /**
     ******************************************************************************

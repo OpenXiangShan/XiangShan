@@ -107,6 +107,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
+  when(!csrCtrl.cache_error_enable){
+    io.error.ecc_error.valid := false.B
+    io.error.valid := false.B
+  }
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))

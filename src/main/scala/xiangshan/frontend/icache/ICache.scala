@@ -630,9 +630,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     dataArray.io.cacheOp.resp.valid -> dataArray.io.cacheOp.resp.bits,
     metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
   ))
-  // TODO
-  cacheOpDecoder.io.error := DontCare
-  cacheOpDecoder.io.error.ecc_error.valid := false.B
+  cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
 } 

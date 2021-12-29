@@ -423,10 +423,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.hartId := io.hartId
 
-  val errors = bankedDataArray.io.errors ++ // data ecc error
-    ldu.map(_.io.tag_error) ++ // load tag ecc error
-    Seq(mainPipe.io.error) // store / misc tag ecc error 
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  val errors = ldu.map(_.io.error) ++ // load error
+    Seq(mainPipe.io.error) // store / misc error 
+  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
 
   //----------------------------------------
   // meta array
@@ -476,18 +475,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   dataWriteArb.io.in(1) <> mainPipe.io.data_write
 
   bankedDataArray.io.write <> dataWriteArb.io.out
-  bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
-  bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
-  bankedDataArray.io.readline <> mainPipe.io.data_read
 
-  ldu(0).io.banked_data_resp := bankedDataArray.io.resp
-  ldu(1).io.banked_data_resp := bankedDataArray.io.resp
+  bankedDataArray.io.readline <> mainPipe.io.data_read
+  mainPipe.io.readline_error := bankedDataArray.io.readline_error
   mainPipe.io.data_resp := bankedDataArray.io.resp
 
-  ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
-  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
-  ldu(0).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(0)
-  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(1)
+  (0 until LoadPipelineWidth).map(i => {
+    bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
+    bankedDataArray.io.read_error(i) <> ldu(i).io.read_error
+
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
+
+    ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
+    ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
+  })
 
   //----------------------------------------
   // load pipe
