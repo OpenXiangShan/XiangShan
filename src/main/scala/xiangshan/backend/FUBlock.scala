@@ -88,7 +88,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
       exu.csrio.get <> io.extra.csrio.get
       exu.csrio.get.perf <> RegNext(io.extra.csrio.get.perf)
       // RegNext customCtrl for better timing
-      io.extra.csrio.get.customCtrl := RegNext(exu.csrio.get.customCtrl)
+      io.extra.csrio.get.customCtrl := RegNext(RegNext(exu.csrio.get.customCtrl))
+      io.extra.csrio.get.tlb := RegNext(RegNext(exu.csrio.get.tlb))
+      // RegNext csrUpdate
+      exu.csrio.get.distributedUpdate := RegNext(io.extra.csrio.get.distributedUpdate)
     }
 
     if (exu.fenceio.isDefined) {
