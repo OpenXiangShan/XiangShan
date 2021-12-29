@@ -56,6 +56,9 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val amo_data   = UInt(DataBits.W)
   val amo_mask   = UInt((DataBits / 8).W)
 
+  // error
+  val error = Bool()
+
   // replace
   val replace = Bool()
   val replace_way_en = UInt(DCacheWays.W)
@@ -80,6 +83,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.store_data := store.data
     req.store_mask := store.mask
     req.replace := false.B
+    req.error := false.B
     req.id := store.id
     req
   }
@@ -248,6 +252,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => enc_tag_resp(w)))
   val s1_flag_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_flag_resp(w))), false.B)
   val s1_tag_error = dcacheParameters.tagCode.decode(s1_encTag).error
+  val s1_l2_error = s1_req.error
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -286,9 +291,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = RegEnable(s1_tag_error, s1_fire)
+  val s2_l2_error = s2_req.error
   // s2_data_error will be reported by data array
   val s2_data_error = io.readline_error && s2_need_data && s2_coh.state =/= ClientStates.Nothing
-  val s2_error = s2_flag_error || s2_tag_error || s2_data_error
+  val s2_error = s2_flag_error || s2_tag_error || s2_data_error || s2_l2_error
 
   val s2_hit = s2_tag_match && s2_has_permission
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
@@ -353,6 +359,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire_to_s3)
   val s3_data_word = RegEnable(s2_data_word, s2_fire_to_s3)
   val s3_data = RegEnable(s2_data, s2_fire_to_s3)
+  val s3_l2_error = s3_req.error
   val s3_error = RegEnable(s2_error, s2_fire_to_s3)
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
@@ -633,10 +640,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.meta.coh := new_coh
 
-  io.error_flag_write.valid := s3_fire && update_meta
+  io.error_flag_write.valid := s3_fire && update_meta && s3_l2_error
   io.error_flag_write.bits.idx := s3_idx
   io.error_flag_write.bits.way_en := s3_way_en
-  io.error_flag_write.bits.error := s3_error
+  io.error_flag_write.bits.error := s3_l2_error
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx
@@ -706,7 +713,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.error.ecc_error.bits := RegNext(s2_req.addr)
   io.error.source.tag := RegNext(s2_tag_error)
   io.error.source.data := RegNext(s2_data_error)
-  io.error.source.l2 := RegNext(s2_flag_error)
+  io.error.source.l2 := RegNext(s2_flag_error || s2_l2_error)
   io.error.opType.store := RegNext(s2_req.isStore && !s2_req.probe)
   io.error.opType.probe := RegNext(s2_req.probe)
   io.error.opType.release := RegNext(s2_req.replace)

@@ -18,6 +18,7 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import utils._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
@@ -348,7 +349,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
   // readline port
   io.readline_error := RegNext(io.readline.fire()) && 
-    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
+    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR || GTimer() > 5000.U
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
