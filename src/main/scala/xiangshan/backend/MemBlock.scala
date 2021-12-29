@@ -353,7 +353,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
      val hit = Wire(Vec(3, Bool()))
      for (j <- 0 until 3) {
        when(!tdata(sTriggerMapping(j)).select) {
-         hit(j) := TriggerCmp(stOut(i).bits.data, tdata(sTriggerMapping(j)).tdata2, tdata(sTriggerMapping(j)).matchType, tEnable(sTriggerMapping(j)))
+         hit(j) := TriggerCmp(stOut(i).bits.debug.vaddr, tdata(sTriggerMapping(j)).tdata2, tdata(sTriggerMapping(j)).matchType, tEnable(sTriggerMapping(j)))
          stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
 //         stOut(i).bits.uop.cf.trigger.backendTiming(sTriggerMapping(j)) := tdata(sTriggerMapping(j)).timing
 //          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
