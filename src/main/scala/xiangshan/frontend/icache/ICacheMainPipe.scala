@@ -93,6 +93,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val respStall   = Input(Bool())
   val perfInfo = Output(new ICachePerfInfo)
 
+  val csr_parity_enable = Input(Bool())
+
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -111,8 +113,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_ready, s1_ready, s2_ready = WireInit(false.B)
   val s0_fire,  s1_fire , s2_fire  = WireInit(false.B)
 
-  val missSwitchBit = RegInit(false.B)
-  
+  val missSwitchBit = RegInit(false.B)  
+
   /** replacement status register */
   val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
@@ -233,8 +235,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errors             = ResultHoldBypass(data = dataResp.errors, valid = RegNext(s0_fire))
 
-  val s1_parity_meta_error = VecInit((0 until PortNumber).map(i => s1_meta_errors(i).reduce(_||_)))
-  val s1_parity_data_error = VecInit((0 until PortNumber).map(i => s1_data_errors(i).reduce(_||_)))
+  val s1_parity_meta_error = VecInit((0 until PortNumber).map(i => s1_meta_errors(i).reduce(_||_) && io.csr_parity_enable))
+  val s1_parity_data_error = VecInit((0 until PortNumber).map(i => s1_data_errors(i).reduce(_||_) && io.csr_parity_enable))
   val s1_parity_error = VecInit((0 until PortNumber).map(i => s1_parity_meta_error(i) || s1_parity_data_error(i)))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
