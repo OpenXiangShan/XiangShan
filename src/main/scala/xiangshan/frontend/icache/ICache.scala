@@ -476,6 +476,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.write <> missUnit.io.data_write
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
+  replacePipe.io.csr_parity_enable := io.csr_parity_enable
 
   if(cacheParams.hasPrefetch){
     prefetchPipe.io.fromFtq <> io.prefetch

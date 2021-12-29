@@ -60,6 +60,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val status = new Bundle() {
       val r1_set, r2_set = ValidIO(UInt(idxBits.W))
     }
+
+    val csr_parity_enable = Input(Bool())
+
   })
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
@@ -113,8 +116,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r1_data_errors             = ResultHoldBypass(data = dataError, valid = RegNext(r0_fire))
 
 
-  val r1_parity_meta_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_), valid = RegNext(r0_fire))
-  val r1_parity_data_error = ResultHoldBypass(data = r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
+  val r1_parity_meta_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) && io.csr_parity_enable, valid = RegNext(r0_fire))
+  val r1_parity_data_error = ResultHoldBypass(data = r1_data_errors.reduce(_||_) && io.csr_parity_enable, valid = RegNext(r0_fire))
   val r1_parity_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) || r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
 
 
