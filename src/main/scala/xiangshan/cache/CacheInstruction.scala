@@ -283,9 +283,10 @@ class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
     }
   }
   val decoded_cache_error = WireInit(encoded_cache_error.asTypeOf(new L1CacheErrorInfo))
-  when(decoded_cache_error.ecc_error.valid && !RegNext(decoded_cache_error.ecc_error.valid)){
+  when(decoded_cache_error.valid && !RegNext(decoded_cache_error.valid)){
     printf("CACHE_ERROR CSR reported an error:\n")
     printf("  paddr 0x%x\n", decoded_cache_error.ecc_error.bits)
+    print_cache_error_flag(decoded_cache_error.ecc_error.valid, "report to bus error unit")
     print_cache_error_flag(decoded_cache_error.source.tag, "tag")
     print_cache_error_flag(decoded_cache_error.source.data, "data")
     print_cache_error_flag(decoded_cache_error.source.l2, "l2")
