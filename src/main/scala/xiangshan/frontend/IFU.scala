@@ -695,6 +695,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && io.toIbuffer.fire()  )
   XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && io.toIbuffer.fire() )
   XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire() )
+  XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && io.toIbuffer.fire() )
+  XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire() )
+  XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire() )
   XSPerfAccumulate("cross_line_block", io.toIbuffer.fire() && f3_situation(0) )
   XSPerfAccumulate("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1) )
 }
