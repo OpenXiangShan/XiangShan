@@ -63,7 +63,7 @@ case class XSCoreParameters
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = false,
-  UbtbSize: Int = 1024,
+  UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
   CacheLineSize: Int = 512,
@@ -303,7 +303,7 @@ trait HasXSParameter {
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
-  val UbtbGHRLength = log2Ceil(coreParams.UbtbSize)
+  val UbtbGHRLength = 4
   val UbtbSize = coreParams.UbtbSize
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays

@@ -472,6 +472,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // XSPerfAccumulate("s2_redirect_because_brTaken_diff", s2_fire && s2_redirect_s1_last_pred_vec(5))
   XSPerfAccumulate("s2_redirect_because_fallThroughError", s2_fire && resp.s2.fallThruError)
 
+  XSPerfAccumulate("s2_redirect_when_taken", s2_redirect && resp.s2.taken && resp.s2.full_pred.hit)
+  XSPerfAccumulate("s2_redirect_when_not_taken", s2_redirect && !resp.s2.taken && resp.s2.full_pred.hit)
+  XSPerfAccumulate("s2_redirect_when_not_hit", s2_redirect && !resp.s2.full_pred.hit)
+
 
   // Send signal tell Ftq override
   val s2_ftq_idx = RegEnable(io.ftq_to_bpu.enq_ptr, s1_fire)

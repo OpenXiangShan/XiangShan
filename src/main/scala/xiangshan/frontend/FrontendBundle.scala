@@ -501,11 +501,13 @@ object BpuToFtqBundle {
 
 class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
   val mispred_mask = Vec(numBr+1, Bool())
+  val pred_hit = Bool()
   val false_hit = Bool()
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry = Bool()
   val meta = UInt(MaxMetaLength.W)
   val full_target = UInt(VAddrBits.W)
+  val from_stage = UInt(2.W)
   val ghist = UInt(HistoryLength.W)
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {

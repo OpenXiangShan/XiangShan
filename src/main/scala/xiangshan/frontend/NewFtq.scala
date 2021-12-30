@@ -870,6 +870,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val can_commit_hit = entry_hit_status(commPtr.value)
   val commit_hit = RegNext(can_commit_hit)
   val commit_target = RegNext(update_target(commPtr.value))
+  val commit_stage = RegNext(pred_stage(commPtr.value))
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
@@ -882,6 +883,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.pc          := commit_pc_bundle.startAddr
   update.meta        := commit_meta.meta
   update.full_target := commit_target
+  update.from_stage  := commit_stage
   update.fromFtqRedirectSram(commit_spec_meta)
 
   val commit_real_hit = commit_hit === h_hit
@@ -900,6 +902,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.new_br_insert_pos := ftbEntryGen.new_br_insert_pos
   update.mispred_mask      := ftbEntryGen.mispred_mask
   update.old_entry         := ftbEntryGen.is_old_entry
+  update.pred_hit          := commit_hit === h_hit || commit_hit === h_false_hit
 
   update.is_minimal := false.B
   update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
