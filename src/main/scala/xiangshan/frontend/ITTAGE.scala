@@ -410,7 +410,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val resp_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
 
   io.out.resp := io.in.bits.resp_in(0)
-  io.out.last_stage_meta := resp_meta.asUInt
+  io.out.last_stage_meta := RegEnable(resp_meta.asUInt, io.s2_fire)
 
   val ftb_hit = io.in.bits.resp_in(0).s2.full_pred.hit
   val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry
@@ -492,7 +492,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSDebug(io.s2_fire, p"hit_taken_jalr:")
   when(s2_tageTaken) {
     io.out.resp.s2.full_pred.jalr_target := s2_tageTarget
-    // FIXME: should use s1 globally
+  }
+
+  val s3_tageTaken = RegEnable(s2_tageTaken, io.s2_fire)
+  val s3_tageTarget = RegEnable(s2_tageTarget, io.s2_fire)
+  when(s3_tageTaken) {
+    io.out.resp.s3.full_pred.jalr_target := s3_tageTarget
   }
   // this is handled in RAS
   // val is_jalr = io.in.bits.resp_in(0).s2.full_pred.is_jalr

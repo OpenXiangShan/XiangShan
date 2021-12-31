@@ -551,13 +551,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   s1_altProvider   := altProviderInfo.tableIdx
   s1_altProviderResp := altProviderInfo.resp
 
-  resp_meta.provider.valid   := s2_provided
-  resp_meta.provider.bits    := s2_provider
-  resp_meta.providerResp     := s2_providerResp
-  resp_meta.altProvider.valid := s2_altProvided
-  resp_meta.altProvider.bits  := s2_altProvider
-  resp_meta.altProviderResp  := s2_altProviderResp
-  resp_meta.pred_cycle.map(_ := GTimer())
+  resp_meta.provider.valid    := RegEnable(s2_provided, io.s2_fire)
+  resp_meta.provider.bits     := RegEnable(s2_provider, io.s2_fire)
+  resp_meta.providerResp      := RegEnable(s2_providerResp, io.s2_fire)
+  resp_meta.altProvider.valid := RegEnable(s2_altProvided, io.s2_fire)
+  resp_meta.altProvider.bits  := RegEnable(s2_altProvider, io.s2_fire)
+  resp_meta.altProviderResp   := RegEnable(s2_altProviderResp, io.s2_fire)
+  resp_meta.pred_cycle.map(_ := RegEnable(GTimer(), io.s2_fire))
   
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
@@ -572,8 +572,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val firstEntry  = PriorityEncoder(allocatableSlots)
   val maskedEntry = PriorityEncoder(allocatableSlots & allocLFSR)
   val allocEntry  = Mux(allocatableSlots(maskedEntry), maskedEntry, firstEntry)
-  resp_meta.allocate.valid := allocatableSlots =/= 0.U
-  resp_meta.allocate.bits  := allocEntry
+  resp_meta.allocate.valid := RegEnable(allocatableSlots =/= 0.U, io.s2_fire)
+  resp_meta.allocate.bits  := RegEnable(allocEntry, io.s2_fire)
 
   val updateProvided    = updateMeta.provider.valid
   val updateProvider    = updateMeta.provider.bits
@@ -630,9 +630,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
     )
     s1_basecnts(w)       := bt.io.s1_cnt(w)
 
-    resp_meta.altDiffers(w) := s2_finalAltPreds(w) =/= s2_tageTakens(w)
-    resp_meta.takens(w)     := s2_tageTakens(w)
-    resp_meta.basecnt(w)    := s2_basecnts(w)
+    resp_meta.altDiffers(w) := RegEnable(s2_finalAltPreds(w) =/= s2_tageTakens(w), io.s2_fire)
+    resp_meta.takens(w)     := RegEnable(s2_tageTakens(w), io.s2_fire)
+    resp_meta.basecnt(w)    := RegEnable(s2_basecnts(w), io.s2_fire)
 
 
     // Update in loop

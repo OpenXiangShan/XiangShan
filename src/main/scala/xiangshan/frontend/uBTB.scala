@@ -166,7 +166,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.is_minimal := true.B
 
   outMeta.ftPred := fallThruPredRAM.io.rdata
-  io.out.last_stage_meta := RegEnable(outMeta.asUInt, io.s1_fire)
+  io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
 
   // Update logic
   val update_mispred = io.update.bits.mispred_mask.reduce(_||_)

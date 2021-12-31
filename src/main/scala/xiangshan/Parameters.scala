@@ -74,7 +74,6 @@ case class XSCoreParameters
         ( 4096,   13,   12),
         ( 4096,   31,   12),
         ( 4096,  119,   12)),
-  TageBanks: Int = 2,
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 512,    0,    0),
@@ -315,7 +314,7 @@ trait HasXSParameter {
   val BankTageTableInfos = (0 until numBr).map(i =>
     TageTableInfos.map{ case (s, h, t) => (s/(1 << i), h, t) }
   )
-  val TageBanks = coreParams.TageBanks
+  val TageBanks = coreParams.numBr
   val SCNRows = coreParams.SCNRows
   val SCCtrBits = coreParams.SCCtrBits
   val SCHistLens = coreParams.SCHistLens

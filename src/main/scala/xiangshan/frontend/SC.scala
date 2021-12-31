@@ -249,39 +249,26 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
+      val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire)
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResp.ctrs(w), io.s1_fire))
+      val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
+      val s2_sumAboveThresholds = aboveThreshold(s2_scTableSums(w), s2_tagePrvdCtrCentered, useThresholds(w))
+      val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val tage_hit_vec = VecInit(s1_resps.map(_.valid))
-      val tage_pvdr_oh = VecInit((0 until TageNTables).map(i =>
-        tage_hit_vec(i) && !tage_hit_vec.drop(i+1).reduceOption(_||_).getOrElse(false.B)
-      ))
-      val tage_table_centered_ctrs = s1_resps.map(r => getPvdrCentered(r.bits.ctrs(w)))
-  
-      val s1_sumAboveThresholdsForAllTageCtrs =
-        VecInit(s1_scTableSums.map(s =>
-          VecInit(tage_table_centered_ctrs.map(tctr =>
-            aboveThreshold(s, tctr, useThresholds(w))
-          ))
-        ))
-      val s1_totalSumsForAllTageCtrs =
-        VecInit(s1_scTableSums.map(s =>
-          VecInit(tage_table_centered_ctrs.map(tctr =>
-            s +& tctr
-          ))
-        ))
-      val s1_totalSums = VecInit(s1_totalSumsForAllTageCtrs.map(i => Mux1H(tage_pvdr_oh, i)))
-      val s1_sumAboveThresholds = VecInit(s1_sumAboveThresholdsForAllTageCtrs.map(i => Mux1H(tage_pvdr_oh, i)))
-      val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
-      
-      val s2_sumAboveThresholds = RegEnable(s1_sumAboveThresholds, io.s1_fire)
-      val s2_scPreds = RegEnable(s1_scPreds, io.s1_fire)
       val s2_scResps = VecInit(RegEnable(s1_scResps, io.s1_fire).map(_.ctrs(w)))
       val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens(w).asUInt)))
       val s2_chooseBit = s2_tageTakens(w)
 
-      scMeta.tageTakens(w) := s2_tageTakens(w)
-      scMeta.scUsed        := s2_provided
-      scMeta.scPreds(w)    := s2_scPreds(s2_chooseBit)
-      scMeta.ctrs(w)       := s2_scCtrs
+      val s2_pred =
+        Mux(s2_provided && s2_sumAboveThresholds(s2_chooseBit),
+          s2_scPreds(s2_chooseBit),
+          s2_tageTakens(w)
+        )
+
+      scMeta.tageTakens(w) := RegEnable(s2_tageTakens(w), io.s2_fire)
+      scMeta.scUsed        := RegEnable(s2_provided, io.s2_fire)
+      scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire)
+      scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire)
   
       when (s2_provided) {
         s2_sc_used(w) := true.B
@@ -300,9 +287,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      io.out.resp.s2.full_pred.br_taken_mask(w) :=
-        Mux(s2_provided && s2_sumAboveThresholds(s2_chooseBit),
-          s2_scPreds(s2_chooseBit), s2_tageTakens(w))
+      io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
   
       val updateTageMeta = updateMeta
       when (updateValids(w) && updateSCMeta.scUsed.asBool) {

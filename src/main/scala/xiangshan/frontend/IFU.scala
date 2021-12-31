@@ -142,8 +142,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
   val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
 
-  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx)/*  ||
-                       fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx) */
+  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
+                       fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
 
   val wb_redirect , mmio_redirect,  backend_redirect= WireInit(false.B)
   val f3_wb_not_flush = WireInit(false.B)
@@ -187,8 +187,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f1_ready := f2_ready || !f1_valid
 
-  // from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
-  from_bpu_f1_flush := false.B
+  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
+  // from_bpu_f1_flush := false.B
 
   when(f1_flush)                  {f1_valid  := false.B}
   .elsewhen(f0_fire && !f0_flush) {f1_valid  := true.B}

@@ -466,10 +466,12 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
+  val s3 = new BranchPredictionBundle
 
   def selectedResp ={
     val res =
       PriorityMux(Seq(
+        ((s3.valid && s3.hasRedirect) -> s3),
         ((s2.valid && s2.hasRedirect) -> s2),
         (s1.valid -> s1)
       ))
@@ -478,10 +480,11 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   }
   def selectedRespIdx =
     PriorityMux(Seq(
+      ((s3.valid && s3.hasRedirect) -> BP_S3),
       ((s2.valid && s2.hasRedirect) -> BP_S2),
       (s1.valid -> BP_S1)
     ))
-  def lastStage = s2
+  def lastStage = s3
 }
 
 class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp with HasBPUConst {
@@ -493,6 +496,7 @@ object BpuToFtqBundle {
     val e = Wire(new BpuToFtqBundle())
     e.s1 := resp.s1
     e.s2 := resp.s2
+    e.s3 := resp.s3
 
     e.meta := DontCare
     e

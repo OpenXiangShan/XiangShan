@@ -419,8 +419,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.req_pc.bits := s0_pc
 
   val ftb_entry = RegEnable(ftbBank.io.read_resp, io.s1_fire)
+  val s3_ftb_entry = RegEnable(ftb_entry, io.s2_fire)
   val s1_hit = ftbBank.io.read_hits.valid
   val s2_hit = RegEnable(s1_hit, io.s1_fire)
+  val s3_hit = RegEnable(s2_hit, io.s2_fire)
   val writeWay = ftbBank.io.read_hits.bits
 
   val fallThruAddr = getFallThroughAddr(s2_pc, ftb_entry.carry, ftb_entry.pftAddr)
@@ -430,17 +432,24 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  io.out.resp.s2.full_pred.hit           := s2_hit
+  io.out.resp.s2.full_pred.hit       := s2_hit
   io.out.resp.s2.pc                  := s2_pc
   io.out.resp.s2.ftb_entry           := ftb_entry
   io.out.resp.s2.full_pred.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
   io.out.resp.s2.is_minimal := false.B
 
-  io.out.last_stage_meta := RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire)
+  io.out.resp.s3.full_pred.hit := s3_hit
+  io.out.resp.s3.pc                  := s3_pc
+  io.out.resp.s3.ftb_entry           := s3_ftb_entry
+  io.out.resp.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
+  io.out.resp.s3.is_minimal := false.B
+
+  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 
   // always taken logic
   for (i <- 0 until numBr) {
     io.out.resp.s2.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s2.full_pred.br_taken_mask(i) || s2_hit && ftb_entry.always_taken(i)
+    io.out.resp.s3.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s3.full_pred.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
   }
 
   // Update logic
