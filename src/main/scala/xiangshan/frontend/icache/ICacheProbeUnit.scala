@@ -69,6 +69,7 @@ class ICacheProbeEntry(id: Int)(implicit p: Parameters) extends ICacheModule {
     pipe_req.vaddr  := req.vaddr
     pipe_req.param := req.param
     pipe_req.voluntary := false.B
+    pipe_req.needData := req.needData
     pipe_req.id := Cat(ProbeKey.U, id.U)
 
     when (io.pipe_req.fire()) {

@@ -107,6 +107,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
+  when(!csrCtrl.cache_error_enable){
+    io.error.ecc_error.valid := false.B
+    io.error.valid := false.B
+  }
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
@@ -515,10 +519,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
-  // Address is delayed by one cycle, so does the atomics address
-  val atomicsException = RegNext(atomicsUnit.io.exceptionAddr.valid)
-  val atomicsExceptionAddress = RegNext(atomicsUnit.io.exceptionAddr.bits)
+  // Exception address is used serveral cycles after flush.
+  // We delay it by 10 cycles to ensure its flush safety.
+  val atomicsException = RegInit(false.B)
+  when (DelayN(io.redirect.valid, 10) && atomicsException) {
+    atomicsException := false.B
+  }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
+    atomicsException := true.B
+  }
+  val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr)
+  XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

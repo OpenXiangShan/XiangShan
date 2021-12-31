@@ -499,11 +499,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.bp_ctrl.ras_enable  := sbpctl(5)
   csrio.customCtrl.bp_ctrl.loop_enable := sbpctl(6)
 
-  // spfctl Bit 0: L1plusCache Prefetcher Enable
+  // spfctl Bit 0: L1I Cache Prefetcher Enable
   // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
-  csrio.customCtrl.l1plus_pf_enable := spfctl(0)
+  val spfctl = RegInit(UInt(XLEN.W), "b11".U)
+  csrio.customCtrl.l1I_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
+
+  // sfetchctl Bit 0: L1I Cache Parity check enable
+  val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
+  csrio.customCtrl.icache_parity_enable := sfetchctl(0)
 
   // sdsid: Differentiated Services ID
   val sdsid = RegInit(UInt(XLEN.W), 0.U)
@@ -671,6 +675,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Supervisor Custom Read/Write Registers
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
+    MaskedRegMap(Sfetchctl, sfetchctl),
     MaskedRegMap(Sdsid, sdsid),
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
@@ -1140,6 +1145,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         cacheopRegs(name) := distributedUpdateData
       }
     }}
+  }
+
+  // Cache error debug support
+  if(HasCustomCSRCacheOp){
+    val cache_error_decoder = Module(new CSRCacheErrorDecoder)
+    cache_error_decoder.io.encoded_cache_error := cacheopRegs("CACHE_ERROR")
   }
 
   // Implicit add reset values for mepc[0] and sepc[0]

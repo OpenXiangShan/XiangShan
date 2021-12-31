@@ -214,8 +214,8 @@ case class XSCoreParameters
     nMissEntries = 2,
     nReleaseEntries = 2,
     nProbeEntries = 2,
-    nPrefetchEntries = 4,
-    hasPrefetch = false,
+    nPrefetchEntries = 2,
+    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -402,7 +402,11 @@ trait HasXSParameter {
   val icacheParameters = coreParams.icacheParameters
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
-  val LRSCCycles = 100
+  // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
+  // for constrained LR/SC loop 
+  val LRSCCycles = 64
+  // for lr storm
+  val LRSCBackOff = 8
 
   // cache hierarchy configurations
   val l1BusDataWidth = 256

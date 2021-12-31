@@ -438,8 +438,10 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val l1plus_pf_enable = Output(Bool())
+  val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  // ICache
+  val icache_parity_enable = Output(Bool())
   // Labeled XiangShan
   val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor

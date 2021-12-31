@@ -81,10 +81,14 @@ trait HasCircularQueuePtrHelper {
   }
 
   def isAfter[T <: CircularQueuePtr[T]](left: T, right: T): Bool = {
-    Mux(left.flag === right.flag, left.value > right.value, left.value < right.value)
+    val differentFlag = left.flag ^ right.flag
+    val compare = left.value > right.value
+    differentFlag ^ compare
   }
 
   def isBefore[T <: CircularQueuePtr[T]](left: T, right: T): Bool = {
-    Mux(left.flag === right.flag, left.value < right.value, left.value > right.value)
+    val differentFlag = left.flag ^ right.flag
+    val compare = left.value < right.value
+    differentFlag ^ compare
   }
 }
