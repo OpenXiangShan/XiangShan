@@ -201,12 +201,12 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire)
   val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire)
-  val s3_spec_push = io.s3_fire && io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_call
-  val s3_spec_pop  = io.s3_fire && io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_ret
+  val s3_push = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_call
+  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_ret
 
-  val s3_recover = s3_pushed_in_s2 =/= s3_spec_push || s3_popped_in_s2 =/= s3_spec_pop
-  io.out.resp.s3.rasSp  := spec_ras.sp
-  io.out.resp.s3.rasTop := spec_ras.top
+  val s3_recover = io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
+  io.out.resp.s3.rasSp  := s3_sp
+  io.out.resp.s3.rasTop := s3_top
 
 
   val redirect = RegNext(io.redirect)
@@ -218,8 +218,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // when we mispredict a call, we must redo a push operation
   // similarly, when we mispredict a return, we should redo a pop
   spec_ras.recover_valid := do_recover
-  spec_ras.recover_push := Mux(redirect.valid, callMissPred, s3_spec_push)
-  spec_ras.recover_pop  := Mux(redirect.valid, retMissPred, s3_spec_pop)
+  spec_ras.recover_push := Mux(redirect.valid, callMissPred, s3_push)
+  spec_ras.recover_pop  := Mux(redirect.valid, retMissPred, s3_pop)
 
   spec_ras.recover_sp  := Mux(redirect.valid, recover_cfi.rasSp, s3_sp)
   spec_ras.recover_top := Mux(redirect.valid, recover_cfi.rasEntry, s3_top)
