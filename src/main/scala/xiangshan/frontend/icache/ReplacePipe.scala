@@ -29,6 +29,7 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
   val vaddr = UInt(VAddrBits.W)
   val param  = UInt(TLPermissions.cWidth.W)
   val voluntary = Bool()
+  val needData = Bool()
   val waymask = UInt(nWays.W)
   val id = UInt(ReplaceIdWid.W)
 
@@ -60,6 +61,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val status = new Bundle() {
       val r1_set, r2_set = ValidIO(UInt(idxBits.W))
     }
+
+    val csr_parity_enable = Input(Bool())
+
   })
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
@@ -113,8 +117,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r1_data_errors             = ResultHoldBypass(data = dataError, valid = RegNext(r0_fire))
 
 
-  val r1_parity_meta_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_), valid = RegNext(r0_fire))
-  val r1_parity_data_error = ResultHoldBypass(data = r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
+  val r1_parity_meta_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) && io.csr_parity_enable, valid = RegNext(r0_fire))
+  val r1_parity_data_error = ResultHoldBypass(data = r1_data_errors.reduce(_||_) && io.csr_parity_enable, valid = RegNext(r0_fire))
   val r1_parity_error = ResultHoldBypass(data = r1_meta_errors.reduce(_||_) || r1_data_errors.reduce(_||_), valid = RegNext(r0_fire))
 
 
@@ -182,7 +186,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   /*** to Release Unit ***/
   val r2_paddr = Mux(r2_req.isProbe, r2_req.paddr , r2_release_addr)
   val r2_param = Mux(r2_req.isProbe, probe_shrink_param , release_shrink_param)
-  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() || r2_req.isRelease
+  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() && r2_req.needData || r2_req.isRelease
   val r2_data  = Mux(r2_req.isProbe, r2_probe_hit_data , r2_release_data)
 
   val r2_write_tag = Mux(r2_req.isProbe, r2_probe_hit_ptag , r2_release_ptag)

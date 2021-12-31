@@ -121,6 +121,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.release_req.bits.vaddr := req.vaddr
   io.release_req.bits.voluntary := true.B
   io.release_req.bits.waymask   := req.waymask
+  io.release_req.bits.needData   := false.B
   io.release_req.bits.id   := release_id
   io.release_req.bits.param := DontCare //release will not care tilelink param
 
