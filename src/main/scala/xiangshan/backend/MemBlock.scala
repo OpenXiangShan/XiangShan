@@ -228,7 +228,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_ld.map(_.ptw_replenish := pmp_check_ptw.io.resp)
   dtlb_st.map(_.ptw_replenish := pmp_check_ptw.io.resp)
 
-  val tdata = Reg(Vec(6, new MatchTriggerIO))
+  val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
   val en = csrCtrl.trigger_enable
   tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
