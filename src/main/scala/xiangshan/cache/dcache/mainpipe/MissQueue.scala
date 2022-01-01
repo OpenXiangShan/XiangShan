@@ -360,6 +360,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   replace.store_mask := 0.U
   replace.replace := true.B
   replace.replace_way_en := req.way_en
+  replace.error := false.B
 
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   val refill = io.refill_pipe_req.bits
@@ -407,6 +408,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.main_pipe_req.bits.word_idx := req.word_idx
   io.main_pipe_req.bits.amo_data := req.amo_data
   io.main_pipe_req.bits.amo_mask := req.amo_mask
+  io.main_pipe_req.bits.error := error
   io.main_pipe_req.bits.id := req.id
 
   io.block_addr.valid := req_valid && w_grantlast && !w_refill_resp

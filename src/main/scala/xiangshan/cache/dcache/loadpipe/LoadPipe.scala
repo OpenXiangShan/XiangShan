@@ -277,8 +277,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
   // report tag / data / l2 error (with paddr) to bus error unit
-  io.error.ecc_error.valid := RegNext((s2_tag_error || s2_data_error) && s2_valid)
-  io.error.ecc_error.bits := RegNext(s2_addr)
+  io.error.report_to_beu := RegNext((s2_tag_error || s2_data_error) && s2_valid)
+  io.error.paddr := RegNext(s2_addr)
   io.error.source.tag := RegNext(s2_tag_error)
   io.error.source.data := RegNext(s2_data_error)
   io.error.source.l2 := RegNext(s2_flag_error)

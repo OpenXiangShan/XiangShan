@@ -108,7 +108,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
   when(!csrCtrl.cache_error_enable){
-    io.error.ecc_error.valid := false.B
+    io.error.report_to_beu := false.B
     io.error.valid := false.B
   }
 
