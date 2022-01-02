@@ -400,7 +400,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
-  dispatch.io.singleStep := false.B
+  dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> stage2Redirect
   fpDq.io.redirect <> stage2Redirect

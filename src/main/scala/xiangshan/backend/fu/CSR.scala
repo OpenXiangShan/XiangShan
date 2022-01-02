@@ -121,7 +121,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // TLB
   val tlb = Output(new TlbCsrBundle)
   // Debug Mode
-  val singleStep = Output(Bool())
+  // val singleStep = Output(Bool())
   val debugMode = Output(Bool())
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
@@ -254,8 +254,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val dcsrNew = dcsr | (dcsrOld.prv(0) | dcsrOld.prv(1)).asUInt // turn 10 priv into 11
     dcsrNew
   }
-  csrio.singleStep := dcsrData.step
-  csrio.customCtrl.singlestep := dcsrData.step
+  // csrio.singleStep := dcsrData.step
+  csrio.customCtrl.singlestep := dcsrData.step && !debugMode
 
   // Trigger CSRs
 
