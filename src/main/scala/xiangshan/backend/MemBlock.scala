@@ -296,7 +296,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
       loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
-      hit(j) := loadUnits(i).io.trigger(j).addrHit && tdata(j).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
+      hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
       io.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
 //      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
       //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
