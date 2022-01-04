@@ -339,50 +339,41 @@ class TageTable
     ctr.andR && taken || !ctr.orR && !taken
   }
 
-  val bank_wrbypasses = Seq.fill(nBanks)(Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRows/nBanks), numWays=numBr, tagWidth=tagLen)))
+  val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRows/nBanks), tagWidth=tagLen))
+  ))
 
   for (b <- 0 until nBanks) {
     val update_wdata = per_bank_update_wdata(b)
-    val wrbypass = bank_wrbypasses(b)
     val not_silent_update = per_bank_not_silent_update(b)
-    wrbypass.io.wen := io.update.mask.reduce(_||_) && update_req_bank_1h(b)
-    wrbypass.io.write_way_mask.map(_ := io.update.mask)
-    wrbypass.io.write_data := update_wdata.ctrs
-    
-    val bypass_ctrs = wrbypass.io.hit_data
     for (i <- 0 until numBr) {
+      val wrbypass = bank_wrbypasses(b)(i)
+      wrbypass.io.wen := io.update.mask(i) && update_req_bank_1h(b)
+      wrbypass.io.write_data(0) := update_wdata.ctrs(i)
+      val bypass_ctr = wrbypass.io.hit_data(0).bits
       update_wdata.ctrs(i) :=
         Mux(io.update.alloc,
           Mux(io.update.takens(i), 4.U, 3.U),
-          Mux(wrbypass.io.hit && bypass_ctrs(i).valid,
-                inc_ctr(bypass_ctrs(i).bits,  io.update.takens(i)),
+          Mux(wrbypass.io.hit,
+                inc_ctr(bypass_ctr,           io.update.takens(i)),
                 inc_ctr(io.update.oldCtrs(i), io.update.takens(i))
           )
         )
       not_silent_update(i) :=
-        Mux(wrbypass.io.hit && bypass_ctrs(i).valid,
-          !silentUpdate(bypass_ctrs(i).bits,  io.update.takens(i)),
+        Mux(wrbypass.io.hit,
+          !silentUpdate(bypass_ctr,           io.update.takens(i)),
           !silentUpdate(io.update.oldCtrs(i), io.update.takens(i))) ||
         io.update.alloc
+      wrbypass.io.write_idx := get_bank_idx(update_idx)
+      wrbypass.io.write_tag.map(_ := update_tag)
     }
     update_wdata.valid := true.B
     update_wdata.tag   := update_tag
-
-    wrbypass.io.write_idx := get_bank_idx(update_idx)
-    wrbypass.io.write_tag.map(_ := update_tag)
   }
-  
-
-
-  // silent_update_from_wrbypass := wrbypass.io.hit && silentUpdate(bypass_ctr, io.update.taken)
-  
-  
-
-
 
   for (i <- 0 until numBr) {
     for (b <- 0 until nBanks) {
-      val wrbypass = bank_wrbypasses(b)
+      val wrbypass = bank_wrbypasses(b)(i)
       XSPerfAccumulate(f"tage_table_bank_${b}_wrbypass_enq_$i", io.update.mask(i) && update_req_bank_1h(b) && !wrbypass.io.hit)
       XSPerfAccumulate(f"tage_table_bank_${b}_wrbypass_hit_$i", io.update.mask(i) && update_req_bank_1h(b) &&  wrbypass.io.hit)
     }

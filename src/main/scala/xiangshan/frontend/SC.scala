@@ -121,23 +121,25 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     waymask = updateWayMask.asUInt
   )
 
-  val wrBypassEntries = 4
+  val wrBypassEntries = 16
 
-  val wrbypass = Module(new WrBypass(SInt(ctrBits.W), wrBypassEntries, log2Ceil(nRows), numWays=2*numBr))
+  val wrbypasses = Seq.fill(numBr)(Module(new WrBypass(SInt(ctrBits.W), wrBypassEntries, log2Ceil(nRows), numWays=2)))
 
   for (i <- 0 until numBr) {
+    val wrbypass = wrbypasses(i)
     val ctrPos = io.update.tagePreds(i)
     val altPos = !io.update.tagePreds(i)
-    val bypass_ctr = wrbypass.io.hit_data((i << 1).U | ctrPos)
+    val bypass_ctr = wrbypass.io.hit_data(ctrPos)
     val hit_and_valid = wrbypass.io.hit && bypass_ctr.valid
     val oldCtr = Mux(hit_and_valid, bypass_ctr.bits, io.update.oldCtrs(i))
     update_wdata(i) := ctrUpdate(oldCtr, io.update.takens(i))
+
+    wrbypass.io.wen := io.update.mask(i)
+    wrbypass.io.write_data := update_wdata_packed.slice(2*i, 2*i+2)
+    wrbypass.io.write_idx := update_idx
+    wrbypass.io.write_way_mask.map(_ := updateWayMask.slice(2*i, 2*i+2))
   }
 
-  wrbypass.io.wen := io.update.mask.reduce(_||_)
-  wrbypass.io.write_data := update_wdata_packed // only one of them are used
-  wrbypass.io.write_idx := update_idx
-  wrbypass.io.write_way_mask.map(_ := updateWayMask)
 
   val u = io.update
   XSDebug(io.req.valid,
