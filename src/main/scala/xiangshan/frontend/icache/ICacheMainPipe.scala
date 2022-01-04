@@ -76,6 +76,9 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
   val hit_0_miss_1   = Bool()
   val miss_0_hit_1   = Bool()
   val miss_0_miss_1  = Bool()
+  val hit_0_except_1 = Bool()
+  val miss_0_except_1 = Bool()
+  val except_0       = Bool()
   val bank_hit       = Vec(2,Bool())
   val hit            = Bool()
 }
@@ -92,6 +95,10 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val respStall   = Input(Bool())
   val perfInfo = Output(new ICachePerfInfo)
+
+  val prefetchEnable = Output(Bool())
+  val prefetchDisable = Output(Bool())
+  val csr_parity_enable = Input(Bool())
 
 }
 
@@ -112,7 +119,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_fire,  s1_fire , s2_fire  = WireInit(false.B)
 
   val missSwitchBit = RegInit(false.B)
-  
+
+  io.prefetchEnable := false.B
+  io.prefetchDisable := false.B
   /** replacement status register */
   val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
@@ -233,7 +242,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errors             = ResultHoldBypass(data = dataResp.errors, valid = RegNext(s0_fire))
 
-  val s1_parity_error = VecInit((0 until PortNumber).map(i => s1_meta_errors(i).reduce(_||_) || s1_data_errors(i).reduce(_||_)))
+  val s1_parity_meta_error = VecInit((0 until PortNumber).map(i => s1_meta_errors(i).reduce(_||_) && io.csr_parity_enable))
+  val s1_parity_data_error = VecInit((0 until PortNumber).map(i => s1_data_errors(i).reduce(_||_) && io.csr_parity_enable))
+  val s1_parity_error = VecInit((0 until PortNumber).map(i => s1_parity_meta_error(i) || s1_parity_data_error(i)))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
   val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
@@ -252,10 +263,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
 
   for(i <- 0 until PortNumber){
-    io.errors(i).ecc_error.valid  := RegNext(s1_parity_error(i) && RegNext(s0_fire))
-    io.errors(i).ecc_error.bits   := true.B
-    io.errors(i).paddr.valid      := RegNext(io.errors(i).ecc_error.valid)  
-    io.errors(i).paddr.bits       := RegNext(tlbRespPAddr(i))  
+    io.errors(i).valid            := RegNext(s1_parity_error(i) && RegNext(s0_fire))
+    io.errors(i).report_to_beu    := RegNext(s1_parity_error(i) && RegNext(s0_fire))
+    io.errors(i).paddr            := RegNext(tlbRespPAddr(i))
+    io.errors(i).source           := DontCare
+    io.errors(i).source.tag       := RegNext(s1_parity_meta_error(i))
+    io.errors(i).source.data      := RegNext(s1_parity_data_error(i))
+    io.errors(i).source.l2        := false.B
+    io.errors(i).opType           := DontCare
+    io.errors(i).opType.fetch     := true.B
   }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
@@ -553,9 +569,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   when(toMSHR.map(_.valid).reduce(_||_)){
     missSwitchBit := true.B
+    io.prefetchEnable := true.B
   }.elsewhen(missSwitchBit && s2_fetch_finish){
     missSwitchBit := false.B
+    io.prefetchDisable := true.B
   }
+
 
   val miss_all_fix       =  wait_state === wait_finish
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio)
@@ -590,17 +609,29 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i) || missSlot(i).m_corrupt
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
+
+    when(RegNext(s2_fire && missSlot(i).m_corrupt)){
+      io.errors(i).valid            := true.B
+      io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
+      io.errors(i).paddr            := RegNext(s2_req_paddr(i))
+      io.errors(i).source.tag       := false.B
+      io.errors(i).source.data      := false.B
+      io.errors(i).source.l2        := true.B
+    }
   }
 
-  io.perfInfo.only_0_hit    := only_0_miss_latch
+  io.perfInfo.only_0_hit    := only_0_hit_latch
   io.perfInfo.only_0_miss   := only_0_miss_latch
   io.perfInfo.hit_0_hit_1   := hit_0_hit_1_latch
   io.perfInfo.hit_0_miss_1  := hit_0_miss_1_latch
   io.perfInfo.miss_0_hit_1  := miss_0_hit_1_latch
   io.perfInfo.miss_0_miss_1 := miss_0_miss_1_latch
+  io.perfInfo.hit_0_except_1 := hit_0_except_1_latch
+  io.perfInfo.miss_0_except_1 := miss_0_except_1_latch
+  io.perfInfo.except_0      := except_0_latch
   io.perfInfo.bank_hit(0)   := only_0_miss_latch  || hit_0_hit_1_latch || hit_0_miss_1_latch || hit_0_except_1_latch
   io.perfInfo.bank_hit(1)   := miss_0_hit_1_latch || hit_0_hit_1_latch 
-  io.perfInfo.hit           := hit_0_hit_1_latch
+  io.perfInfo.hit           := hit_0_hit_1_latch || only_0_hit_latch || hit_0_except_1_latch || except_0_latch
 
   /** <PERF> fetch bubble generated by icache miss*/
 

@@ -94,7 +94,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2,
           nReleaseEntries = 2,
           nProbeEntries = 2,
-          nPrefetchEntries = 4,
+          nPrefetchEntries = 2,
           hasPrefetch = false
         ),
         dcacheParametersOpt = Some(DCacheParameters(

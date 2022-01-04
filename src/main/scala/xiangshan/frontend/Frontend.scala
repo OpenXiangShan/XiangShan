@@ -21,8 +21,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker}
-import xiangshan.cache.mmu.{TLB, TlbPtwIO}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
 
@@ -77,13 +77,31 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
+  val pmp_req_vec     = Wire(Vec(2, Valid(new PMPReqBundle())))
+  pmp_req_vec(0) <> icache.io.pmp(0).req
+  pmp_req_vec(1).valid  :=  icache.io.pmp(1).req.valid || ifu.io.pmp.req.valid 
+  pmp_req_vec(1).bits   := Mux(ifu.io.pmp.req.valid, ifu.io.pmp.req.bits, icache.io.pmp(1).req.bits)
+
   for (i <- pmp_check.indices) {
-    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp(i).req)
+    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
     icache.io.pmp(i).resp <> pmp_check(i).resp
   }
+  ifu.io.pmp.resp <> pmp_check(1).resp
+  ifu.io.pmp.req.ready := false.B
+
+  val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
+  tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
+  tlb_req_arb.io.in(1) <> icache.io.itlb(1).req
+
+  val itlb_requestors = Wire(Vec(2, new BlockTlbRequestIO))
+  itlb_requestors(0) <> icache.io.itlb(0)
+  itlb_requestors(1).req <>  tlb_req_arb.io.out
+  ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
+  icache.io.itlb(1).resp <> itlb_requestors(1).resp
 
   io.ptw <> TLB(
-    in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
+    //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
+    in = Seq(itlb_requestors(0), itlb_requestors(1)),
     sfence = io.sfence,
     csr = tlbCsr,
     width = 2,
@@ -110,10 +128,11 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  //icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
-
   icache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(icache.io.csr.update)
+
+  icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
+  icache.io.csr_parity_enable := RegNext(csrCtrl.icache_parity_enable)
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

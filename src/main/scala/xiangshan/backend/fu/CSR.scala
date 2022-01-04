@@ -395,7 +395,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
-  val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
+  val marchid = RegInit(UInt(XLEN.W), 25.U) // architecture id for XiangShan is 25; see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
@@ -499,11 +499,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.bp_ctrl.ras_enable  := sbpctl(5)
   csrio.customCtrl.bp_ctrl.loop_enable := sbpctl(6)
 
-  // spfctl Bit 0: L1plusCache Prefetcher Enable
+  // spfctl Bit 0: L1I Cache Prefetcher Enable
   // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
-  csrio.customCtrl.l1plus_pf_enable := spfctl(0)
+  val spfctl = RegInit(UInt(XLEN.W), "b11".U)
+  csrio.customCtrl.l1I_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
+
+  // sfetchctl Bit 0: L1I Cache Parity check enable
+  val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
+  csrio.customCtrl.icache_parity_enable := sfetchctl(0)
 
   // sdsid: Differentiated Services ID
   val sdsid = RegInit(UInt(XLEN.W), 0.U)
@@ -671,6 +675,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Supervisor Custom Read/Write Registers
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
+    MaskedRegMap(Sfetchctl, sfetchctl),
     MaskedRegMap(Sdsid, sdsid),
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
@@ -1140,6 +1145,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         cacheopRegs(name) := distributedUpdateData
       }
     }}
+  }
+
+  // Cache error debug support
+  if(HasCustomCSRCacheOp){
+    val cache_error_decoder = Module(new CSRCacheErrorDecoder)
+    cache_error_decoder.io.encoded_cache_error := cacheopRegs("CACHE_ERROR")
   }
 
   // Implicit add reset values for mepc[0] and sepc[0]

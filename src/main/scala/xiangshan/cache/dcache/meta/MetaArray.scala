@@ -89,10 +89,8 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.ecc_error.valid := RegNext(io.read.fire()) && Cat(ecc_errors).orR()
-  io.error.ecc_error.bits := true.B
-  io.error.paddr.valid := io.error.ecc_error.valid
-  io.error.paddr.bits := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
+  io.error.report_to_beu := RegNext(io.read.fire()) && Cat(ecc_errors).orR()
+  io.error.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
   io.read.ready := !wen

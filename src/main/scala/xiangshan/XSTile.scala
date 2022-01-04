@@ -14,21 +14,19 @@ import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
 
-class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
-  val paddr = Valid(UInt(soc.PAddrBits.W))
-  // for now, we only detect ecc
-  val ecc_error = Valid(Bool())
+class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
+  val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
 }
 
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
-  val icache = new L1CacheErrorInfo
-  val dcache = new L1CacheErrorInfo
+  val icache = new L1BusErrorUnitInfo
+  val dcache = new L1BusErrorUnitInfo
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
     List(
-      Some(icache.paddr, s"IBUS", s"Icache bus error"),
+//      Some(icache.paddr, s"IBUS", s"Icache bus error"),
       Some(icache.ecc_error, s"I_ECC", s"Icache ecc error"),
-      Some(dcache.paddr, s"DBUS", s"Dcache bus error"),
+//      Some(dcache.paddr, s"DBUS", s"Dcache bus error"),
       Some(dcache.ecc_error, s"D_ECC", s"Dcache ecc error")
     )
 }

@@ -442,8 +442,10 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val l1plus_pf_enable = Output(Bool())
+  val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  // ICache
+  val icache_parity_enable = Output(Bool())
   // Labeled XiangShan
   val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor
@@ -501,6 +503,38 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
+class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
+  // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
+  val source = Output(new Bundle() {
+    val tag = Bool() // l1 tag array
+    val data = Bool() // l1 data array
+    val l2 = Bool()
+  })
+  val opType = Output(new Bundle() {
+    val fetch = Bool()
+    val load = Bool()
+    val store = Bool()
+    val probe = Bool()
+    val release = Bool()
+    val atom = Bool()
+  })
+  val paddr = Output(UInt(PAddrBits.W))
+
+  // report error and paddr to beu
+  // bus error unit will receive error info iff ecc_error.valid
+  val report_to_beu = Output(Bool())
+
+  // there is an valid error
+  // l1 cache error will always be report to CACHE_ERROR csr
+  val valid = Output(Bool())
+
+  def toL1BusErrorUnitInfo(): L1BusErrorUnitInfo = {
+    val beu_info = Wire(new L1BusErrorUnitInfo)
+    beu_info.ecc_error.valid := report_to_beu
+    beu_info.ecc_error.bits := paddr
+    beu_info
+  }
+}
 
 /* TODO how to trigger on next inst?
 1. If hit is determined at frontend, then set a "next instr" trap at dispatch like singlestep

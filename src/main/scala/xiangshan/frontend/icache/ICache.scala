@@ -390,14 +390,18 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val prefetch        = Flipped(new FtqPrefechBundle)
+  val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
-  val csr         = new L1CacheToCsrIO
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
-  val perfInfo = Output(new ICachePerfInfo)
-  val error  = new L1CacheErrorInfo
+  val perfInfo    = Output(new ICachePerfInfo)
+  val error       = new L1CacheErrorInfo
+  /* Cache Instruction */
+  val csr         = new L1CacheToCsrIO
+  /* CSR control signal */
+  val csr_pf_enable = Input(Bool())
+  val csr_parity_enable = Input(Bool())
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -471,8 +475,15 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
 
+  mainPipe.io.csr_parity_enable := io.csr_parity_enable
+  replacePipe.io.csr_parity_enable := io.csr_parity_enable
+
   if(cacheParams.hasPrefetch){
     prefetchPipe.io.fromFtq <> io.prefetch
+    when(!io.csr_pf_enable){
+      prefetchPipe.io.fromFtq.req.valid := false.B
+      io.prefetch.req.ready := true.B
+    }
   } else {
     prefetchPipe.io.fromFtq <> DontCare
   }
@@ -483,6 +494,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   mainPipe.io.pmp(0).resp <> io.pmp(0).resp
   prefetchPipe.io.pmp.resp <> io.pmp(0).resp
+
+  prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
+  prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
+
 
   io.pmp(1) <> mainPipe.io.pmp(1)
 
@@ -541,7 +556,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors ++ Seq(replacePipe.io.error)
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
 
 
   /** Block set-conflict request */
@@ -620,9 +635,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     dataArray.io.cacheOp.resp.valid -> dataArray.io.cacheOp.resp.bits,
     metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
   ))
-  // TODO
-  cacheOpDecoder.io.error := DontCare
-  cacheOpDecoder.io.error.ecc_error.valid := false.B
+  cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
 } 

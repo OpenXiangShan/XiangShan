@@ -267,7 +267,7 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
                         else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val tdata = Reg(Vec(4, new MatchTriggerIO))
+  val tdata = RegInit(VecInit(Seq.fill(4)(0.U.asTypeOf(new MatchTriggerIO))))
   when(io.frontendTrigger.t.valid) {
     tdata(io.frontendTrigger.t.bits.addr) := io.frontendTrigger.t.bits.tdata
   }

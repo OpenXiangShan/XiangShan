@@ -106,6 +106,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.addr   := req.addr
     pipe_req.vaddr  := req.vaddr
     pipe_req.probe_need_data := req.needData
+    pipe_req.error := false.B
     pipe_req.id := io.id
 
     when (io.pipe_req.fire()) {
