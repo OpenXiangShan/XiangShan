@@ -1086,7 +1086,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         // ebreak or ss in running hart
         debugModeNew := true.B
         dpc := iexceptionPC
-        dcsrNew.cause := Mux(hasTriggerHit, 4.U, Mux(hasbreakPoint, 3.U, 0.U))
+        dcsrNew.cause := Mux(hasTriggerHit, 2.U, Mux(hasbreakPoint, 1.U, 4.U))
         dcsrNew.prv := priviledgeMode // TODO
         priviledgeMode := ModeM
         mstatusNew.mprv := false.B
