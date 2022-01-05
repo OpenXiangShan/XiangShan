@@ -236,7 +236,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // | zero     | 0
   // | ebreaks  |
   // | ebreaku  |
-  // | stepie   | 0 disable interrupts in singlestep
+  // | stepie   | disable interrupts in singlestep
   // | stopcount| stop counter, 0
   // | stoptime | stop time, 0
   // | cause    | 3 bits read only
@@ -951,7 +951,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))
-  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y) && !debugMode}
+  val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie)
+  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y) && !disableInterrupt}
   val intrVec = Cat(debugIntr && !debugMode, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
   val intrBitSet = intrVec.orR()
   csrio.interrupt := intrBitSet
