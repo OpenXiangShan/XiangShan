@@ -102,7 +102,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasPerfEvents
 {
-  println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val (toICache, fromICache) = (VecInit(io.icacheInter.map(_.req)), VecInit(io.icacheInter.map(_.resp)))
