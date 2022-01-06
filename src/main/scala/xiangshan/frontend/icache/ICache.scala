@@ -61,7 +61,7 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst{
   val cacheParams = icacheParameters
-  val dataCodeUnit = 8
+  val dataCodeUnit = 16
   val dataCodeUnitNum  = blockBits/dataCodeUnit
 
   def highestIdxBit = log2Ceil(nSets) - 1
