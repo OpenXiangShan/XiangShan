@@ -91,6 +91,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
+  l3cacheOpt.map(_.intnode.map(int => {
+    misc.plic.intnode := IntBuffer() := int
+  }))
 
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
@@ -105,7 +108,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   l3cacheOpt match {
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
-      misc.plic.intnode := IntBuffer() := l3.intnode
     case None =>
   }
 
