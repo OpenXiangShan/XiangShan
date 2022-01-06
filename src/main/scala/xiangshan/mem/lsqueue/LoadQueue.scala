@@ -790,7 +790,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   (0 until LoadPipelineWidth).map(i => {
     vaddrTriggerResultModule.io.raddr(i) := loadWbSelGen(i)
-    io.trigger(i).lqLoadAddrTriggerHitVec := vaddrTriggerResultModule.io.rdata(i)
+    io.trigger(i).lqLoadAddrTriggerHitVec := Mux(
+      loadWbSelV(i),
+      vaddrTriggerResultModule.io.rdata(i),
+      VecInit(Seq.fill(3)(false.B))
+    )
   })
 
   // misprediction recovery / exception redirect
