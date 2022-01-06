@@ -267,14 +267,13 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
                         else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val tdata = Reg(Vec(4, new MatchTriggerIO))
+  val tdata = RegInit(VecInit(Seq.fill(4)(0.U.asTypeOf(new MatchTriggerIO))))
   when(io.frontendTrigger.t.valid) {
     tdata(io.frontendTrigger.t.bits.addr) := io.frontendTrigger.t.bits.tdata
   }
   io.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
   val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
   triggerEnable := io.csrTriggerEnable
-  val triggerHitVec = Wire(Vec(4, Bool()))
   XSDebug(triggerEnable.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
 
   for (i <- 0 until 4) {PrintTriggerInfo(triggerEnable(i), tdata(i))}
@@ -283,6 +282,7 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
     val currentPC = io.pc(i)
     val currentIsRVC = io.pds(i).isRVC
     val inst = WireInit(rawInsts(i))
+    val triggerHitVec = Wire(Vec(4, Bool()))
 
     for (j <- 0 until 4) {
       triggerHitVec(j) := Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),

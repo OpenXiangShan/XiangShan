@@ -267,8 +267,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
 
-  io.beu_errors.icache <> frontend.io.error
-  io.beu_errors.dcache <> memBlock.io.error
+  io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head

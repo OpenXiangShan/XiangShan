@@ -499,6 +499,38 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
+class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
+  // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
+  val source = Output(new Bundle() {
+    val tag = Bool() // l1 tag array
+    val data = Bool() // l1 data array
+    val l2 = Bool()
+  })
+  val opType = Output(new Bundle() {
+    val fetch = Bool()
+    val load = Bool()
+    val store = Bool()
+    val probe = Bool()
+    val release = Bool()
+    val atom = Bool()
+  })
+  val paddr = Output(UInt(PAddrBits.W))
+
+  // report error and paddr to beu
+  // bus error unit will receive error info iff ecc_error.valid
+  val report_to_beu = Output(Bool())
+
+  // there is an valid error
+  // l1 cache error will always be report to CACHE_ERROR csr
+  val valid = Output(Bool())
+
+  def toL1BusErrorUnitInfo(): L1BusErrorUnitInfo = {
+    val beu_info = Wire(new L1BusErrorUnitInfo)
+    beu_info.ecc_error.valid := report_to_beu
+    beu_info.ecc_error.bits := paddr
+    beu_info
+  }
+}
 
 /* TODO how to trigger on next inst?
 1. If hit is determined at frontend, then set a "next instr" trap at dispatch like singlestep
@@ -543,6 +575,11 @@ class TriggerCf(implicit p: Parameters) extends XSBundle {
   def getHitFrontend = frontendHit.reduce(_ || _)
   def getHitBackend = backendHit.reduce(_ || _)
   def hit = getHitFrontend || getHitBackend
+  def clear(): Unit = {
+    frontendHit.foreach(_ := false.B)
+    backendEn.foreach(_ := false.B)
+    backendHit.foreach(_ := false.B)
+  }
 }
 
 // these 3 bundles help distribute trigger control signals from CSR

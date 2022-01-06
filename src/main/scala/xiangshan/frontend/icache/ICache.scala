@@ -390,7 +390,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val prefetch        = Flipped(new FtqPrefechBundle)
+  val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
@@ -556,7 +556,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors ++ Seq(replacePipe.io.error)
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
 
 
   /** Block set-conflict request */
