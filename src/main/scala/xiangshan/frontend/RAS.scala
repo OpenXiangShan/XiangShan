@@ -58,8 +58,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     })
 
     val debugIO = IO(new Bundle{
-        val push_entry = Output(new RASEntry)
-        val alloc_new = Output(Bool())
+        val spec_push_entry = Output(new RASEntry)
+        val spec_alloc_new = Output(Bool())
+        val recover_push_entry = Output(new RASEntry)
+        val recover_alloc_new = Output(Bool())
         val sp = Output(UInt(log2Up(rasSize).W))
         val topRegister = Output(new RASEntry)
         val out_mem = Output(Vec(RasSize, new RASEntry))
@@ -67,13 +69,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top = RegInit(0.U.asTypeOf(new RASEntry))
+    val top = RegInit(RASEntry(0x80000000L.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
 
     def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
     def ptrDec(ptr: UInt) = Mux(ptr === 0.U, (rasSize-1).U, ptr - 1.U)
 
-    val alloc_new = io.spec_new_addr =/= top.retAddr || top.ctr.andR
+    val spec_alloc_new = io.spec_new_addr =/= top.retAddr || top.ctr.andR
     val recover_alloc_new = io.recover_new_addr =/= io.recover_top.retAddr || io.recover_top.ctr.andR
 
     // TODO: fix overflow and underflow bugs
@@ -85,8 +87,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
           sp     := ptrInc(do_sp)
           topPtr := do_sp
           top.retAddr := do_new_addr
-          top.ctr := 1.U
-          stack.write(do_sp, RASEntry(do_new_addr, 1.U))
+          top.ctr := 0.U
+          stack.write(do_sp, RASEntry(do_new_addr, 0.U))
         }.otherwise {
           when (recover) {
             sp := do_sp
@@ -97,7 +99,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
           stack.write(do_top_ptr, RASEntry(do_new_addr, do_top.ctr + 1.U))
         }
       }.elsewhen (do_pop) {
-        when (do_top.ctr === 1.U) {
+        when (do_top.ctr === 0.U) {
           sp     := ptrDec(do_sp)
           topPtr := ptrDec(do_top_ptr)
           top := stack.read(ptrDec(do_top_ptr))
@@ -124,7 +126,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     update(io.recover_valid)(
       Mux(io.recover_valid, io.recover_push,     io.push_valid),
       Mux(io.recover_valid, io.recover_pop,      io.pop_valid),
-      Mux(io.recover_valid, recover_alloc_new,   alloc_new),
+      Mux(io.recover_valid, recover_alloc_new,   spec_alloc_new),
       Mux(io.recover_valid, io.recover_sp,       sp),
       Mux(io.recover_valid, io.recover_sp - 1.U, topPtr),
       Mux(io.recover_valid, io.recover_new_addr, io.spec_new_addr),
@@ -143,8 +145,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       do_reset := false.B
     }
 
-    debugIO.push_entry := RASEntry(io.spec_new_addr, Mux(alloc_new, 1.U, top.ctr + 1.U))
-    debugIO.alloc_new := alloc_new
+    debugIO.spec_push_entry := RASEntry(io.spec_new_addr, Mux(spec_alloc_new, 1.U, top.ctr + 1.U))
+    debugIO.spec_alloc_new := spec_alloc_new
+    debugIO.recover_push_entry := RASEntry(io.recover_new_addr, Mux(recover_alloc_new, 1.U, io.recover_top.ctr + 1.U))
+    debugIO.recover_alloc_new := recover_alloc_new
     debugIO.sp := sp
     debugIO.topRegister := top
     for (i <- 0 until RasSize) {
@@ -241,10 +245,16 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       when(i.U === spec_debug.sp){XSDebug(false,true.B,"   <----sp")}
       XSDebug(false,true.B,"\n")
   }
-  XSDebug(s2_spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
-      s2_spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-  XSDebug(s2_spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
+  XSDebug(s2_spec_push, "s2_spec_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
+  s2_spec_new_addr,spec_debug.spec_push_entry.ctr,spec_debug.spec_alloc_new,spec_debug.sp.asUInt)
+  XSDebug(s2_spec_pop, "s2_spec_pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
+  val s3_recover_entry = spec_debug.recover_push_entry
+  XSDebug(s3_recover && s3_push, "s3_recover_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
+    s3_recover_entry.retAddr, s3_recover_entry.ctr, spec_debug.recover_alloc_new, s3_sp.asUInt)
+  XSDebug(s3_recover && s3_pop, "s3_recover_pop  outAddr: 0x%x \n",io.out.resp.s3.getTarget)
   val redirectUpdate = redirect.bits.cfiUpdate
-  XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
-      do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
+  XSDebug(do_recover && callMissPred, "redirect_recover_push\n")
+  XSDebug(do_recover && retMissPred, "redirect_recover_pop\n")
+  XSDebug(do_recover, "redirect_recover(SP:%d retAddr:%x ctr:%d) \n",
+      redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
 }
