@@ -187,7 +187,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f1_ready := f2_ready || !f1_valid
 
-  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
+  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx) && f1_valid
   // from_bpu_f1_flush := false.B
 
   when(f1_flush)                  {f1_valid  := false.B}
