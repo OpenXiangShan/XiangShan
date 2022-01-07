@@ -540,7 +540,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // TODO: 
 
   s3_redirect := s3_fire && !previous_s2_pred.fallThruError && (
-    resp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt
+    resp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt ||
+    resp.s3.getTarget =/= previous_s2_pred.getTarget
   )
 
   npcGen.register(s3_redirect, resp.s3.getTarget, Some("s3_target"), 3)

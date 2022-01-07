@@ -76,8 +76,7 @@ case class XSCoreParameters
         ( 4096,  119,    8)),
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
-    Seq(( 512,    0,    0),
-        ( 256,    4,    9),
+    Seq(( 256,    4,    9),
         ( 256,    8,    9),
         ( 512,   13,    9),
         ( 512,   16,    9),
