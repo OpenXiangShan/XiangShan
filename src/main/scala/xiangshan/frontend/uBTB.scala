@@ -218,7 +218,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   XSPerfAccumulate("ubtb_update_ft_mispred", RegNext(io.update.valid) && u_ftMisPred)
   XSPerfAccumulate("ubtb_update_ft_pred_correct", RegNext(io.update.valid) && !u_ftMisPred)
 
-  val perfEvents = Seq(
+  override val perfEvents = Seq(
     // ("ubtb_commit_hit       ", u_valid &&  u_meta.hit),
     // ("ubtb_commit_miss      ", u_valid && !u_meta.hit),
   )

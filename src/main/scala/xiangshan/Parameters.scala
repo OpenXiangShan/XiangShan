@@ -70,10 +70,10 @@ case class XSCoreParameters
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    Seq(( 4096,    8,   12),
-        ( 4096,   13,   12),
-        ( 4096,   31,   12),
-        ( 4096,  119,   12)),
+    Seq(( 4096,    8,    8),
+        ( 4096,   13,    8),
+        ( 4096,   31,    8),
+        ( 4096,  119,    8)),
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 512,    0,    0),
@@ -95,7 +95,7 @@ case class XSCoreParameters
       //             else          { Module(new FakeTage) })
       val ftb = Module(new FTB()(p))
       val ubtb = Module(new MicroBTB()(p))
-      val bim = Module(new BIM()(p))
+      // val bim = Module(new BIM()(p))
       val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
@@ -103,7 +103,7 @@ case class XSCoreParameters
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(bim, ubtb, tage, ftb, ittage, ras)
+      val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -111,8 +111,7 @@ case class XSCoreParameters
       // btb.io.resp_in(0)   := bim.io.resp
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
-      bim.io.in.bits.resp_in(0)  := resp_in
-      ubtb.io.in.bits.resp_in(0) := bim.io.out.resp
+      ubtb.io.in.bits.resp_in(0) := resp_in
       tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
       ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
@@ -309,11 +308,6 @@ trait HasXSParameter {
   }
   val numBr = coreParams.numBr
   val TageTableInfos = coreParams.TageTableInfos
-
-
-  val BankTageTableInfos = (0 until numBr).map(i =>
-    TageTableInfos.map{ case (s, h, t) => (s/(1 << i), h, t) }
-  )
   val TageBanks = coreParams.numBr
   val SCNRows = coreParams.SCNRows
   val SCCtrBits = coreParams.SCCtrBits
@@ -326,12 +320,12 @@ trait HasXSParameter {
   val ITTageTableInfos = coreParams.ITTageTableInfos
   type FoldedHistoryInfo = Tuple2[Int, Int]
   val foldedGHistInfos =
-    (BankTageTableInfos.flatMap(_.map{ case (nRows, h, t) =>
+    (TageTableInfos.map{ case (nRows, h, t) =>
       if (h > 0)
-        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+        Set((h, min(log2Ceil(nRows/numBr), h)), (h, min(h, t)), (h, min(h, t-1)))
       else
         Set[FoldedHistoryInfo]()
-    }.reduce(_++_)).toSet ++
+    }.reduce(_++_).toSet ++
     SCTableInfos.map{ case (nRows, _, h) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows/TageBanks), h)))

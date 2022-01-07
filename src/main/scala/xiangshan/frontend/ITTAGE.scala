@@ -717,6 +717,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
   XSDebug(updateValid, updateMeta.toPrintable+p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
+
+  generatePerfEvent()
 }
 
 

@@ -257,4 +257,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   XSDebug(do_recover && retMissPred, "redirect_recover_pop\n")
   XSDebug(do_recover, "redirect_recover(SP:%d retAddr:%x ctr:%d) \n",
       redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
+
+  generatePerfEvent()
 }

@@ -216,7 +216,8 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBPUConst with BPUUtils {
+abstract class BasePredictor(implicit p: Parameters) extends XSModule 
+  with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
   val io = IO(new BasePredictorIO())
@@ -239,6 +240,8 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   io.out.resp.s1.pc := s1_pc
   io.out.resp.s2.pc := s2_pc
   io.out.resp.s3.pc := s3_pc
+  
+  val perfEvents: Seq[(String, UInt)] = Seq()
 
 
   def getFoldedHistoryInfo: Option[Set[FoldedHistoryInfo]] = None

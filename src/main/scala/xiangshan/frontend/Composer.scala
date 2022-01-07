@@ -76,9 +76,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_++_))
 
-  val comp_1_perf = components(1).asInstanceOf[MicroBTB].getPerfEvents
-  val comp_2_perf = components(2).asInstanceOf[Tage_SC].getPerfEvents
-  val comp_3_perf = components(3).asInstanceOf[FTB].getPerfEvents
-  val perfEvents = comp_1_perf ++ comp_2_perf ++ comp_3_perf
+  override val perfEvents = components.map(_.getPerfEvents).reduce(_++_)
   generatePerfEvent()
 }

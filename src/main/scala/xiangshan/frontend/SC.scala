@@ -252,7 +252,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       )
       val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire)
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResp.ctrs(w), io.s1_fire))
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire))
       val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds = aboveThreshold(s2_scTableSums(w), s2_tagePrvdCtrCentered, useThresholds(w))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
@@ -262,17 +262,17 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s2_chooseBit = s2_tageTakens(w)
 
       val s2_pred =
-        Mux(s2_provided && s2_sumAboveThresholds(s2_chooseBit),
+        Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
           s2_scPreds(s2_chooseBit),
           s2_tageTakens(w)
         )
 
       scMeta.tageTakens(w) := RegEnable(s2_tageTakens(w), io.s2_fire)
-      scMeta.scUsed        := RegEnable(s2_provided, io.s2_fire)
+      scMeta.scUsed        := RegEnable(s2_provideds(w), io.s2_fire)
       scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire)
       scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire)
   
-      when (s2_provided) {
+      when (s2_provideds(w)) {
         s2_sc_used(w) := true.B
         s2_unconf(w) := !s2_sumAboveThresholds(s2_chooseBit)
         s2_conf(w) := s2_sumAboveThresholds(s2_chooseBit)
@@ -297,7 +297,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         val tagePred = updateSCMeta.tageTakens(w)
         val taken = update.full_pred.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs(w)
-        val pvdrCtr = updateTageMeta.providerResp.ctrs(w)
+        val pvdrCtr = updateTageMeta.providerResps(w).ctr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
         val sumAbs = sum.abs.asUInt
         val sumAboveThreshold = aboveThreshold(sum, getPvdrCentered(pvdrCtr), useThresholds(w))
@@ -364,8 +364,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
 
   override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
 
-  val perfEvents = Seq(
-    ("tage_tht_hit                  ", updateMeta.provider.valid),
+  override val perfEvents = Seq(
+    ("tage_tht_hit                  ", PopCount(updateMeta.providers.map(_.valid))),
     ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
     ("sc_update_on_unconf           ", PopCount(update_on_unconf)  ),
   )

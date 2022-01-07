@@ -518,7 +518,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
 
-  val perfEvents = Seq(
+  override val perfEvents = Seq(
     ("ftb_commit_hits            ", RegNext(io.update.valid)  &&  u_meta.hit),
     ("ftb_commit_misses          ", RegNext(io.update.valid)  && !u_meta.hit),
   )
