@@ -39,6 +39,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire
     c.io.s2_fire := io.s2_fire
+    c.io.s3_fire := io.s3_fire
 
     c.io.redirect := io.redirect
 
