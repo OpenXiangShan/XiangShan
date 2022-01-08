@@ -186,7 +186,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   /*** to Release Unit ***/
   val r2_paddr = Mux(r2_req.isProbe, r2_req.paddr , r2_release_addr)
   val r2_param = Mux(r2_req.isProbe, probe_shrink_param , release_shrink_param)
-  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() && r2_req.needData || r2_req.isRelease
+  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() && (r2_req.needData || probe_has_dirty_data) || r2_req.isRelease
   val r2_data  = Mux(r2_req.isProbe, r2_probe_hit_data , r2_release_data)
 
   val r2_write_tag = Mux(r2_req.isProbe, r2_probe_hit_ptag , r2_release_ptag)
