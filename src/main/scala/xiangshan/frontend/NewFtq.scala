@@ -1130,7 +1130,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
     "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full),
     "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
-  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s2_entry_len_map
+  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s2_entry_len_map ++
   s3_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map ++
   mispred_stage_map ++ br_mispred_stage_map ++ jalr_mispred_stage_map ++
   correct_stage_map ++ br_correct_stage_map ++ jalr_correct_stage_map
