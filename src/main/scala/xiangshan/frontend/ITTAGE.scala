@@ -413,7 +413,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_valid = io.update.valid
   val update = io.update.bits
   val updateValid =
-    update.ftb_entry.isJalr && u_valid && update.ftb_entry.jmpValid &&
+    update.full_pred.is_jalr && !update.full_pred.is_ret && u_valid && update.ftb_entry.jmpValid &&
     !(update.full_pred.real_br_taken_mask().reduce(_||_))
   val updateFhist = update.folded_hist
 
@@ -449,7 +449,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tableInfo.target := r.bits.target
     tableInfo.tableIdx := i.U(log2Ceil(ITTageNTables).W)
     SelectTwoInterRes(r.valid, tableInfo)
-  }}.init)
+  }})
 
   val selectedInfo = ParallelSelectTwo(inputRes.reverse)
   val provided = selectedInfo.hasOne
