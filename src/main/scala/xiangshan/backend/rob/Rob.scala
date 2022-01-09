@@ -101,7 +101,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
-  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && !io.exception_state.bits.flushPipe && io.exception_state.bits.robIdx === deqPtrVec(0)
+  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
@@ -168,6 +168,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
 //  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
 //  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
   def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.hit
+  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.hit
   // only exceptions are allowed to writeback when enqueue
   def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.hit
 }
