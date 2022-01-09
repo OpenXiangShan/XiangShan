@@ -208,6 +208,9 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val s2_fire = Input(Bool())
   val s3_fire = Input(Bool())
 
+  val s2_redirect = Input(Bool())
+  val s3_redirect = Input(Bool())
+
   val s1_ready = Output(Bool())
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
@@ -367,6 +370,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     .elsewhen(s2_fire) { s2_valid := false.B }
 
   predictors.io.s2_fire := s2_fire
+  predictors.io.s2_redirect := s2_redirect
 
   s3_fire := s3_valid
 
@@ -375,6 +379,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     .elsewhen(s3_fire) { s3_valid := false.B }
 
   predictors.io.s3_fire := s3_fire
+  predictors.io.s3_redirect := s3_redirect
 
 
   io.bpu_to_ftq.resp.valid :=

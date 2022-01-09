@@ -172,8 +172,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_ras.spec_new_addr := s2_spec_new_addr
 
   // confirm that the call/ret is the taken cfi
-  s2_spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_call
-  s2_spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_ret
+  s2_spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_call && !io.s3_redirect
+  s2_spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_ret  && !io.s3_redirect
 
   val s2_jalr_target = io.out.resp.s2.full_pred.jalr_target
   val s2_last_target_in = io.in.bits.resp_in(0).s2.full_pred.targets.last
