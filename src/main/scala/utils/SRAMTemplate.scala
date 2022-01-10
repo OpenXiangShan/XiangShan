@@ -150,35 +150,44 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
 }
 
-class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4,
+class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4, way: Int = 1,
   shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false, bypassWrite: Boolean = false) extends Module {
   val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(gen, set, 1))
-    val w = Flipped(new SRAMWriteBus(gen, set, 1))
+    val r = Flipped(new SRAMReadBus(gen, set, way))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
   })
+  //   |<----- setIdx ----->|
+  //   | ridx | width | way |
 
   require(width > 0 && isPow2(width))
+  require(way > 0 && isPow2(way))
   require(set % width == 0)
 
   val nRows = set / width
 
-  val array = Module(new SRAMTemplate(gen, set=nRows, way=width, shouldReset=shouldReset, holdRead=holdRead, singlePort=singlePort))
+  val array = Module(new SRAMTemplate(gen, set=nRows, way=width*way, shouldReset=shouldReset, holdRead=holdRead, singlePort=singlePort))
 
   io.r.req.ready := array.io.r.req.ready
   io.w.req.ready := array.io.w.req.ready
 
   val raddr = io.r.req.bits.setIdx >> log2Ceil(width)
-  val ridx = RegNext(io.r.req.bits.setIdx(log2Ceil(width)-1, 0))
+  val ridx = RegNext(if (width != 1) io.r.req.bits.setIdx(log2Ceil(width)-1, 0) else 0.U(1.W))
   val ren  = io.r.req.valid
 
   array.io.r.req.valid := ren
   array.io.r.req.bits.setIdx := raddr
-  io.r.resp.data(0) := array.io.r.resp.data(ridx)
+
+  val rdata = array.io.r.resp.data
+  for (w <- 0 until way) {
+    val wayData = VecInit(rdata.indices.filter(_ % way == w).map(rdata(_)))
+    io.r.resp.data(w) := Mux1H(UIntToOH(ridx, width), wayData)
+  }
 
   val wen = io.w.req.valid
-  val wdata = VecInit(Seq.fill(width)(io.w.req.bits.data(0)))
+  val wdata = VecInit(Seq.fill(width)(io.w.req.bits.data).flatten)
   val waddr = io.w.req.bits.setIdx >> log2Ceil(width)
-  val wmask = UIntToOH(io.w.req.bits.setIdx(log2Ceil(width)-1, 0))
+  val widthIdx = if (width != 1) io.w.req.bits.setIdx(log2Ceil(width)-1, 0) else 0.U
+  val wmask = if (width*way != 1) VecInit(Seq.tabulate(width*way)(n => (n / way).U === widthIdx)).asUInt else 1.U(1.W)
 
   array.io.w.apply(wen, wdata, waddr, wmask)
 }

@@ -112,7 +112,7 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(impli
   }
 
   when (io.w.valid) {
-    array(io.w.bits.index) := io.w.bits.data
+    array(io.w.bits.index) := io.w.bits.data.asUInt
   }
 }
 
