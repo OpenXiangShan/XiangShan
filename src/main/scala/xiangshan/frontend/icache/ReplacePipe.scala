@@ -40,7 +40,7 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 }
 
 
-class ReplacePipe(implicit p: Parameters) extends ICacheModule{
+class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val io = IO(new Bundle{
     val pipe_req = Flipped(DecoupledIO(new ReplacePipeReq))
 
@@ -55,11 +55,12 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
     val release_req = DecoupledIO(new ReleaseReq)
+    val release_finish = Input(Bool())
 
     val pipe_resp = ValidIO(UInt(ReplaceIdWid.W))
     
     val status = new Bundle() {
-      val r1_set, r2_set = ValidIO(UInt(idxBits.W))
+      val r1_set, r2_set, r3_set = ValidIO(UInt(idxBits.W))
     }
 
     val csr_parity_enable = Input(Bool())
@@ -71,7 +72,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val (metaError, dataError) = (io.meta_response.errors(0), io.data_response.errors(0))
 
   val r0_ready, r1_ready, r2_ready = WireInit(false.B)
-  val r0_fire,  r1_fire , r2_fire  = WireInit(false.B)
+  val r0_fire,  r1_fire , r2_fire, r3_fire  = WireInit(false.B)
 
   /**
     ******************************************************************************
@@ -209,10 +210,28 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.release_req.bits.vidx      := DontCare
 
   //response to MissQueue
-  io.pipe_resp.valid := r2_fire && r2_req.isRelease
-  io.pipe_resp.bits  := r2_req.id
+  // io.pipe_resp.valid := r2_fire && r2_req.isRelease
+  // io.pipe_resp.bits  := r2_req.id
 
   io.status.r2_set.valid := r2_valid
   io.status.r2_set.bits  := r2_req.vidx
+
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 3
+    ******************************************************************************
+    */
+
+  val r3_valid          = generatePipeControl(lastFire = r2_fire && r2_req.isRelease, thisFire = r3_fire, thisFlush = false.B, lastFlush = false.B)
+
+  r3_fire       := r3_valid && RegNext(io.release_finish)
+
+  val r3_req = RegEnable(next = r2_req, enable = r2_fire && r2_req.isRelease)
+
+  io.pipe_resp.valid := r3_fire
+  io.pipe_resp.bits  := r3_req.id
+
+  io.status.r3_set.valid := r3_valid
+  io.status.r3_set.bits  := r3_req.vidx
 
 }

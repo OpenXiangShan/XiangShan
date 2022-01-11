@@ -218,7 +218,6 @@ case class XSCoreParameters
     dataECC = Some("parity"),
     replacer = Some("setplru"),
     nMissEntries = 2,
-    nReleaseEntries = 2,
     nProbeEntries = 2,
     nPrefetchEntries = 2,
     hasPrefetch = true,
