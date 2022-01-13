@@ -36,7 +36,7 @@ abstract class SCModule(implicit p: Parameters) extends TageModule with HasSCPar
 
 class SCMeta(val ntables: Int)(implicit p: Parameters) extends XSBundle with HasSCParameter {
   val tageTakens = Vec(numBr, Bool())
-  val scUsed = Bool()
+  val scUsed = Vec(numBr, Bool())
   val scPreds = Vec(numBr, Bool())
   // Suppose ctrbits of all tables are identical
   val ctrs = Vec(numBr, Vec(ntables, SInt(SCCtrBits.W)))
@@ -268,7 +268,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         )
 
       scMeta.tageTakens(w) := RegEnable(s2_tageTakens(w), io.s2_fire)
-      scMeta.scUsed        := RegEnable(s2_provideds(w), io.s2_fire)
+      scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire)
       scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire)
       scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire)
   
@@ -292,7 +292,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
   
       val updateTageMeta = updateMeta
-      when (updateValids(w) && updateSCMeta.scUsed.asBool) {
+      when (updateValids(w) && updateSCMeta.scUsed(w)) {
         val scPred = updateSCMeta.scPreds(w)
         val tagePred = updateSCMeta.tageTakens(w)
         val taken = update.full_pred.br_taken_mask(w)
