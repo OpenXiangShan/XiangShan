@@ -666,7 +666,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
         providerInfo.resp.ctr(TageCtrBits-1)
       )
     s1_altUsed(i)       := !provided || providerUnconf && useAltOnNa
-    s1_finalAltPreds(i) := bt.io.s1_cnt(i)
+    s1_finalAltPreds(i) := bt.io.s1_cnt(i)(1)
     s1_basecnts(i)      := bt.io.s1_cnt(i)
     s1_useAltOnNa(i)    := providerUnconf && useAltOnNa
 
