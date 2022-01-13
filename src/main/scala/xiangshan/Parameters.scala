@@ -61,7 +61,8 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 256,
+  UbtbGHRLength: Int = 4,
+  HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = false,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
@@ -70,17 +71,25 @@ case class XSCoreParameters
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    Seq(( 4096,    8,    8),
-        ( 4096,   13,    8),
-        ( 4096,   31,    8),
-        ( 4096,  119,    8)),
+    Seq(( 2048,    2,    8),
+        ( 2048,    8,    8),
+        ( 2048,   12,    8),
+        ( 2048,   13,    8),
+        ( 2048,   27,    8),
+        ( 2048,   54,    8),
+        ( 2048,  119,    8),
+        ( 2048,  256,    8)),
+    // Seq(( 4096,    8,    8),
+    //     ( 4096,   13,    8),
+    //     ( 4096,   31,    8),
+    //     ( 4096,  119,    8)),
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 256,    4,    9),
         ( 256,    8,    9),
         ( 512,   13,    9),
         ( 512,   16,    9),
-        ( 512,   31,    9)),
+        ( 512,   32,    9)),
   SCNRows: Int = 512,
   SCNTables: Int = 4,
   SCCtrBits: Int = 6,
@@ -296,7 +305,7 @@ trait HasXSParameter {
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
-  val UbtbGHRLength = 4
+  val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays

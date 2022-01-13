@@ -39,6 +39,10 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageCtrBits = 3
   val TickWidth = 8
 
+  val USE_ALT_ON_NA_WIDTH = 4
+  val NUM_USE_ALT_ON_NA = 128
+  def use_alt_idx(pc: UInt) = (pc >> instOffsetBits)(log2Ceil(NUM_USE_ALT_ON_NA)-1, 0)
+
   val TotalBits = TageTableInfos.map {
     case (s, h, t) => {
       s * (1+t+TageCtrBits+1)
@@ -49,6 +53,12 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   def negUnconf(ctr: UInt) = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
 
   def unconf(ctr: UInt) = posUnconf(ctr) || negUnconf(ctr)
+
+  val unshuffleBitWidth = log2Ceil(numBr)
+  def get_unshuffle_bits(idx: UInt) = idx(unshuffleBitWidth-1, 0)
+  // xor hashes are reversable
+  def get_phy_br_idx(unhashed_idx: UInt, br_lidx: Int)  = get_unshuffle_bits(unhashed_idx) ^ br_lidx.U(log2Ceil(numBr).W)
+  def get_lgc_br_idx(unhashed_idx: UInt, br_pidx: UInt) = get_unshuffle_bits(unhashed_idx) ^ br_pidx
 
 }
 
@@ -107,14 +117,18 @@ class TageMeta(implicit p: Parameters)
 {
   val providers = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   val providerResps = Vec(numBr, new TageResp)
-  val altProviders = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
-  val altProviderResps = Vec(numBr, new TageResp)
+  // val altProviders = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
+  // val altProviderResps = Vec(numBr, new TageResp)
+  val altUsed = Vec(numBr, Bool())
   val altDiffers = Vec(numBr, Bool())
   val basecnts = Vec(numBr, UInt(2.W))
   val allocates = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   val takens = Vec(numBr, Bool())
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+  val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+
+  def altPreds = basecnts.map(_(1))
 }
 
 trait TBTParams extends HasXSParameter {
@@ -218,7 +232,7 @@ class TageTable
   require(nRows % SRAM_SIZE == 0)
   require(isPow2(numBr))
   val nRowsPerBr = nRows / numBr
-  val nBanks = 8
+  val nBanks = 4
   val bankSize = nRowsPerBr / nBanks
   val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
   val uFoldedWidth = nRowsPerBr / SRAM_SIZE
@@ -236,11 +250,7 @@ class TageTable
     else
       0.U(1.W)
 
-  val unshuffleBitWidth = log2Ceil(numBr)
-  def get_unshuffle_bits(idx: UInt) = idx(unshuffleBitWidth-1, 0)
-  // xor hashes are reversable
-  def get_phy_br_idx(unhashed_idx: UInt, br_lidx: Int)  = get_unshuffle_bits(unhashed_idx) ^ br_lidx.U(log2Ceil(numBr).W)
-  def get_lgc_br_idx(unhashed_idx: UInt, br_pidx: UInt) = get_unshuffle_bits(unhashed_idx) ^ br_pidx
+
 
   // bypass entries for tage update
   val perBankWrbypassEntries = 8
@@ -521,6 +531,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.s0_pc   := s0_pc
 
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
+  val useAltOnNaCtrs = RegInit(
+    VecInit(Seq.fill(numBr)(
+      VecInit(Seq.fill(USE_ALT_ON_NA_WIDTH)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
+    ))
+  )
 
   val tage_fh_info = tables.map(_.getFoldedHistoryInfo).reduce(_++_).toSet
   override def getFoldedHistoryInfo = Some(tage_fh_info)
@@ -537,22 +552,26 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_provideds        = Wire(Vec(numBr, Bool()))
   val s1_providers        = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
   val s1_providerResps    = Wire(Vec(numBr, new TageResp))
-  val s1_altProvideds     = Wire(Vec(numBr, Bool()))
-  val s1_altProviders     = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
-  val s1_altProviderResps = Wire(Vec(numBr, new TageResp))
+  // val s1_altProvideds     = Wire(Vec(numBr, Bool()))
+  // val s1_altProviders     = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
+  // val s1_altProviderResps = Wire(Vec(numBr, new TageResp))
+  val s1_altUsed          = Wire(Vec(numBr, Bool()))
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_finalAltPreds    = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
+  val s1_useAltOnNa       = Wire(Vec(numBr, Bool()))
 
   val s2_provideds        = RegEnable(s1_provideds, io.s1_fire)
   val s2_providers        = RegEnable(s1_providers, io.s1_fire)
   val s2_providerResps    = RegEnable(s1_providerResps, io.s1_fire)
-  val s2_altProvideds     = RegEnable(s1_altProvideds, io.s1_fire)
-  val s2_altProviders     = RegEnable(s1_altProviders, io.s1_fire)
-  val s2_altProviderResps = RegEnable(s1_altProviderResps, io.s1_fire)  
+  // val s2_altProvideds     = RegEnable(s1_altProvideds, io.s1_fire)
+  // val s2_altProviders     = RegEnable(s1_altProviders, io.s1_fire)
+  // val s2_altProviderResps = RegEnable(s1_altProviderResps, io.s1_fire)  
+  val s2_altUsed          = RegEnable(s1_altUsed, io.s1_fire)
   val s2_tageTakens       = RegEnable(s1_tageTakens, io.s1_fire)
   val s2_finalAltPreds    = RegEnable(s1_finalAltPreds, io.s1_fire)
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire)
+  val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire)
 
   io.out.resp := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
@@ -595,31 +614,32 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   for (i <- 0 until numBr) {
     val s1_per_br_resp = VecInit(s1_resps.map(_(i)))
-    val inputRes = VecInit(s1_per_br_resp.zipWithIndex.map{case (r, idx) => {
+    val inputRes = s1_per_br_resp.zipWithIndex.map{case (r, idx) => {
       val tableInfo = Wire(new TageTableInfo)
       tableInfo.resp := r.bits
       tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
-      SelectTwoInterRes(r.valid, tableInfo)
-    }})
-    val selectedInfo = ParallelSelectTwo(inputRes.reverse)
-    val provided = selectedInfo.hasOne
-    val altProvided = selectedInfo.hasTwo
-    val providerInfo = selectedInfo.first
-    val altProviderInfo = selectedInfo.second
+      (r.valid, tableInfo)
+    }}
+    val providerInfo = ParallelPriorityMux(inputRes.reverse)
+    val provided = inputRes.map(_._1).reduce(_||_)
+    // val altProvided = selectedInfo.hasTwo
+    // val providerInfo = selectedInfo
+    // val altProviderInfo = selectedInfo.second
     s1_provideds(i)      := provided
     s1_providers(i)      := providerInfo.tableIdx
     s1_providerResps(i)  := providerInfo.resp
-    s1_altProvideds(i)   := altProvided
-    s1_altProviders(i)   := altProviderInfo.tableIdx
-    s1_altProviderResps(i) := altProviderInfo.resp
+    // s1_altProvideds(i)   := altProvided
+    // s1_altProviders(i)   := altProviderInfo.tableIdx
+    // s1_altProviderResps(i) := altProviderInfo.resp
 
     resp_meta.providers(i).valid    := RegEnable(s2_provideds(i), io.s2_fire)
     resp_meta.providers(i).bits     := RegEnable(s2_providers(i), io.s2_fire)
     resp_meta.providerResps(i)      := RegEnable(s2_providerResps(i), io.s2_fire)
-    resp_meta.altProviders(i).valid := RegEnable(s2_altProvideds(i), io.s2_fire)
-    resp_meta.altProviders(i).bits  := RegEnable(s2_altProviders(i), io.s2_fire)
-    resp_meta.altProviderResps(i)   := RegEnable(s2_altProviderResps(i), io.s2_fire)
+    // resp_meta.altProviders(i).valid := RegEnable(s2_altProvideds(i), io.s2_fire)
+    // resp_meta.altProviders(i).bits  := RegEnable(s2_altProviders(i), io.s2_fire)
+    // resp_meta.altProviderResps(i)   := RegEnable(s2_altProviderResps(i), io.s2_fire)
     resp_meta.pred_cycle.map(_ := RegEnable(GTimer(), io.s2_fire))
+    resp_meta.use_alt_on_na.map(_(i) := RegEnable(s2_useAltOnNa(i), io.s2_fire))
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
@@ -638,18 +658,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i).bits  := RegEnable(allocEntry, io.s2_fire)
 
     val providerUnconf = unconf(providerInfo.resp.ctr)
+    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc)), useAltOnNaCtrs(i))
+    val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
+    s1_tageTakens(i) := 
+      Mux(!provided || providerUnconf && useAltOnNa,
+        bt.io.s1_cnt(1),
+        providerInfo.resp.ctr(TageCtrBits-1)
+      )
+    s1_altUsed(i)       := !provided || providerUnconf && useAltOnNa
+    s1_finalAltPreds(i) := bt.io.s1_cnt(i)
+    s1_basecnts(i)      := bt.io.s1_cnt(i)
+    s1_useAltOnNa(i)    := providerUnconf && useAltOnNa
 
-    s1_tageTakens(i)     := Mux1H(Seq(
-      (provided && !providerUnconf, providerInfo.resp.ctr(TageCtrBits-1)),
-      (altProvided && providerUnconf, altProviderInfo.resp.ctr(TageCtrBits-1)),
-      (!provided, bt.io.s1_cnt(i)(1))
-    ))
-    s1_finalAltPreds(i)  := Mux(altProvided,
-      altProviderInfo.resp.ctr(TageCtrBits-1),
-      bt.io.s1_cnt(i)(1)
-    )
-    s1_basecnts(i)       := bt.io.s1_cnt(i)
-
+    resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire)
     resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens(i), io.s2_fire)
     resp_meta.takens(i)     := RegEnable(s2_tageTakens(i), io.s2_fire)
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire)
@@ -657,51 +678,56 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
 
     //---------------- update logics below ------------------//
-    val updateProvided     = updateMeta.providers(i).valid
-    val updateProvider     = updateMeta.providers(i).bits
-    val updateProviderResp = updateMeta.providerResps(i)
-    val updateAltProvided     = updateMeta.altProviders(i).valid
-    val updateAltProvider     = updateMeta.altProviders(i).bits
-    val updateAltProviderResp = updateMeta.altProviderResps(i)
-
     val hasUpdate = updateValids(i)
     val updateMispred = updateMisPreds(i)
     val updateTaken = hasUpdate && update.full_pred.br_taken_mask(i)
 
+    val updateProvided     = updateMeta.providers(i).valid
+    val updateProvider     = updateMeta.providers(i).bits
+    val updateProviderResp = updateMeta.providerResps(i)
+    val updateProviderCorrect = updateProviderResp.ctr(TageCtrBits-1) === updateTaken
+    val updateUseAlt = updateMeta.altUsed(i)
+    val updateAltDiffers = updateMeta.altDiffers(i)
+    val updateAltIdx = use_alt_idx(update.pc)
+    val updateUseAltCtr = Mux1H(UIntToOH(updateAltIdx), useAltOnNaCtrs(i))
+    val updateAltPred = updateMeta.altPreds(i)
+    val updateAltCorrect = updateAltPred === updateTaken
+
+
     val updateProviderWeakTaken = posUnconf(updateProviderResp.ctr)
     val updateProviderWeaknotTaken = negUnconf(updateProviderResp.ctr)
     val updateProviderWeak = unconf(updateProviderResp.ctr)
-    
+
+    when (hasUpdate) {
+      when (updateProvided && updateProviderWeak && updateAltDiffers) {
+        val newCtr = satUpdate(updateUseAltCtr, USE_ALT_ON_NA_WIDTH, updateAltCorrect)
+        useAltOnNaCtrs(i)(updateAltIdx) := newCtr
+      }
+    }
+
+    XSPerfAccumulate(f"tage_bank_${i}_use_alt_pred", hasUpdate && updateUseAlt)
+    XSPerfAccumulate(f"tage_bank_${i}_alt_correct", hasUpdate && updateUseAlt && updateAltCorrect)
+    XSPerfAccumulate(f"tage_bank_${i}_alt_wrong", hasUpdate && updateUseAlt && !updateAltCorrect)
+
+    updateMeta.use_alt_on_na.map(uaon => XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na", hasUpdate && uaon(i)))
+
     when (hasUpdate) {
       when (updateProvided) {
-        when (updateMispred && updateAltProvided && updateProviderWeak) {
-          updateMask(i)(updateAltProvider) := true.B
-          updateUMask(i)(updateAltProvider) := false.B
-          updateTakens(i)(updateAltProvider) := updateTaken
-          updateOldCtrs(i)(updateAltProvider) := updateAltProviderResp.ctr
-          updateAlloc(i)(updateAltProvider) := false.B
-        }
         updateMask(i)(updateProvider) := true.B
         updateUMask(i)(updateProvider) := true.B
-        updateU(i)(updateProvider) := Mux(updateMeta.altDiffers(i), updateAltProviderResp.u, !updateMispred)
+        updateU(i)(updateProvider) := Mux(!updateAltDiffers, updateProviderResp.u, !updateMispred)
         updateTakens(i)(updateProvider) := updateTaken
         updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
         updateAlloc(i)(updateProvider) := false.B
-
       }
     }
 
     // update base table if used base table to predict
-    baseupdate(i) := hasUpdate && (
-      (updateProvided && !updateAltProvided && updateMispred && updateProviderWeak) ||
-      !updateProvided
-    )
+    baseupdate(i) := hasUpdate && updateUseAlt
     updatebcnt(i) := updateMeta.basecnts(i)
     bUpdateTakens(i) := updateTaken
 
-    val needToAllocate = hasUpdate && updateMispred && !(
-      (updateProviderWeaknotTaken && !updateTaken ||
-       updateProviderWeakTaken && updateTaken) && updateProvided)
+    val needToAllocate = hasUpdate && updateMispred && !(updateUseAlt && updateProviderCorrect && updateProvided)
     val canAllocate = updateMeta.allocates(i).valid
     when (needToAllocate) {
       val allocate = updateMeta.allocates(i).bits
