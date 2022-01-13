@@ -102,7 +102,7 @@ object XSDebugModuleParams {
   def apply(xlen:Int /*TODO , val configStringAddr: Int*/): DebugModuleParams = {
     new DebugModuleParams().copy(
       nAbstractDataWords   = (if (xlen == 32) 1 else if (xlen == 64) 2 else 4),
-      maxSupportedSBAccess = xlen,
+      maxSupportedSBAccess = 32,
       hasBusMaster = true,
       baseAddress = BigInt(0x38020000),
       nScratch = 2
