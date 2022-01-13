@@ -90,26 +90,38 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     }
   }
 
+
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
   val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
   val s1_idx = RegEnable(s0_idx, enable=io.req.valid)
 
+  val s1_pc = RegEnable(io.req.bits.pc, io.req.fire())
+  val s1_unhashed_idx = s1_pc >> instOffsetBits
+
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
 
-  for (i <- 0 until numBr) {
-    io.resp.ctrs(i)(0) := table.io.r.resp.data(2*i)
-    io.resp.ctrs(i)(1) := table.io.r.resp.data(2*i+1)
-  }
+  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(VecInit(_))
+  val per_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
+    UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
+    per_br_ctrs_unshuffled
+  )))
 
-  val update_wdata = Wire(Vec(numBr, SInt(ctrBits.W)))
+  io.resp.ctrs := per_br_ctrs
+
+  val update_wdata = Wire(Vec(numBr, SInt(ctrBits.W))) // correspond to physical bridx
   val update_wdata_packed = VecInit(update_wdata.map(Seq.fill(2)(_)).reduce(_++_))
-  val updateWayMask = Wire(Vec(2*numBr, Bool()))
+  val updateWayMask = Wire(Vec(2*numBr, Bool())) // correspond to physical bridx
 
-  for (i <- 0 until numBr) {
-    updateWayMask(2*i)   := io.update.mask(i) && !io.update.tagePreds(i)
-    updateWayMask(2*i+1) := io.update.mask(i) &&  io.update.tagePreds(i)
+  val update_unhashed_idx = io.update.pc >> instOffsetBits
+  for (pi <- 0 until numBr) {
+    updateWayMask(2*pi)   := Seq.tabulate(numBr)(li => 
+      io.update.mask(li) && get_phy_br_idx(update_unhashed_idx, li) === pi.U && !io.update.tagePreds(li)
+    ).reduce(_||_)
+    updateWayMask(2*pi+1) := Seq.tabulate(numBr)(li => 
+      io.update.mask(li) && get_phy_br_idx(update_unhashed_idx, li) === pi.U &&  io.update.tagePreds(li)
+    ).reduce(_||_)
   }
 
   val update_idx = getIdx(io.update.pc, io.update.folded_hist)
@@ -123,21 +135,32 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   val wrBypassEntries = 16
 
+  // let it corresponds to logical brIdx
   val wrbypasses = Seq.fill(numBr)(Module(new WrBypass(SInt(ctrBits.W), wrBypassEntries, log2Ceil(nRows), numWays=2)))
 
-  for (i <- 0 until numBr) {
-    val wrbypass = wrbypasses(i)
-    val ctrPos = io.update.tagePreds(i)
-    val altPos = !io.update.tagePreds(i)
-    val bypass_ctr = wrbypass.io.hit_data(ctrPos)
-    val hit_and_valid = wrbypass.io.hit && bypass_ctr.valid
-    val oldCtr = Mux(hit_and_valid, bypass_ctr.bits, io.update.oldCtrs(i))
-    update_wdata(i) := ctrUpdate(oldCtr, io.update.takens(i))
+  for (pi <- 0 until numBr) {
+    val br_lidx = get_lgc_br_idx(update_unhashed_idx, pi.U(log2Ceil(numBr).W))
+    
+    val wrbypass_io = Mux1H(UIntToOH(br_lidx, numBr), wrbypasses.map(_.io))
 
-    wrbypass.io.wen := io.update.mask(i)
-    wrbypass.io.write_data := update_wdata_packed.slice(2*i, 2*i+2)
+    val ctrPos = Mux1H(UIntToOH(br_lidx, numBr), io.update.tagePreds)
+    val bypass_ctr = wrbypass_io.hit_data(ctrPos)
+    val previous_ctr = Mux1H(UIntToOH(br_lidx, numBr), io.update.oldCtrs)
+    val hit_and_valid = wrbypass_io.hit && bypass_ctr.valid
+    val oldCtr = Mux(hit_and_valid, bypass_ctr.bits, previous_ctr)
+    val taken = Mux1H(UIntToOH(br_lidx, numBr), io.update.takens)
+    update_wdata(pi) := ctrUpdate(oldCtr, taken)
+  }
+
+  val per_br_update_wdata_packed = update_wdata_packed.sliding(2,2).map(VecInit(_)).toSeq
+  val per_br_update_way_mask = updateWayMask.sliding(2,2).map(VecInit(_)).toSeq
+  for (li <- 0 until numBr) {
+    val wrbypass = wrbypasses(li)
+    val br_pidx = get_phy_br_idx(update_unhashed_idx, li)
+    wrbypass.io.wen := io.update.mask(li)
     wrbypass.io.write_idx := update_idx
-    wrbypass.io.write_way_mask.map(_ := updateWayMask.slice(2*i, 2*i+2))
+    wrbypass.io.write_data := Mux1H(UIntToOH(br_pidx, numBr), per_br_update_wdata_packed)
+    wrbypass.io.write_way_mask.map(_ := Mux1H(UIntToOH(br_pidx, numBr), per_br_update_way_mask))
   }
 
 

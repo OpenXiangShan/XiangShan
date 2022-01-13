@@ -131,7 +131,7 @@ class TageMeta(implicit p: Parameters)
   def altPreds = basecnts.map(_(1))
 }
 
-trait TBTParams extends HasXSParameter {
+trait TBTParams extends HasXSParameter with TageParams {
   val BtSize = 2048
   val bypassEntries = 8
 }
@@ -163,28 +163,35 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   bt.io.r.req.bits.setIdx := s0_idx
 
   val s1_read = bt.io.r.resp.data
+  val s1_idx = RegEnable(s0_idx, io.s0_fire)
 
-  io.s1_cnt := bt.io.r.resp.data
+
+  val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
+  io.s1_cnt := per_br_ctr
 
   // Update logic
 
   val u_idx = bimAddr.getIdx(io.update_pc)
 
-  val newCtrs = Wire(Vec(numBr, UInt(2.W)))
+  val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
 
-  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr))
+  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr)) // logical bridx
   wrbypass.io.wen := io.update_mask.reduce(_||_)
   wrbypass.io.write_idx := u_idx
-  wrbypass.io.write_data := newCtrs
   wrbypass.io.write_way_mask.map(_ := io.update_mask)
+  for (li <- 0 until numBr) {
+    val br_pidx = get_phy_br_idx(u_idx, li)
+    wrbypass.io.write_data(li) := newCtrs(br_pidx)
+  }
 
 
   val oldCtrs =
-    VecInit((0 until numBr).map(i =>
-      Mux(wrbypass.io.hit && wrbypass.io.hit_data(i).valid,
-        wrbypass.io.hit_data(i).bits,
-        io.update_cnt(i))
-    ))
+    VecInit((0 until numBr).map(pi => {
+      val br_lidx = get_lgc_br_idx(u_idx, pi.U(log2Ceil(numBr).W))
+      Mux(wrbypass.io.hit && wrbypass.io.hit_data(br_lidx).valid,
+        wrbypass.io.hit_data(br_lidx).bits,
+        io.update_cnt(br_lidx))
+    }))
 
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
     val oldSatTaken = old === ((1 << len)-1).U
@@ -195,9 +202,10 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   }
 
   val newTakens = io.update_takens
-  newCtrs := VecInit((0 until numBr).map(i =>
-    satUpdate(oldCtrs(i), 2, newTakens(i))
-  ))
+  newCtrs := VecInit((0 until numBr).map(pi => {
+    val br_lidx = get_lgc_br_idx(u_idx, pi.U(log2Ceil(numBr).W))
+    satUpdate(oldCtrs(pi), 2, newTakens(br_lidx))
+  }))
 
   bt.io.w.apply(
     valid = io.update_mask.reduce(_||_) || doing_reset,
@@ -321,8 +329,8 @@ class TageTable
   val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_last_cycle)
 
 
-  val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i)), resp_selected)))
-  val per_br_u    = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i)), us.io.r.resp.data)))
+  val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), resp_selected)))
+  val per_br_u    = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), us.io.r.resp.data)))
   
   val req_rhits = VecInit((0 until numBr).map(i =>
     per_br_resp(i).valid && per_br_resp(i).tag === s1_tag && !resp_invalid_by_write
@@ -658,7 +666,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i).bits  := RegEnable(allocEntry, io.s2_fire)
 
     val providerUnconf = unconf(providerInfo.resp.ctr)
-    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc)), useAltOnNaCtrs(i))
+    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
     s1_tageTakens(i) := 
       Mux(!provided || providerUnconf && useAltOnNa,
@@ -689,7 +697,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val updateUseAlt = updateMeta.altUsed(i)
     val updateAltDiffers = updateMeta.altDiffers(i)
     val updateAltIdx = use_alt_idx(update.pc)
-    val updateUseAltCtr = Mux1H(UIntToOH(updateAltIdx), useAltOnNaCtrs(i))
+    val updateUseAltCtr = Mux1H(UIntToOH(updateAltIdx, NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val updateAltPred = updateMeta.altPreds(i)
     val updateAltCorrect = updateAltPred === updateTaken
 
