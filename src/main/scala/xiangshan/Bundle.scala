@@ -79,10 +79,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasEntry = new RASEntry
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghr = UInt(UbtbGHRLength.W)
   val histPtr = new CGHPtr
-  val phist = UInt(PathHistoryLength.W)
   val specCnt = Vec(numBr, UInt(10.W))
-  val phNewBit = Bool()
   // need pipeline update
   val br_hit = Bool()
   val predTaken = Bool()
@@ -96,11 +95,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     // this.hist := entry.ghist
     this.folded_hist := entry.folded_hist
     this.histPtr := entry.histPtr
-    this.phist := entry.phist
-    this.phNewBit := entry.phNewBit
     this.rasSp := entry.rasSp
     this.rasEntry := entry.rasEntry
-    this.specCnt := entry.specCnt
     this
   }
 }

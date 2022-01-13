@@ -31,6 +31,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
+  val miss_way_en = UInt(DCacheWays.W)
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -185,6 +186,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     !io.probe_req.valid && !io.replace_req.valid
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
+  val s0_need_tag = io.tag_read.valid
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
   val s0_fire = req.valid && s0_can_go
 
@@ -221,6 +223,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
+  val s1_need_tag = RegEnable(s0_need_tag, s0_fire)
   val s1_can_go = s2_ready && (io.data_read.ready || !s1_need_data)
   val s1_fire = s1_valid && s1_can_go
   val s1_idx = get_idx(s1_req.vaddr)
@@ -251,7 +254,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => enc_tag_resp(w)))
   val s1_flag_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_flag_resp(w))), false.B)
-  val s1_tag_error = dcacheParameters.tagCode.decode(s1_encTag).error
+  val s1_tag_error = dcacheParameters.tagCode.decode(s1_encTag).error && s1_need_tag
   val s1_l2_error = s1_req.error
 
   // replacement policy
@@ -259,14 +262,41 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(io.replace_way.way), RegNext(s1_repl_way_en))
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_miss_tag = Mux1H(s1_req.miss_way_en, wayMap(w => tag_resp(w)))
+  val s1_miss_coh = Mux1H(s1_req.miss_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
   val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
-  val s1_way_en = Mux(s1_req.replace, s1_req.replace_way_en, Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way))
-  val s1_tag = Mux(s1_req.replace, get_tag(s1_req.addr), Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag))
+  val s1_way_en = Mux(
+    s1_req.replace,
+    s1_req.replace_way_en,
+    Mux(
+      s1_req.miss,
+      s1_req.miss_way_en,
+      Mux(
+        s1_need_replacement,
+        s1_repl_way_en,
+        s1_tag_match_way
+      )
+    )
+  )
+  assert(!RegNext(s1_fire && PopCount(s1_tag_match_way) > 1.U))
+  val s1_tag = Mux(
+    s1_req.replace,
+    get_tag(s1_req.addr),
+    Mux(
+      s1_req.miss,
+      s1_miss_tag,
+      Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
+    )
+  )
   val s1_coh = Mux(
     s1_req.replace,
     Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
-    Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+    Mux(
+      s1_req.miss,
+      s1_miss_coh,
+      Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+    )
   )
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
@@ -277,11 +307,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
+  val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val (s2_has_permission, _, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
-  val s2_repl_way_en = RegEnable(s1_repl_way_en, s1_fire)
+
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
+  val s2_repl_way_en = RegEnable(s1_repl_way_en, s1_fire)
   val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_idx = get_idx(s2_req.vaddr)
@@ -574,7 +606,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
-  miss_req.way_en := s2_way_en
+  miss_req.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
   miss_req.store_data := s2_req.store_data
   miss_req.store_mask := s2_req.store_mask
   miss_req.word_idx := s2_req.word_idx

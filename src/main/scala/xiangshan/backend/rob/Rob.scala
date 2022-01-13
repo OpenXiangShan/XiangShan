@@ -101,7 +101,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
-  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && !io.exception_state.bits.flushPipe && io.exception_state.bits.robIdx === deqPtrVec(0)
+  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
@@ -168,6 +168,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
 //  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
 //  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
   def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.hit
+  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.hit
   // only exceptions are allowed to writeback when enqueue
   def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.hit
 }
@@ -970,17 +971,17 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val uop = commitDebugUop(i)
       val exuOut = debug_exuDebug(ptr)
       val exuData = debug_exuData(ptr)
-      difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
-      difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
-      difftest.io.instr    := RegNext(uop.cf.instr)
-      difftest.io.special  := RegNext(CommitType.isFused(io.commits.info(i).commitType))
+      difftest.io.valid    := RegNext(RegNext(RegNext(io.commits.valid(i) && !io.commits.isWalk)))
+      difftest.io.pc       := RegNext(RegNext(RegNext(SignExt(uop.cf.pc, XLEN))))
+      difftest.io.instr    := RegNext(RegNext(RegNext(uop.cf.instr)))
+      difftest.io.special  := RegNext(RegNext(RegNext(CommitType.isFused(io.commits.info(i).commitType))))
       // when committing an eliminated move instruction,
       // we must make sure that skip is properly set to false (output from EXU is random value)
-      difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
-      difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)
-      difftest.io.wen      := RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)
-      difftest.io.wpdest   := RegNext(io.commits.info(i).pdest)
-      difftest.io.wdest    := RegNext(io.commits.info(i).ldest)
+      difftest.io.skip     := RegNext(RegNext(RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))))
+      difftest.io.isRVC    := RegNext(RegNext(RegNext(uop.cf.pd.isRVC)))
+      difftest.io.wen      := RegNext(RegNext(RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)))
+      difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
+      difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
 
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
@@ -1022,13 +1023,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.clock   := clock
       difftest.io.coreid  := io.hartId
       difftest.io.index   := i.U
-      difftest.io.valid   := RegNext(io.commits.valid(i) && !io.commits.isWalk)
-      difftest.io.special := RegNext(CommitType.isFused(commitInfo.commitType))
-      difftest.io.skip    := RegNext(Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
-      difftest.io.isRVC   := RegNext(isRVC)
-      difftest.io.wen     := RegNext(io.commits.valid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U)
-      difftest.io.wpdest  := RegNext(commitInfo.pdest)
-      difftest.io.wdest   := RegNext(commitInfo.ldest)
+      difftest.io.valid   := RegNext(RegNext(RegNext(io.commits.valid(i) && !io.commits.isWalk)))
+      difftest.io.special := RegNext(RegNext(RegNext(CommitType.isFused(commitInfo.commitType))))
+      difftest.io.skip    := RegNext(RegNext(RegNext(Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))))
+      difftest.io.isRVC   := RegNext(RegNext(RegNext(isRVC)))
+      difftest.io.wen     := RegNext(RegNext(RegNext(io.commits.valid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U)))
+      difftest.io.wpdest  := RegNext(RegNext(RegNext(commitInfo.pdest)))
+      difftest.io.wdest   := RegNext(RegNext(RegNext(commitInfo.ldest)))
     }
   }
 

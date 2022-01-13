@@ -21,13 +21,13 @@ class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCP
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
   val icache = new L1BusErrorUnitInfo
   val dcache = new L1BusErrorUnitInfo
+  val l2 = new L1BusErrorUnitInfo
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
     List(
-//      Some(icache.paddr, s"IBUS", s"Icache bus error"),
-      Some(icache.ecc_error, s"I_ECC", s"Icache ecc error"),
-//      Some(dcache.paddr, s"DBUS", s"Dcache bus error"),
-      Some(dcache.ecc_error, s"D_ECC", s"Dcache ecc error")
+      Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
+      Some(dcache.ecc_error, "D_ECC", "Dcache ecc error"),
+      Some(l2.ecc_error, "L2_ECC", "L2Cache ecc error")
     )
 }
 
@@ -136,7 +136,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.perfEvents <> DontCare
     }
 
-    misc.module.beu_errors <> core.module.io.beu_errors
+    misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
+    misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
+    if(l2cache.isDefined){
+      misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
+      misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
+    } else {
+      misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
+    }
 
     // Modules are reset one by one
     // io_reset ----

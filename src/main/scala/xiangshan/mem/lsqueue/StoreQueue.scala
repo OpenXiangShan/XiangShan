@@ -581,10 +581,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       difftest.io.clock       := clock
       difftest.io.coreid      := io.hartId
       difftest.io.index       := i.U
-      difftest.io.valid       := storeCommit
-      difftest.io.storeAddr   := waddr
-      difftest.io.storeData   := wdata
-      difftest.io.storeMask   := wmask
+      difftest.io.valid       := RegNext(RegNext(storeCommit))
+      difftest.io.storeAddr   := RegNext(RegNext(waddr))
+      difftest.io.storeData   := RegNext(RegNext(wdata))
+      difftest.io.storeMask   := RegNext(RegNext(wmask))
     }
   }
 
