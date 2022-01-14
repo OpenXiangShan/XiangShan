@@ -675,6 +675,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   XSPerfAccumulate("s2_redirect", s2_redirect)
   XSPerfAccumulate("s3_redirect", s3_redirect)
+  XSPerfAccumulate("s1_not_valid", !s1_valid)
 
   val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
   generatePerfEvent()
