@@ -431,7 +431,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 
   def getMissSituat(slotNum : Int, missNum : Int ) :Bool =  {
-    RegNext(s1_fire) && (missSlot(slotNum).m_vSetIdx === s2_req_vsetIdx(missNum)) && (missSlot(slotNum).m_pTag  === s2_req_ptags(missNum)) && !s2_port_hit(missNum)  && waitSecondComeIn(missStateQueue(slotNum)) && !s2_mmio
+    RegNext(s1_fire) && (missSlot(slotNum).m_vSetIdx === s2_req_vsetIdx(missNum)) && (missSlot(slotNum).m_pTag  === s2_req_ptags(missNum)) && !s2_port_hit(missNum)  && waitSecondComeIn(missStateQueue(slotNum)) //&& !s2_mmio
   }
 
   val miss_0_s2_0 =   getMissSituat(slotNum = 0, missNum = 0)

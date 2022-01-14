@@ -235,7 +235,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
-  val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
+  // val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
+  val f2_cache_response_data = VecInit(fromICache.map(_.bits.readData))
+
 
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
