@@ -540,7 +540,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pc          := f3_pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOut.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
-  io.toIbuffer.bits.ipf         := f3_pf_vec
+  io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
   io.toIbuffer.bits.acf         := f3_af_vec
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPageFault
   io.toIbuffer.bits.triggered   := f3_triggered

@@ -1043,10 +1043,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val ptr = deqPtrVec(i).value
       val uop = commitDebugUop(i)
       val exuOut = debug_exuDebug(ptr)
-      difftest.io.valid  := RegNext(io.commits.valid(i) && !io.commits.isWalk)
-      difftest.io.paddr  := RegNext(exuOut.paddr)
-      difftest.io.opType := RegNext(uop.ctrl.fuOpType)
-      difftest.io.fuType := RegNext(uop.ctrl.fuType)
+      difftest.io.valid  := RegNext(RegNext(RegNext(io.commits.valid(i) && !io.commits.isWalk)))
+      difftest.io.paddr  := RegNext(RegNext(RegNext(exuOut.paddr)))
+      difftest.io.opType := RegNext(RegNext(RegNext(uop.ctrl.fuOpType)))
+      difftest.io.fuType := RegNext(RegNext(RegNext(uop.ctrl.fuType)))
     }
   }
 
