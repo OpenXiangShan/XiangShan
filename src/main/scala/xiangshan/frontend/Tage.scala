@@ -716,6 +716,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
     XSPerfAccumulate(f"tage_bank_${i}_use_alt_pred", hasUpdate && updateUseAlt)
     XSPerfAccumulate(f"tage_bank_${i}_alt_correct", hasUpdate && updateUseAlt && updateAltCorrect)
     XSPerfAccumulate(f"tage_bank_${i}_alt_wrong", hasUpdate && updateUseAlt && !updateAltCorrect)
+    XSPerfAccumulate(f"tage_bank_${i}_alt_differs", hasUpdate && updateAltDiffers)
+    XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na_ctr_updated", hasUpdate && updateAltDiffers && updateProvided && updateProviderWeak)
+    XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na_ctr_inc", hasUpdate && updateAltDiffers && updateProvided && updateProviderWeak &&  updateAltCorrect)
+    XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na_ctr_dec", hasUpdate && updateAltDiffers && updateProvided && updateProviderWeak && !updateAltCorrect)
+    
+    XSPerfAccumulate(f"tage_bank_${i}_na", hasUpdate && updateProvided && updateProviderWeak)
+    XSPerfAccumulate(f"tage_bank_${i}_use_na_correct", hasUpdate && updateProvided && updateProviderWeak && !updateUseAlt && !updateMispred)
+    XSPerfAccumulate(f"tage_bank_${i}_use_na_wrong",   hasUpdate && updateProvided && updateProviderWeak && !updateUseAlt &&  updateMispred)
 
     updateMeta.use_alt_on_na.map(uaon => XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na", hasUpdate && uaon(i)))
 
