@@ -336,11 +336,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
+  val redirect_req = io.ftq_to_bpu.redirect
+  val do_redirect = RegNext(redirect_req, init=0.U.asTypeOf(io.ftq_to_bpu.redirect))
+
   // Pipeline logic
   s2_redirect := false.B
   s3_redirect := false.B
 
-  s3_flush := io.ftq_to_bpu.redirect.valid
+  s3_flush := redirect_req.valid // flush when redirect comes
   s2_flush := s3_flush || s3_redirect
   s1_flush := s2_flush || s2_redirect
 
@@ -357,9 +360,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s3_ready := s3_fire || !s3_valid
   s2_fire := s2_valid && s3_components_ready && s3_ready
 
-  when(s0_fire)         { s1_valid := true.B  }
-    .elsewhen(s1_flush) { s1_valid := false.B }
-    .elsewhen(s1_fire)  { s1_valid := false.B }
+  when (redirect_req.valid) { s1_valid := false.B }
+    .elsewhen(s0_fire)      { s1_valid := true.B  }
+    .elsewhen(s1_flush)     { s1_valid := false.B }
+    .elsewhen(s1_fire)      { s1_valid := false.B }
 
   predictors.io.s1_fire := s1_fire
 
@@ -570,11 +574,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect := s3_redirect
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  val redirect = io.ftq_to_bpu.redirect.bits
+  val redirect = do_redirect.bits
 
   predictors.io.update := io.ftq_to_bpu.update
   predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.histPtr)
-  predictors.io.redirect := io.ftq_to_bpu.redirect
+  predictors.io.redirect := do_redirect
 
   // Redirect logic
   val shift = redirect.cfiUpdate.shift
@@ -592,7 +596,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val updated_ptr = oldPtr - shift
   val updated_fh = VecInit((0 to numBr).map(i => oldFh.update(ghv, oldPtr, i, taken && addIntoHist)))(shift)
   val redirect_ghv_wens = (0 until HistoryLength).map(n =>
-    (0 until numBr).map(b => oldPtr.value === (n.U(log2Ceil(HistoryLength).W) + b.U) && shouldShiftVec(b) && io.ftq_to_bpu.redirect.valid))
+    (0 until numBr).map(b => oldPtr.value === (n.U(log2Ceil(HistoryLength).W) + b.U) && shouldShiftVec(b) && do_redirect.valid))
   val redirect_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b => oldPtr.value === (n.U(log2Ceil(HistoryLength).W) + b.U) && shouldShiftVec(b)),
@@ -607,7 +611,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
         updated_ghist(i) := taken && addIntoHist && (i==0).B
       }
     }
-    when(io.ftq_to_bpu.redirect.valid) {
+    when(do_redirect.valid) {
       s0_ghist := updated_ghist.asUInt
     }
   }
@@ -615,9 +619,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // val updatedGh = oldGh.update(shift, taken && addIntoHist)
 
-  npcGen.register(io.ftq_to_bpu.redirect.valid, redirect.cfiUpdate.target, Some("redirect_target"), 2)
-  foldedGhGen.register(io.ftq_to_bpu.redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
-  ghistPtrGen.register(io.ftq_to_bpu.redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
+  npcGen.register(do_redirect.valid, do_redirect.bits.cfiUpdate.target, Some("redirect_target"), 2)
+  foldedGhGen.register(do_redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
+  ghistPtrGen.register(do_redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
   ghvBitWriteGens.zip(redirect_ghv_wens).zipWithIndex.map{case ((b, w), i) =>
     b.register(w.reduce(_||_), redirect_ghv_wdatas(i), Some(s"redirect_new_bit_$i"), 2)
   }
@@ -671,6 +675,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   XSPerfAccumulate("s2_redirect", s2_redirect)
   XSPerfAccumulate("s3_redirect", s3_redirect)
+  XSPerfAccumulate("s1_not_valid", !s1_valid)
 
   val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
   generatePerfEvent()

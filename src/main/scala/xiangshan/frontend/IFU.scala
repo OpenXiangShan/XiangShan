@@ -102,7 +102,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasPerfEvents
 {
-  println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val (toICache, fromICache) = (VecInit(io.icacheInter.map(_.req)), VecInit(io.icacheInter.map(_.resp)))
@@ -158,9 +157,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   fromFtq.req.ready := toICache(0).ready && toICache(1).ready && f2_ready && GTimer() > 500.U
 
-  toICache(0).valid       := fromFtq.req.valid && !f0_flush
+  toICache(0).valid       := fromFtq.req.valid //&& !f0_flush
   toICache(0).bits.vaddr  := fromFtq.req.bits.startAddr
-  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine && !f0_flush
+  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine //&& !f0_flush
   toICache(1).bits.vaddr  := fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
 
   /** <PERF> f0 fetch bubble */
