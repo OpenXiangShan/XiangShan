@@ -61,12 +61,13 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst{
   val cacheParams = icacheParameters
-  val dataCodeUnit = 8
-  val dataUnitNum  = blockBits/dataCodeUnit
+  val dataCodeUnit = 16
+  val dataCodeUnitNum  = blockBits/dataCodeUnit
 
   def highestIdxBit = log2Ceil(nSets) - 1
-  def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
-  def dataEntryBits = dataCodeBits * dataUnitNum
+  def encDataUnitBits   = cacheParams.dataCode.width(dataCodeUnit)
+  def dataCodeBits      = encDataUnitBits - dataCodeUnit
+  def dataCodeEntryBits = dataCodeBits * dataCodeUnitNum
 
   val ICacheSets = cacheParams.nSets
   val ICacheWays = cacheParams.nWays
@@ -186,6 +187,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
     tagArray
   }
+
   //Parity Decode
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
   for((tagArray,i) <- tagArrays.zipWithIndex){
@@ -194,7 +196,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := read_meta_wrong(w) && RegNext(io.read.fire)}
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(read_meta_wrong(w)) && RegNext(RegNext(io.read.fire))}
   }
 
   //Parity Encode
@@ -268,6 +270,20 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 {
+
+  def getECCFromEncUnit(encUnit: UInt) = {
+    require(encUnit.getWidth == encDataUnitBits)
+    encUnit(encDataUnitBits - 1, dataCodeUnit)
+  }
+
+  def getECCFromBlock(cacheblock: UInt) = {
+    // require(cacheblock.getWidth == blockBits)
+    VecInit((0 until dataCodeUnitNum).map { w =>
+      val unit = cacheblock(dataCodeUnit * (w + 1) - 1, dataCodeUnit * w)
+      getECCFromEncUnit(cacheParams.dataCode.encode(unit))
+    })
+  }
+
   val io=IO{new Bundle{
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
@@ -292,11 +308,12 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
 
-  val write_data_bits = Wire(UInt(dataEntryBits.W))
+  val write_data_bits = Wire(UInt(blockBits.W))
+  val write_data_code = Wire(UInt(dataCodeEntryBits.W))
 
   val dataArrays = (0 until 2) map { i =>
     val dataArray = Module(new SRAMTemplate(
-      UInt(dataEntryBits.W),
+      UInt(blockBits.W),
       set=nSets/2,
       way=nWays,
       shouldReset = true,
@@ -320,22 +337,46 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     dataArray
   }
 
+  val codeArrays = (0 until 2) map { i => 
+    val codeArray = Module(new SRAMTemplate(
+      UInt(dataCodeEntryBits.W),
+      set=nSets/2,
+      way=nWays,
+      shouldReset = true,
+      holdRead = true,
+      singlePort = true
+    ))
+
+    if(i == 0) {
+      codeArray.io.r.req.valid := port_0_read_0 || port_1_read_0
+      codeArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
+      codeArray.io.w.req.valid := write_bank_0
+      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+    }
+    else {
+      codeArray.io.r.req.valid := port_0_read_1 || port_1_read_1
+      codeArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
+      codeArray.io.w.req.valid := write_bank_1
+      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+    }
+    
+    codeArray
+  }
+
   //Parity Decode
   val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
-  for((dataArray,i) <- dataArrays.zipWithIndex){
-    val read_data_bits = dataArray.io.r.resp.asTypeOf(Vec(nWays,Vec(dataUnitNum, UInt(dataCodeBits.W))))
-    val read_data_decoded = read_data_bits.map{way_bits => way_bits.map(unit =>  cacheParams.dataCode.decode(unit))}
-    val read_data_wrong    = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.error ))})
-    val read_data_corrected = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.corrected )).asUInt})
-    read_datas(i) := read_data_corrected.asTypeOf(Vec(nWays,UInt(blockBits.W)))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_data_wrong(w).asUInt.orR } 
+  val read_codes = Wire(Vec(2,Vec(nWays,UInt(dataCodeEntryBits.W) )))
+  for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
+    read_datas(i) := dataArray.io.r.resp.asTypeOf(Vec(nWays,UInt(blockBits.W)))
+    read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_codes(i)(w).asUInt.orR } 
   } 
 
   //Parity Encode
   val write = io.write.bits
-  val write_data = WireInit(write.data.asTypeOf(Vec(dataUnitNum, UInt(dataCodeUnit.W))))
-  val write_data_encoded = VecInit(write_data.map( unit_bits => cacheParams.dataCode.encode(unit_bits) ))
-  write_data_bits := write_data_encoded.asUInt
+  val write_data = WireInit(write.data)
+  write_data_code := getECCFromBlock(write_data).asUInt
+  write_data_bits := write_data
 
   io.readResp.datas(0) := Mux( port_0_read_1_reg, read_datas(1) , read_datas(0))
   io.readResp.datas(1) := Mux( port_1_read_0_reg, read_datas(0) , read_datas(1))

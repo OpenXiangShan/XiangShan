@@ -398,6 +398,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.main_pipe_req.bits.miss_id := io.id
   io.main_pipe_req.bits.miss_param := grant_param
   io.main_pipe_req.bits.miss_dirty := isDirty
+  io.main_pipe_req.bits.miss_way_en := req.way_en
   io.main_pipe_req.bits.probe := false.B
   io.main_pipe_req.bits.source := req.source
   io.main_pipe_req.bits.cmd := req.cmd

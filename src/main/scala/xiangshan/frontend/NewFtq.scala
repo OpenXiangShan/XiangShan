@@ -139,6 +139,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   // val specCnt = Vec(numBr, UInt(10.W))
   // val ghist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+
   val histPtr = new CGHPtr
 
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
@@ -146,6 +149,8 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasSp := resp.rasSp
     this.rasEntry := resp.rasTop
     this.folded_hist := resp.folded_hist
+    this.afhob := resp.afhob
+    this.lastBrNumOH := resp.lastBrNumOH
     this.histPtr := resp.histPtr
     this
   }
@@ -528,7 +533,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   bpuPtr := bpuPtr + enq_fire
-  ifuPtr := ifuPtr + io.toIfu.req.fire
+  ifuPtr := ifuPtr + (io.toIfu.req.fire && allowToIfu)
 
   // only use ftb result to assign hit status
   when (bpu_s2_resp.valid) {
@@ -570,7 +575,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
   ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
 
-  io.toIfu.req.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  io.toIfu.req.valid := entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
   io.toIfu.req.bits.ftqIdx := ifuPtr
   io.toIfu.req.bits.nextStartAddr := update_target(ifuPtr.value)
   io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)

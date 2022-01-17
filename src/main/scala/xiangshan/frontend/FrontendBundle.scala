@@ -163,6 +163,7 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
   require(compLen >= max_update_num)
   val folded_hist = UInt(compLen.W)
 
+  def need_oldest_bits = len > compLen
   def info = (len, compLen)
   def oldest_bit_to_get_from_ghr = (0 until max_update_num).map(len - _ - 1)
   def oldest_bit_pos_in_folded = oldest_bit_to_get_from_ghr map (_ % compLen)
@@ -181,8 +182,15 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
     shifted
   }
 
-
+  // slow path, read bits from ghr
   def update(ghr: Vec[Bool], histPtr: CGHPtr, num: Int, taken: Bool): FoldedHistory = {
+    val oldest_bits = VecInit(get_oldest_bits_from_ghr(ghr, histPtr))
+    update(oldest_bits, num, taken)
+  }
+
+
+  // fast path, use pre-read oldest bits
+  def update(ob: Vec[Bool], num: Int, taken: Bool): FoldedHistory = {
     // do xors for several bitsets at specified bits
     def bitsets_xor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]]) = {
       val res = Wire(Vec(len, Bool()))
@@ -209,43 +217,125 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
       }
       res.asUInt
     }
-    val oldest_bits = get_oldest_bits_from_ghr(ghr, histPtr)
 
-    // mask off bits that do not update
-    val oldest_bits_masked = oldest_bits.zipWithIndex.map{
-      case (ob, i) => ob && (i < num).B
-    }
-    // if a bit does not wrap around, it should not be xored when it exits
-    val oldest_bits_set = (0 until max_update_num).filter(oldest_bit_wrap_around).map(i => (oldest_bit_pos_in_folded(i), oldest_bits_masked(i)))
-    
-    // println(f"old bits pos ${oldest_bits_set.map(_._1)}")
-
-    // only the last bit could be 1, as we have at most one taken branch at a time
-    val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && ((i+1) == num).B)).asUInt
-    // if a bit does not wrap around, newest bits should not be xored onto it either
-    val newest_bits_set = (0 until max_update_num).map(i => (compLen-1-i, newest_bits_masked(i)))
-
-    // println(f"new bits set ${newest_bits_set.map(_._1)}")
-    //
-    val original_bits_masked = VecInit(folded_hist.asBools.zipWithIndex.map{
-      case (fb, i) => fb && !(num >= (len-i)).B
-    })
-    val original_bits_set = (0 until compLen).map(i => (i, original_bits_masked(i)))
-
-    
-    // histLen too short to wrap around
-    val new_folded_hist =
-      if (len <= compLen) {
-        ((folded_hist << num) | taken)(compLen-1,0)
-        // circular_shift_left(max_update_num)(Cat(Reverse(newest_bits_masked), folded_hist(compLen-max_update_num-1,0)), num)
-      } else {
-        // do xor then shift
-        val xored = bitsets_xor(compLen, Seq(original_bits_set, oldest_bits_set, newest_bits_set))
-        circular_shift_left(xored, num)
+    val new_folded_hist = if (need_oldest_bits) {
+      val oldest_bits = ob
+      require(oldest_bits.length == max_update_num)
+      // mask off bits that do not update
+      val oldest_bits_masked = oldest_bits.zipWithIndex.map{
+        case (ob, i) => ob && (i < num).B
       }
+      // if a bit does not wrap around, it should not be xored when it exits
+      val oldest_bits_set = (0 until max_update_num).filter(oldest_bit_wrap_around).map(i => (oldest_bit_pos_in_folded(i), oldest_bits_masked(i)))
+      
+      // println(f"old bits pos ${oldest_bits_set.map(_._1)}")
+  
+      // only the last bit could be 1, as we have at most one taken branch at a time
+      val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && ((i+1) == num).B)).asUInt
+      // if a bit does not wrap around, newest bits should not be xored onto it either
+      val newest_bits_set = (0 until max_update_num).map(i => (compLen-1-i, newest_bits_masked(i)))
+  
+      // println(f"new bits set ${newest_bits_set.map(_._1)}")
+      //
+      val original_bits_masked = VecInit(folded_hist.asBools.zipWithIndex.map{
+        case (fb, i) => fb && !(num >= (len-i)).B
+      })
+      val original_bits_set = (0 until compLen).map(i => (i, original_bits_masked(i)))
+
+      // do xor then shift
+      val xored = bitsets_xor(compLen, Seq(original_bits_set, oldest_bits_set, newest_bits_set))
+      circular_shift_left(xored, num)
+    } else {
+      // histLen too short to wrap around
+      ((folded_hist << num) | taken)(compLen-1,0)
+    }
+
     val fh = WireInit(this)
     fh.folded_hist := new_folded_hist
     fh
+  }
+}
+
+class AheadFoldedHistoryOldestBits(val len: Int, val max_update_num: Int)(implicit p: Parameters) extends XSBundle {
+  val bits = Vec(max_update_num*2, Bool())
+  // def info = (len, compLen)
+  def getRealOb(brNumOH: UInt): Vec[Bool] = {
+    val ob = Wire(Vec(max_update_num, Bool()))
+    for (i <- 0 until max_update_num) {
+      ob(i) := Mux1H(brNumOH, bits.drop(i).take(numBr+1))
+    }
+    ob
+  }
+}
+
+class AllAheadFoldedHistoryOldestBits(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val afhob = MixedVec(gen.filter(t => t._1 > t._2).map{_._1}
+    .toSet.toList.map(l => new AheadFoldedHistoryOldestBits(l, numBr))) // remove duplicates
+  require(gen.toSet.toList.equals(gen))
+  def getObWithInfo(info: Tuple2[Int, Int]) = {
+    val selected = afhob.filter(_.len == info._1)
+    require(selected.length == 1)
+    selected(0)
+  }
+  def read(ghv: Vec[Bool], ptr: CGHPtr) = {
+    val hisLens = afhob.map(_.len)
+    val bitsToRead = hisLens.flatMap(l => (0 until numBr*2).map(i => l-i-1)).toSet // remove duplicates
+    val bitsWithInfo = bitsToRead.map(pos => (pos, ghv((ptr+(pos+1).U).value)))
+    for (ob <- afhob) {
+      for (i <- 0 until numBr*2) {
+        val pos = ob.len - i - 1
+        val bit_found = bitsWithInfo.filter(_._1 == pos).toList
+        require(bit_found.length == 1)
+        ob.bits(i) := bit_found(0)._2
+      }
+    }
+  }
+}
+
+class AllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val hist = MixedVec(gen.map{case (l, cl) => new FoldedHistory(l, cl, numBr)})
+  // println(gen.mkString)
+  require(gen.toSet.toList.equals(gen))
+  def getHistWithInfo(info: Tuple2[Int, Int]) = {
+    val selected = hist.filter(_.info.equals(info))
+    require(selected.length == 1)
+    selected(0)
+  }
+  def autoConnectFrom(that: AllFoldedHistories) = {
+    require(this.hist.length <= that.hist.length)
+    for (h <- this.hist) {
+      h := that.getHistWithInfo(h.info)
+    }
+  }
+  def update(ghv: Vec[Bool], ptr: CGHPtr, shift: Int, taken: Bool): AllFoldedHistories = {
+    val res = WireInit(this)
+    for (i <- 0 until this.hist.length) {
+      res.hist(i) := this.hist(i).update(ghv, ptr, shift, taken)
+    }
+    res
+  }
+  def update(afhob: AllAheadFoldedHistoryOldestBits, lastBrNumOH: UInt, shift: Int, taken: Bool): AllFoldedHistories = {
+    val res = WireInit(this)
+    for (i <- 0 until this.hist.length) {
+      val fh = this.hist(i)
+      if (fh.need_oldest_bits) {
+        val info = fh.info
+        val selectedAfhob = afhob.getObWithInfo(info)
+        val ob = selectedAfhob.getRealOb(lastBrNumOH)
+        res.hist(i) := this.hist(i).update(ob, shift, taken)
+      } else {
+        val dumb = Wire(Vec(numBr, Bool())) // not needed
+        dumb := DontCare
+        res.hist(i) := this.hist(i).update(dumb, shift, taken)
+      }
+    }
+    res
+  }
+
+  def display(cond: Bool) = {
+    for (h <- hist) {
+      XSDebug(cond, p"hist len ${h.len}, folded len ${h.compLen}, value ${Binary(h.folded_hist)}\n")
+    }
   }
 }
 
@@ -434,6 +524,8 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
 
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
@@ -516,6 +608,8 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     folded_hist := entry.folded_hist
+    afhob := entry.afhob
+    lastBrNumOH := entry.lastBrNumOH
     histPtr := entry.histPtr
     rasSp := entry.rasSp
     rasTop := entry.rasEntry
