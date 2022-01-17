@@ -139,6 +139,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   // val specCnt = Vec(numBr, UInt(10.W))
   // val ghist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+
   val histPtr = new CGHPtr
 
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
@@ -146,6 +149,8 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasSp := resp.rasSp
     this.rasEntry := resp.rasTop
     this.folded_hist := resp.folded_hist
+    this.afhob := resp.afhob
+    this.lastBrNumOH := resp.lastBrNumOH
     this.histPtr := resp.histPtr
     this
   }
