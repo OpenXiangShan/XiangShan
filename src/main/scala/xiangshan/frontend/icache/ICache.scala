@@ -536,10 +536,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
   prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
 
-  when(mainPipe.io.pmp(0).req.valid && prefetchPipe.io.pmp.req.valid)
-  {
-    assert(false.B, "Both mainPipe PMP and prefetchPipe PMP valid!")
-  }
 
   tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
   tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
