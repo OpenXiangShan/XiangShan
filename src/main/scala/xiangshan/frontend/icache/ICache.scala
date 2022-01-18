@@ -434,7 +434,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
-  val pmp         = Vec(PortNumber, new ICachePMPBundle)
+  val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
@@ -529,18 +529,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     prefetchPipe.io.fromFtq <> DontCare
   }
 
-  io.pmp(0).req.valid := mainPipe.io.pmp(0).req.valid ||  prefetchPipe.io.pmp.req.valid
-  io.pmp(0).req.bits := Mux(mainPipe.io.pmp(0).req.valid, mainPipe.io.pmp(0).req.bits, prefetchPipe.io.pmp.req.bits)
-  prefetchPipe.io.pmp.req.ready := !mainPipe.io.pmp(0).req.valid
-
-  mainPipe.io.pmp(0).resp <> io.pmp(0).resp
-  prefetchPipe.io.pmp.resp <> io.pmp(0).resp
+  io.pmp(0) <> mainPipe.io.pmp(0)
+  io.pmp(1) <> mainPipe.io.pmp(1)
+  io.pmp(2) <> prefetchPipe.io.pmp
 
   prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
   prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
-
-
-  io.pmp(1) <> mainPipe.io.pmp(1)
 
   when(mainPipe.io.pmp(0).req.valid && prefetchPipe.io.pmp.req.valid)
   {
