@@ -37,7 +37,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   // val BankTageNTables = BankTageTableInfos.map(_.size) // Number of tage tables
   // val UBitPeriod = 256
   val TageCtrBits = 3
-  val TickWidth = 8
+  val TickWidth = 7
 
   val USE_ALT_ON_NA_WIDTH = 4
   val NUM_USE_ALT_ON_NA = 128
@@ -122,13 +122,14 @@ class TageMeta(implicit p: Parameters)
   val altUsed = Vec(numBr, Bool())
   val altDiffers = Vec(numBr, Bool())
   val basecnts = Vec(numBr, UInt(2.W))
-  val allocates = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
+  val allocates = Vec(numBr, UInt(TageNTables.W))
   val takens = Vec(numBr, Bool())
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
 
   def altPreds = basecnts.map(_(1))
+  def allocateValid = allocates.map(_.orR)
 }
 
 trait TBTParams extends HasXSParameter with TageParams {
@@ -537,6 +538,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.s0_fire := io.s0_fire
   bt.io.s0_pc   := s0_pc
 
+  val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W)))
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
     VecInit(Seq.fill(numBr)(
@@ -657,12 +659,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
             Fill(TageNTables, s1_provideds(i).asUInt)),
         io.s1_fire
       )
-    val allocLFSR   = LFSR64()(TageNTables - 1, 0)
-    val firstEntry  = PriorityEncoder(allocatableSlots)
-    val maskedEntry = PriorityEncoder(allocatableSlots & allocLFSR)
-    val allocEntry  = Mux(allocatableSlots(maskedEntry), maskedEntry, firstEntry)
-    resp_meta.allocates(i).valid := RegEnable(allocatableSlots =/= 0.U, io.s2_fire)
-    resp_meta.allocates(i).bits  := RegEnable(allocEntry, io.s2_fire)
+    
+    resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
     val providerUnconf = unconf(providerInfo.resp.ctr)
     val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
@@ -729,8 +727,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     when (hasUpdate) {
       when (updateProvided) {
         updateMask(i)(updateProvider) := true.B
-        updateUMask(i)(updateProvider) := true.B
-        updateU(i)(updateProvider) := Mux(!updateAltDiffers, updateProviderResp.u, !updateMispred)
+        updateUMask(i)(updateProvider) := updateAltDiffers
+        updateU(i)(updateProvider) := !updateMispred
         updateTakens(i)(updateProvider) := updateTaken
         updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
         updateAlloc(i)(updateProvider) := false.B
@@ -743,10 +741,44 @@ class Tage(implicit p: Parameters) extends BaseTage {
     bUpdateTakens(i) := updateTaken
 
     val needToAllocate = hasUpdate && updateMispred && !(updateUseAlt && updateProviderCorrect && updateProvided)
-    val canAllocate = updateMeta.allocates(i).valid
+    val allocatableMask = updateMeta.allocates(i)
+    val canAllocate = updateMeta.allocateValid(i)
+
+    val allocLFSR = LFSR64()(TageNTables - 1, 0)
+    val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt))
+    val canAllocMask = allocatableMask & longerHistoryTableMask
+    val allocFailureMask = ~allocatableMask & longerHistoryTableMask
+    val tickInc = PopCount(allocFailureMask) > PopCount(canAllocMask)
+    val tickDec = PopCount(canAllocMask) > PopCount(allocFailureMask)
+    val tickIncVal = PopCount(allocFailureMask) - PopCount(canAllocMask)
+    val tickDecVal = PopCount(canAllocMask) - PopCount(allocFailureMask)
+    val tickToPosSat = tickIncVal >= bankTickCtrDistanceToTops(i) && tickInc
+    val tickToNegSat = tickDecVal >= bankTickCtrs(i) && tickDec
+
+    val firstEntry = PriorityEncoder(canAllocMask)
+    val maskedEntry = PriorityEncoder(canAllocMask & allocLFSR)
+    val allocate = Mux(canAllocMask(maskedEntry), maskedEntry, firstEntry)
+
+
     when (needToAllocate) {
-      val allocate = updateMeta.allocates(i).bits
-      bankTickCtrs(i) := satUpdate(bankTickCtrs(i), TickWidth, !canAllocate)
+      // val allocate = updateMeta.allocates(i).bits
+      when (tickInc) {
+        when (tickToPosSat) {
+          bankTickCtrs(i) := ((1 << TickWidth) - 1).U
+          bankTickCtrDistanceToTops(i) := 0.U
+        }.otherwise {
+          bankTickCtrs(i) := bankTickCtrs(i) + tickIncVal
+          bankTickCtrDistanceToTops(i) := bankTickCtrDistanceToTops(i) - tickIncVal
+        }
+      }.elsewhen (tickDec) {
+        when (tickToNegSat) {
+          bankTickCtrs(i) := 0.U
+          bankTickCtrDistanceToTops(i) := ((1 << TickWidth) - 1).U
+        }.otherwise {
+          bankTickCtrs(i) := bankTickCtrs(i) - tickDecVal
+          bankTickCtrDistanceToTops(i) := bankTickCtrDistanceToTops(i) + tickDecVal
+        }
+      }
       when (canAllocate) {
         updateMask(i)(allocate) := true.B
         updateTakens(i)(allocate) := updateTaken
@@ -756,6 +788,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
       when (bankTickCtrs(i) === ((1 << TickWidth) - 1).U) {
         bankTickCtrs(i) := 0.U
+        bankTickCtrDistanceToTops(i) := ((1 << TickWidth) - 1).U
         updateResetU(i) := true.B
       }
     }
@@ -763,6 +796,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
     XSPerfAccumulate(f"tage_bank_${i}_update_allocate_success", needToAllocate &&  canAllocate)
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && updateMispred)
     XSPerfAccumulate(s"tage_bank_${i}_reset_u", updateResetU(i))
+    for (t <- 0 to TageNTables) {
+      XSPerfAccumulate(f"tage_bank_${i}_tick_inc_${t}", needToAllocate && tickInc && tickIncVal === t.U)
+      XSPerfAccumulate(f"tage_bank_${i}_tick_dec_${t}", needToAllocate && tickDec && tickDecVal === t.U)
+    }
   }
 
   for (w <- 0 until TageBanks) {
@@ -834,10 +871,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
   for (b <- 0 until TageBanks) {
     val m = updateMeta
     // val bri = u.metas(b)
-    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
       b.U, update.pc, 0.U, update.full_pred.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.providers(b).valid, m.providers(b).bits, m.altDiffers(b), m.providerResps(b).u,
-      m.providerResps(b).ctr, m.allocates(b).valid, m.allocates(b).bits
+      m.providerResps(b).ctr, m.allocates(b)
     )
   }
   val s2_resps = RegEnable(s1_resps, io.s1_fire)
