@@ -352,6 +352,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_bank_miss    = RegEnable(next = s1_bank_miss, enable = s1_fire)
   val s2_waymask      = RegEnable(next = s1_victim_oh, enable = s1_fire)
   val s2_victim_coh   = RegEnable(next = s1_victim_coh, enable = s1_fire)
+  val s2_tag_match_vec = RegEnable(next = s1_tag_match_vec, enable = s1_fire)
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */
   val sec_meet_vec = Wire(Vec(2, Bool()))
@@ -601,9 +602,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
-    t_s(0)         := s1_req_vsetIdx(i)
-    t_w(0).valid   := s1_port_hit(i)
-    t_w(0).bits    := OHToUInt(s1_tag_match_vec(i))
+    t_s(0)         := s2_req_vsetIdx(i)
+    t_w(0).valid   := s2_valid && s2_port_hit(i)
+    t_w(0).bits    := OHToUInt(s2_tag_match_vec(i))
 
     t_s(1)         := s2_req_vsetIdx(i)
     t_w(1).valid   := s2_valid && !s2_port_hit(i)
