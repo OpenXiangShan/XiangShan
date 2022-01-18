@@ -154,7 +154,7 @@ trait HaveAXI4MemPort {
   mem_xbar :=*
     TLXbar() :=*
     BinaryArbiter() :=*
-    TLBuffer() :=*
+    TLBuffer.chainNode(2) :=*
     TLCacheCork() :=*
     bankedNode
 
