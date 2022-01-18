@@ -282,7 +282,7 @@ class TageTable
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, TageCtrBits, taken)
   
   if (EnableGHistDiff) {
-    val idx_history = compute_folded_ghist(io.req.bits.ghist, log2Ceil(nRows))
+    val idx_history = compute_folded_ghist(io.req.bits.ghist, log2Ceil(nRowsPerBr))
     val idx_fh = io.req.bits.folded_hist.getHistWithInfo(idxFhInfo)
     XSError(idx_history =/= idx_fh.folded_hist, p"tage table $tableIdx has different fh," +
       p" ghist: ${Binary(idx_history)}, fh: ${Binary(idx_fh.folded_hist)}\n")
@@ -343,9 +343,8 @@ class TageTable
   }
 
   if (EnableGHistDiff) {
-    val update_idx_history = compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
-    val update_idx_info = (histLen, min(log2Ceil(nRows), histLen))
-    val update_idx_fh = io.update.folded_hist.getHistWithInfo(update_idx_info)
+    val update_idx_history = compute_folded_ghist(io.update.ghist, log2Ceil(nRowsPerBr))
+    val update_idx_fh = io.update.folded_hist.getHistWithInfo(idxFhInfo)
     XSError(update_idx_history =/= update_idx_fh.folded_hist && io.update.mask.reduce(_||_),
       p"tage table $tableIdx has different fh when update," +
       p" ghist: ${Binary(update_idx_history)}, fh: ${Binary(update_idx_fh.folded_hist)}\n")
