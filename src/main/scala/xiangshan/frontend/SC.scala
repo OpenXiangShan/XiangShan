@@ -254,11 +254,11 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     val updateSCMeta = updateMeta.scMeta.get
   
     val s2_sc_used, s2_conf, s2_unconf, s2_agree, s2_disagree =
-      0.U.asTypeOf(Vec(TageBanks, Bool()))
+      WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
     val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
-      0.U.asTypeOf(Vec(TageBanks, Bool()))
+      WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
     val sc_misp_tage_corr, sc_corr_tage_misp =
-      0.U.asTypeOf(Vec(TageBanks, Bool()))
+      WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   
     // for sc ctrs
     def getCentered(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
@@ -323,7 +323,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         val pvdrCtr = updateTageMeta.providerResps(w).ctr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
         val sumAbs = sum.abs.asUInt
-        val sumAboveThreshold = aboveThreshold(sum, getPvdrCentered(pvdrCtr), useThresholds(w))
+        val updateThres = updateThresholds(w)
+        val sumAboveThreshold = aboveThreshold(sum, getPvdrCentered(pvdrCtr), updateThres)
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
@@ -343,7 +344,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
         }
   
-        val updateThres = updateThresholds(w)
         when (scPred =/= taken || !sumAboveThreshold) {
           scUpdateMask(w).foreach(_ := true.B)
           XSDebug(sum < 0.S,
