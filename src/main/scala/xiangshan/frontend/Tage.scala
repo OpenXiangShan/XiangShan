@@ -150,7 +150,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
    // val update  = Input(new TageUpdate)
   })
 
-  val bimAddr = new TableAddr(log2Up(BtSize), 1)
+  val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
   val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
 
@@ -208,11 +208,17 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
     satUpdate(oldCtrs(pi), 2, newTakens(br_lidx))
   }))
 
+  val updateWayMask = VecInit((0 until numBr).map(pi =>
+    (0 until numBr).map(li =>
+      io.update_mask(li) && get_phy_br_idx(u_idx, li) === pi.U  
+    ).reduce(_||_)
+  )).asUInt
+
   bt.io.w.apply(
     valid = io.update_mask.reduce(_||_) || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), io.update_mask.asUInt())
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), updateWayMask)
   )
 
 }
