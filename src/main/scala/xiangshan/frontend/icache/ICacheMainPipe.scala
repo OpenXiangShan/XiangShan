@@ -193,7 +193,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_||_)
   val tlb_resp = Wire(Vec(2, Bool()))
   tlb_resp(0) := !fromITLB(0).bits.miss
-  tlb_resp(1) := !fromITLB(1).bits.miss || !s0_double_line
+  tlb_resp(1) := !fromITLB(1).bits.miss || !s0_final_double_line
   val tlb_all_resp = tlb_resp.reduce(_&&_)
 
   when(tlb_has_miss && !tlb_slot.valid){
