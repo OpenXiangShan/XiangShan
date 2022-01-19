@@ -56,9 +56,9 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
 
-  val l1d_bucket = LazyModule(new TokenBucketNode())
-
-  busPMU := l1d_bucket.node := l1d_logger
+  val tile_bucket = LazyModule(new TokenBucketNode())
+  busPMU := tile_bucket.node := l1d_logger
+  busPMU := l1d_logger
   l1_xbar :=* busPMU
 
   l2_binder match {
@@ -76,8 +76,8 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
     beu.module.io.errors <> beu_errors
-    val l1d_bucket_io = IO(Flipped(new BucketIO()))
-    l1d_bucket.module.bucketIO <> l1d_bucket_io
+    val tile_bucket_io = IO(Flipped(new BucketIO()))
+    tile_bucket.module.bucketIO <> tile_bucket_io
   }
 }
 
@@ -147,7 +147,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     misc.module.beu_errors <> core.module.io.beu_errors
 
-    misc.module.l1d_bucket_io <> io.bucketIO
+    misc.module.tile_bucket_io <> io.bucketIO
 
     // Modules are reset one by one
     // io_reset ----

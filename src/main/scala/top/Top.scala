@@ -88,6 +88,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     misc.peripheral_ports(i) := core_with_l2(i).uncache
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    //misc.core_to_l3_ports(i) :=* tile_tokenBuckets(i).node :=* core_with_l2(i).memory_port
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
@@ -106,6 +107,32 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
     case None =>
+  }
+
+  if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
+    val cat = Module(new autocat)
+    val cpio = misc.controlPlane.module.io
+    val l3 = l3cacheOpt.module
+    l3.cp <> cpio.l2
+
+    cat.io.clk_in := io.clock
+    cat.io.reset_in := io.reset || cpio.autocat_watching_change
+    cat.io.access_valid_in := cpio.cp.autocat_en && l3.autocat.access_valid_in
+    cat.io.reset_bin_power := cpio.cp.autocat_reset_bin_power
+    cat.io.allowed_gap := cpio.cp.autocat_gap
+    cat.io.hit_vec_in := l3.autocat.hit_vec_in
+    cpio.l2.autocat_suggested_waymask := cat.io.suggested_waymask_out
+    l3.autocat.suggested_waymask_out :=
+      Mux(cpio.cp.autocat_en, cat.io.suggested_waymask_out, Fill(p(NL2CacheWays), 1.U))
+
+    when (cat.io.access_valid_in) {
+      printf("hit_vec_in %b\n", cat.io.hit_vec_in)
+    }
+
+    val pre_way = RegNext(cat.io.suggested_waymask_out)
+    when (pre_way =/= cat.io.suggested_waymask_out) {
+      printf("suggested waymask %b\n", cat.io.suggested_waymask_out)
+    }
   }
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -159,8 +186,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
-      core.module.io.bucketIO <> misc.module.cp_l1d_buckets_io(i)
+      //val cpio = misc.controlPlane.module.io
+      //core.module.io.dsid := cpio.hartDsids(i.U)
+      //core.module.io.memBase := cpio.memBases(i.U)
+      //core.module.io.memMask := cpio.memMasks(i.U)
+      //cpio.pc(i.U) := core.module.io.pc //for debug
+      core.module.io.bucketIO <> misc.module.cp_tile_buckets_io(i)
     }
+
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset

@@ -33,8 +33,8 @@ trait HasControlPlaneParameters {
   // val nTiles = p(NumCores)
   val nTiles = 2
   // val ldomDSidWidth = log2Up(nTiles)
-  val ldomDSidWidth = 3
-  val procDSidWidth = p(ProcDSidWidth)
+  val ldomDSidWidth = 3   // 1 ?
+  val procDSidWidth = p(ProcDSidWidth)   // 0 ?
   val dsidWidth = ldomDSidWidth + procDSidWidth
   val nDSID = 1 << dsidWidth
   val cycle_counter_width = 64
@@ -124,12 +124,25 @@ trait HasControlPlaneParameters {
   def CP_L2_STAT_RESET = 0x7e
 
   def CP_L2_REQ_EN = 0x7f
+
+  /* AutoCat */
+  def CP_AUTOCAT_EN = 0x58
+
+  def CP_AUTOCAT_RESET_BIN_POWER = 0x59
+
+  def CP_AUTOCAT_SUGGEST_WAYMASK = 0x5a
+
+  def CP_AUTOCAT_WATCHING_DSID = 0x5b
+
+  def CP_AUTOCAT_SET = 0x5c
+
+  def CP_AUTOCAT_GAP = 0x5d
 }
 
 /**
  * From ControlPlane's side of view.
  */
-class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters {
+class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters with HasAutoCatParameters {
   private val indexWidth = 32
 
   val updateData   = Input(UInt(32.W))
@@ -185,6 +198,18 @@ class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlP
   val l2_req_miss       = Output(UInt(32.W))
   val l2_req_total      = Output(UInt(32.W))
   val l2_stat_reset_wen = Input(Bool())
+
+  val autocat_en        = Output(Bool())
+  val autocat_wen       = Input(Bool())
+  val autocat_reset_bin_power = Output(UInt(resetBinPowerWidth.W))
+  val autocat_reset_bin_power_wen = Input(Bool())
+  val autocat_suggested_waymask = Output(UInt(nrL2Ways.W))
+  val autocat_watching_dsid = Output(UInt(dsidWidth.W))
+  val autocat_watching_dsid_wen = Input(Bool())
+  val autocat_set       = Output(UInt(32.W))
+  val autocat_set_wen   = Input(Bool())
+  val autocat_gap = Output(UInt(32.W))
+  val autocat_gap_wen = Input(Bool())
 }
 
 /* From ControlPlane's View */
@@ -197,6 +222,11 @@ class CPToL2CacheIO(implicit val p: Parameters) extends Bundle with HasControlPl
   val req_miss_en = Output(Bool())
   val req_total = Input(UInt(32.W))
   val stat_reset = Output(Bool())
+
+  val autocat_watching_dsid = Output(UInt(dsidWidth.W))
+  val autocat_suggested_waymask = Input(UInt(p(NL2CacheWays).W))
+  val autocat_set = Output(UInt(32.W))
+  val autocat_en = Output(Bool())
 }
 
 class BucketState(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters with HasTokenBucketParameters {
@@ -224,6 +254,7 @@ class CPToCore(implicit val p: Parameters) extends Bundle with HasControlPlanePa
 class ControlPlane(tlBeatBytes: Int)(implicit p: Parameters) extends LazyModule
 with HasControlPlaneParameters
 with HasTokenBucketParameters
+with HasAutoCatParameters
 {
   private val memAddrWidth = 64
   private val instAddrWidth = 64
@@ -249,6 +280,7 @@ with HasTokenBucketParameters
       val mem_part_en = Input(Bool())
       val distinct_hart_dsid_en = Input(Bool())
       val progHartIds = Vec(nTiles, Output(UInt(log2Safe(nTiles).W)))
+      val autocat_watching_change = Output(Bool())
     })
 
     val hartSel   = RegInit(0.U(ldomDSidWidth.W))
@@ -398,6 +430,38 @@ with HasTokenBucketParameters
     io.cp.l2_req_miss := RegEnable(io.l2.req_miss, RegNext(RegNext(miss_en)))    // Wait miss_stat sram addr changes
     io.cp.l2_req_total := RegEnable(io.l2.req_total, RegNext(RegNext(miss_en)))  // Wait miss_stat sram addr changes
 
+    // AutoCat
+    def cpRegTmpl(init: UInt, enable: Bool): UInt = RegEnable(io.cp.updateData, init, enable)
+
+    io.cp.autocat_suggested_waymask := io.l2.autocat_suggested_waymask
+
+    /*AutoCat Enable*/
+    val autocat_en_reg = cpRegTmpl(false.B, io.cp.autocat_wen)
+    io.cp.autocat_en := autocat_en_reg
+    io.l2.autocat_en := autocat_en_reg
+
+    /*Decide autocat refresh cycles: 2**(value) */
+    val autocat_reset_bin_power_reg = cpRegTmpl(10.U(resetBinPowerWidth.W), io.cp.autocat_reset_bin_power_wen)
+    io.cp.autocat_reset_bin_power := autocat_reset_bin_power_reg
+
+    /*The label autocat are serving.
+      Updating this field will refresh autocat's way hit counters.*/
+    val autocat_watching_dsid = cpRegTmpl(0.U(dsidWidth.W), io.cp.autocat_watching_dsid_wen)
+    io.cp.autocat_watching_dsid := autocat_watching_dsid
+    io.l2.autocat_watching_dsid := autocat_watching_dsid
+    val watch_change = WireInit(false.B)
+    io.autocat_watching_change := watch_change || io.cp.autocat_watching_dsid_wen
+
+    /*The allowed hits gap between current allocated ways to full-occupied.*/
+    val autocat_gap = cpRegTmpl(500.U(32.W), io.cp.autocat_gap_wen)
+    io.cp.autocat_gap := autocat_gap
+
+    private val l2SetCnt: BigInt = p(NL2CacheCapacity) * 1024 / p(NL2CacheWays) / p(CacheBlockBytes)
+    private val l2SetBits = l2SetCnt.bitLength
+    println(s"cp: l2SetCnt $l2SetCnt, l2SetBits $l2SetBits")
+    val autocat_set_sampling_mask = cpRegTmpl(0xf.U(l2SetBits.W), io.cp.autocat_set_wen)
+    io.cp.autocat_set := autocat_set_sampling_mask
+    io.l2.autocat_set := autocat_set_sampling_mask
 
     // TL node
     def offset(addr: Int): Int = { (addr - CP_HART_DSID) << 2 }
@@ -441,6 +505,12 @@ with HasTokenBucketParameters
       offset(CP_L2_REQ_MISS) -> Seq(RegField.r(32, io.l2.req_miss)),
       offset(CP_L2_REQ_TOTAL)-> Seq(RegField.r(32, io.l2.req_total)),
       offset(CP_L2_STAT_RESET)->Seq(RWNotify(1, WireInit(false.B), l2_stat_reset, Wire(Bool()), WireInit(false.B))),
+      offset(CP_AUTOCAT_EN)             -> Seq(RegField(1, autocat_en_reg)),
+      offset(CP_AUTOCAT_RESET_BIN_POWER)-> Seq(RegField(resetBinPowerWidth, autocat_reset_bin_power_reg)),
+      offset(CP_AUTOCAT_SUGGEST_WAYMASK)-> Seq(RegField.r(nrL2Ways, io.l2.autocat_suggested_waymask)),
+      offset(CP_AUTOCAT_WATCHING_DSID)  -> Seq(RWNotify(dsidWidth, autocat_watching_dsid, autocat_watching_dsid, WireInit(false.B), watch_change)),
+      offset(CP_AUTOCAT_SET)            -> Seq(RegField(32, autocat_set_sampling_mask)),
+      offset(CP_AUTOCAT_GAP)            -> Seq(RegField(32, autocat_gap)),
     )
 
 

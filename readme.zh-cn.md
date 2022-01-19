@@ -98,6 +98,6 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 export NOOP_HOME="/home/cailuoshan/OpenXiangShan/XiangShan"
 export NEMU_HOME="/home/cailuoshan/OpenXiangShan/NEMU"
 export AM_HOME="/home/cailuoshan/OpenXiangShan/nexus-am"
-make verilog
+make verilog CONFIG=MinimalConfig NUM_CORES=2
 make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
