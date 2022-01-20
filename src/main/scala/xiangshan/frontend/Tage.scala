@@ -671,14 +671,15 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val providerUnconf = unconf(providerInfo.resp.ctr)
     val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
+    val s1_bimCtr = bt.io.s1_cnt(i)
     s1_tageTakens(i) := 
       Mux(!provided || providerUnconf && useAltOnNa,
-        bt.io.s1_cnt(1),
+        s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
     s1_altUsed(i)       := !provided || providerUnconf && useAltOnNa
-    s1_finalAltPreds(i) := bt.io.s1_cnt(i)(1)
-    s1_basecnts(i)      := bt.io.s1_cnt(i)
+    s1_finalAltPreds(i) := s1_bimCtr(1)
+    s1_basecnts(i)      := s1_bimCtr
     s1_useAltOnNa(i)    := providerUnconf && useAltOnNa
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire)
