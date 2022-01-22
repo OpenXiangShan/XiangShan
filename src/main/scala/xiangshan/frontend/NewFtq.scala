@@ -66,11 +66,9 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
-  // TODO: move pftAddr, oversize, carry to another mem
   val startAddr = UInt(VAddrBits.W)
   val nextLineAddr = UInt(VAddrBits.W)
   val isNextMask = Vec(PredictWidth, Bool())
-  val oversize = Bool()
   val fallThruError = Bool()
   // val carry = Bool()
   def getPc(offset: UInt) = {
@@ -82,11 +80,10 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     def carryPos(addr: UInt) = addr(instOffsetBits+log2Ceil(PredictWidth)+1)
     this.startAddr := resp.pc
-    this.nextLineAddr := resp.pc + (FetchWidth * 4 * 2).U
+    this.nextLineAddr := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
       (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
     ))
-    this.oversize := resp.oversize
     this.fallThruError := resp.fallThruError
     this
   }
@@ -276,12 +273,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val new_jmp_is_call = entry_has_jmp &&  pd.jmpInfo.bits(1) && io.cfiIndex.valid
   val new_jmp_is_ret  = entry_has_jmp &&  pd.jmpInfo.bits(2) && io.cfiIndex.valid
   val last_jmp_rvi = entry_has_jmp && pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask.last
-  val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
+  // val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
 
   val cfi_is_jal = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jal
   val cfi_is_jalr = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jalr
 
-  def carryPos = log2Ceil(PredictWidth)+instOffsetBits+1
+  def carryPos = log2Ceil(PredictWidth)+instOffsetBits
   def getLower(pc: UInt) = pc(carryPos-1, instOffsetBits)
   // if not hit, establish a new entry
   init_entry.valid := true.B
@@ -304,14 +301,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   }
 
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
-  init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + ((FetchWidth*4)>>instOffsetBits).U + Mux(last_br_rvi, 1.U, 0.U))
-  init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1) || (io.start_addr(carryPos-2, instOffsetBits).andR && last_br_rvi))
+  init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
+  init_entry.carry   := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos-instOffsetBits), true.B)
   init_entry.isJalr := new_jmp_is_jalr
   init_entry.isCall := new_jmp_is_call
   init_entry.isRet  := new_jmp_is_ret
-  init_entry.last_is_rvc := Mux(entry_has_jmp, pd.rvcMask(pd.jmpOffset), pd.rvcMask.last)
-
-  init_entry.oversize := last_br_rvi || last_jmp_rvi
+  init_entry.last_is_rvc := DontCare
 
   // if hit, check whether a new cfi(only br is possible) is detected
   val oe = io.old_entry
@@ -368,9 +363,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
     // set jmp to invalid
     old_entry_modified.pftAddr := getLower(io.start_addr) + new_pft_offset
-    old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U) // TODO: fix this
     old_entry_modified.carry := (getLower(io.start_addr) +& new_pft_offset).head(1).asBool
-    old_entry_modified.oversize := false.B
     old_entry_modified.isCall := false.B
     old_entry_modified.isRet := false.B
     old_entry_modified.isJalr := false.B
@@ -605,6 +598,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
     XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
   }
+  
+  XSPerfAccumulate(f"fall_through_error_to_ifu", toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit &&
+    io.toIfu.req.fire && !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) && !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr))
   
   val ifu_req_should_be_flushed =
     io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
