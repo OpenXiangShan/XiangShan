@@ -485,7 +485,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred, resp.s2)
 
-  s2_redirect := s2_fire && (s2_redirect_s1_last_pred_vec.reduce(_||_) || resp.s2.fallThruError)
+  s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
 
   XSError(resp.s2.is_minimal, "s2 should not be minimal!\n")
 
@@ -550,9 +550,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s3_redirect_on_br_taken = resp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt
   val s3_redirect_on_target = resp.s3.getTarget =/= previous_s2_pred.getTarget
   val s3_redirect_on_jalr_target = resp.s3.full_pred.hit_taken_on_jalr && resp.s3.full_pred.jalr_target =/= previous_s2_pred.full_pred.jalr_target
+  val s3_redirect_on_fall_thru_error = resp.s3.fallThruError
 
-  s3_redirect := s3_fire && !previous_s2_pred.fallThruError && (
-    s3_redirect_on_br_taken || s3_redirect_on_target
+  s3_redirect := s3_fire && (
+    s3_redirect_on_br_taken || s3_redirect_on_target || s3_redirect_on_fall_thru_error
   )
 
   XSPerfAccumulate(f"s3_redirect_on_br_taken", s3_fire && s3_redirect_on_br_taken)
