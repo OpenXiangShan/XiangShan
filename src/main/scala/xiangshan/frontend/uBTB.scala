@@ -155,7 +155,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   // io.out.resp
   val s1_data_ridx = RegEnable(s0_data_ridx, io.s0_fire)
-  val resp_valid = RegEnable(validArray(s0_data_ridx), io.s0_fire)
+  val resp_valid = RegEnable(validArray(s0_data_ridx), io.s0_fire && !update_valid)
 
 
   val outMeta = Wire(new MicroBTBOutMeta)

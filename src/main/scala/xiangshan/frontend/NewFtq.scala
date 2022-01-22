@@ -139,6 +139,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   // val specCnt = Vec(numBr, UInt(10.W))
   // val ghist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+
   val histPtr = new CGHPtr
 
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
@@ -146,6 +149,8 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasSp := resp.rasSp
     this.rasEntry := resp.rasTop
     this.folded_hist := resp.folded_hist
+    this.afhob := resp.afhob
+    this.lastBrNumOH := resp.lastBrNumOH
     this.histPtr := resp.histPtr
     this
   }
@@ -487,6 +492,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_redirect_sram.io.wdata.fromBranchPrediction(io.fromBpu.resp.bits.lastStage)
+  println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
+  println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
