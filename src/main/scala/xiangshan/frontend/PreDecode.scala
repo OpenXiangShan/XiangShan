@@ -177,7 +177,8 @@ object FaultType {
   def jalFault        = "b001".U    //not CFI taken or invalid instruction taken
   def retFault        = "b010".U    //not CFI taken or invalid instruction taken
   def targetFault     = "b011".U
-  def faulsePred      = "b100".U    //not CFI taken or invalid instruction taken
+  def notCFIFault    = "b100".U    //not CFI taken or invalid instruction taken
+  def invalidTaken    = "b101".U
   def apply() = UInt(3.W)
 }
 
@@ -186,7 +187,8 @@ class CheckInfo extends Bundle {  // 8 bit
   def isjalFault      = value === FaultType.jalFault
   def isRetFault      = value === FaultType.retFault
   def istargetFault   = value === FaultType.targetFault
-  def isfaulsePred    = value === FaultType.faulsePred
+  def invalidTakenFault    = value === FaultType.invalidTaken
+  def notCFIFault          = value === FaultType.notCFIFault
 }
 
 class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
@@ -243,7 +245,8 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   io.out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVec(i) , FaultType.jalFault ,
                                                                              Mux(retFaultVec(i), FaultType.retFault ,
                                                                              Mux(targetFault(i), FaultType.targetFault , 
-                                                                             Mux(notCFITaken(i) || invalidTaken(i) ,FaultType.faulsePred, FaultType.noFault))))}
+                                                                             Mux(notCFITaken(i) , FaultType.notCFIFault, 
+                                                                             Mux(invalidTaken(i), FaultType.invalidTaken,  FaultType.noFault)))))}
 
   io.out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVec(i) || retFaultVec(i) || notCFITaken(i) || invalidTaken(i) || targetFault(i)}
   io.out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i),  seqTargets(i) )}

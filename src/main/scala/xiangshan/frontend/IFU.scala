@@ -652,6 +652,26 @@ class NewIFU(implicit p: Parameters) extends XSModule
   wb_redirect := checkFlushWb.bits.misOffset.valid && wb_valid
 
 
+  /*write back flush type*/
+  val checkFaultType = wb_check_result.faultType
+  val checkJalFault =  wb_valid && checkFaultType.map(_.isjalFault).reduce(_||_)
+  val checkRetFault =  wb_valid && checkFaultType.map(_.isRetFault).reduce(_||_)
+  val checkTargetFault =  wb_valid && checkFaultType.map(_.istargetFault).reduce(_||_)
+  val checkNotCFIFault =  wb_valid && checkFaultType.map(_.notCFIFault).reduce(_||_)
+  val checkInvalidTaken =  wb_valid && checkFaultType.map(_.invalidTakenFault).reduce(_||_)
+
+
+  XSPerfAccumulate("predecode_flush_jalFault",   checkJalFault )
+  XSPerfAccumulate("predecode_flush_retFault",   checkRetFault )
+  XSPerfAccumulate("predecode_flush_targetFault",   checkTargetFault )
+  XSPerfAccumulate("predecode_flush_notCFIFault",   checkNotCFIFault )
+  XSPerfAccumulate("predecode_flush_incalidTakenFault",   checkInvalidTaken )
+
+  when(checkRetFault){
+    XSDebug("startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n", 
+        wb_ftq_req.startAddr, wb_ftq_req.nextStartAddr, wb_ftq_req.ftqOffset.valid, wb_ftq_req.ftqOffset.bits)
+  }
+
   /** performance counter */
   val f3_perf_info     = RegEnable(next = f2_perf_info, enable = f2_fire)
   val f3_req_0    = io.toIbuffer.fire()
