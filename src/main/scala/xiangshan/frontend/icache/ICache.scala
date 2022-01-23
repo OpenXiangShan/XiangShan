@@ -369,7 +369,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
     read_datas(i) := dataArray.io.r.resp.asTypeOf(Vec(nWays,UInt(blockBits.W)))
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_codes(i)(w).asUInt.orR } 
+    val data_full_wayBits = VecInit((0 until nWays).map( w => Cat(read_codes(i)(w), read_datas(i)(w))))
+    val data_error_wayBits = VecInit(data_full_wayBits.map(data => cacheParams.dataCode.decode(data).error) )
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && data_error_wayBits(w) } 
   } 
 
   //Parity Encode
@@ -434,7 +436,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
-  val pmp         = Vec(PortNumber, new ICachePMPBundle)
+  val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
@@ -529,23 +531,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     prefetchPipe.io.fromFtq <> DontCare
   }
 
-  io.pmp(0).req.valid := mainPipe.io.pmp(0).req.valid ||  prefetchPipe.io.pmp.req.valid
-  io.pmp(0).req.bits := Mux(mainPipe.io.pmp(0).req.valid, mainPipe.io.pmp(0).req.bits, prefetchPipe.io.pmp.req.bits)
-  prefetchPipe.io.pmp.req.ready := !mainPipe.io.pmp(0).req.valid
-
-  mainPipe.io.pmp(0).resp <> io.pmp(0).resp
-  prefetchPipe.io.pmp.resp <> io.pmp(0).resp
+  io.pmp(0) <> mainPipe.io.pmp(0)
+  io.pmp(1) <> mainPipe.io.pmp(1)
+  io.pmp(2) <> prefetchPipe.io.pmp
 
   prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
   prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
 
-
-  io.pmp(1) <> mainPipe.io.pmp(1)
-
-  when(mainPipe.io.pmp(0).req.valid && prefetchPipe.io.pmp.req.valid)
-  {
-    assert(false.B, "Both mainPipe PMP and prefetchPipe PMP valid!")
-  }
 
   tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
   tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req

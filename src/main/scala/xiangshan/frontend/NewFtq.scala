@@ -947,7 +947,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       // XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
     }
 
-    io.toPrefetch.req.valid := allowToIfu && prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
+    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
     io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
 
     when(redirectVec.map(r => r.valid).reduce(_||_)){
