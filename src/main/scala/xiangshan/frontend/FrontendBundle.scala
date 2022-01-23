@@ -397,6 +397,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val is_jalr = Bool()
   val is_call = Bool()
   val is_ret = Bool()
+  val last_may_be_rvi_call = Bool()
   val is_br_sharing = Bool()
 
   // val call_is_rvc = Bool()
@@ -487,6 +488,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_jalr := entry.tailSlot.valid && entry.isJalr
     is_call := entry.tailSlot.valid && entry.isCall
     is_ret := entry.tailSlot.valid && entry.isRet
+    last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
     
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))

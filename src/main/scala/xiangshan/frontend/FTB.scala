@@ -141,7 +141,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   val isRet       = Bool()
   val isJalr      = Bool()
 
-  val last_is_rvc = Bool()
+  val last_may_be_rvi_call = Bool()
 
   val always_taken = Vec(numBr, Bool())
 
@@ -221,7 +221,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
       p"lower=${Hexadecimal(tailSlot.lower)}, sharing=${tailSlot.sharing}}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
     XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
-    XSDebug(cond, p"last_is_rvc=$last_is_rvc\n")
+    XSDebug(cond, p"last_may_be_rvi_call=$last_may_be_rvi_call\n")
     XSDebug(cond, p"------------------------------- \n")
   }
 
