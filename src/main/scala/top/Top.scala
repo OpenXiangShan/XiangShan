@@ -191,12 +191,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     withClockAndReset(io.clock.asClock, io.reset) {
       // Modules are reset one by one
-      // reset ----> SYNC --> {L3 Cache, Cores}
-      //         |
-      //         v
-      //        misc
-      val l3cacheMod = if (l3cacheOpt.isDefined) Seq(l3cacheOpt.get.module) else Seq()
-      val resetChain = Seq(l3cacheMod ++ core_with_l2.map(_.module))
+      // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
+      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
       ResetGen(resetChain, io.reset, !debugOpts.FPGAPlatform)
     }
 

@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
+import freechips.rocketchip.tilelink.TLBuffer
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
@@ -138,7 +139,10 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
+  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
+
+  ptw_to_l2_buffer.node := ptw.node
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
@@ -251,6 +255,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
+  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   ctrlBlock.io.hartId := io.hartId
@@ -402,13 +407,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   //                  v          v            v           v           v
   //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
   val resetChain = Seq(
-    Seq(memBlock, dtlbRepeater1, dtlbRepeater2),
+    Seq(memBlock, ptw, ptw_to_l2_buffer, dtlbRepeater1),
     Seq(exuBlocks.head),
     // Note: arbiters don't actually have reset ports
     exuBlocks.tail ++ Seq(outer.wbArbiter.module),
     Seq(ctrlBlock),
-    Seq(ptw),
-    Seq(frontend, itlbRepeater1, itlbRepeater2)
+    Seq(dtlbRepeater2, itlbRepeater2),
+    Seq(frontend, itlbRepeater1)
   )
   ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
 }
