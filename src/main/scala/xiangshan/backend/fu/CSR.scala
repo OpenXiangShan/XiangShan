@@ -849,12 +849,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
 
   // Illegal priviledged operation list
+  val illegalMret = valid && isMret && priviledgeMode < ModeM
+  val illegalSret = valid && isSret && priviledgeMode < ModeS
   val illegalSModeSret = valid && isSret && priviledgeMode === ModeS && mstatusStruct.tsr.asBool
 
   // Illegal priviledged instruction check
   val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = !permitted
-  val isIllegalPrivOp = illegalSModeSret
+  val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret
 
   // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
@@ -885,7 +887,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
   }
 
-  when (valid && isMret) {
+  when (valid && isMret && !illegalMret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.ie.m := mstatusOld.pie.m
@@ -898,7 +900,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     retTarget := mepc(VAddrBits-1, 0)
   }
 
-  when (valid && isSret && !illegalSModeSret) {
+  when (valid && isSret && !illegalSret && !illegalSModeSret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.ie.s := mstatusOld.pie.s
