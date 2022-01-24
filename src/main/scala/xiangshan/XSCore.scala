@@ -402,18 +402,30 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
   // Modules are reset one by one
-  // reset --> SYNC ----> SYNC ------> SYNC -----> SYNC -----> SYNC ---
-  //                  |          |            |           |           |
-  //                  v          v            v           v           v
-  //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
-  val resetChain = Seq(
-    Seq(memBlock, ptw, ptw_to_l2_buffer, dtlbRepeater1),
-    Seq(exuBlocks.head),
-    // Note: arbiters don't actually have reset ports
-    exuBlocks.tail ++ Seq(outer.wbArbiter.module),
-    Seq(ctrlBlock),
-    Seq(dtlbRepeater2, itlbRepeater2),
-    Seq(frontend, itlbRepeater1)
+  val resetTree = ResetGenNode(
+    Seq(
+      ModuleNode(memBlock), ModuleNode(dtlbRepeater1),
+      ResetGenNode(Seq(
+        ModuleNode(itlbRepeater2),
+        ModuleNode(ptw),
+        ModuleNode(dtlbRepeater2),
+        ModuleNode(ptw_to_l2_buffer),
+      )),
+      ResetGenNode(Seq(
+        ModuleNode(exuBlocks.head),
+        ResetGenNode(
+          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
+        ),
+        ResetGenNode(Seq(
+          ModuleNode(ctrlBlock),
+          ResetGenNode(Seq(
+            ModuleNode(frontend), ModuleNode(itlbRepeater1)
+          ))
+        ))
+      ))
+    )
   )
-  ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
+
+  ResetGen(resetTree, reset.asBool, !debugOpts.FPGAPlatform)
+
 }
