@@ -242,11 +242,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
-  val folded_hist_infos = predictors.getFoldedHistoryInfo.getOrElse(Set()).toList
-  for ((len, compLen) <- folded_hist_infos) {
-    println(f"folded hist info: len $len, compLen $compLen")
-  }
-
   val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
   val s1_valid, s2_valid, s3_valid = RegInit(false.B)
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
@@ -290,7 +285,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s0_ghist = WireInit(0.U.asTypeOf(UInt(HistoryLength.W)))
 
-  
+
+  println(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
   
