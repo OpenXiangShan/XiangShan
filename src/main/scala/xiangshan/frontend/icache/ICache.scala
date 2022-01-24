@@ -39,6 +39,7 @@ case class ICacheParameters(
     dataECC: Option[String] = None,
     replacer: Option[String] = Some("random"),
     nMissEntries: Int = 2,
+    nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 4,
     hasPrefetch: Boolean = false,
@@ -562,6 +563,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
+
+  prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
 
   bus.b.ready := false.B
   bus.c.valid := false.B

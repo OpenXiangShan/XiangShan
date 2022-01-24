@@ -223,12 +223,13 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     */
 
   val r3_valid          = generatePipeControl(lastFire = r2_fire && r2_req.isRelease, thisFire = r3_fire, thisFlush = false.B, lastFlush = false.B)
+  val r3_release_need_send = RegEnable(next = release_need_send, enable = r2_fire && r2_req.isRelease)
 
-  r3_fire       := r3_valid && RegNext(io.release_finish)
+  r3_fire       := (r3_valid && RegNext(io.release_finish) && r3_release_need_send) || (r3_valid && !r3_release_need_send) 
 
   val r3_req = RegEnable(next = r2_req, enable = r2_fire && r2_req.isRelease)
 
-  io.pipe_resp.valid := r3_fire
+  io.pipe_resp.valid := r3_fire 
   io.pipe_resp.bits  := r3_req.id
 
   io.status.r3_set.valid := r3_valid

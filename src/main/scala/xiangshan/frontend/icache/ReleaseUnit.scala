@@ -142,7 +142,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 
   //more than 1 release entries may cause bug
   //TODO: support multiple concurrent Releases 
-  require(cfg.nReleaseEntries == 1)
+  require(cacheParams.nReleaseEntries == 1)
 
   val req = io.req
   io.mem_release.valid := false.B
@@ -158,11 +158,9 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
   entry.io.req.bits  := io.req.bits
   io.req.ready    := entry.io.req.ready
 
-  entry.io.mem_grant.valid := (i.U === io.mem_grant.bits.source) && io.mem_grant.valid
+  entry.io.mem_grant.valid := (0.U === io.mem_grant.bits.source) && io.mem_grant.valid
   entry.io.mem_grant.bits  := io.mem_grant.bits
-  when (i.U === io.mem_grant.bits.source) {
-    io.mem_grant.ready := entry.io.mem_grant.ready
-  }
+  io.mem_grant.ready := entry.io.mem_grant.ready
 
   io.mem_release <> entry.io.mem_release
   io.finish := entry.io.finish

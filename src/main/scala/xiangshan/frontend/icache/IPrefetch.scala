@@ -45,7 +45,8 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val pmp             =   new ICachePMPBundle
   val toIMeta         = Decoupled(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
-  val toMissUnit     = new IPrefetchToMissUnit
+  val toMissUnit      = new IPrefetchToMissUnit
+  val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
@@ -154,6 +155,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(next = tlb_resp_af, enable = p1_fire)
   val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
 
+  /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
+  val p2_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p2_paddr, blockBytes, PAddrBits))).reduce(_||_)
+
   //TODO wait PMP logic
   val p2_exception  = VecInit(Seq(pmpExcpAF, p2_mmio)).reduce(_||_)
 
@@ -170,10 +174,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)
 
   val p3_paddr = RegEnable(next = p2_paddr,  enable = p2_fire)
+  val p3_check_in_mshr = RegEnable(next = p2_check_in_mshr,  enable = p2_fire)
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
 
-  p3_discard := p3_hit_dir
+  p3_discard := p3_hit_dir || p3_check_in_mshr
 
   toMissUnit.enqReq.valid             := p3_valid && enableBit && !p3_discard
   toMissUnit.enqReq.bits.paddr        := p3_paddr
