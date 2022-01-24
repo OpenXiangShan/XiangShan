@@ -40,6 +40,7 @@ import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -79,6 +80,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasEntry = new RASEntry
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
   val ghr = UInt(UbtbGHRLength.W)
   val histPtr = new CGHPtr
   val specCnt = Vec(numBr, UInt(10.W))
@@ -94,6 +97,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
     this.folded_hist := entry.folded_hist
+    this.lastBrNumOH := entry.lastBrNumOH
+    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.rasSp := entry.rasSp
     this.rasEntry := entry.rasEntry

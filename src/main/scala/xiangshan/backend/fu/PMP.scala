@@ -66,15 +66,17 @@ trait PMPReadWriteMethodBare extends PMPConst {
     Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
-    def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
+  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
       val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
       cfgVec(i) := cfg_w_m_tmp
-      cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
-      when (cfgVec(i).na4_napot) {
-        mask(index + i) := match_mask(cfgVec(i), addr(index + i))
+      when (!cfg_w_m_tmp.l) {
+        cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
+        if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
+        when (cfgVec(i).na4_napot) {
+          mask(index + i) := match_mask(cfgVec(i), addr(index + i))
+        }
       }
     }
     cfgVec.asUInt
@@ -118,8 +120,10 @@ trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
     for (i <- cfgVec.indices) {
       val cfg_w_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
       cfgVec(i) := cfg_w_tmp
-      cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
+      when (!cfg_w_tmp.l) {
+        cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
+        if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
+      }
     }
     cfgVec.asUInt
   }

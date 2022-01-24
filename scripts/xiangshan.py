@@ -237,7 +237,7 @@ class XiangShan(object):
         return riscv_tests
 
     def __get_ci_misc(self, name=None):
-        base_dir = "/home/ci-runner/xsenv/workloads"
+        base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
             "bitmanip/bitMisc.bin",
             "crypto/crypto-riscv64-noop.bin",
@@ -257,7 +257,7 @@ class XiangShan(object):
         return misc_tests
 
     def __get_ci_nodiff(self, name=None):
-        base_dir = "/home/ci-runner/xsenv/workloads"
+        base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
             "cache-management/cacheoptest-riscv64-xs.bin"
         ]
@@ -282,7 +282,7 @@ class XiangShan(object):
             "wrf": "_1916220000000_.gz",
             "astar": "_122060000000_.gz"
         }
-        return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
+        return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
 
     def run_ci(self, test):
         all_tests = {

@@ -34,11 +34,6 @@ class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
   val paddr      = UInt(PAddrBits.W)
 }
 
-class IPrefetchPMPBundle(implicit p: Parameters) extends ICacheBundle{
-  val req  = DecoupledIO(new PMPReqBundle())
-  val resp = Input(new PMPRespBundle())
-}
-
 
 class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
   val enqReq  = DecoupledIO(new PIQReq)
@@ -47,7 +42,7 @@ class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
 class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromFtq         = Flipped(new FtqPrefechBundle)
   val iTLBInter       = new BlockTlbRequestIO
-  val pmp             =   new IPrefetchPMPBundle
+  val pmp             =   new ICachePMPBundle
   val toIMeta         = Decoupled(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
   val toMissUnit     = new IPrefetchToMissUnit
@@ -112,7 +107,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   fromITLB.ready := true.B
 
-  fromFtq.req.ready :=  (!enableBit || (enableBit && p0_fire)) && GTimer() > 500.U
+  fromFtq.req.ready :=  (!enableBit || (enableBit && p3_ready)) && GTimer() > 500.U
 
   /** Prefetch Stage 1: cache probe filter */
   val p1_valid =  generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
@@ -151,7 +146,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p2_valid =  generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
-  val p2_pmp_fire = p2_valid && io.pmp.req.ready
+  val p2_pmp_fire = p2_valid
   val pmpExcpAF = fromPMP.instr
 
   val p2_paddr     = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
@@ -169,7 +164,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   p2_ready :=   p2_fire || p2_discard || !p2_valid
   p2_fire  :=   p2_valid && !p2_exception && p3_ready && p2_pmp_fire
-  p2_discard := p2_valid && ((p2_exception && p2_pmp_fire) || !io.pmp.req.ready)
+  p2_discard := p2_valid && (p2_exception && p2_pmp_fire)
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)

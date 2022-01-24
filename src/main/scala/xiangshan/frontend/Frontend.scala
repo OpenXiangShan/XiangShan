@@ -73,21 +73,23 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val triggerEn = csrCtrl.trigger_enable
   ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
-  // pmp
+// pmp
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
+  val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
-  val pmp_req_vec     = Wire(Vec(2, Valid(new PMPReqBundle())))
+  val pmp_req_vec     = Wire(Vec(4, Valid(new PMPReqBundle())))
   pmp_req_vec(0) <> icache.io.pmp(0).req
-  pmp_req_vec(1).valid  :=  icache.io.pmp(1).req.valid || ifu.io.pmp.req.valid 
-  pmp_req_vec(1).bits   := Mux(ifu.io.pmp.req.valid, ifu.io.pmp.req.bits, icache.io.pmp(1).req.bits)
+  pmp_req_vec(1) <> icache.io.pmp(1).req
+  pmp_req_vec(2) <> icache.io.pmp(2).req
+  pmp_req_vec(3) <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
     pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
-    icache.io.pmp(i).resp <> pmp_check(i).resp
   }
-  ifu.io.pmp.resp <> pmp_check(1).resp
-  ifu.io.pmp.req.ready := false.B
+  icache.io.pmp(0).resp <> pmp_check(0).resp
+  icache.io.pmp(1).resp <> pmp_check(1).resp
+  icache.io.pmp(2).resp <> pmp_check(2).resp
+  ifu.io.pmp.resp <> pmp_check(3 ).resp
 
   val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
   tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req

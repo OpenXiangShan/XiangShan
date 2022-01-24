@@ -66,7 +66,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val csrTriggerEnable = Input(Vec(4, Bool()))
   val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
   val iTLBInter       = new BlockTlbRequestIO
-  val pmp             =   new IPrefetchPMPBundle
+  val pmp             =   new ICachePMPBundle
 }
 
 // record the situation in which fallThruAddr falls into
@@ -102,7 +102,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasPerfEvents
 {
-  println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val (toICache, fromICache) = (VecInit(io.icacheInter.map(_.req)), VecInit(io.icacheInter.map(_.resp)))
@@ -158,9 +157,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   fromFtq.req.ready := toICache(0).ready && toICache(1).ready && f2_ready && GTimer() > 500.U
 
-  toICache(0).valid       := fromFtq.req.valid && !f0_flush
+  toICache(0).valid       := fromFtq.req.valid //&& !f0_flush
   toICache(0).bits.vaddr  := fromFtq.req.bits.startAddr
-  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine && !f0_flush
+  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine //&& !f0_flush
   toICache(1).bits.vaddr  := fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
 
   /** <PERF> f0 fetch bubble */
@@ -236,7 +235,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
-  val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
+  // val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
+  val f2_cache_response_data = VecInit(fromICache.map(_.bits.readData))
+
 
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
@@ -367,10 +368,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  val f3_ftq_flush_self     = fromFtq.redirect.valid && RedirectLevel.flushItself(fromFtq.redirect.bits.level)
-  val f3_ftq_flush_by_older = fromFtq.redirect.valid && isBefore(fromFtq.redirect.bits.ftqIdx, f3_ftq_req.ftqIdx)
+  val fromFtqRedirectReg = RegNext(fromFtq.redirect)
+  val f3_ftq_flush_self     = fromFtqRedirectReg.valid && RedirectLevel.flushItself(fromFtqRedirectReg.bits.level)
+  val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
-  val f3_need_not_flush = f3_req_is_mmio && fromFtq.redirect.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
+  val f3_need_not_flush = f3_req_is_mmio && fromFtqRedirectReg.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
 
   when(f3_flush && !f3_need_not_flush)               {f3_valid := false.B}
   .elsewhen(f2_fire && !f2_flush )                   {f3_valid := true.B }
@@ -379,8 +381,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
 
-  val (redirect_ftqIdx, redirect_ftqOffset)  = (fromFtq.redirect.bits.ftqIdx,fromFtq.redirect.bits.ftqOffset)
-  val redirect_mmio_req = fromFtq.redirect.valid && redirect_ftqIdx === f3_ftq_req.ftqIdx && redirect_ftqOffset === 0.U
+  val (redirect_ftqIdx, redirect_ftqOffset)  = (fromFtqRedirectReg.bits.ftqIdx,fromFtqRedirectReg.bits.ftqOffset)
+  val redirect_mmio_req = fromFtqRedirectReg.valid && redirect_ftqIdx === f3_ftq_req.ftqIdx && redirect_ftqOffset === 0.U
 
   when(RegNext(f2_fire && !f2_flush) && f3_req_is_mmio)        { f3_mmio_use_seq_pc := true.B  }
   .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
