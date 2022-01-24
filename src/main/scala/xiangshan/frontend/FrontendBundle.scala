@@ -28,18 +28,15 @@ import scala.math._
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
   val startAddr       = UInt(VAddrBits.W)
   val nextlineStart   = UInt(VAddrBits.W)
-  // val fallThruError   = Bool()
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val nextStartAddr   = UInt(VAddrBits.W)
-  val oversize        = Bool()
 
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
-    this.oversize := b.oversize
     when (b.fallThruError) {
       val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.startAddr, b.nextLineAddr)
       val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
@@ -360,7 +357,6 @@ trait BasicPrediction extends HasXSParameter {
   def brTaken: Bool
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
-  val oversize: Bool
 }
 class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry with BasicPrediction {
   val valid = Bool()
@@ -374,7 +370,7 @@ class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry w
   def lastBrPosOH: Vec[Bool] = VecInit(brNumOH.asBools())
   def brTaken = takenOnBr
   def shouldShiftVec: Vec[Bool] = VecInit((0 until numBr).map(i => lastBrPosOH.drop(i+1).reduce(_||_)))
-  def fallThruError: Bool = false.B
+  def fallThruError: Bool = false.B // we do this check on the following stages
 
   def fromMicroBTBEntry(valid: Bool, entry: NewMicroBTBEntry, pc: UInt) = {
     this.valid := valid
@@ -383,7 +379,6 @@ class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry w
     this.taken := entry.taken && valid
     this.takenOnBr := entry.takenOnBr && valid
     this.brNumOH := Mux(valid, entry.brNumOH, 1.U(3.W))
-    this.oversize := entry.oversize && valid
   }
 }
 @chiselName
@@ -397,12 +392,12 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
   val fallThroughAddr = UInt(VAddrBits.W)
   val fallThroughErr = Bool()
-  val oversize = Bool()
 
   val is_jal = Bool()
   val is_jalr = Bool()
   val is_call = Bool()
   val is_ret = Bool()
+  val last_may_be_rvi_call = Bool()
   val is_br_sharing = Bool()
 
   // val call_is_rvc = Bool()
@@ -489,16 +484,16 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     targets := entry.getTargetVec(pc)
     jalr_target := targets.last
     offsets := entry.getOffsetVec
-    oversize := entry.oversize
     is_jal := entry.tailSlot.valid && entry.isJal
     is_jalr := entry.tailSlot.valid && entry.isJalr
     is_call := entry.tailSlot.valid && entry.isCall
     is_ret := entry.tailSlot.valid && entry.isRet
+    last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
     
-    val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits))
+    val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
-    fallThroughErr := startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
+    fallThroughErr := startLower >= endLowerwithCarry
     fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc))
   }
 
@@ -539,7 +534,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def lastBrPosOH      = Mux(is_minimal, minimal_pred.lastBrPosOH,    full_pred.lastBrPosOH)
   def brTaken          = Mux(is_minimal, minimal_pred.brTaken,        full_pred.brTaken)
   def shouldShiftVec   = Mux(is_minimal, minimal_pred.shouldShiftVec, full_pred.shouldShiftVec)
-  def oversize         = Mux(is_minimal, minimal_pred.oversize,       full_pred.oversize)
   def fallThruError    = Mux(is_minimal, minimal_pred.fallThruError,  full_pred.fallThruError)
 
   def getTarget = target(pc)

@@ -134,17 +134,14 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   val tailSlot = new FtbSlot(JMP_OFFSET_LEN, Some(BR_OFFSET_LEN))
 
   // Partial Fall-Through Address
-  val pftAddr     = UInt((log2Up(PredictWidth)+1).W)
+  val pftAddr     = UInt(log2Up(PredictWidth).W)
   val carry       = Bool()
 
   val isCall      = Bool()
   val isRet       = Bool()
   val isJalr      = Bool()
 
-  // 
-  val oversize    = Bool()
-
-  val last_is_rvc = Bool()
+  val last_may_be_rvi_call = Bool()
 
   val always_taken = Vec(numBr, Bool())
 
@@ -224,7 +221,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
       p"lower=${Hexadecimal(tailSlot.lower)}, sharing=${tailSlot.sharing}}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
     XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
-    XSDebug(cond, p"oversize=$oversize, last_is_rvc=$last_is_rvc\n")
+    XSDebug(cond, p"last_may_be_rvi_call=$last_may_be_rvi_call\n")
     XSDebug(cond, p"------------------------------- \n")
   }
 

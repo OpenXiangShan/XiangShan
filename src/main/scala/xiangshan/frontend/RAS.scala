@@ -163,23 +163,22 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val s2_spec_push = WireInit(false.B)
   val s2_spec_pop = WireInit(false.B)
-  // val jump_is_first = io.callIdx.bits === 0.U
-  // val call_is_last_half = io.isLastHalfRVI && jump_is_first
-  // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val s2_spec_new_addr = io.in.bits.resp_in(0).s2.full_pred.fallThroughAddr
+  val s2_full_pred = io.in.bits.resp_in(0).s2.full_pred
+  // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
+  val s2_spec_new_addr = s2_full_pred.fallThroughAddr + Mux(s2_full_pred.last_may_be_rvi_call, 2.U, 0.U)
   spec_ras.push_valid := s2_spec_push
   spec_ras.pop_valid  := s2_spec_pop
   spec_ras.spec_new_addr := s2_spec_new_addr
 
   // confirm that the call/ret is the taken cfi
-  s2_spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_call && !io.s3_redirect
-  s2_spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.full_pred.hit_taken_on_ret  && !io.s3_redirect
+  s2_spec_push := io.s2_fire && s2_full_pred.hit_taken_on_call && !io.s3_redirect
+  s2_spec_pop  := io.s2_fire && s2_full_pred.hit_taken_on_ret  && !io.s3_redirect
 
   val s2_jalr_target = io.out.resp.s2.full_pred.jalr_target
-  val s2_last_target_in = io.in.bits.resp_in(0).s2.full_pred.targets.last
+  val s2_last_target_in = s2_full_pred.targets.last
   val s2_last_target_out = io.out.resp.s2.full_pred.targets.last
-  val s2_is_jalr = io.in.bits.resp_in(0).s2.full_pred.is_jalr
-  val s2_is_ret = io.in.bits.resp_in(0).s2.full_pred.is_ret
+  val s2_is_jalr = s2_full_pred.is_jalr
+  val s2_is_ret = s2_full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
   when(s2_is_ret) {
     s2_jalr_target := spec_top_addr

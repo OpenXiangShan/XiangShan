@@ -40,7 +40,6 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
   val taken = Bool()
   val takenOnBr = Bool()
   val brNumOH = UInt((numBr+1).W) // used to speculative update histPtr
-  val oversize = Bool()
 
   def fromBpuUpdateBundle(u: BranchPredictionUpdate) = {
     // this.valid := true.B
@@ -50,7 +49,6 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
     this.taken := u.taken
     this.takenOnBr := (u.lastBrPosOH.tail zip u.full_pred.br_taken_mask).map{case (a, b) => a && b}.reduce(_||_)
     this.brNumOH := u.lastBrPosOH.asUInt()
-    this.oversize := u.full_pred.oversize && (!u.taken || u.taken && u.cfiIndex.bits.andR)
   }
 }
 
