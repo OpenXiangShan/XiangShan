@@ -369,10 +369,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
     read_datas(i) := dataArray.io.r.resp.asTypeOf(Vec(nWays,UInt(blockBits.W)))
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
-    val data_full_wayBits = VecInit((0 until nWays).map( w => Cat(read_codes(i)(w), read_datas(i)(w))))
-    val data_error_wayBits = VecInit(data_full_wayBits.map(data => cacheParams.dataCode.decode(data).error) )
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && data_error_wayBits(w) } 
   } 
+
 
   //Parity Encode
   val write = io.write.bits
@@ -382,6 +380,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   io.readResp.datas(0) := Mux( port_0_read_1_reg, read_datas(1) , read_datas(0))
   io.readResp.datas(1) := Mux( port_1_read_0_reg, read_datas(0) , read_datas(1))
+  io.readResp.codes(0) := Mux( port_0_read_1_reg, read_codes(1) , read_codes(0))
+  io.readResp.codes(1) := Mux( port_1_read_0_reg, read_codes(0) , read_codes(1))
 
   io.write.ready := true.B
 
