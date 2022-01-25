@@ -337,7 +337,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_ldld_violation = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
     RegNext(io.csrCtrl.ldld_vio_check_enable)
-  val s2_data_invalid = io.lsq.dataInvalid && !s2_forward_fail && !s2_ldld_violation
+  val s2_data_invalid = io.lsq.dataInvalid && !s2_forward_fail && !s2_ldld_violation && !s2_exception
 
   io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
   io.dcacheResp.ready := true.B
