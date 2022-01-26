@@ -376,7 +376,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   for(i <- 0 until PortNumber){
     io.errors(i).valid            := RegNext(s2_parity_error(i))
     io.errors(i).report_to_beu    := RegNext(s2_parity_error(i))
-    io.errors(i).paddr            := RegNext(s2_req_paddr(i))
+    io.errors(i).paddr            := RegNext(RegNext(s2_req_paddr(i)))
     io.errors(i).source           := DontCare
     io.errors(i).source.tag       := RegNext(RegNext(s2_parity_meta_error(i)))
     io.errors(i).source.data      := RegNext(s2_parity_data_error(i))

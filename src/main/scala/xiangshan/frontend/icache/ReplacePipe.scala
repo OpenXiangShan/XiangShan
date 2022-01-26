@@ -171,23 +171,23 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val data_error_wayBits = VecInit((0 until nWays).map( w => 
                                 VecInit((0 until dataCodeUnitNum).map(u => 
                                       cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
-  (0 until nWays).map{ w => r2_data_errors(w) := RegNext(r1_fire) && data_error_wayBits(w).reduce(_||_) } 
+  (0 until nWays).map{ w => r2_data_errors(w) := RegNext(RegNext(r1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_) } 
 
   val r2_parity_meta_error = r2_meta_errors.reduce(_||_) && io.csr_parity_enable
   val r2_parity_data_error = r2_data_errors.reduce(_||_) && io.csr_parity_enable
-  val r2_parity_error      = r2_parity_meta_error || r2_parity_data_error
+  val r2_parity_error      = RegNext(r2_parity_meta_error) || r2_parity_data_error
 
 
-  io.error.valid                := RegNext(r2_parity_error && RegNext(r1_fire))
-  io.error.report_to_beu        := RegNext(r2_parity_error && RegNext(r1_fire))
-  io.error.paddr                := RegNext(r2_req.paddr)
-  io.error.source.tag           := r2_parity_meta_error
-  io.error.source.data          := r2_parity_data_error
+  io.error.valid                := RegNext(r2_parity_error )
+  io.error.report_to_beu        := RegNext(r2_parity_error )
+  io.error.paddr                := RegNext(RegNext(r2_req.paddr))
+  io.error.source.tag           := RegNext(RegNext(r2_parity_meta_error))
+  io.error.source.data          := RegNext(r2_parity_data_error)
   io.error.source.l2            := false.B
   io.error.opType               := DontCare
   io.error.opType.fetch         := true.B
-  io.error.opType.release       := RegNext(r2_req.isRelease)
-  io.error.opType.probe         := RegNext(r2_req.isProbe)
+  io.error.opType.release       := RegNext(RegNext(r2_req.isRelease))
+  io.error.opType.probe         := RegNext(RegNext(r2_req.isProbe))
 
 
 
