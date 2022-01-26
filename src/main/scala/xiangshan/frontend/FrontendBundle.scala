@@ -144,6 +144,19 @@ class CGHPtr(implicit p: Parameters) extends CircularQueuePtr[CGHPtr](
 ){
   override def cloneType = (new CGHPtr).asInstanceOf[this.type]
 }
+
+object CGHPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): CGHPtr = {
+    val ptr = Wire(new CGHPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+  def inverse(ptr: CGHPtr)(implicit p: Parameters): CGHPtr = {
+    apply(!ptr.flag, ptr.value)
+  }
+}
+
 class CircularGlobalHistory(implicit p: Parameters) extends GlobalHistory {
   val buffer = Vec(HistoryLength, Bool())
   type HistPtr = UInt

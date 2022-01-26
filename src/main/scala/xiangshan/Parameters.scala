@@ -243,7 +243,7 @@ case class XSCoreParameters
   softPTW: Boolean = false // dpi-c debug only
 ){
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
-  val HistoryLength = 1 << log2Ceil(allHistLens.max + numBr * FtqSize)
+  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
