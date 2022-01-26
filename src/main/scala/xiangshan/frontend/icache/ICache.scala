@@ -39,7 +39,7 @@ case class ICacheParameters(
     dataECC: Option[String] = None,
     replacer: Option[String] = Some("random"),
     nMissEntries: Int = 2,
-    nReleaseEntries: Int = 2,
+    nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 4,
     hasPrefetch: Boolean = false,
@@ -484,7 +484,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
   val releaseUnit    = Module(new ReleaseUnit(edge))
-  val replacePipe     = Module(new ReplacePipe)
+  val replacePipe     = Module(new ICacheReplacePipe)
   val probeQueue     = Module(new ICacheProbeQueue(edge))
   val prefetchPipe    = Module(new IPrefetchPipe)
 
@@ -564,6 +564,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
 
+  prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
+
   bus.b.ready := false.B
   bus.c.valid := false.B
   bus.c.bits  := DontCare
@@ -573,8 +575,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.a <> missUnit.io.mem_acquire
   bus.e <> missUnit.io.mem_finish
 
-  releaseUnit.io.req(0)  <>  replacePipe.io.release_req
-  releaseUnit.io.req(1)  <>  DontCare//mainPipe.io.toReleaseUnit(1)
+  releaseUnit.io.req <>  replacePipe.io.release_req
+  replacePipe.io.release_finish := releaseUnit.io.finish
   bus.c <> releaseUnit.io.mem_release
 
   // connect bus d
@@ -606,12 +608,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val hasConflict = VecInit(Seq(
         replacePipe.io.status.r1_set.valid,
-        replacePipe.io.status.r2_set.valid
+        replacePipe.io.status.r2_set.valid,
+        replacePipe.io.status.r3_set.valid
   ))
 
   val conflictIdx = VecInit(Seq(
         replacePipe.io.status.r1_set.bits,
-        replacePipe.io.status.r2_set.bits
+        replacePipe.io.status.r2_set.bits,
+        replacePipe.io.status.r3_set.bits
   ))
 
   val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)

@@ -79,7 +79,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     val release_req    =  DecoupledIO(new ReplacePipeReq)
     val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
-    val victimInfor        =  Output(new ICacheVictimInfor())
+    val victimInfor    =  Output(new ICacheVictimInfor())
+
+    val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
   })
 
@@ -128,6 +130,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.req.ready := (state === s_idle)
   io.mem_acquire.valid := (state === s_send_mem_aquire)
   io.release_req.valid := (state === s_send_replace)
+
+  io.toPrefetch.valid := (state =/= s_idle)
+  io.toPrefetch.bits  :=  addrAlign(req.paddr, blockBytes, PAddrBits)
 
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
@@ -265,7 +270,9 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     val victimInfor = Vec(PortNumber, Output(new ICacheVictimInfor()))
 
-    val prefetch_req =  Flipped(DecoupledIO(new PIQReq))
+    val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
+    val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
+
 
   })
   // assign default values to output signals
@@ -301,6 +308,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     io.resp(i) <> entry.io.resp
 
     io.victimInfor(i) := entry.io.victimInfor
+    io.prefetch_check(i) <> entry.io.toPrefetch
 
     entry.io.release_resp <> io.release_resp
 

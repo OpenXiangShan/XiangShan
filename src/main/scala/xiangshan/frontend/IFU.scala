@@ -164,10 +164,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   /** <PERF> f0 fetch bubble */
 
-  XSPerfAccumulate("fetch_bubble_ftq_not_valid",   !f0_valid )
+  XSPerfAccumulate("fetch_bubble_ftq_not_valid",   !fromFtq.req.valid && fromFtq.req.ready  )
   XSPerfAccumulate("fetch_bubble_pipe_stall",    f0_valid && toICache(0).ready && toICache(1).ready && !f1_ready )
-  XSPerfAccumulate("fetch_bubble_sram_0_busy",   f0_valid && !toICache(0).ready  )
-  XSPerfAccumulate("fetch_bubble_sram_1_busy",   f0_valid && !toICache(1).ready  )
+  XSPerfAccumulate("fetch_bubble_icache_0_busy",   f0_valid && !toICache(0).ready  )
+  XSPerfAccumulate("fetch_bubble_icache_1_busy",   f0_valid && !toICache(1).ready  )
+  XSPerfAccumulate("fetch_flush_backend_redirect",   backend_redirect  )
+  XSPerfAccumulate("fetch_flush_wb_redirect",    wb_redirect  )
+  XSPerfAccumulate("fetch_flush_bpu_f1_flush",   from_bpu_f1_flush  )
+  XSPerfAccumulate("fetch_flush_bpu_f0_flush",   from_bpu_f0_flush  )
 
 
   /**
@@ -302,6 +306,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
 
   val predecodeOutValid = WireInit(false.B)
+
+  XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
   /**
@@ -599,6 +605,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   mmio_redirect := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire())  && f3_mmio_use_seq_pc)
 
+  XSPerfAccumulate("fetch_bubble_ibuffer_not_ready",   io.toIbuffer.valid && !io.toIbuffer.ready )
+
+
   /**
     ******************************************************************************
     * IFU Write Back Stage
@@ -693,8 +702,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && io.toIbuffer.fire() ),
     ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && io.toIbuffer.fire() ),
     ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && io.toIbuffer.fire() ),
-    // ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
-    // ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
   )
   generatePerfEvent()
 
