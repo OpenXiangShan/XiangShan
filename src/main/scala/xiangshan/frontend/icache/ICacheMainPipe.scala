@@ -359,22 +359,26 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                                   VecInit((0 until dataCodeUnitNum).map(u => 
                                        cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
     if(i == 0){
-      (0 until nWays).map{ w => s2_data_errors(i)(w) := RegNext(s1_fire) && data_error_wayBits(w).reduce(_||_) } 
+      (0 until nWays).map{ w => 
+        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_) 
+      } 
     } else {
-      (0 until nWays).map{ w => s2_data_errors(i)(w) := RegNext(s1_fire) && RegNext(s1_double_line) && data_error_wayBits(w).reduce(_||_) } 
+      (0 until nWays).map{ w => 
+        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(RegNext(s1_double_line)) && RegNext(data_error_wayBits(w)).reduce(_||_) 
+      } 
     }                                
   } 
 
   val s2_parity_meta_error  = VecInit((0 until PortNumber).map(i => s2_meta_errors(i).reduce(_||_) && io.csr_parity_enable))
   val s2_parity_data_error  = VecInit((0 until PortNumber).map(i => s2_data_errors(i).reduce(_||_) && io.csr_parity_enable))
-  val s2_parity_error       = VecInit((0 until PortNumber).map(i => s2_parity_meta_error(i) || s2_parity_data_error(i)))
+  val s2_parity_error       = VecInit((0 until PortNumber).map(i => RegNext(s2_parity_meta_error(i)) || s2_parity_data_error(i)))
 
   for(i <- 0 until PortNumber){
-    io.errors(i).valid            := RegNext(s2_parity_error(i) && RegNext(s1_fire))
-    io.errors(i).report_to_beu    := RegNext(s2_parity_error(i) && RegNext(s1_fire))
+    io.errors(i).valid            := RegNext(s2_parity_error(i))
+    io.errors(i).report_to_beu    := RegNext(s2_parity_error(i))
     io.errors(i).paddr            := RegNext(s2_req_paddr(i))
     io.errors(i).source           := DontCare
-    io.errors(i).source.tag       := RegNext(s2_parity_meta_error(i))
+    io.errors(i).source.tag       := RegNext(RegNext(s2_parity_meta_error(i)))
     io.errors(i).source.data      := RegNext(s2_parity_data_error(i))
     io.errors(i).source.l2        := false.B
     io.errors(i).opType           := DontCare
@@ -389,8 +393,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
   //exception information
   val s2_except_pf = RegEnable(next =tlbExcpPF, enable = s1_fire)
-  val s2_except_af = VecInit(RegEnable(next = tlbExcpAF, enable = s1_fire).zip(DataHoldBypass(s2_parity_error, RegNext(s1_fire))).zip(pmpExcpAF).map{
-                                  case((tlbAf, parityError), pmpAf) => tlbAf || parityError || DataHoldBypass(pmpAf, RegNext(s1_fire)).asBool})
+  val s2_except_af = VecInit(RegEnable(next = tlbExcpAF, enable = s1_fire).zip(pmpExcpAF).map{
+                                  case(tlbAf, pmpAf) => tlbAf || DataHoldBypass(pmpAf, RegNext(s1_fire)).asBool})
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_af(i)})
   val s2_has_except = s2_valid && (s2_except_af.reduce(_||_) || s2_except_pf.reduce(_||_))
   //MMIO
