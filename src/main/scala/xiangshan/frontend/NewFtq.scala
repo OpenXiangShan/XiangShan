@@ -1068,6 +1068,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("entry", validEntries)
   XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
   XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
+  XSPerfAccumulate("br_mispred_retired", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
   XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
   XSPerfAccumulate("predecodeRedirect", fromIfuRedirect.valid)
 
