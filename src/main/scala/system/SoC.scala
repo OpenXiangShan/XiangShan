@@ -154,7 +154,7 @@ trait HaveAXI4MemPort {
   mem_xbar :=*
     TLXbar() :=*
     BinaryArbiter() :=*
-    TLBuffer() :=*
+    TLBuffer.chainNode(2) :=*
     TLCacheCork() :=*
     bankedNode
 
@@ -288,8 +288,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val pma = LazyModule(new TLPMA)
   pma.node := 
-    TLBuffer() :=
-    TLBuffer() :=
+    TLBuffer.chainNode(4) :=
     peripheralXbar
 
   lazy val module = new LazyModuleImp(this){
