@@ -237,15 +237,10 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents {
+class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
-
-  val folded_hist_infos = predictors.getFoldedHistoryInfo.getOrElse(Set()).toList
-  for ((len, compLen) <- folded_hist_infos) {
-    println(f"folded hist info: len $len, compLen $compLen")
-  }
 
   val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
   val s1_valid, s2_valid, s3_valid = RegInit(false.B)
@@ -290,7 +285,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s0_ghist = WireInit(0.U.asTypeOf(UInt(HistoryLength.W)))
 
-  
+
+  println(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
   
@@ -413,13 +409,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     }
   }
 
-  require(isPow2(HistoryLength))
   val s1_ghv_wens = (0 until HistoryLength).map(n =>
-    (0 until numBr).map(b => (s1_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s1.shouldShiftVec(b) && s1_valid))
+    (0 until numBr).map(b => (s1_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s1.shouldShiftVec(b) && s1_valid))
   val s1_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b => (
-        (s1_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s1.shouldShiftVec(b),
+        (s1_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s1.shouldShiftVec(b),
         resp.s1.brTaken && resp.s1.lastBrPosOH(b+1)
       ))
     )
@@ -471,11 +466,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   }
 
   val s2_ghv_wens = (0 until HistoryLength).map(n =>
-    (0 until numBr).map(b => (s2_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s2.shouldShiftVec(b) && s2_redirect))
+    (0 until numBr).map(b => (s2_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s2.shouldShiftVec(b) && s2_redirect))
   val s2_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b => (
-        (s2_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s2.shouldShiftVec(b),
+        (s2_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s2.shouldShiftVec(b),
         resp.s2.full_pred.real_br_taken_mask()(b)
       ))
     )
@@ -535,11 +530,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   }
 
   val s3_ghv_wens = (0 until HistoryLength).map(n =>
-    (0 until numBr).map(b => (s3_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s3.shouldShiftVec(b) && s3_redirect))
+    (0 until numBr).map(b => (s3_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s3.shouldShiftVec(b) && s3_redirect))
   val s3_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b => (
-        (s3_ghist_ptr).value === n.U(log2Ceil(HistoryLength).W) + b.U && resp.s3.shouldShiftVec(b),
+        (s3_ghist_ptr).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s3.shouldShiftVec(b),
         resp.s3.full_pred.real_br_taken_mask()(b)
       ))
     )
@@ -611,10 +606,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val thisAheadFhOb = Wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   thisAheadFhOb.read(ghv, oldPtr)
   val redirect_ghv_wens = (0 until HistoryLength).map(n =>
-    (0 until numBr).map(b => oldPtr.value === (n.U(log2Ceil(HistoryLength).W) + b.U) && shouldShiftVec(b) && do_redirect.valid))
+    (0 until numBr).map(b => oldPtr.value === (CGHPtr(false.B, n.U) + b.U).value && shouldShiftVec(b) && do_redirect.valid))
   val redirect_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
-      (0 until numBr).map(b => oldPtr.value === (n.U(log2Ceil(HistoryLength).W) + b.U) && shouldShiftVec(b)),
+      (0 until numBr).map(b => oldPtr.value === (CGHPtr(false.B, n.U) + b.U).value && shouldShiftVec(b)),
       real_br_taken_mask
     )
   )
@@ -664,6 +659,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       ghv(i) := ghv_write_datas(i)
     }
   }
+
+  XSError(isBefore(redirect.cfiUpdate.histPtr, s3_ghist_ptr) && do_redirect.valid, p"s3_ghist_ptr ${s3_ghist_ptr} exceeds redirect histPtr ${redirect.cfiUpdate.histPtr}\n")
+  XSError(isBefore(redirect.cfiUpdate.histPtr, s2_ghist_ptr) && do_redirect.valid, p"s2_ghist_ptr ${s2_ghist_ptr} exceeds redirect histPtr ${redirect.cfiUpdate.histPtr}\n")
+  XSError(isBefore(redirect.cfiUpdate.histPtr, s1_ghist_ptr) && do_redirect.valid, p"s1_ghist_ptr ${s1_ghist_ptr} exceeds redirect histPtr ${redirect.cfiUpdate.histPtr}\n")
 
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
   XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")

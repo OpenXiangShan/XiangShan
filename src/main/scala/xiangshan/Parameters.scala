@@ -62,7 +62,7 @@ case class XSCoreParameters
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   UbtbGHRLength: Int = 4,
-  HistoryLength: Int = 512,
+  // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
@@ -241,6 +241,9 @@ case class XSCoreParameters
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only
 ){
+  val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
+  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
+
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
@@ -347,6 +350,8 @@ trait HasXSParameter {
     }.reduce(_++_) ++
       Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
     ).toList
+  
+
 
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
