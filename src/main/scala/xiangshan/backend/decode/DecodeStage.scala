@@ -81,6 +81,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
+  XSPerfAccumulate("slots_issued", PopCount(io.out.map(_.fire)))
+  XSPerfAccumulate("decode_bubbles", PopCount(io.out.map(x => !x.valid && x.ready))) // Unutilized issue-pipeline slots while there is no backend-stall
+  XSPerfAccumulate("fetch_bubbles", PopCount((0 until DecodeWidth).map(i => !io.in(i).valid && io.out(i).ready)))
 
   val perfEvents = Seq(
     ("decoder_fused_instr          ", PopCount(fusionDecoder.io.out.map(_.fire))                                 ),
