@@ -288,8 +288,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val pma = LazyModule(new TLPMA)
   pma.node := 
-    TLBuffer() :=
-    TLBuffer() :=
+    TLBuffer.chainNode(4) :=
     peripheralXbar
 
   lazy val module = new LazyModuleImp(this){
