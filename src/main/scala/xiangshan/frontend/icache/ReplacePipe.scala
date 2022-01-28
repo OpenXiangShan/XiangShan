@@ -179,8 +179,8 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_parity_error      = RegNext(r2_parity_meta_error) || r2_parity_data_error
 
 
-  io.error.valid                := RegNext(r2_parity_error )
-  io.error.report_to_beu        := RegNext(r2_parity_error )
+  io.error.valid                := RegNext(r2_parity_error &&  RegNext(RegNext(r1_fire))) 
+  io.error.report_to_beu        := RegNext(r2_parity_error &&  RegNext(RegNext(r1_fire)))
   io.error.paddr                := RegNext(RegNext(r2_req.paddr))
   io.error.source.tag           := RegNext(RegNext(r2_parity_meta_error))
   io.error.source.data          := RegNext(r2_parity_data_error)
@@ -190,6 +190,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.error.opType.release       := RegNext(RegNext(r2_req.isRelease))
   io.error.opType.probe         := RegNext(RegNext(r2_req.isProbe))
 
+  XSError(r2_parity_error && RegNext(RegNext(r1_fire)), "ICache has parity error in ReplacePipe!")
 
 
   /*** for Release mux ***/
