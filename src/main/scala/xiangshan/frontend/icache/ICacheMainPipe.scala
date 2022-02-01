@@ -375,8 +375,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_parity_error       = VecInit((0 until PortNumber).map(i => RegNext(s2_parity_meta_error(i)) || s2_parity_data_error(i)))
 
   for(i <- 0 until PortNumber){
-    io.errors(i).valid            := RegNext(s2_parity_error(i))
-    io.errors(i).report_to_beu    := RegNext(s2_parity_error(i))
+    io.errors(i).valid            := RegNext(s2_parity_error(i) && RegNext(RegNext(s1_fire)))
+    io.errors(i).report_to_beu    := RegNext(s2_parity_error(i) && RegNext(RegNext(s1_fire)))
     io.errors(i).paddr            := RegNext(RegNext(s2_req_paddr(i)))
     io.errors(i).source           := DontCare
     io.errors(i).source.tag       := RegNext(RegNext(s2_parity_meta_error(i)))
@@ -385,6 +385,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.errors(i).opType           := DontCare
     io.errors(i).opType.fetch     := true.B
   }
+  XSError(s2_parity_error.reduce(_||_) && RegNext(RegNext(s1_fire)), "ICache has parity error in MainPaipe!")
 
 
   /** exception and pmp logic **/
