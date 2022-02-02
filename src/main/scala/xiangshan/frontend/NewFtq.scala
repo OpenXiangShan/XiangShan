@@ -572,21 +572,25 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
   ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
 
-  io.toIfu.req.valid := entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
   io.toIfu.req.bits.ftqIdx := ifuPtr
   io.toIfu.req.bits.nextStartAddr := update_target(ifuPtr.value)
   io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-
+  
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
-
+  val entry_is_to_send = WireInit(false.B)
+  
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf
+    entry_is_to_send := true.B
   }.elsewhen (last_cycle_to_ifu_fire) {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.last
+    entry_is_to_send := RegNext(entry_fetch_status((ifuPtr+1.U).value) === f_to_send)
   }.otherwise {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.init.last
+    entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
   }
   
+  io.toIfu.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
   
   // when fall through is smaller in value than start address, there must be a false hit
