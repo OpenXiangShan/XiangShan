@@ -78,12 +78,12 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
   // content addressed match
   for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheIndexOffset) === data(j)(PAddrBits-1, DCacheIndexOffset)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheWordOffset) === data(j)(PAddrBits-1, DCacheWordOffset)
     }
   }
   for (i <- 0 until LoadPipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheIndexOffset) === data(j)(PAddrBits-1, DCacheIndexOffset)
+      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
     }
   }
 
