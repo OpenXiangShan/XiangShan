@@ -594,8 +594,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
-  io.lsu.release.valid := RegNext(bus.c.fire())
-  io.lsu.release.bits.paddr := RegNext(bus.c.bits.address)
+
+  io.lsu.release.valid := RegNext(bus.c.fire()) // RegNext() for better timing
+  io.lsu.release.bits.paddr := RegNext(bus.c.bits.address) // RegNext() for better timing
+  // Note: RegNext() is required by released flag update logic, change it with care
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B

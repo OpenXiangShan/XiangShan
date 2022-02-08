@@ -245,6 +245,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
+      released(loadWbIndex) := io.release.valid && 
+        io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === io.release.bits.paddr(PAddrBits-1, DCacheLineOffset)
       // dirty code for load instr
       uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
       uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
