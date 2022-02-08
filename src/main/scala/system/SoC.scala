@@ -108,7 +108,7 @@ trait HaveSlaveAXI4Port {
   ))
   private val error_xbar = TLXbar()
 
-  error_xbar :=
+  l3_xbar :=
     TLFIFOFixer() :=
     TLWidthWidget(32) :=
     AXI4ToTL() :=
@@ -118,10 +118,7 @@ trait HaveSlaveAXI4Port {
     AXI4Buffer() :=
     AXI4IdIndexer(1) :=
     l3FrontendAXI4Node
-  errorDevice.node := error_xbar
-  l3_xbar :=
-    TLBuffer() :=
-    error_xbar
+  errorDevice.node := l3_xbar
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
@@ -153,7 +150,6 @@ trait HaveAXI4MemPort {
   val mem_xbar = TLXbar()
   mem_xbar :=*
     TLXbar() :=*
-    BinaryArbiter() :=*
     TLBuffer.chainNode(2) :=*
     TLCacheCork() :=*
     bankedNode
@@ -164,6 +160,8 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
@@ -214,7 +212,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
-    TLBuffer() :=
+    TLBuffer.chainNode(3) :=
     peripheralXbar
 
   val peripheral = InModuleBody {
@@ -253,7 +251,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
       TLBuffer() :=
       core_out
   }
-  l3_banked_xbar := TLBuffer() := l3_xbar
+  l3_banked_xbar := TLBuffer.chainNode(2) := l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
