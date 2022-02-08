@@ -195,7 +195,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_resp = Wire(Vec(2, Bool()))
   tlb_resp(0) := !fromITLB(0).bits.miss
   tlb_resp(1) := !fromITLB(1).bits.miss || !s0_final_double_line
-  val tlb_all_resp = tlb_resp.reduce(_&&_)
+  val tlb_all_resp = RegNext(tlb_resp.reduce(_&&_))
+  val tlb_miss_flush = RegNext(tlb_has_miss) && RegNext(s0_fire)
 
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
@@ -207,11 +208,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     tlb_slot.req_vsetIdx := s0_req_vsetIdx
   }
 
-  when(s0_fire && tlb_slot.valid){
+
+  when(tlb_slot.valid && tlb_all_resp){
     tlb_slot.valid := false.B
   }
 
-  s0_fire        := (s0_valid || tlb_slot.valid) && !missSwitchBit && s1_ready && tlb_all_resp && fetch_req(0).ready && fetch_req(1).ready
+  s0_fire        := (s0_valid || tlb_slot.valid && tlb_all_resp) && !missSwitchBit && s1_ready && 
+                    fetch_req(0).ready && fetch_req(1).ready                    
 
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
@@ -229,7 +232,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s1 control */
   val tlbRespAllValid = WireInit(false.B)
 
-  val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = false.B, lastFlush = false.B)
+  val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = tlb_miss_flush, lastFlush = false.B)
 
   val s1_req_vaddr   = RegEnable(next = s0_final_vaddr,    enable = s0_fire)
   val s1_req_vsetIdx = RegEnable(next = s0_final_vsetIdx, enable = s0_fire)
@@ -237,7 +240,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_double_line = RegEnable(next = s0_final_double_line, enable = s0_fire)
 
   s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && s2_ready
+  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !tlb_miss_flush
 
   fromITLB.map(_.ready := true.B)
 
@@ -245,7 +248,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
-  when(s1_valid && s1_tlb_all_resp_wire && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
+  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
   .elsewhen(s1_fire && s1_tlb_all_resp_reg)             {s1_tlb_all_resp_reg := false.B}
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
@@ -318,7 +321,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s2 control */
   val s2_fetch_finish = Wire(Bool())
 
-  val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = false.B, lastFlush = false.B)
+  val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = false.B, lastFlush = tlb_miss_flush)
   val s2_miss_available = Wire(Bool())
 
   s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || (!s2_valid && s2_miss_available)

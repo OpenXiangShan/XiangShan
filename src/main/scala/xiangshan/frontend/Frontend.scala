@@ -41,7 +41,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 {
   val io = IO(new Bundle() {
     val fencei = Input(Bool())
-    val ptw = new TlbPtwIO(2)
+    val ptw = new TlbPtwIO(4)
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -89,24 +89,29 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.pmp(0).resp <> pmp_check(0).resp
   icache.io.pmp(1).resp <> pmp_check(1).resp
   icache.io.pmp(2).resp <> pmp_check(2).resp
-  ifu.io.pmp.resp <> pmp_check(3 ).resp
+  ifu.io.pmp.resp <> pmp_check(3).resp
 
-  val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
-  tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
-  tlb_req_arb.io.in(1) <> icache.io.itlb(1).req
+  // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
+  // tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
+  // tlb_req_arb.io.in(1) <> icache.io.itlb(1).req
 
-  val itlb_requestors = Wire(Vec(2, new BlockTlbRequestIO))
+  val itlb_requestors = Wire(Vec(4, new BlockTlbRequestIO))
   itlb_requestors(0) <> icache.io.itlb(0)
-  itlb_requestors(1).req <>  tlb_req_arb.io.out
-  ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
-  icache.io.itlb(1).resp <> itlb_requestors(1).resp
+  itlb_requestors(1) <> icache.io.itlb(1)
+  itlb_requestors(2) <> icache.io.itlb(2)
+  itlb_requestors(3) <> ifu.io.iTLBInter
+
+  // itlb_requestors(1).req <>  tlb_req_arb.io.out
+
+  // ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
+  // icache.io.itlb(1).resp <> itlb_requestors(1).resp
 
   io.ptw <> TLB(
     //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
-    in = Seq(itlb_requestors(0), itlb_requestors(1)),
+    in = Seq(itlb_requestors(0), itlb_requestors(1), itlb_requestors(2), itlb_requestors(3)),
     sfence = io.sfence,
     csr = tlbCsr,
-    width = 2,
+    width = 4,
     shouldBlock = true,
     itlbParams
   )
