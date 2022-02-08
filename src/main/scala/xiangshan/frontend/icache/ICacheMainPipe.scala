@@ -141,6 +141,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_only_first  = fromIFU(0).valid && !fromIFU(0).valid
   val s0_double_line = fromIFU(0).valid && fromIFU(1).valid
 
+  val s0_can_go = WireInit(false.B)
+
   /** s0 tlb */
   class tlbMissSlot(implicit p: Parameters) extends ICacheBundle{
     val valid = Bool()
@@ -209,12 +211,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
 
-  when(tlb_slot.valid && tlb_all_resp){
+  when(tlb_slot.valid && tlb_all_resp && s0_can_go){
     tlb_slot.valid := false.B
   }
 
-  s0_fire        := (s0_valid || tlb_slot.valid && tlb_all_resp) && !missSwitchBit && s1_ready && 
-                    fetch_req(0).ready && fetch_req(1).ready                    
+  s0_can_go      := !missSwitchBit && s1_ready && fetch_req(0).ready && fetch_req(1).ready    
+  s0_fire        := (s0_valid || tlb_slot.valid && tlb_all_resp) && s0_can_go                 
 
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
