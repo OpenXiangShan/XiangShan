@@ -437,7 +437,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
-  val itlb        = Vec(PortNumber + 1, new BlockTlbRequestIO)
+  val itlb        = Vec(PortNumber * 2 + 1, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
   /* Cache Instruction */
@@ -553,7 +553,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.itlb(0)        <>    mainPipe.io.itlb(0)
   io.itlb(1)        <>    mainPipe.io.itlb(1)
-  io.itlb(2)        <>    prefetchPipe.io.iTLBInter
+  io.itlb(2)        <>    mainPipe.io.itlb(2)
+  io.itlb(3)        <>    mainPipe.io.itlb(3)
+  io.itlb(4)        <>    prefetchPipe.io.iTLBInter
 
   for(i <- 0 until PortNumber){
     io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp
