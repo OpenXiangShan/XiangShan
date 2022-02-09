@@ -489,14 +489,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
     val xorMask = lqIdxMask ^ enqMask
     val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === enqPtrExt(0).flag
-    val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
+    val stToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
 
     // check if load already in lq needs to be rolledback
     dataModule.io.violation(i).paddr := io.storeIn(i).bits.paddr
     dataModule.io.violation(i).mask := io.storeIn(i).bits.mask
     val addrMaskMatch = RegNext(dataModule.io.violation(i).violationMask)
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueSize).map(j => {
-      allocated(j) && toEnqPtrMask(j) && (datavalid(j) || miss(j))
+      allocated(j) && stToEnqPtrMask(j) && (datavalid(j) || miss(j))
     })))
     val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -668,13 +668,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // Generate real violation mask
     // Note that we use UIntToMask.rightmask here
     val startIndex = io.loadViolationQuery(i).req.bits.uop.lqIdx.value
-    val lqIdxMask = UIntToMask.rightmask(startIndex, LoadQueueSize)
-    val xorMask = lqIdxMask ^ deqRightMask
-    val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === deqPtrExt.flag
-    val toDeqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
+    val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
+    val xorMask = lqIdxMask ^ enqMask
+    val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === enqPtrExt(0).flag
+    val ldToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
     val ldld_violation_mask = WireInit(VecInit((0 until LoadQueueSize).map(j => {
       dataModule.io.release_violation(i).match_mask(j) && // addr match
-      toDeqPtrMask(j) && // the load is younger than current load
+      ldToEnqPtrMask(j) && // the load is younger than current load
       allocated(j) && // entry is valid
       released(j) && // cacheline is released
       (datavalid(j) || miss(j)) // paddr is valid
@@ -691,8 +691,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   when(io.release.valid){
     // Take over ld-ld paddr cam port
     dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
-    io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
-    // If a load needs that cam port, replay it from rs
+    // If a load comes in that cycle, we can not judge if it has ld-ld violation
+    // We replay that load inst from RS
+    io.loadViolationQuery.map(i => i.req.ready := false.B)
   }
 
   (0 until LoadQueueSize).map(i => {
