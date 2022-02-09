@@ -164,6 +164,12 @@ class XiangShan(object):
     def show(self):
         self.args.show()
 
+    def make_clean(self):
+        print("Clean up CI workspace")
+        self.show()
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME clean')
+        return return_code
+
     def generate_verilog(self):
         print("Generating XiangShan verilog with the following configurations:")
         self.show()
@@ -200,7 +206,8 @@ class XiangShan(object):
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
             (args.build, lambda _ : self.build_emu()),
-            (args.workload, lambda args: self.run_emu(args.workload))
+            (args.workload, lambda args: self.run_emu(args.workload)),
+            (args.clean, lambda _ : self.make_clean())
         ]
         valid_actions = map(lambda act: act[1], filter(lambda act: act[0], actions))
         for i, action in enumerate(valid_actions):
@@ -325,6 +332,7 @@ if __name__ == "__main__":
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
+    parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
     # environment variables
     parser.add_argument('--nemu', nargs='?', type=str, help='path to nemu')
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')

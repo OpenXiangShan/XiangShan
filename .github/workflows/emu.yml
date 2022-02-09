@@ -22,6 +22,9 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: check top wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
@@ -57,6 +60,9 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
@@ -106,6 +112,9 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
