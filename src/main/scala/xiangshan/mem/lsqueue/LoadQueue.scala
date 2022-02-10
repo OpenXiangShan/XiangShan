@@ -141,6 +141,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val commitCount = RegNext(io.rob.lcommit)
 
+  val release1cycle = io.release
+  val release2cycle = RegNext(io.release)
+
   /**
     * Enqueue at dispatch
     *
@@ -245,8 +248,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
-      released(loadWbIndex) := io.release.valid && 
-        io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === io.release.bits.paddr(PAddrBits-1, DCacheLineOffset)
+      released(loadWbIndex) := release2cycle.valid && 
+        io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
       // dirty code for load instr
       uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
       uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
@@ -686,21 +689,29 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   // "released" flag update
   // 
-  // When io.release.valid, it uses the last ld-ld paddr cam port to
+  // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
-  when(io.release.valid){
+
+  when(release1cycle.valid){
     // Take over ld-ld paddr cam port
-    dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
+    dataModule.io.release_violation.takeRight(1)(0).paddr := release1cycle.bits.paddr
+    io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
+  }
+
+  when(release2cycle.valid){
     // If a load comes in that cycle, we can not judge if it has ld-ld violation
     // We replay that load inst from RS
-    io.loadViolationQuery.map(i => i.req.ready := false.B)
+    io.loadViolationQuery.map(i => i.req.ready := 
+      !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+    )
+    // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
   }
 
   (0 until LoadQueueSize).map(i => {
     when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
       allocated(i) && 
       writebacked(i) &&
-      io.release.valid
+      release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches. 

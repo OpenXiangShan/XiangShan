@@ -595,9 +595,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
 
-  io.lsu.release.valid := RegNext(RegNext(wb.io.req.fire()))
-  io.lsu.release.bits.paddr := RegNext(RegNext(wb.io.req.bits.addr))
-  // Note: RegNext(RegNext()) is required by:
+  io.lsu.release.valid := RegNext(wb.io.req.fire())
+  io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)
+  // Note: RegNext() is required by:
   // * load queue released flag update logic
   // * load / load violation check logic
   // * and timing requirements
