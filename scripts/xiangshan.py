@@ -263,6 +263,14 @@ class XiangShan(object):
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
 
+    def __get_ci_mc(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads"
+        workloads = [
+            "dualcoretest/ldvio-riscv64-xs.bin"
+        ]
+        mc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return mc_tests
+
     def __get_ci_nodiff(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -296,6 +304,7 @@ class XiangShan(object):
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
             "misc-tests": self.__get_ci_misc,
+            "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
