@@ -227,7 +227,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   s0_can_go      := !missSwitchBit && s1_ready && fetch_req(0).ready && fetch_req(1).ready    
-  s0_fire        := (s0_valid || tlb_slot.valid && tlb_all_resp) && s0_can_go                 
+  s0_fire        := (s0_valid && !tlb_slot.valid || tlb_slot.valid && tlb_all_resp) && s0_can_go                 
 
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
