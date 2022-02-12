@@ -23,6 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.decode.ImmUnion
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -221,15 +222,17 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle with HasCircularQueueP
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {
-  def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt + 1
+  def numRedirectPcRead = exuParameters.JmpCnt + exuParameters.AluCnt + 1
   def isLoadReplay(r: Valid[Redirect]) = r.bits.flushItself()
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedirectInfo {
-  val pc_reads = Vec(1 + numRedirect + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val pc_reads = Vec(1 + numRedirectPcRead + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val target_read = Flipped(new FtqRead(UInt(VAddrBits.W)))
+  val redirect_s1_real_pc = Output(UInt(VAddrBits.W))
   def getJumpPcRead = pc_reads.head
   def getRedirectPcRead = VecInit(pc_reads.tail.dropRight(2))
+  def getRedirectPcReadData = pc_reads.tail.dropRight(2).map(_.data)
   def getMemPredPcRead = pc_reads.init.last
   def getRobFlushPcRead = pc_reads.last
 }
@@ -437,8 +440,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   io.bpuInfo := DontCare
 
-  val backendRedirect = io.fromBackend.redirect
-  val backendRedirectReg = RegNext(io.fromBackend.redirect)
+  val backendRedirect = Wire(Valid(new Redirect))
+  val backendRedirectReg = RegNext(backendRedirect)
 
   val stage2Flush = backendRedirect.valid
   val backendFlush = stage2Flush || RegNext(stage2Flush)
@@ -475,7 +478,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
   // read ports:                            jumpPc + redirects + loadPred + robFlush + ifuReq1 + ifuReq2 + commitUpdate
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1+1+1, 1))
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirectPcRead+2+1+1+1, 1))
   // resp from uBTB
   ftq_pc_mem.io.wen(0) := bpu_in_fire
   ftq_pc_mem.io.waddr(0) := bpu_in_resp_idx
@@ -701,10 +704,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // *******************************************************************************
 
   // redirect read cfiInfo, couples to redirectGen s2
-  ftq_redirect_sram.io.ren.init.last := io.fromBackend.redirect.valid
-  ftq_redirect_sram.io.raddr.init.last := io.fromBackend.redirect.bits.ftqIdx.value
+  ftq_redirect_sram.io.ren.init.last := backendRedirect.valid
+  ftq_redirect_sram.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
 
-  ftb_entry_mem.io.raddr.init.last := io.fromBackend.redirect.bits.ftqIdx.value
+  ftb_entry_mem.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
 
   val stage3CfiInfo = ftq_redirect_sram.io.rdata.init.last
   val fromBackendRedirect = WireInit(backendRedirectReg)
@@ -762,6 +765,60 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // *********************************************************************
   // **************************** wb from exu ****************************
   // *********************************************************************
+
+  class RedirectGen(implicit p: Parameters) extends XSModule
+    with HasCircularQueuePtrHelper {
+    val io = IO(new Bundle {
+      val in = Flipped((new CtrlToFtqIO).for_redirect_gen)
+      val stage1Pc = Input(Vec(numRedirectPcRead, UInt(VAddrBits.W)))
+      val out = Valid(new Redirect)
+      val s1_real_pc = Output(UInt(VAddrBits.W))
+      val debug_diff = Flipped(Valid(new Redirect))
+    })
+    val s1_jumpTarget = io.in.s1_jumpTarget
+    val s1_uop = io.in.s1_oldest_exu_output.bits.uop
+    val s1_imm12_reg = s1_uop.ctrl.imm(11,0)
+    val s1_pd = s1_uop.cf.pd
+    val s1_isReplay = io.in.s1_redirect_onehot.last
+    val s1_isJump = io.in.s1_redirect_onehot.head
+    val real_pc = Mux1H(io.in.s1_redirect_onehot, io.stage1Pc)
+    val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
+    val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
+    val target = Mux(s1_isReplay,
+      real_pc,
+      Mux(io.in.s1_oldest_redirect.bits.cfiUpdate.taken,
+        Mux(s1_isJump, io.in.s1_jumpTarget, brTarget),
+        snpc  
+      )
+    )
+
+    val redirectGenRes = WireInit(io.in.rawRedirect)
+    redirectGenRes.bits.cfiUpdate.pc := real_pc
+    redirectGenRes.bits.cfiUpdate.pd := s1_pd
+    redirectGenRes.bits.cfiUpdate.target := target
+
+    val realRedirect = Wire(Valid(new Redirect))
+    realRedirect.valid := redirectGenRes.valid || io.in.flushRedirect.valid
+    realRedirect.bits := Mux(io.in.flushRedirect.valid, io.in.flushRedirect.bits, redirectGenRes.bits)
+
+    when (io.in.flushRedirect.valid) {
+      realRedirect.bits.level := RedirectLevel.flush
+      realRedirect.bits.cfiUpdate.target := io.in.frontendFlushTarget
+    }
+
+    io.out := realRedirect
+    io.s1_real_pc := real_pc
+    XSError((io.debug_diff.valid || realRedirect.valid) && io.debug_diff.asUInt =/= io.out.asUInt, "redirect wrong")
+
+  }
+
+  val redirectGen = Module(new RedirectGen)
+  redirectGen.io.in <> io.fromBackend.for_redirect_gen
+  redirectGen.io.stage1Pc := io.toBackend.getRedirectPcReadData
+  redirectGen.io.debug_diff := io.fromBackend.redirect
+  backendRedirect := redirectGen.io.out
+
+  io.toBackend.redirect_s1_real_pc := redirectGen.io.s1_real_pc
 
   def extractRedirectInfo(wb: Valid[Redirect]) = {
     val ftqIdx = wb.bits.ftqIdx.value
@@ -1008,7 +1065,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   val enq = io.fromBpu.resp
-  val perf_redirect = io.fromBackend.redirect
+  val perf_redirect = backendRedirect
 
   XSPerfAccumulate("entry", validEntries)
   XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
