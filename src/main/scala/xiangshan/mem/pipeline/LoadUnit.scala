@@ -332,6 +332,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
+  val s2_cache_tag_error = io.dcacheResp.bits.tag_error
   val s2_cache_error = io.dcacheResp.bits.error
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   val s2_ldld_violation = io.loadViolationQueryResp.valid &&
@@ -415,10 +416,15 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
-  // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
-  // and dcache query is no longer needed.
+  // We use io.dataForwarded instead. It means:
+  // 1. Forward logic have prepared all data needed,
+  //    and dcache query is no longer needed.
+  // 2. ... or data cache tag error is detected, this kind of inst 
+  //    will not update miss queue. That is to say, if miss, that inst
+  //    may not be refilled
   // Such inst will be writebacked from load queue.
-  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception && !s2_forward_fail
+  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception && !s2_forward_fail || // case 1
+    io.csrCtrl.cache_error_enable && s2_cache_tag_error // case 2
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
   // data retbrived from dcache is also included in io.out.bits.forwardData
