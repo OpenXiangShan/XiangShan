@@ -215,7 +215,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_data_error = io.read_error // banked_data_resp_word.error && !bank_conflict_slow
   val s2_error = RegEnable(s1_error, s1_fire) || s2_data_error
 
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_tag_error
+  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -236,7 +236,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
-  io.miss_req.bits.cancel := io.lsu.s2_kill
+  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
@@ -252,15 +252,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // * report a miss if bank conflict is detected
   val real_miss = !s2_hit
   resp.bits.miss := real_miss || io.bank_conflict_slow
-  if (id == 0) {
-    // load pipe 0 will not be influenced by bank conflict
-    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
-  } else {
-    // load pipe 1 need replay when there is a bank conflict
-    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
-    XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
-  }
-  resp.bits.error := s2_error && s2_hit
+  // load pipe need replay when there is a bank conflict
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
+  resp.bits.tag_error := s2_tag_error
+  resp.bits.error := s2_error && (s2_hit || s2_tag_error)
+
+  XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

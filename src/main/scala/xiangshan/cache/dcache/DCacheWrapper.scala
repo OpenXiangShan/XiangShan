@@ -263,7 +263,8 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // cache miss, and failed to enter the missqueue, replay from RS is needed
   val replay = Bool()
   // data has been corrupted
-  val error = Bool()
+  val tag_error = Bool() // tag error
+  val error = Bool() // all kinds of errors, include tag error
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)

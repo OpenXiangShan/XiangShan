@@ -127,6 +127,8 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.id     := req.id
     io.resp.bits.miss   := false.B
     io.resp.bits.replay := false.B
+    io.resp.bits.tag_error := false.B
+    io.resp.bits.error  := false.B
 
     when (io.resp.fire()) {
       state := s_invalid
