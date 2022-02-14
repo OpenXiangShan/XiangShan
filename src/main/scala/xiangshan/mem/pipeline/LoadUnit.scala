@@ -423,8 +423,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   //    will not update miss queue. That is to say, if miss, that inst
   //    may not be refilled
   // Such inst will be writebacked from load queue.
-  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception && !s2_forward_fail || // case 1
-    io.csrCtrl.cache_error_enable && s2_cache_tag_error // case 2
+  io.dataForwarded := s2_cache_miss && !s2_exception && !s2_forward_fail &&
+    (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
   // data retbrived from dcache is also included in io.out.bits.forwardData
