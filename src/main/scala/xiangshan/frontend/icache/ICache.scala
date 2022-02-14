@@ -437,7 +437,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
-  val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
+  val itlb        = Vec(PortNumber * 2 + 1, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
   /* Cache Instruction */
@@ -492,7 +492,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val data_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
   val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
-  val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
+  // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
   meta_read_arb.io.in(ReplacePipeKey)   <> replacePipe.io.meta_read
   meta_read_arb.io.in(MainPipeKey)      <> mainPipe.io.metaArray.toIMeta
@@ -539,20 +539,23 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
 
 
-  tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
-  tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
-  io.itlb(0).req       <>    tlb_req_arb.io.out
+  // tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
+  // tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
+  // io.itlb(0).req       <>    tlb_req_arb.io.out
 
-  mainPipe.io.itlb(0).resp  <>  io.itlb(0).resp
-  prefetchPipe.io.iTLBInter.resp  <>  io.itlb(0).resp
+  // mainPipe.io.itlb(0).resp  <>  io.itlb(0).resp
+  // prefetchPipe.io.iTLBInter.resp  <>  io.itlb(0).resp
 
-  when(mainPipe.io.itlb(0).req.fire() && prefetchPipe.io.iTLBInter.req.fire())
-  {
-    assert(false.B, "Both mainPipe ITLB and prefetchPipe ITLB fire!")
-  }
+  // when(mainPipe.io.itlb(0).req.fire() && prefetchPipe.io.iTLBInter.req.fire())
+  // {
+  //   assert(false.B, "Both mainPipe ITLB and prefetchPipe ITLB fire!")
+  // }
 
+  io.itlb(0)        <>    mainPipe.io.itlb(0)
   io.itlb(1)        <>    mainPipe.io.itlb(1)
-
+  io.itlb(2)        <>    mainPipe.io.itlb(2)
+  io.itlb(3)        <>    mainPipe.io.itlb(3)
+  io.itlb(4)        <>    prefetchPipe.io.iTLBInter
 
   for(i <- 0 until PortNumber){
     io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp

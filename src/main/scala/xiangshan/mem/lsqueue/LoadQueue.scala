@@ -141,6 +141,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val commitCount = RegNext(io.rob.lcommit)
 
+  val release1cycle = io.release
+  val release2cycle = RegNext(io.release)
+
   /**
     * Enqueue at dispatch
     *
@@ -245,6 +248,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
+      released(loadWbIndex) := release2cycle.valid && 
+        io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
+        release1cycle.valid &&
+        io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release1cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
       // dirty code for load instr
       uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
       uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
@@ -487,14 +494,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
     val xorMask = lqIdxMask ^ enqMask
     val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === enqPtrExt(0).flag
-    val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
+    val stToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
 
     // check if load already in lq needs to be rolledback
     dataModule.io.violation(i).paddr := io.storeIn(i).bits.paddr
     dataModule.io.violation(i).mask := io.storeIn(i).bits.mask
     val addrMaskMatch = RegNext(dataModule.io.violation(i).violationMask)
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueSize).map(j => {
-      allocated(j) && toEnqPtrMask(j) && (datavalid(j) || miss(j))
+      allocated(j) && stToEnqPtrMask(j) && (datavalid(j) || miss(j))
     })))
     val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -666,13 +673,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // Generate real violation mask
     // Note that we use UIntToMask.rightmask here
     val startIndex = io.loadViolationQuery(i).req.bits.uop.lqIdx.value
-    val lqIdxMask = UIntToMask.rightmask(startIndex, LoadQueueSize)
-    val xorMask = lqIdxMask ^ deqRightMask
-    val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === deqPtrExt.flag
-    val toDeqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
+    val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
+    val xorMask = lqIdxMask ^ enqMask
+    val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === enqPtrExt(0).flag
+    val ldToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
     val ldld_violation_mask = WireInit(VecInit((0 until LoadQueueSize).map(j => {
       dataModule.io.release_violation(i).match_mask(j) && // addr match
-      toDeqPtrMask(j) && // the load is younger than current load
+      ldToEnqPtrMask(j) && // the load is younger than current load
       allocated(j) && // entry is valid
       released(j) && // cacheline is released
       (datavalid(j) || miss(j)) // paddr is valid
@@ -684,20 +691,29 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   // "released" flag update
   // 
-  // When io.release.valid, it uses the last ld-ld paddr cam port to
+  // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
-  when(io.release.valid){
+
+  when(release1cycle.valid){
     // Take over ld-ld paddr cam port
-    dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
+    dataModule.io.release_violation.takeRight(1)(0).paddr := release1cycle.bits.paddr
     io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
-    // If a load needs that cam port, replay it from rs
+  }
+
+  when(release2cycle.valid){
+    // If a load comes in that cycle, we can not judge if it has ld-ld violation
+    // We replay that load inst from RS
+    io.loadViolationQuery.map(i => i.req.ready := 
+      !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+    )
+    // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
   }
 
   (0 until LoadQueueSize).map(i => {
     when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
       allocated(i) && 
       writebacked(i) &&
-      io.release.valid
+      release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches. 
