@@ -57,7 +57,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 
   l2_binder match {
     case Some(binder) =>
-      memory_port := TLBuffer() := TLClientsMerger() := TLXbar() :=* binder
+      memory_port := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder
     case None =>
       memory_port := l1_xbar
   }
