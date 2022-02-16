@@ -172,22 +172,22 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     fetch_req(i).bits.vSetIdx      := s0_final_vsetIdx
   }
 
-  toITLB(0).valid         := s0_valid  && !missSwitchBit
+  toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := s0_req_vaddr(0)
   toITLB(0).bits.debug.pc := s0_req_vaddr(0)
 
-  toITLB(1).valid         := s0_valid && s0_double_line && !missSwitchBit
+  toITLB(1).valid         := s0_valid && s0_double_line 
   toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := s0_req_vaddr(1)
   toITLB(1).bits.debug.pc := s0_req_vaddr(1)
 
-  toITLB(2).valid         := tlb_slot.valid && !missSwitchBit
+  toITLB(2).valid         := tlb_slot.valid  
   toITLB(2).bits.size     := 3.U // TODO: fix the size
   toITLB(2).bits.vaddr    := tlb_slot.req_vaddr(0)
   toITLB(2).bits.debug.pc := tlb_slot.req_vaddr(0)
 
-  toITLB(3).valid         := tlb_slot.valid && tlb_slot.double_line && !missSwitchBit
+  toITLB(3).valid         := tlb_slot.valid && tlb_slot.double_line  
   toITLB(3).bits.size     := 3.U // TODO: fix the size
   toITLB(3).bits.vaddr    := tlb_slot.req_vaddr(1)
   toITLB(3).bits.debug.pc := tlb_slot.req_vaddr(1)
