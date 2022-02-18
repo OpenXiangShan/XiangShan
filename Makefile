@@ -50,7 +50,7 @@ TIME_CMD = time -a -o $(TIMELOG)
 .DEFAULT_GOAL = verilog
 
 help:
-	mill XiangShan.test.runMain $(SIMTOP) --help
+	mill -i XiangShan.test.runMain $(SIMTOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
@@ -105,6 +105,9 @@ bump:
 
 bsp:
 	mill -i mill.bsp.BSP/install
+
+idea:
+	mill -i mill.scalalib.GenIdea/idea
 
 # verilator simulation
 emu:
