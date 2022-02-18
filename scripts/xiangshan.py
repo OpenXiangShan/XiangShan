@@ -286,6 +286,7 @@ class XiangShan(object):
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
+            "linux-hello-smp": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
