@@ -377,7 +377,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.fpRfReadIn.isDefined) {
-    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+    // Due to distance issues, we RegNext the address for cross-block regfile read
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := RegNext(addr)}
     require(io.extra.fpRfReadIn.get.length == readFpRf.length)
   }
 
