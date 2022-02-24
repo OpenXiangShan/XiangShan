@@ -271,7 +271,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.valid := true.B
     statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
     statusArray.io.update(i).data.blocked := params.checkWaitBit.B && io.fromDispatch(i).bits.cf.loadWaitBit
-    statusArray.io.update(i).data.credit := Mux(params.delayedRf.B && needFpSource(i), 2.U, 0.U)
+    statusArray.io.update(i).data.credit := Mux(params.delayedRf.B && needFpSource(i), 3.U, 0.U)
     statusArray.io.update(i).data.srcState := VecInit(io.fromDispatch(i).bits.srcIsReady.take(params.numSrc))
     statusArray.io.update(i).data.midState := false.B
     statusArray.io.update(i).data.psrc := VecInit(io.fromDispatch(i).bits.psrc.take(params.numSrc))

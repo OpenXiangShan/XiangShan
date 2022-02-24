@@ -317,7 +317,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
   val fpBusyTable = if (readFpState.nonEmpty) {
     // Some fp states are read from outside
-    val numInFpStateRead = io.extra.fpStateReadIn.getOrElse(Seq()).length
+    val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
     // The left read requests are serviced by internal busytable
     val numBusyTableRead = readFpState.length - numInFpStateRead
     val busyTable = if (numBusyTableRead > 0) {
@@ -334,7 +334,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       busyTable.io.read <> readFpState
       Some(busyTable)
     } else None
-    if (io.extra.fpStateReadIn.isDefined) {
+    if (io.extra.fpStateReadIn.isDefined && numInFpStateRead > 0) {
       io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
     }
     busyTable
@@ -377,7 +377,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.fpRfReadIn.isDefined) {
-    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+    // Due to distance issues, we RegNext the address for cross-block regfile read
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := RegNext(addr)}
     require(io.extra.fpRfReadIn.get.length == readFpRf.length)
   }
 
@@ -530,7 +531,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))  )
   )
   val intBtPerf = if (intBusyTable.isDefined) intBusyTable.get.getPerfEvents else Seq()
-  val fpBtPerf = if (fpBusyTable.isDefined) fpBusyTable.get.getPerfEvents else Seq()
+  val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()
   val perfEvents = schedulerPerf ++ intBtPerf ++ fpBtPerf ++ rs_all.flatMap(_.module.getPerfEvents)
   generatePerfEvent()
 }
