@@ -160,7 +160,10 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc)}\n")
 
-  io.out.resp.s1.minimal_pred.fromMicroBTBEntry(resp_valid && shouldNotFallThru && !lastCycleHasUpdate, dataMem.io.r.resp.data(0), s1_pc) // invalid when update
+  io.out.resp.s1.minimal_pred.fromMicroBTBEntry(
+    resp_valid && shouldNotFallThru && !lastCycleHasUpdate && io.ctrl.ubtb_enable,
+    dataMem.io.r.resp.data(0), s1_pc
+  ) // invalid when update
   io.out.resp.s1.is_minimal := true.B
 
   outMeta.ftPred := fallThruPredRAM.io.rdata

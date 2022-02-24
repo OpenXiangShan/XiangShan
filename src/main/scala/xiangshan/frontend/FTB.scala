@@ -422,7 +422,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val ftb_entry = RegEnable(ftbBank.io.read_resp, io.s1_fire)
   val s3_ftb_entry = RegEnable(ftb_entry, io.s2_fire)
-  val s1_hit = ftbBank.io.read_hits.valid
+  val s1_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
   val s2_hit = RegEnable(s1_hit, io.s1_fire)
   val s3_hit = RegEnable(s2_hit, io.s2_fire)
   val writeWay = ftbBank.io.read_hits.bits
