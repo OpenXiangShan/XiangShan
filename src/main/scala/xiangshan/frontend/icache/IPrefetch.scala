@@ -202,7 +202,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends ICacheMissUnitModule
 {
   val io = IO(new Bundle {
-    val id = Input(UInt(log2Ceil(nPrefetchEntries).W))
+    val id = Input(UInt(log2Ceil(PortNumber + nPrefetchEntries).W))
 
     val req = Flipped(DecoupledIO(new PIQReq))
 
