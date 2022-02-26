@@ -687,7 +687,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.takens(i)     := RegEnable(s2_tageTakens(i), io.s2_fire)
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire)
 
-    resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
+    when (io.ctrl.tage_enable) {
+      resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
+    }
 
     //---------------- update logics below ------------------//
     val hasUpdate = updateValids(i)

@@ -45,6 +45,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.s3_redirect := io.s3_redirect
 
     c.io.redirect := io.redirect
+    c.io.ctrl := DelayN(io.ctrl, 1)
 
     if (c.meta_size > 0) {
       metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size-1,0)
