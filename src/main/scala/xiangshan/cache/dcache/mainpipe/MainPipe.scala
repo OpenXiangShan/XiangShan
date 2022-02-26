@@ -265,6 +265,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_miss_tag = Mux1H(s1_req.miss_way_en, wayMap(w => tag_resp(w)))
   val s1_miss_coh = Mux1H(s1_req.miss_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
+  val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
+  s1_repl_way_raw := Mux(RegNext(s0_fire), io.replace_way.way, RegNext(s1_repl_way_raw))
+
   val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
   val s1_way_en = Mux(
     s1_req.replace,
@@ -720,7 +723,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.wb.bits.delay_release := s3_req.replace
   io.wb.bits.miss_id := s3_req.miss_id
 
-  io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe && s1_tag_match)
+  io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe)
   io.replace_access.bits.set := s2_idx
   io.replace_access.bits.way := RegNext(OHToUInt(s1_way_en))
 
