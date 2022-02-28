@@ -150,9 +150,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way
 
-  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
+  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
-  io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
+  io.replace_access.bits.way := RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way))
 
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
