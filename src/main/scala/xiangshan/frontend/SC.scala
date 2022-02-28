@@ -312,7 +312,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
+      when (io.ctrl.sc_enable) {
+        io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
+      }
   
       val updateTageMeta = updateMeta
       when (updateValids(w) && updateSCMeta.scUsed(w)) {
