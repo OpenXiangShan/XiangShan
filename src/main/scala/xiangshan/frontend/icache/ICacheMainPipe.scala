@@ -150,9 +150,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   class tlbMissSlot(implicit p: Parameters) extends ICacheBundle{
     val valid = Bool()
     val only_first = Bool()
-    val double_line = Bool()
+    val double_line = Bool() // ?
     val req_vaddr = Vec(PortNumber,UInt(VAddrBits.W))
-    val req_vsetIdx = Vec(PortNumber, UInt(idxBits.W))
+    val req_vsetIdx = Vec(PortNumber, UInt(idxBits.W)) // ?
   }
 
   val tlb_slot = RegInit(0.U.asTypeOf(new tlbMissSlot))

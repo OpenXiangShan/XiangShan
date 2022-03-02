@@ -27,7 +27,7 @@ import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
+import xiangshan.cache.mmu.{BTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
 
 class Std(implicit p: Parameters) extends FunctionUnit {
@@ -161,11 +161,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sfence = RegNext(io.sfence)
   val tlbcsr = RegNext(io.tlbCsr)
   val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
-    val tlb_ld = Module(new TLB(1, ldtlbParams))
+    val tlb_ld = Module(new TLBNonBlock(1, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt){
-    val tlb_st = Module(new TLB(1 , sttlbParams))
+    val tlb_st = Module(new TLBNonBlock(1 , sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   dtlb_ld.map(_.sfence := sfence)
