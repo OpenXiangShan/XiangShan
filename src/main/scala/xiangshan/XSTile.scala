@@ -19,6 +19,7 @@ class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCPar
   val paddr = Valid(UInt(soc.PAddrBits.W))
   // for now, we only detect ecc
   val ecc_error = Valid(Bool())
+}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
