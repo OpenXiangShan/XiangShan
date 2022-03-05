@@ -38,7 +38,7 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
     )),
-    requestFields = Seq(DsidField(3))
+    requestFields = Seq(DsidField(1))
   )
   ))
 

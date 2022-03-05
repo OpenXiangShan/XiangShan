@@ -58,7 +58,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 
   val tile_bucket = LazyModule(new TokenBucketNode())
   busPMU := tile_bucket.node := l1d_logger
-  busPMU := l1d_logger
+  //busPMU := l1d_logger
   l1_xbar :=* busPMU
 
   l2_binder match {

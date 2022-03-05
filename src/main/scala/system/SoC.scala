@@ -313,6 +313,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     (cp_tile_buckets_io zip controlPlane.module.bucketIO) map {case (out_bucket_io, cp_bucket_io) =>
       out_bucket_io <> cp_bucket_io
     }
+    val cp_to_huancun_io = IO(new CPToHuanCunIO())
+    cp_to_huancun_io <> controlPlane.module.io.huancun
 
     val freq = 100
     val cnt = RegInit(freq.U)

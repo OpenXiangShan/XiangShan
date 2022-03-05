@@ -38,6 +38,7 @@ import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils,
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
+import device.lvna._
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -107,32 +108,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
     case None =>
-  }
-
-  if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
-    val cat = Module(new autocat)
-    val cpio = misc.controlPlane.module.io
-    val l3 = l3cacheOpt.module
-    l3.cp <> cpio.l2
-
-    cat.io.clk_in := io.clock
-    cat.io.reset_in := io.reset || cpio.autocat_watching_change
-    cat.io.access_valid_in := cpio.cp.autocat_en && l3.autocat.access_valid_in
-    cat.io.reset_bin_power := cpio.cp.autocat_reset_bin_power
-    cat.io.allowed_gap := cpio.cp.autocat_gap
-    cat.io.hit_vec_in := l3.autocat.hit_vec_in
-    cpio.l2.autocat_suggested_waymask := cat.io.suggested_waymask_out
-    l3.autocat.suggested_waymask_out :=
-      Mux(cpio.cp.autocat_en, cat.io.suggested_waymask_out, Fill(p(NL2CacheWays), 1.U))
-
-    when (cat.io.access_valid_in) {
-      printf("hit_vec_in %b\n", cat.io.hit_vec_in)
-    }
-
-    val pre_way = RegNext(cat.io.suggested_waymask_out)
-    when (pre_way =/= cat.io.suggested_waymask_out) {
-      printf("suggested waymask %b\n", cat.io.suggested_waymask_out)
-    }
   }
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -229,6 +204,33 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val l3cacheMod = if (l3cacheOpt.isDefined) Seq(l3cacheOpt.get.module) else Seq()
       val resetChain = Seq(l3cacheMod ++ core_with_l2.map(_.module))
       ResetGen(resetChain, io.reset, !debugOpts.FPGAPlatform)
+    }
+
+    l3cacheOpt match {
+      case Some(l3) =>
+        //val cat = Module(new autocat)
+        //val cpio = misc.controlPlane.module.io
+        l3.module.io.cp <> misc.module.cp_to_huancun_io
+
+        /*cat.io.clk_in := io.clock
+        cat.io.reset_in := io.reset || cpio.autocat_watching_change
+        cat.io.access_valid_in := cpio.cp.autocat_en && l3.module.io.autocat.access_valid_in
+        cat.io.reset_bin_power := cpio.cp.autocat_reset_bin_power
+        cat.io.allowed_gap := cpio.cp.autocat_gap
+        cat.io.hit_vec_in := l3.module.io.autocat.hit_vec_in
+        cpio.huancun.autocat_suggested_waymask := cat.io.suggested_waymask_out
+        l3.module.io.autocat.suggested_waymask_out :=
+          Mux(cpio.cp.autocat_en, cat.io.suggested_waymask_out, Fill(p(NL2CacheWays), 1.U))
+
+        when (cat.io.access_valid_in) {
+          printf("hit_vec_in %b\n", cat.io.hit_vec_in)
+        }
+
+        val pre_way = RegNext(cat.io.suggested_waymask_out)
+        when (pre_way =/= cat.io.suggested_waymask_out) {
+          printf("suggested waymask %b\n", cat.io.suggested_waymask_out)
+        }*/
+      case None =>
     }
 
   }

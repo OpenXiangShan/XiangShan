@@ -160,7 +160,8 @@ class MinimalConfig(n: Int = 1) extends Config(
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024
+        sets = 1024,
+        reqField = Seq(DsidField(1))
       )),
       L3NBanks = 1
     )
@@ -222,7 +223,7 @@ class WithNKBL2
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField(),DsidField(3)),
+        reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
         enablePerf = true,
