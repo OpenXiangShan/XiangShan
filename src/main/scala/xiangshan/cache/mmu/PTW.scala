@@ -116,8 +116,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
     val recv = cache.io.resp
+    // NOTE: 1. prefetch doesn't gen prefetch 2. req from mq doesn't gen prefetch
+    // NOTE: 1. miss req gen prefetch 2. hit but prefetched gen prefetch
     prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit  ||
-      recv.bits.prefetch)
+      recv.bits.prefetch) && recv.bits.isFirst
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence
     prefetch.io.csr := csr

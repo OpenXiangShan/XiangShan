@@ -55,6 +55,17 @@ Some of the key directories are shown below.
         └── xstransforms   # some useful firrtl transforms
 ```
 
+## IDE Support
+
+### bsp
+```
+make bsp
+```
+
+### IDEA
+```
+make idea
+```
 
 
 ## Generate Verilog

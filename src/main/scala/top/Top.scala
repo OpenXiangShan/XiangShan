@@ -93,6 +93,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
+  l3cacheOpt.map(_.intnode.map(int => {
+    misc.plic.intnode := IntBuffer() := int
+  }))
 
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
@@ -106,7 +109,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
+      misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
     case None =>
   }
 
@@ -197,12 +200,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     withClockAndReset(io.clock.asClock, io.reset) {
       // Modules are reset one by one
-      // reset ----> SYNC --> {L3 Cache, Cores}
-      //         |
-      //         v
-      //        misc
-      val l3cacheMod = if (l3cacheOpt.isDefined) Seq(l3cacheOpt.get.module) else Seq()
-      val resetChain = Seq(l3cacheMod ++ core_with_l2.map(_.module))
+      // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
+      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
       ResetGen(resetChain, io.reset, !debugOpts.FPGAPlatform)
     }
 

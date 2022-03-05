@@ -29,6 +29,7 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
   val vaddr = UInt(VAddrBits.W)
   val param  = UInt(TLPermissions.cWidth.W)
   val voluntary = Bool()
+  val needData = Bool()
   val waymask = UInt(nWays.W)
   val id = UInt(ReplaceIdWid.W)
 
@@ -39,12 +40,14 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 }
 
 
-class ReplacePipe(implicit p: Parameters) extends ICacheModule{
+class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val io = IO(new Bundle{
     val pipe_req = Flipped(DecoupledIO(new ReplacePipeReq))
 
     val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(new ICacheReadBundle)
+
+    val error      = Output(new L1CacheErrorInfo)
 
     val meta_response     = Input(new ICacheMetaRespBundle)
     val data_response     = Input(new ICacheDataRespBundle)
@@ -52,19 +55,30 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
     val release_req = DecoupledIO(new ReleaseReq)
+    val release_finish = Input(Bool())
 
     val pipe_resp = ValidIO(UInt(ReplaceIdWid.W))
     
     val status = new Bundle() {
-      val r1_set, r2_set = ValidIO(UInt(idxBits.W))
+      val r1_set, r2_set, r3_set = ValidIO(UInt(idxBits.W))
     }
+
+    val csr_parity_enable = Input(Bool())
+
   })
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
   val (toData, dataResp) =  (io.data_read, io.data_response.datas(0))
+  val (metaError, codeResp) = (io.meta_response.errors(0), io.data_response.codes(0))
 
   val r0_ready, r1_ready, r2_ready = WireInit(false.B)
-  val r0_fire,  r1_fire , r2_fire  = WireInit(false.B)
+  val r0_fire,  r1_fire , r2_fire, r3_fire  = WireInit(false.B)
+
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 0
+    ******************************************************************************
+    */  
 
   val r0_valid       = io.pipe_req.valid
 
@@ -83,10 +97,12 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
-  //---------------------------------------------
-
-  //---------------------------------------------
-
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 1
+    ******************************************************************************
+    */  
+  
   val r1_valid = generatePipeControl(lastFire = r0_fire, thisFire = r1_fire, thisFlush = false.B, lastFlush = false.B)
   r1_ready := r2_ready  || !r1_valid
   r1_fire  := r1_valid && r2_ready
@@ -96,7 +112,11 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
   val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
-  val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
+  val r1_meta_errors             = ResultHoldBypass(data = metaError, valid = RegNext(r0_fire))
+
+  val r1_data_cacheline          = ResultHoldBypass(data = VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
+  val r1_data_errorBits          = ResultHoldBypass(data = VecInit(codeResp.map(way => way)), valid = RegNext(r0_fire))
+
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
@@ -115,12 +135,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.status.r1_set.valid := r1_valid
   io.status.r1_set.bits  := r1_req.vidx
 
-
   /**
     ******************************************************************************
-    * 
-    * 
-    * 
+    * ReplacePipe Stage 2
     ******************************************************************************
     */
     
@@ -140,6 +157,42 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = r2_probe_hit_coh.onProbe(r2_req.param)
 
+
+
+  val r2_meta_errors    = RegEnable(next = r1_meta_errors,    enable = r1_fire)
+  val r2_data_errorBits = RegEnable(next = r1_data_errorBits, enable = r1_fire)
+
+  val r2_data_errors    = Wire(Vec(nWays, Bool()))
+
+  val read_datas = r2_data_cacheline.asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeUnit.W))))
+  val read_codes = r2_data_errorBits.asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeBits.W))))
+  val data_full_wayBits = VecInit((0 until nWays).map( w => 
+                                VecInit((0 until dataCodeUnitNum).map(u => 
+                                      Cat(read_codes(w)(u), read_datas(w)(u))))))
+  val data_error_wayBits = VecInit((0 until nWays).map( w => 
+                                VecInit((0 until dataCodeUnitNum).map(u => 
+                                      cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
+  (0 until nWays).map{ w => r2_data_errors(w) := RegNext(RegNext(r1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_) } 
+
+  val r2_parity_meta_error = r2_meta_errors.reduce(_||_) && io.csr_parity_enable
+  val r2_parity_data_error = r2_data_errors.reduce(_||_) && io.csr_parity_enable
+  val r2_parity_error      = RegNext(r2_parity_meta_error) || r2_parity_data_error
+
+
+  io.error.valid                := RegNext(r2_parity_error &&  RegNext(RegNext(r1_fire))) 
+  io.error.report_to_beu        := RegNext(r2_parity_error &&  RegNext(RegNext(r1_fire)))
+  io.error.paddr                := RegNext(RegNext(r2_req.paddr))
+  io.error.source.tag           := RegNext(RegNext(r2_parity_meta_error))
+  io.error.source.data          := RegNext(r2_parity_data_error)
+  io.error.source.l2            := false.B
+  io.error.opType               := DontCare
+  io.error.opType.fetch         := true.B
+  io.error.opType.release       := RegNext(RegNext(r2_req.isRelease))
+  io.error.opType.probe         := RegNext(RegNext(r2_req.isProbe))
+
+  XSError(r2_parity_error && RegNext(RegNext(r1_fire)), "ICache has parity error in ReplacePipe!")
+
+
   /*** for Release mux ***/
   val r2_release_ptag = RegEnable(next = release_tag, enable = r1_fire)
   val r2_release_coh  = RegEnable(next = release_coh, enable = r1_fire)
@@ -153,7 +206,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   /*** to Release Unit ***/
   val r2_paddr = Mux(r2_req.isProbe, r2_req.paddr , r2_release_addr)
   val r2_param = Mux(r2_req.isProbe, probe_shrink_param , release_shrink_param)
-  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() || r2_req.isRelease
+  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() && (r2_req.needData || probe_has_dirty_data) || r2_req.isRelease
   val r2_data  = Mux(r2_req.isProbe, r2_probe_hit_data , r2_release_data)
 
   val r2_write_tag = Mux(r2_req.isProbe, r2_probe_hit_ptag , r2_release_ptag)
@@ -176,10 +229,29 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.release_req.bits.vidx      := DontCare
 
   //response to MissQueue
-  io.pipe_resp.valid := r2_fire && r2_req.isRelease
-  io.pipe_resp.bits  := r2_req.id
+  // io.pipe_resp.valid := r2_fire && r2_req.isRelease
+  // io.pipe_resp.bits  := r2_req.id
 
   io.status.r2_set.valid := r2_valid
   io.status.r2_set.bits  := r2_req.vidx
+
+  /**
+    ******************************************************************************
+    * ReplacePipe Stage 3
+    ******************************************************************************
+    */
+
+  val r3_valid          = generatePipeControl(lastFire = r2_fire && r2_req.isRelease, thisFire = r3_fire, thisFlush = false.B, lastFlush = false.B)
+  val r3_release_need_send = RegEnable(next = release_need_send, enable = r2_fire && r2_req.isRelease)
+
+  r3_fire       := (r3_valid && RegNext(io.release_finish) && r3_release_need_send) || (r3_valid && !r3_release_need_send) 
+
+  val r3_req = RegEnable(next = r2_req, enable = r2_fire && r2_req.isRelease)
+
+  io.pipe_resp.valid := r3_fire 
+  io.pipe_resp.bits  := r3_req.id
+
+  io.status.r3_set.valid := r3_valid
+  io.status.r3_set.bits  := r3_req.vidx
 
 }

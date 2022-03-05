@@ -161,10 +161,8 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
           data
         }
       })
-      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR()
-      io.errors(j).ecc_error.bits := true.B
-      io.errors(j).paddr.valid := io.errors(j).ecc_error.valid
-      io.errors(j).paddr.bits := RegNext(io.read(j).bits.addr)
+      io.errors(j).report_to_beu := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR()
+      io.errors(j).paddr := RegNext(io.read(j).bits.addr)
     }
 
     io.nacks(j) := false.B

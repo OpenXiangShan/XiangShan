@@ -69,6 +69,7 @@ object CacheInstrucion{
     CacheRegMap("17",     "64",    "RW",      "CACHE_DATA_5"),
     CacheRegMap("18",     "64",    "RW",      "CACHE_DATA_6"),
     CacheRegMap("19",     "64",    "RW",      "CACHE_DATA_7"),
+    CacheRegMap("20",     "64",    "RW",      "CACHE_ERROR"),
   )
 
   // Usage:
@@ -131,7 +132,7 @@ class L1CacheToCsrIO(implicit p: Parameters) extends DCacheBundle {
   val update = new DistributedCSRUpdateReq
 }
 
-class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
+class L1CacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
   val req  = Valid(new CacheCtrlReqInfo)
   val resp = Flipped(Valid(new CacheCtrlRespInfo))
 }
@@ -139,7 +140,8 @@ class DCacheInnerOpIO(implicit p: Parameters) extends DCacheBundle {
 class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) extends CacheCtrlModule {
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
-    val cache = new DCacheInnerOpIO
+    val cache = new L1CacheInnerOpIO
+    val error = Flipped(new L1CacheErrorInfo)
   })
 
   // CSRCacheOpDecoder state
@@ -260,5 +262,40 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("OP_FINISH")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := CacheInstrucion.COP_RESULT_CODE_OK
     data_transfer_cnt := 0.U
+  }
+
+  val error = DelayN(io.error, 1)
+  when(error.report_to_beu) {
+    io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
+    io.csr.update.w.bits.data := error.asUInt
+    io.csr.update.w.valid := true.B
+  }
+}
+
+class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
+  val io = IO(new Bundle{
+    val encoded_cache_error = Input(UInt())
+  })
+  val encoded_cache_error = io.encoded_cache_error
+  def print_cache_error_flag(flag: Bool, desc: String) = {
+    when(flag){
+      printf("  " + desc + "\n")
+    }
+  }
+  val decoded_cache_error = WireInit(encoded_cache_error.asTypeOf(new L1CacheErrorInfo))
+  when(decoded_cache_error.valid && !RegNext(decoded_cache_error.valid)){
+    printf("CACHE_ERROR CSR reported an error:\n")
+    printf("  paddr 0x%x\n", decoded_cache_error.paddr)
+    print_cache_error_flag(decoded_cache_error.report_to_beu, "report to bus error unit")
+    print_cache_error_flag(decoded_cache_error.source.tag, "tag")
+    print_cache_error_flag(decoded_cache_error.source.data, "data")
+    print_cache_error_flag(decoded_cache_error.source.l2, "l2")
+    print_cache_error_flag(decoded_cache_error.opType.fetch, "fetch")
+    print_cache_error_flag(decoded_cache_error.opType.load, "load")
+    print_cache_error_flag(decoded_cache_error.opType.store, "store")
+    print_cache_error_flag(decoded_cache_error.opType.probe, "probe")
+    print_cache_error_flag(decoded_cache_error.opType.release, "release")
+    print_cache_error_flag(decoded_cache_error.opType.atom, "atom")
+    printf("It should not happen in normal execution flow\n")
   }
 }

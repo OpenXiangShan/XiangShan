@@ -94,6 +94,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
     val hartid =  Input(UInt(3.W))
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
+    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+    val sqDeq = Output(UInt(2.W))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -105,6 +108,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
+  when(!csrCtrl.cache_error_enable){
+    io.error.report_to_beu := false.B
+    io.error.valid := false.B
+  }
 
   dcache.io.hartid <> io.hartid
 
@@ -224,82 +231,94 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_ld.map(_.ptw_replenish := pmp_check_ptw.io.resp)
   dtlb_st.map(_.ptw_replenish := pmp_check_ptw.io.resp)
 
-  val tdata = Reg(Vec(6, new MatchTriggerIO))
+  val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
   val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
+  tEnable := VecInit(en(2), en (3), en(4), en(5), en(7), en(9))
   when(csrCtrl.mem_trigger.t.valid) {
     tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
   }
-  val lTriggerMapping = Map(0 -> 4, 1 -> 5, 2 -> 9)
-  val sTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 7)
+  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
+  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
   val lChainMapping = Map(0 -> 2)
   val sChainMapping = Map(0 -> 1)
+  XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
+  for(j <- 0 until 3)
+    PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
-    loadUnits(i).io.redirect      <> io.redirect
-    loadUnits(i).io.feedbackSlow  <> io.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast  <> io.rsfeedback(i).feedbackFast
-    loadUnits(i).io.rsIdx         := io.rsfeedback(i).rsIdx
-    loadUnits(i).io.isFirstIssue  := io.rsfeedback(i).isFirstIssue // NOTE: just for dtlb's perf cnt
+    loadUnits(i).io.redirect <> io.redirect
+    loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
+    loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
+    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.loadFastMatch <> io.loadFastMatch(i)
     // get input form dispatch
-    loadUnits(i).io.ldin          <> io.issue(i)
+    loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
-    loadUnits(i).io.dcache        <> dcache.io.lsu.load(i)
+    loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
     // forward
-    loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
-    loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+    loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
+    loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
     // ld-ld violation check
     loadUnits(i).io.lsq.loadViolationQuery <> lsq.io.loadViolationQuery(i)
     loadUnits(i).io.csrCtrl       <> csrCtrl
     // dtlb
-    loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
+    loadUnits(i).io.tlb <> dtlb_ld(i).requestor(0)
     // pmp
-    loadUnits(i).io.pmp           <> pmp_check(i).resp
+    loadUnits(i).io.pmp <> pmp_check(i).resp
 
     // laod to load fast forward
     for (j <- 0 until exuParameters.LduCnt) {
-      loadUnits(i).io.fastpathIn(j)  <> loadUnits(j).io.fastpathOut
+      loadUnits(i).io.fastpathIn(j) <> loadUnits(j).io.fastpathOut
     }
 
     // Lsq to load unit's rs
 
     // passdown to lsq
-    lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
-    lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
-    lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
+    lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
+    lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // update mem dependency predictor
     io.memPredUpdate(i) := DontCare
-    lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
+    lsq.io.dcacheRequireReplay(i)    <> loadUnits(i).io.lsq.dcacheRequireReplay
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
+//    for (j <- 0 until 10) {
+//      io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+//      io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+//      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+//    }
 
-
-    // TODO: load trigger, a total of 3
-      for (j <- 0 until 10) {
-        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
-        io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
-        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
-      }
-    when(ldExeWbReqs(i).fire()){
-      // load data, we need to delay cmp for 1 cycle for better timing
-//      ldExeWbReqs(i).bits.data
-      // TriggerCmp(ldExeWbReqs(i).bits.data, DontCare, DontCare, DontCare) 
-      // load vaddr 
-//      ldExeWbReqs(i).bits.debug.vaddr
-      // TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
-      for (j <- 0 until 3) {
-        val hit = Mux(tdata(j+3).select, TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)),
-          TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)))
-        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
-        io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
-        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
-      }
+    // --------------------------------
+    // Load Triggers
+    // --------------------------------
+    val hit = Wire(Vec(3, Bool()))
+    for (j <- 0 until 3) {
+      loadUnits(i).io.trigger(j).tdata2 := tdata(lTriggerMapping(j)).tdata2
+      loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
+      loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
+      // Just let load triggers that match data unavailable
+      hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
+      io.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
+//      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
+      //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
     }
+    when(tdata(2).chain) {
+      io.writeback(i).bits.uop.cf.trigger.backendHit(2) := hit(0) && hit(1)
+      io.writeback(i).bits.uop.cf.trigger.backendHit(3) := hit(0) && hit(1)
+    }
+    when(!io.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
+      io.writeback(i).bits.uop.cf.trigger.backendHit(5) := false.B
+    }
+
+    XSDebug(io.writeback(i).bits.uop.cf.trigger.getHitBackend && io.writeback(i).valid, p"Debug Mode: Load Inst No.${i}" +
+    p"has trigger hit vec ${io.writeback(i).bits.uop.cf.trigger.backendHit}\n")
+
   }
 
   // StoreUnit
@@ -336,41 +355,54 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.stout.ready := true.B
 
-    // TODO: debug trigger
-    // store vaddr 
-    when (stOut(i).fire()) {
-      for (j <- 0 until 10) {
-          stOut(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
-          stOut(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
-          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
-      }
+    // -------------------------
+    // Store Triggers
+    // -------------------------
+    when(stOut(i).fire()){
+      val hit = Wire(Vec(3, Bool()))
       for (j <- 0 until 3) {
-        when(!tdata(j).select) {
-          val hit = TriggerCmp(stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
-          stOut(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
-          stOut(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
-          if (sChainMapping.contains(j)) stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
-        }
-      }
-    }
+         hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
+           stOut(i).bits.debug.vaddr,
+           tdata(sTriggerMapping(j)).tdata2,
+           tdata(sTriggerMapping(j)).matchType,
+           tEnable(sTriggerMapping(j))
+         )
+       stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
+     }
+
+     when(tdata(0).chain) {
+       io.writeback(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
+       io.writeback(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
+     }
+
+     when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
+       stOut(i).bits.uop.cf.trigger.backendHit(4) := false.B
+     }
+   }
     // store data
-    when(lsq.io.storeDataIn(i).fire()){
-      lsq.io.storeDataIn(i).bits.data(XLEN-1, 0)
-      for (j <- 0 until 10) {
-          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
-          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
-          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
-      }
-      // TriggerCmp(lsq.io.storeDataIn(i).bits.data(XLEN-1, 0), DontCare, DontCare, DontCare)
-      for (j <- 0 until 3) {
-        when(tdata(j).select) {
-          val hit = TriggerCmp(lsq.io.storeDataIn(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
-          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
-          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
-          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
-        }
-      }
-    }
+//    when(lsq.io.storeDataIn(i).fire()){
+//
+//      val hit = Wire(Vec(3, Bool()))
+//      for (j <- 0 until 3) {
+//        when(tdata(sTriggerMapping(j)).select) {
+//          hit(j) := TriggerCmp(lsq.io.storeDataIn(i).bits.data, tdata(sTriggerMapping(j)).tdata2, tdata(sTriggerMapping(j)).matchType, tEnable(sTriggerMapping(j)))
+//          lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
+//          lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendTiming(sTriggerMapping(j)) := tdata(sTriggerMapping(j)).timing
+////          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
+//        }
+//      }
+//
+//      when(tdata(0).chain) {
+//        lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
+//        lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
+//      }
+//      when(lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendEn(1)) {
+//        lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendHit(4) := Mux(io.writeback(i).bits.uop.cf.trigger.backendConsiderTiming(1),
+//          tdata(4).timing === lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendChainTiming(1), true.B) && hit(2)
+//      } .otherwise {
+//        lsq.io.storeDataIn(i).bits.uop.cf.trigger.backendHit(4) := false.B
+//      }
+//    }
   }
 
   // mmio store writeback will use store writeback port 0
@@ -381,11 +413,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.mmioStout.ready := true.B
   }
 
-  // atom inst will use store writeback port 0 to writeback exception info
+  // atomic exception / trigger writeback
   when (atomicsUnit.io.out.valid) {
+    // atom inst will use store writeback port 0 to writeback exception info
     stOut(0).valid := true.B
     stOut(0).bits  := atomicsUnit.io.out.bits
     assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
+
+    // when atom inst writeback, surpress normal load trigger
+    (0 until 2).map(i => {
+      io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+    })
   }
 
   // Lsq
@@ -399,6 +437,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
   lsq.io.release        := dcache.io.lsu.release
+  lsq.io.lqCancelCnt <> io.lqCancelCnt
+  lsq.io.sqCancelCnt <> io.sqCancelCnt
+  lsq.io.sqDeq <> io.sqDeq
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
@@ -469,6 +510,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
+  atomicsUnit.io.csrCtrl := csrCtrl
+
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
   when (state === s_atomics_0 || state === s_atomics_1) {
@@ -491,10 +534,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
-  // Address is delayed by one cycle, so does the atomics address
-  val atomicsException = RegNext(atomicsUnit.io.exceptionAddr.valid)
-  val atomicsExceptionAddress = RegNext(atomicsUnit.io.exceptionAddr.bits)
+  // Exception address is used serveral cycles after flush.
+  // We delay it by 10 cycles to ensure its flush safety.
+  val atomicsException = RegInit(false.B)
+  when (DelayN(io.redirect.valid, 10) && atomicsException) {
+    atomicsException := false.B
+  }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
+    atomicsException := true.B
+  }
+  val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr)
+  XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

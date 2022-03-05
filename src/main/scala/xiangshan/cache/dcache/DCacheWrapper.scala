@@ -96,8 +96,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encTagBits = cacheParams.tagCode.width(tagBits)
   def eccTagBits = encTagBits - tagBits
 
-  def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
-  def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 3
@@ -259,13 +257,15 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
+  val id     = UInt(reqIdWidth.W)
+
   // cache req missed, send it to miss queue
   val miss   = Bool()
-  // cache req nacked, replay it later
-  val miss_enter = Bool()
-  // cache miss, and enter the missqueue successfully. just for softprefetch
+  // cache miss, and failed to enter the missqueue, replay from RS is needed
   val replay = Bool()
-  val id     = UInt(reqIdWidth.W)
+  // data has been corrupted
+  val tag_error = Bool() // tag error
+  val error = Bool() // all kinds of errors, include tag error
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
@@ -290,6 +290,7 @@ class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
   val data   = UInt(l1BusDataWidth.W)
+  val error  = Bool() // refilled data has been corrupted
   // for debug usage
   val data_raw = UInt((cfg.blockBytes * 8).W)
   val hasdata = Bool()
@@ -409,6 +410,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
   val metaArray = Module(new AsynchronousMetaArray(readPorts = 3, writePorts = 2))
+  val errorArray = Module(new ErrorArray(readPorts = 3, writePorts = 2)) // TODO: add it to meta array
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
@@ -418,33 +420,39 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
-//  val replacePipe = Module(new ReplacePipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
 
   missQueue.io.hartId := io.hartId
 
-  val errors = bankedDataArray.io.errors ++ ldu.map(_.io.error) ++
-    Seq(mainPipe.io.error)
-  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  val errors = ldu.map(_.io.error) ++ // load error
+    Seq(mainPipe.io.error) // store / misc error 
+  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
 
   //----------------------------------------
   // meta array
   val meta_read_ports = ldu.map(_.io.meta_read) ++
-    Seq(mainPipe.io.meta_read/*,
-      replacePipe.io.meta_read*/)
+    Seq(mainPipe.io.meta_read)
   val meta_resp_ports = ldu.map(_.io.meta_resp) ++
-    Seq(mainPipe.io.meta_resp/*,
-      replacePipe.io.meta_resp*/)
+    Seq(mainPipe.io.meta_resp)
   val meta_write_ports = Seq(
     mainPipe.io.meta_write,
-    refillPipe.io.meta_write/*,
-    replacePipe.io.meta_write*/
+    refillPipe.io.meta_write
   )
   meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
   meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
+
+  val error_flag_resp_ports = ldu.map(_.io.error_flag_resp) ++
+    Seq(mainPipe.io.error_flag_resp)
+  val error_flag_write_ports = Seq(
+    mainPipe.io.error_flag_write,
+    refillPipe.io.error_flag_write
+  )
+  meta_read_ports.zip(errorArray.io.read).foreach { case (p, r) => r <> p }
+  error_flag_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => p := r }
+  error_flag_write_ports.zip(errorArray.io.write).foreach { case (p, w) => w <> p }
 
   //----------------------------------------
   // tag array
@@ -465,28 +473,25 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // data array
 
-//  val dataReadLineArb = Module(new Arbiter(new L1BankedDataReadLineReq, 2))
-//  dataReadLineArb.io.in(0) <> replacePipe.io.data_read
-//  dataReadLineArb.io.in(1) <> mainPipe.io.data_read
-
   val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
   dataWriteArb.io.in(0) <> refillPipe.io.data_write
   dataWriteArb.io.in(1) <> mainPipe.io.data_write
 
   bankedDataArray.io.write <> dataWriteArb.io.out
-  bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
-  bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
+
   bankedDataArray.io.readline <> mainPipe.io.data_read
-
-  ldu(0).io.banked_data_resp := bankedDataArray.io.resp
-  ldu(1).io.banked_data_resp := bankedDataArray.io.resp
+  mainPipe.io.readline_error := bankedDataArray.io.readline_error
   mainPipe.io.data_resp := bankedDataArray.io.resp
-//  replacePipe.io.data_resp := bankedDataArray.io.resp
 
-  ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
-  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
-  ldu(0).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(0)
-  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(1)
+  (0 until LoadPipelineWidth).map(i => {
+    bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
+    bankedDataArray.io.read_error(i) <> ldu(i).io.read_error
+
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
+
+    ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
+    ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
+  })
 
   //----------------------------------------
   // load pipe
@@ -508,6 +513,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
   atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   //----------------------------------------
   // miss queue
@@ -587,14 +593,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-//  val wbArb = Module(new Arbiter(new WritebackReq, 2))
-//  wbArb.io.in.zip(Seq(mainPipe.io.wb, replacePipe.io.wb)).foreach { case (arb, pipe) => arb <> pipe }
+
   wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
-  io.lsu.release.valid := RegNext(bus.c.fire())
-  io.lsu.release.bits.paddr := RegNext(bus.c.bits.address)
+
+  io.lsu.release.valid := RegNext(wb.io.req.fire())
+  io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)
+  // Note: RegNext() is required by:
+  // * load queue released flag update logic
+  // * load / load violation check logic
+  // * and timing requirements
+  // CHANGE IT WITH CARE
 
   wb.io.hartid <> io.hartid      // add hartid to tilelinkC by writebackqueue
 
@@ -665,17 +676,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
   cacheOpDecoder.io.csr <> io.csr
   bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
-    metaArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
     bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
-    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
     tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
   ))
-  assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
+  cacheOpDecoder.io.error := io.error
+  assert(!((bankedDataArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------
   // performance counters

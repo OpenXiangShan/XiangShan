@@ -64,6 +64,7 @@ class XSArgs(object):
         self.numa = args.numa
         self.diff = args.diff
         self.fork = not args.disable_fork
+        self.disable_diff = args.no_diff
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -163,6 +164,12 @@ class XiangShan(object):
     def show(self):
         self.args.show()
 
+    def make_clean(self):
+        print("Clean up CI workspace")
+        self.show()
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME clean')
+        return return_code
+
     def generate_verilog(self):
         print("Generating XiangShan verilog with the following configurations:")
         self.show()
@@ -184,10 +191,13 @@ class XiangShan(object):
         self.show()
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
-        numa_info = get_free_cores(self.args.threads)
-        numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}" if self.args.numa else ""
+        numa_args = ""
+        if self.args.numa:
+            numa_info = get_free_cores(self.args.threads)
+            numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
         fork_args = "--enable-fork" if self.args.fork else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args}')
+        diff_args = "--no-diff" if self.args.disable_diff else ""
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
         return return_code
 
     def run(self, args):
@@ -196,7 +206,8 @@ class XiangShan(object):
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
             (args.build, lambda _ : self.build_emu()),
-            (args.workload, lambda args: self.run_emu(args.workload))
+            (args.workload, lambda args: self.run_emu(args.workload)),
+            (args.clean, lambda _ : self.make_clean())
         ]
         valid_actions = map(lambda act: act[1], filter(lambda act: act[0], actions))
         for i, action in enumerate(valid_actions):
@@ -233,7 +244,7 @@ class XiangShan(object):
         return riscv_tests
 
     def __get_ci_misc(self, name=None):
-        base_dir = "/home/ci-runner/xsenv/workloads"
+        base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
             "bitmanip/bitMisc.bin",
             "crypto/crypto-riscv64-noop.bin",
@@ -247,10 +258,26 @@ class XiangShan(object):
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
-            "cache-management/softprefetch-riscv64-noop.bin"
+            "cache-management/softprefetchtest-riscv64-xs.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
+
+    def __get_ci_mc(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads"
+        workloads = [
+            "dualcoretest/ldvio-riscv64-xs.bin"
+        ]
+        mc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return mc_tests
+
+    def __get_ci_nodiff(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads"
+        workloads = [
+            "cache-management/cacheoptest-riscv64-xs.bin"
+        ]
+        tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return tests
 
     def __am_apps_path(self, bench):
         filename = f"{bench}-riscv64-noop.bin"
@@ -259,6 +286,7 @@ class XiangShan(object):
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
+            "linux-hello-smp": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
@@ -270,13 +298,15 @@ class XiangShan(object):
             "wrf": "_1916220000000_.gz",
             "astar": "_122060000000_.gz"
         }
-        return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
+        return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
 
     def run_ci(self, test):
         all_tests = {
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
             "misc-tests": self.__get_ci_misc,
+            "mc-tests": self.__get_ci_mc,
+            "nodiff-tests": self.__get_ci_nodiff,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
         }
@@ -312,6 +342,7 @@ if __name__ == "__main__":
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
+    parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
     # environment variables
     parser.add_argument('--nemu', nargs='?', type=str, help='path to nemu')
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
@@ -332,6 +363,7 @@ if __name__ == "__main__":
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
+    parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     # ci action head sha
 
     args = parser.parse_args()

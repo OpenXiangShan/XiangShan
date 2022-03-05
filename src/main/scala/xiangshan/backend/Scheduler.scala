@@ -29,7 +29,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -251,6 +251,11 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val stIssuePtr = Input(new SqPtr())
     // special ports for load / store rs
     val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    // from lsq
+    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
@@ -283,7 +288,16 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val dispatch2 = outer.dispatch2.map(_.module)
 
   // dirty code for ls dp
-  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) dp.io.enqLsq.get <> io.extra.enqLsq.get)
+  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
+    val lsqCtrl = Module(new LsqEnqCtrl)
+    lsqCtrl.io.redirect <> io.redirect
+    lsqCtrl.io.enq <> dp.io.enqLsq.get
+    lsqCtrl.io.lcommit := io.extra.lcommit
+    lsqCtrl.io.scommit := io.extra.scommit
+    lsqCtrl.io.lqCancelCnt := io.extra.lqCancelCnt
+    lsqCtrl.io.sqCancelCnt := io.extra.sqCancelCnt
+    io.extra.enqLsq.get <> lsqCtrl.io.enqLsq
+  })
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
@@ -303,7 +317,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
   val fpBusyTable = if (readFpState.nonEmpty) {
     // Some fp states are read from outside
-    val numInFpStateRead = io.extra.fpStateReadIn.getOrElse(Seq()).length
+    val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
     // The left read requests are serviced by internal busytable
     val numBusyTableRead = readFpState.length - numInFpStateRead
     val busyTable = if (numBusyTableRead > 0) {
@@ -320,7 +334,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       busyTable.io.read <> readFpState
       Some(busyTable)
     } else None
-    if (io.extra.fpStateReadIn.isDefined) {
+    if (io.extra.fpStateReadIn.isDefined && numInFpStateRead > 0) {
       io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
     }
     busyTable
@@ -363,7 +377,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.fpRfReadIn.isDefined) {
-    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+    // Due to distance issues, we RegNext the address for cross-block regfile read
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := RegNext(addr)}
     require(io.extra.fpRfReadIn.get.length == readFpRf.length)
   }
 
@@ -497,13 +512,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.gpr := intRfReadData.takeRight(32)
+    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData.takeRight(32))))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.fpr := fpRfReadData.takeRight(32)
+    difftest.io.fpr := RegNext(RegNext(VecInit(fpRfReadData.takeRight(32))))
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
@@ -516,7 +531,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))  )
   )
   val intBtPerf = if (intBusyTable.isDefined) intBusyTable.get.getPerfEvents else Seq()
-  val fpBtPerf = if (fpBusyTable.isDefined) fpBusyTable.get.getPerfEvents else Seq()
+  val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()
   val perfEvents = schedulerPerf ++ intBtPerf ++ fpBtPerf ++ rs_all.flatMap(_.module.getPerfEvents)
   generatePerfEvent()
 }

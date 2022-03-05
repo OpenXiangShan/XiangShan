@@ -44,12 +44,13 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   val io = IO(new Bundle {
     val id = Input(UInt())
     val req = Flipped(DecoupledIO(new ReleaseReq))
+    val finish = Output(Bool())
 
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   })
 
-  val s_invalid :: s_release_req :: s_release_resp :: s_meta_write :: Nil = Enum(4)
+  val s_invalid :: s_release_req :: s_release_resp :: Nil = Enum(3)
   val state = RegInit(s_invalid)
 
   val req  = Reg(new ReleaseReq)
@@ -67,6 +68,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 
   io.req.ready := state === s_invalid
   io.mem_grant.ready := false.B
+  io.finish := false.B
 
   when (io.req.fire()) {
     req        := io.req.bits
@@ -95,7 +97,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
     data = beat_data(beat)
   )
 
-    val voluntaryReleaseData = edge.Release(
+  val voluntaryReleaseData = edge.Release(
     fromSource = io.id,
     toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
     lgSize = log2Ceil(blockBytes).U,
@@ -122,12 +124,9 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   when (state === s_release_resp) {
     io.mem_grant.ready := true.B
     when (io.mem_grant.fire()) {
-      state := Mux(req.voluntary,s_meta_write,s_invalid)
-    }
-  }
-
-  when(state === s_meta_write) {
+      io.finish := true.B
       state := s_invalid
+    }
   }
 
 }
@@ -135,35 +134,35 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 {
   val io = IO(new Bundle {
-    val req = Vec(2, Flipped(DecoupledIO(new ReleaseReq)))
+    val req = Flipped(DecoupledIO(new ReleaseReq))
+    val finish = Output(Bool())
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   })
+
+  //more than 1 release entries may cause bug
+  //TODO: support multiple concurrent Releases 
+  require(cacheParams.nReleaseEntries == 1)
 
   val req = io.req
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
 
-  val entries = (0 until cacheParams.nReleaseEntries) map { i =>
-    val entry = Module(new RealeaseEntry(edge))
+  val entry = Module(new RealeaseEntry(edge))
 
-    entry.io.id := i.U
+  entry.io.id := 0.U
 
-    // entry req
-    entry.io.req.valid := io.req(i).valid
-    entry.io.req.bits  := io.req(i).bits
-    io.req(i).ready    := entry.io.req.ready
+  // entry req
+  entry.io.req.valid := io.req.valid
+  entry.io.req.bits  := io.req.bits
+  io.req.ready    := entry.io.req.ready
 
-    entry.io.mem_grant.valid := (i.U === io.mem_grant.bits.source) && io.mem_grant.valid
-    entry.io.mem_grant.bits  := io.mem_grant.bits
-    when (i.U === io.mem_grant.bits.source) {
-      io.mem_grant.ready := entry.io.mem_grant.ready
-    }
+  entry.io.mem_grant.valid := (0.U === io.mem_grant.bits.source) && io.mem_grant.valid
+  entry.io.mem_grant.bits  := io.mem_grant.bits
+  io.mem_grant.ready := entry.io.mem_grant.ready
 
-
-    entry
-  }
-  TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
+  io.mem_release <> entry.io.mem_release
+  io.finish := entry.io.finish
 
 }

@@ -27,7 +27,30 @@ class ResetGen extends Module {
   io.out := RegNext(RegNext(reset.asBool))
 }
 
+trait ResetNode
+
+case class ModuleNode(mod: MultiIOModule) extends ResetNode
+
+case class ResetGenNode(children: Seq[ResetNode]) extends ResetNode
+
 object ResetGen {
+
+  def apply(resetTree: ResetNode, reset: Bool, sim: Boolean): Unit = {
+    if(!sim) {
+      resetTree match {
+        case ModuleNode(mod) =>
+          mod.reset := reset
+        case ResetGenNode(children) =>
+          val next_rst = Wire(Bool())
+          withReset(reset){
+            val resetGen = Module(new ResetGen)
+            next_rst := resetGen.io.out
+          }
+          children.foreach(child => apply(child, next_rst, sim))
+      }
+    }
+  }
+
   def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Bool, sim: Boolean): Seq[Bool] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Bool()))
     resetReg.foreach(_ := reset)

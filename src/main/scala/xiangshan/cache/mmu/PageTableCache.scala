@@ -67,6 +67,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val req = Flipped(DecoupledIO(new PtwCacheReq()))
   val resp = DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
+    val isFirst = Bool()
     val hit = Bool()
     val prefetch = Bool() // is the entry fetched by prefetch
     val toFsm = new Bundle {
@@ -323,6 +324,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   io.resp.bits.req_info   := stage3.bits.req_info
+  io.resp.bits.isFirst  := stage3.bits.isFirst
   io.resp.bits.hit      := s3_res.l3.hit || s3_res.sp.hit
   io.resp.bits.prefetch := s3_res.l3.pre && s3_res.l3.hit || s3_res.sp.pre && s3_res.sp.hit
   io.resp.bits.toFsm.l1Hit := s3_res.l1.hit

@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
+import freechips.rocketchip.tilelink.TLBuffer
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
@@ -138,7 +139,10 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
+  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
+
+  ptw_to_l2_buffer.node := ptw.node
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
@@ -251,6 +255,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
+  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   ctrlBlock.io.hartId := io.hartId
@@ -267,8 +272,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
 
-  io.beu_errors.icache <> frontend.io.error
-  io.beu_errors.dcache <> memBlock.io.error
+  io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
@@ -287,6 +292,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
+  exuBlocks.foreach(b => {
+    b.io.scheExtra.lcommit := ctrlBlock.io.robio.lsq.lcommit
+    b.io.scheExtra.scommit := memBlock.io.sqDeq
+    b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
+    b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
+  })
   val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
   outer.ctrlBlock.generateWritebackIO()
 
@@ -395,18 +406,30 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
   // Modules are reset one by one
-  // reset --> SYNC ----> SYNC ------> SYNC -----> SYNC -----> SYNC ---
-  //                  |          |            |           |           |
-  //                  v          v            v           v           v
-  //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
-  val resetChain = Seq(
-    Seq(memBlock, dtlbRepeater1, dtlbRepeater2),
-    Seq(exuBlocks.head),
-    // Note: arbiters don't actually have reset ports
-    exuBlocks.tail ++ Seq(outer.wbArbiter.module),
-    Seq(ctrlBlock),
-    Seq(ptw),
-    Seq(frontend, itlbRepeater1, itlbRepeater2)
+  val resetTree = ResetGenNode(
+    Seq(
+      ModuleNode(memBlock), ModuleNode(dtlbRepeater1),
+      ResetGenNode(Seq(
+        ModuleNode(itlbRepeater2),
+        ModuleNode(ptw),
+        ModuleNode(dtlbRepeater2),
+        ModuleNode(ptw_to_l2_buffer),
+      )),
+      ResetGenNode(Seq(
+        ModuleNode(exuBlocks.head),
+        ResetGenNode(
+          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
+        ),
+        ResetGenNode(Seq(
+          ModuleNode(ctrlBlock),
+          ResetGenNode(Seq(
+            ModuleNode(frontend), ModuleNode(itlbRepeater1)
+          ))
+        ))
+      ))
+    )
   )
-  ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
+
+  ResetGen(resetTree, reset.asBool, !debugOpts.FPGAPlatform)
+
 }

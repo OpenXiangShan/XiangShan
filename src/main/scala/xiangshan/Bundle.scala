@@ -40,6 +40,7 @@ import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -79,10 +80,11 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasEntry = new RASEntry
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+  val ghr = UInt(UbtbGHRLength.W)
   val histPtr = new CGHPtr
-  val phist = UInt(PathHistoryLength.W)
   val specCnt = Vec(numBr, UInt(10.W))
-  val phNewBit = Bool()
   // need pipeline update
   val br_hit = Bool()
   val predTaken = Bool()
@@ -95,12 +97,11 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
     this.folded_hist := entry.folded_hist
+    this.lastBrNumOH := entry.lastBrNumOH
+    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
-    this.phist := entry.phist
-    this.phNewBit := entry.phNewBit
     this.rasSp := entry.rasSp
     this.rasEntry := entry.rasEntry
-    this.specCnt := entry.specCnt
     this
   }
 }
@@ -442,8 +443,10 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val l1plus_pf_enable = Output(Bool())
+  val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  // ICache
+  val icache_parity_enable = Output(Bool())
   // Labeled XiangShan
   val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor
@@ -458,6 +461,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val sbuffer_threshold = Output(UInt(4.W))
   val ldld_vio_check_enable = Output(Bool())
   val soft_prefetch_enable = Output(Bool())
+  val cache_error_enable = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // Decode
@@ -466,6 +470,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 
+  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   val trigger_enable = Output(Vec(10, Bool()))
@@ -499,12 +504,91 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class TriggerCf (implicit p: Parameters) extends XSBundle {
-  val triggerHitVec = Vec(10, Bool())
-  val triggerTiming = Vec(10, Bool())
-  val triggerChainVec = Vec(5, Bool())
+class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
+  // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
+  val source = Output(new Bundle() {
+    val tag = Bool() // l1 tag array
+    val data = Bool() // l1 data array
+    val l2 = Bool()
+  })
+  val opType = Output(new Bundle() {
+    val fetch = Bool()
+    val load = Bool()
+    val store = Bool()
+    val probe = Bool()
+    val release = Bool()
+    val atom = Bool()
+  })
+  val paddr = Output(UInt(PAddrBits.W))
+
+  // report error and paddr to beu
+  // bus error unit will receive error info iff ecc_error.valid
+  val report_to_beu = Output(Bool())
+
+  // there is an valid error
+  // l1 cache error will always be report to CACHE_ERROR csr
+  val valid = Output(Bool())
+
+  def toL1BusErrorUnitInfo(): L1BusErrorUnitInfo = {
+    val beu_info = Wire(new L1BusErrorUnitInfo)
+    beu_info.ecc_error.valid := report_to_beu
+    beu_info.ecc_error.bits := paddr
+    beu_info
+  }
 }
 
+/* TODO how to trigger on next inst?
+1. If hit is determined at frontend, then set a "next instr" trap at dispatch like singlestep
+2. If it is determined at Load(meaning it must be "hit after", then it must not be a jump. So we can let it commit and set
+xret csr to pc + 4/ + 2
+2.5 The problem is to let it commit. This is the real TODO
+3. If it is load and hit before just treat it as regular load exception
+ */
+
+// This bundle carries trigger hit info along the pipeline
+// Now there are 10 triggers divided into 5 groups of 2
+// These groups are
+// (if if) (store store) (load loid) (if store) (if load)
+
+// Triggers in the same group can chain, meaning that they only
+// fire is both triggers in the group matches (the triggerHitVec bit is asserted)
+// Chaining of trigger No. (2i) and (2i+1) is indicated by triggerChainVec(i)
+// Timing of 0 means trap at current inst, 1 means trap at next inst
+// Chaining and timing and the validness of a trigger is controlled by csr
+// In two chained triggers, if they have different timing, both won't fire
+//class TriggerCf (implicit p: Parameters) extends XSBundle {
+//  val triggerHitVec = Vec(10, Bool())
+//  val triggerTiming = Vec(10, Bool())
+//  val triggerChainVec = Vec(5, Bool())
+//}
+
+class TriggerCf(implicit p: Parameters) extends XSBundle {
+  // frontend
+  val frontendHit = Vec(4, Bool())
+//  val frontendTiming = Vec(4, Bool())
+//  val frontendHitNext = Vec(4, Bool())
+
+//  val frontendException = Bool()
+  // backend
+  val backendEn = Vec(2, Bool()) // Hit(6) && chain(4) , Hit(8) && chain(4)
+  val backendHit = Vec(6, Bool())
+//  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
+
+  // Two situations not allowed:
+  // 1. load data comparison
+  // 2. store chaining with store
+  def getHitFrontend = frontendHit.reduce(_ || _)
+  def getHitBackend = backendHit.reduce(_ || _)
+  def hit = getHitFrontend || getHitBackend
+  def clear(): Unit = {
+    frontendHit.foreach(_ := false.B)
+    backendEn.foreach(_ := false.B)
+    backendHit.foreach(_ := false.B)
+  }
+}
+
+// these 3 bundles help distribute trigger control signals from CSR
+// to Frontend, Load and Store.
 class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
     val t = Valid(new Bundle {
       val addr = Output(UInt(2.W))

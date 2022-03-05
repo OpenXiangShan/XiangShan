@@ -18,6 +18,7 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import utils._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
@@ -48,6 +49,7 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
   // you can choose which bank to read to save power
   val ecc = Bits(eccBits.W)
   val raw_data = Bits(DCacheSRAMRowBits.W)
+  val error = Bool() // slow to generate, use it with care
 
   def asECCData() = {
     Cat(ecc, raw_data)
@@ -64,6 +66,7 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
 // -----------------------------------------------------------------
 abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
+  val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
@@ -73,14 +76,16 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data bank read resp (all banks)
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
+    // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
+    val read_error = Output(Vec(LoadPipelineWidth, Bool()))
+    val readline_error = Output(Bool())
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
     // customized cache op port 
-    val cacheOp = Flipped(new DCacheInnerOpIO)
+    val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
-  assert(LoadPipelineWidth == 2) // BankedDataArray is designed for 2 port
+  assert(LoadPipelineWidth <= 2) // BankedDataArray is designed for no more than 2 read ports
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -249,8 +254,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // read each bank, get bank result
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   dontTouch(bank_result)
-  val row_error = Wire(Vec(DCacheBanks, Bool()))
-  dontTouch(row_error)
+  val read_bank_error = Wire(Vec(DCacheBanks, Bool()))
+  dontTouch(read_bank_error)
   val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
   val rrl_bank_conflict_0 = Wire(Bool())
   val rrl_bank_conflict_1 = Wire(Bool())
@@ -322,24 +327,29 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
     // read ECC
     val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR
+    ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR || readline_match
     ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
     bank_result(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
 
     // use ECC to check error
     val data = bank_result(bank_index).asECCData()
-    row_error(bank_index) := dcacheParameters.dataCode.decode(data).error && RegNext(bank_addr_matchs.asUInt.orR)
+    bank_result(bank_index).error := dcacheParameters.dataCode.decode(data).error
+    read_bank_error(bank_index) := bank_result(bank_index).error
   }
 
-  // Select final read result
-  (0 until LoadPipelineWidth).map(rport_index => {
-    io.errors(rport_index).ecc_error.valid := RegNext(io.read(rport_index).fire()) && row_error.asUInt.orR() &&
-      !io.bank_conflict_slow(rport_index)
-    io.errors(rport_index).ecc_error.bits := true.B
-    io.errors(rport_index).paddr.valid := io.errors(rport_index).ecc_error.valid
-    io.errors(rport_index).paddr.bits := RegNext(io.read(rport_index).bits.addr)
-  })
+  // read result: expose banked read result 
   io.resp := bank_result
+
+  // error detection
+  // normal read ports
+  (0 until LoadPipelineWidth).map(rport_index => {
+    io.read_error(rport_index) := RegNext(io.read(rport_index).fire()) && 
+      read_bank_error(RegNext(bank_addrs(rport_index))) &&
+      !io.bank_conflict_slow(rport_index)
+  })
+  // readline port
+  io.readline_error := RegNext(io.readline.fire()) && 
+    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
