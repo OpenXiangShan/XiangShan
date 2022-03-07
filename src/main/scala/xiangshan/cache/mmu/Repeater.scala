@@ -128,17 +128,17 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false)(implicit p: Para
 }
 
 class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val tlb = Flipped(new BTlbPtwIO(Width))
+  val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
 
-  def apply(tlb: BTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+  def apply(tlb: VectorTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.tlb <> tlb
     this.ptw <> ptw
     this.sfence <> sfence
     this.csr <> csr
   }
 
-  def apply(tlb: BTlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+  def apply(tlb: VectorTlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.tlb <> tlb
     this.sfence <> sfence
     this.csr <> csr
@@ -222,7 +222,11 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val enqNum = PopCount(reqs.map(_.valid))
   val canEnqueue = counter +& enqNum <= Size.U
 
-  io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
+  // the req may recv false ready, but actually received. Filter and TLB will handle it.
+  val enqNum_fake = PopCount(tlb_req.map(_.valid))
+  val canEnqueue_fake = counter +& enqNum_fake <= Size.U
+  io.tlb.req.map(_.ready := canEnqueue_fake) // NOTE: just drop un-fire reqs
+
   io.tlb.resp.valid := ptwResp_valid
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
@@ -371,7 +375,7 @@ object PTWRepeaterNB {
 
 object PTWFilter {
   def apply(
-    tlb: BTlbPtwIO,
+    tlb: VectorTlbPtwIO,
     ptw: TlbPtwIO,
     sfence: SfenceBundle,
     csr: TlbCsrBundle,
@@ -384,7 +388,7 @@ object PTWFilter {
   }
 
   def apply(
-    tlb: BTlbPtwIO,
+    tlb: VectorTlbPtwIO,
     sfence: SfenceBundle,
     csr: TlbCsrBundle,
     size: Int
