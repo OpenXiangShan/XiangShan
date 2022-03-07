@@ -268,22 +268,21 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   }
 
   def handle_block(idx: Int): Unit = {
-    val miss_req = Reg(Valid(new PtwReq)) // this valid for if req (not) sent to ptw
+    // three valid: 1. if exist a entry 2. if sent to ptw 3. unset resp.valid
+    val miss_req_v = Reg(Bool()) // this valid for if req (not) sent to ptw
     val miss_v = Reg(Bool()) // this valid for if miss, try to unset resp.valid
-    req_out_v.zip(io.requestor).foreach {
-      case (v,r) => r.req.ready := !v
-    } // req_out_v for if there is a request
+    io.requestor(idx).req.ready := req_out_v(idx) // req_out_v for if there is a request
 
-      // miss request entries
+    // miss request entries
+    val miss_req_vpn = get_pn(req_out(idx).vaddr)
     resp(idx).valid := req_out_v(idx) && !missVec(idx) && !miss_v
     when (missVec(idx)) { // TODO: bypass ptw's resp
       miss_v := true.B
-      miss_req.valid := true.B
-      miss_req.bits.vpn := get_pn(req_out(idx).vaddr)
+      miss_req_v := true.B
     }
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     when (io.ptw.resp.fire()) {
-      val hit = io.ptw.resp.bits.entry.hit(miss_req.bits.vpn, satp.asid, allType = true)
+      val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, satp.asid, allType = true)
       when (hit && req_out_v(idx)) {
         resp(idx).valid := true.B
         resp(idx).bits.miss := false.B // for blocked tlb, this is useless
@@ -291,12 +290,12 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
       // NOTE: the unfiltered req would be handled by Repeater
     }
     val ptw_req = io.ptw.req(idx)
-    ptw_req.valid := miss_req.valid
-    ptw_req.bits.vpn := miss_req.bits.vpn
-    when (ptw_req.fire()) { miss_req.valid := false.B }
+    ptw_req.valid := miss_req_v
+    ptw_req.bits.vpn := miss_req_vpn
+    when (ptw_req.fire()) { miss_req_v := false.B }
 
     when (flush) {
-      miss_req.valid := false.B
+      miss_req_v := false.B
       miss_v := false.B
     }
   }
