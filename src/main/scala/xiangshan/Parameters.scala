@@ -175,8 +175,7 @@ case class XSCoreParameters
     normalNWays = 32,
     normalReplacer = Some("plru"),
     superNWays = 4,
-    superReplacer = Some("plru"),
-    shouldBlock = true
+    superReplacer = Some("plru")
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
@@ -348,7 +347,7 @@ trait HasXSParameter {
     }.reduce(_++_) ++
       Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
     ).toList
-  
+
 
 
   val CacheLineSize = coreParams.CacheLineSize
@@ -406,7 +405,7 @@ trait HasXSParameter {
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
-  // for constrained LR/SC loop 
+  // for constrained LR/SC loop
   val LRSCCycles = 64
   // for lr storm
   val LRSCBackOff = 8

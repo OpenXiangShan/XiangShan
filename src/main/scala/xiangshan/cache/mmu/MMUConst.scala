@@ -25,6 +25,7 @@ import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+
 case class TLBParameters
 (
   name: String = "none",
@@ -40,7 +41,6 @@ case class TLBParameters
   superAssociative: String = "fa", // must be fa
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
   outReplace: Boolean = false,
-  shouldBlock: Boolean = false, // only for perf, not support for io
   partialStaticPMP: Boolean = false, // partila static pmp result stored in entries
   saveLevel: Boolean = false
 )

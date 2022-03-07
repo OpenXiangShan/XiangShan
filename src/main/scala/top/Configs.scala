@@ -117,8 +117,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           superReplacer = Some("plru"),
           normalNWays = 4,
           normalNSets = 1,
-          superNWays = 2,
-          shouldBlock = true
+          superNWays = 2
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
