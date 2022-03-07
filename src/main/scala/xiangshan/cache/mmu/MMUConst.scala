@@ -90,8 +90,6 @@ trait HasTlbConst extends HasXSParameter {
 
   val timeOutThreshold = 10000
 
-  def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
-  def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
     addr(addr.getWidth-1, offLen)

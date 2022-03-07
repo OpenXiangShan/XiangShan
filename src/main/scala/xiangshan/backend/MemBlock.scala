@@ -165,7 +165,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt){
-    val tlb_st = Module(new TLBNonBlock(1 , sttlbParams))
+    val tlb_st = Module(new TLBNonBlock(1, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   dtlb_ld.map(_.sfence := sfence)

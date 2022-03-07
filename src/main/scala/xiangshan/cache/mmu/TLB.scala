@@ -114,30 +114,6 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   normalPage.csr <> io.csr
   superPage.csr <> io.csr
 
-  // read TLB, get hit/miss, paddr, perm bits
-  val readResult = (0 until Width).map(TLBRead(_))
-  val hitVec = readResult.map(_._1)
-  val missVec = readResult.map(_._2)
-  val pmp_addr = readResult.map(_._3)
-  val static_pm = readResult.map(_._4)
-  val static_pm_v = readResult.map(_._5)
-  val perm = readResult.map(_._6)
-
-  // check pmp use paddr (for timing optization, use pmp_addr here)
-  // check permisson
-  (0 until Width).foreach{i =>
-    pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
-    perm_check(perm(i), req_out(i).cmd, static_pm(i), static_pm_v(i), i)
-  }
-
-  // handle block or non-block io
-  // for non-block io, just return the above result, send miss to ptw
-  // for block io, hold the request, send miss to ptw,
-  //   when ptw back, return the result
-  (0 until NBWidth).foreach { handle_nonblock(_) }
-  (NBWidth until Width)foreach{ handle_block(_) }
-  io.ptw.resp.ready := true.B
-
   // replacement
   def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
     val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
@@ -185,6 +161,31 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     data = ptw.resp.bits,
     data_replenish = io.ptw_replenish
   )
+
+  // read TLB, get hit/miss, paddr, perm bits
+  val readResult = (0 until Width).map(TLBRead(_))
+  val hitVec = readResult.map(_._1)
+  val missVec = readResult.map(_._2)
+  val pmp_addr = readResult.map(_._3)
+  val static_pm = readResult.map(_._4)
+  val static_pm_v = readResult.map(_._5)
+  val perm = readResult.map(_._6)
+
+  // check pmp use paddr (for timing optization, use pmp_addr here)
+  // check permisson
+  (0 until Width).foreach{i =>
+    pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    perm_check(perm(i), req_out(i).cmd, static_pm(i), static_pm_v(i), i)
+  }
+
+  // handle block or non-block io
+  // for non-block io, just return the above result, send miss to ptw
+  // for block io, hold the request, send miss to ptw,
+  //   when ptw back, return the result
+  (0 until NBWidth).foreach { handle_nonblock(_) }
+  (NBWidth until Width)foreach{ handle_block(_) }
+  io.ptw.resp.ready := true.B
+
 
   def TLBRead(i: Int) = {
     val (normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
@@ -349,6 +350,9 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
 
 }
+
+class TLBNonBlock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Width, q)
+class TLBBLock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, 0, q)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))

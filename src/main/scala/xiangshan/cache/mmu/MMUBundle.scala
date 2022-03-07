@@ -439,6 +439,13 @@ class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
     val vector = Output(Vec(Width, Bool()))
   }))
 
+  def connect(normal: TlbPtwIO) {
+    req <> normal.req
+    resp.ready := normal.resp.ready
+    normal.resp.bits := resp.bits.data
+    normal.resp.valid := resp.valid
+  }
+
   override def cloneType: this.type = (new VectorTlbPtwIO(Width)).asInstanceOf[this.type]
 }
 
