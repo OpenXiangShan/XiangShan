@@ -172,8 +172,6 @@ case class XSCoreParameters
     name = "itlb",
     fetchi = true,
     useDmode = false,
-    sameCycle = false,
-    missSameCycle = true,
     normalNWays = 32,
     normalReplacer = Some("plru"),
     superNWays = 4,

@@ -30,8 +30,6 @@ case class TLBParameters
   name: String = "none",
   fetchi: Boolean = false, // TODO: remove it
   useDmode: Boolean = true,
-  sameCycle: Boolean = false,
-  missSameCycle: Boolean = false,
   normalNSets: Int = 1, // when da or sa
   normalNWays: Int = 8, // when fa or sa
   superNSets: Int = 1,

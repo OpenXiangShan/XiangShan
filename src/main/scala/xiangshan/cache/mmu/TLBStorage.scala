@@ -24,7 +24,6 @@ import utils._
 
 @chiselName
 class TLBFA(
-  sameCycle: Boolean,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -33,7 +32,6 @@ class TLBFA(
   normalPage: Boolean,
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule with HasPerfEvents {
-  require(!(sameCycle && saveLevel))
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
   io.r.req.map(_.ready := true.B)
@@ -48,17 +46,17 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
-    val vpn_gen_ppn = if(sameCycle || saveLevel) vpn else vpn_reg
+    val vpn_reg = RegEnable(vpn, req.fire())
+    val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
 
-    val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
+    val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
 
     hitVec.suggestName("hitVec")
 
-    val hitVecReg = if (sameCycle) hitVec else RegEnable(hitVec, req.fire())
+    val hitVecReg = RegEnable(hitVec, req.fire())
 
-    resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
+    resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
       resp.bits.ppn := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
@@ -67,7 +65,6 @@ class TLBFA(
       resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
       resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
-    io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
     access.touch_ways.valid := resp.valid && Cat(hitVecReg).orR
@@ -152,7 +149,6 @@ class TLBFA(
 
 @chiselName
 class TLBSA(
-  sameCycle: Boolean,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -161,7 +157,6 @@ class TLBSA(
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule {
   require(!superPage, "super page should use reg/fa")
-  require(!sameCycle, "sram needs next cycle")
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
 
@@ -198,7 +193,6 @@ class TLBSA(
       resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN()(vpn_reg)))
       resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
     }
-    io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := {
       if (sramSinglePort) RegNext(req.fire()) else RegNext(req.valid)
@@ -294,7 +288,6 @@ object TlbStorage {
   (
     name: String,
     associative: String,
-    sameCycle: Boolean,
     ports: Int,
     nSets: Int,
     nWays: Int,
@@ -304,11 +297,11 @@ object TlbStorage {
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBSA(ports, nSets, nWays, sramSinglePort, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }

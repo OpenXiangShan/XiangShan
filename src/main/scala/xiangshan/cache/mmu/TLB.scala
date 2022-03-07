@@ -30,7 +30,7 @@ import firrtl.FirrtlProtos.Firrtl.Module.ExternalModule.Parameter
 
 
 trait TLBBlockHandlerDefault{this: TLBBase =>
-  def handle_block(Width: Int, sameCycle: Boolean): Unit ={
+  def handle_block(Width: Int): Unit ={
     io.ptw <> DontCare
     io.requestor <> DonCare
   }
@@ -45,9 +45,6 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
-  if (q.sameCycle || q.missSameCycle) {
-    require(q.normalAssociative == "fa")
-  }
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -66,15 +63,13 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
   else (satp.mode === 8.U && (mode < ModeM))
 
   val req_in = req
-  val req_out = { if (q.sameCycle) req_in.map(_.bits) else req.map(a => RegEnable(a.bits, a.fire())) }
-  val req_out_v = { if (q.sameCycle) req_in.map(_.valid) else {
-    (0 until Width).map(i => ValidHold(req_in(i).fire, resp(i).fire, flush)) }}
+  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire, resp(i).fire, flush))
 
   // Normal page && Super page
   val normalPage = TlbStorage(
     name = "normal",
     associative = q.normalAssociative,
-    sameCycle = q.sameCycle,
     ports = Width,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
@@ -86,7 +81,6 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
   val superPage = TlbStorage(
     name = "super",
     associative = q.superAssociative,
-    sameCycle = q.sameCycle,
     ports = Width,
     nSets = q.superNSets,
     nWays = q.superNWays,
@@ -120,19 +114,17 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
   superPage.csr <> io.csr
 
   def TLBRead(i: Int) = {
-    val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
-    val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
+    val (normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
+    val (super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
     assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
-    val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
     val ppn = Mux(super_hit, super_ppn, normal_ppn)
     val perm = Mux(super_hit, super_perm, normal_perm)
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     val fast_miss = !super_hit && vmEnable
-    val miss_sameCycle = !hit_sameCycle && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
@@ -142,7 +134,7 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
 
     resp(i).bits.paddr := Mux(vmEnable, paddr, vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
+    resp(i).bits.miss := miss
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
@@ -254,10 +246,8 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
     data_replenish = io.ptw_replenish
   )
 
-  // if sameCycle, just req.valid
-  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
   // because sram is too slow and dtlb is too distant from dtlbRepeater
-  handle_block(Width, q.sameCycle)
+  handle_block(Width)
   def need_RegNext[T <: Data](need: Boolean, data: T): T = {
     if (need) RegNext(data)
     else data
@@ -272,7 +262,7 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
     else falsedata
   }
 
-  val result_ok = { if (q.sameCycle) req_in.map(_.fire()) else req_in.map(a => RegNext(a.fire())) }
+  val result_ok = req_in.map(a => RegNext(a.fire()))
   if (!q.shouldBlock) {
     for (i <- 0 until Width) {
       XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
@@ -330,23 +320,23 @@ class TLBBase(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbM
 }
 
 trait TLBBlockHanlerNonBlock{this: TLBBase =>
-  override def handle_block(Width: Int, sameCycle: Boolean): Unit = {
+  override def handle_block(Width: Int): Unit = {
     req_out_v.zip(io.requestor).foreach { case (v,r) => 
       r.resp.valid := v
       r.req.ready := r.resp.ready // should always be true
     }
     for (i <- 0 until Width) {
-      io.ptw.req(i).valid :=  need_RegNextInit(!sameCycle, req_out_v(i) && missVec(i), false.B) &&
+      io.ptw.req(i).valid :=  RegNext(req_out_v(i) && missVec(i), false.B)
         !RegNext(refill, init = false.B) &&
-        param_choose(!sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
-      io.ptw.req(i).bits.vpn := need_RegNext(!sameCycle, need_RegNext(!sameCycle, get_pn(req_out(i).vaddr)))
+        !RegNext(RegNext(refill, init = false.B), init = false.B)
+      io.ptw.req(i).bits.vpn := RegNext(get_pn(req_out(i).vaddr))
     }
     io.ptw.resp.ready := true.B
   }
 }
 
 trait TLBBlockHandlerBlock{this: TLBBase =>
-  override def handle_block(Width: Int, sameCycle: Boolean): Unit = {
+  override def handle_block(Width: Int): Unit = {
     val miss = Wire(Vec(Width, Bool())) // TODO
     val miss_req = Reg(Vec(Width, Valid(new PtwReq))) // this valid for if req (not) sent to ptw
     val miss_v = Reg(Vec(Width, Bool())) // this valid for if miss, try to unset resp.valid
@@ -372,23 +362,23 @@ trait TLBBlockHandlerBlock{this: TLBBase =>
         // NOTE: the unfiltered req would be handled by Repeater
       }
     }
-    // send reqs to ptw
-    if (io.ptw.req.length == 1) {
-      val ptw_arb = Module(new RRArbiter(new PtwReq(), Width))
-      ptw_arb.io.in <> miss_req // DecoupledIO <> ValidIO
-      when (ptw_arb.io.out.fire()) {
-        miss_req(ptw_arb.io.chosen).valid := false.B
-      }
-      io.ptw.req(0).valid := ptw_arb.io.out.valid
-      io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
-    } else {
+    // // send reqs to ptw
+    // if (io.ptw.req.length == 1) {
+    //   val ptw_arb = Module(new RRArbiter(new PtwReq(), Width))
+    //   ptw_arb.io.in <> miss_req // DecoupledIO <> ValidIO
+    //   when (ptw_arb.io.out.fire()) {
+    //     miss_req(ptw_arb.io.chosen).valid := false.B
+    //   }
+    //   io.ptw.req(0).valid := ptw_arb.io.out.valid
+    //   io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
+    // } else {
       require(io.ptw.req.length == Width) // NOTE: or we need a M2N Arbiter
       io.ptw.req.zip(miss_req).foreach { case(p,m) =>
         p.valid := m.valid
         p.bits.vpn := m.bits.vpn
         when (p.fire()) { m.valid := false.B }
       }
-    }
+    // }
 
     // TODO: how to handle sfence.valid? when flush happen, request will be dropped 
     when (flush) {
@@ -425,56 +415,3 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
     io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
   }
 }
-
-// object TLB {
-//   def apply
-//   (
-//     in: Seq[BlockTlbRequestIO],
-//     sfence: SfenceBundle,
-//     csr: TlbCsrBundle,
-//     width: Int,
-//     shouldBlock: Boolean,
-//     q: TLBParameters
-//   )(implicit p: Parameters) = {
-//     require(in.length == width)
-
-//     val tlb = Module(new TLB(width, q))
-
-//     tlb.io.sfence <> sfence
-//     tlb.io.csr <> csr
-//     tlb.suggestName(s"tlb_${q.name}")
-
-//     if (!shouldBlock) { // dtlb
-//       for (i <- 0 until width) {
-//         tlb.io.requestor(i) <> in(i)
-//         // tlb.io.requestor(i).req.valid := in(i).req.valid
-//         // tlb.io.requestor(i).req.bits := in(i).req.bits
-//         // in(i).req.ready := tlb.io.requestor(i).req.ready
-
-//         // in(i).resp.valid := tlb.io.requestor(i).resp.valid
-//         // in(i).resp.bits := tlb.io.requestor(i).resp.bits
-//         // tlb.io.requestor(i).resp.ready := in(i).resp.ready
-//       }
-//     } else { // itlb
-//       //require(width == 1)
-//       (0 until width).map{ i =>
-//         tlb.io.requestor(i).req.valid := in(i).req.valid
-//         tlb.io.requestor(i).req.bits := in(i).req.bits
-//         in(i).req.ready := !tlb.io.requestor(i).resp.bits.miss && in(i).resp.ready && tlb.io.requestor(i).req.ready
-
-//         require(q.missSameCycle || q.sameCycle)
-//         // NOTE: the resp.valid seems to be useless, it must be true when need
-//         //       But don't know what happens when true but not need, so keep it correct value, not just true.B
-//         if (q.missSameCycle && !q.sameCycle) {
-//           in(i).resp.valid := tlb.io.requestor(i).resp.valid && !RegNext(tlb.io.requestor(i).resp.bits.miss)
-//         } else {
-//           in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
-//         }
-//         in(i).resp.bits := tlb.io.requestor(i).resp.bits
-//         tlb.io.requestor(i).resp.ready := in(i).resp.ready
-//       }
-//       tlb.io.ptw_replenish <> DontCare // itlb only use reg, so no static pmp/pma
-//     }
-//     tlb.io.ptw
-//   }
-// }
