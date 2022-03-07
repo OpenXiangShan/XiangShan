@@ -432,24 +432,15 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }
 
-class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
+class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
   val req = Vec(Width, DecoupledIO(new PtwReq))
   val resp = Flipped(DecoupledIO(new Bundle {
     val data = new PtwResp
     val vector = Output(Vec(Width, Bool()))
   }))
 
-  override def cloneType: this.type = (new BTlbPtwIO(Width)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new VectorTlbPtwIO(Width)).asInstanceOf[this.type]
 }
-/****************************  Bridge TLB *******************************/
-
-class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val requestor = Vec(Width, Flipped(new TlbPtwIO()))
-  val ptw = new BTlbPtwIO(Width)
-
-  override def cloneType: this.type = (new BridgeTLBIO(Width)).asInstanceOf[this.type]
-}
-
 
 /****************************  PTW  *************************************/
 abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst

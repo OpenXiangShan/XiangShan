@@ -27,7 +27,7 @@ import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, TLBNonBlock, TlbReplace}
+import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
 
 class Std(implicit p: Parameters) extends FunctionUnit {
@@ -74,7 +74,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
+    val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)

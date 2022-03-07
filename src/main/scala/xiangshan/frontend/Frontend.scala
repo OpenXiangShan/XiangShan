@@ -107,11 +107,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
   // icache.io.itlb(1).resp <> itlb_requestors(1).resp
-  val itlb = Module(new TLBNonBlock(6, itlbParams))
+  val itlb = Module(new TLBBlock(6, 4, itlbParams))
   itlb.io.requestor <> itlb_requestors
   itlb.io.sfence <> io.sfence
   itlb.io.csr <> tlbCsr
-  io.ptw <> itlb.io.ptw
   // io.ptw <> TLB(
   //   //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
   //   in = Seq(itlb_requestors(0),itlb_requestors(1),itlb_requestors(2),itlb_requestors(3),itlb_requestors(4),itlb_requestors(5)),
