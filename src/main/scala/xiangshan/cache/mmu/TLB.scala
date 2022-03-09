@@ -51,116 +51,34 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   val ptw = io.ptw
   val pmp = io.pmp
 
-  val sfence = io.sfence
-  val flush = sfence.valid
-  val csr = io.csr
-  val satp = csr.satp
-  val priv = csr.priv
+  val flush = io.sfence.valid
   val ifecth = if (q.fetchi) true.B else false.B
-  val mode = if (q.useDmode) priv.dmode else priv.imode
+  val mode = if (q.useDmode) io.csr.priv.dmode else io.csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U && (mode < ModeM))
+  val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
+    else (io.csr.satp.mode === 8.U && (mode < ModeM))
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire, resp(i).fire, flush))
 
-  // Normal page && Super page
-  // TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
-  val normalPage = TlbStorage(
-    name = "normal",
-    associative = q.normalAssociative,
-    ports = Width,
-    nSets = q.normalNSets,
-    nWays = q.normalNWays,
-    sramSinglePort = sramSinglePort,
-    saveLevel = q.saveLevel,
-    normalPage = true,
-    superPage = false
-  )
-  val superPage = TlbStorage(
-    name = "super",
-    associative = q.superAssociative,
-    ports = Width,
-    nSets = q.superNSets,
-    nWays = q.superNWays,
-    sramSinglePort = sramSinglePort,
-    saveLevel = q.saveLevel,
-    normalPage = q.normalAsVictim,
-    superPage = true,
-  )
-
-
-  for (i <- 0 until Width) {
-    normalPage.r_req_apply(
+  val entries = Module(new TlbStorageWrapper(Width, q))
+  entries.io.base_connect(io.sfence, io.csr)
+  if (q.outReplace) { io.replace <> entries.io.replace }
+  val refill = ptw.resp.fire() && !io.sfence.valid && !io.csr.satp.changed
+  (0 until Width).foreach{i =>
+    entries.io.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = get_pn(req_in(i).bits.vaddr),
-      asid = csr.satp.asid,
+      asid = io.csr.satp.asid,
       i = i
     )
-    superPage.r_req_apply(
-      valid = io.requestor(i).req.valid,
-      vpn = get_pn(req_in(i).bits.vaddr),
-      asid = csr.satp.asid,
-      i = i
+    entries.io.w_apply(
+      valid = refill,
+      data = ptw.resp.bits,
+      data_replenish = io.ptw_replenish
     )
   }
-
-  normalPage.victim.in <> superPage.victim.out
-  normalPage.victim.out <> superPage.victim.in
-  normalPage.sfence <> io.sfence
-  superPage.sfence <> io.sfence
-  normalPage.csr <> io.csr
-  superPage.csr <> io.csr
-
-  // replacement
-  def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
-    val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
-    res.valid := Cat(one_hot).orR && valid
-    res.bits := OHToUInt(one_hot)
-    res
-  }
-
-  val normal_refill_idx = if (q.outReplace) {
-    io.replace.normalPage.access <> normalPage.access
-    io.replace.normalPage.chosen_set := get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
-    io.replace.normalPage.refillIdx
-  } else if (q.normalAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(normalPage.access.map(_.touch_ways)) // normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
-    re.way
-  } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
-    re.way(get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
-  }
-
-  val super_refill_idx = if (q.outReplace) {
-    io.replace.superPage.access <> superPage.access
-    io.replace.superPage.chosen_set := DontCare
-    io.replace.superPage.refillIdx
-  } else {
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(superPage.access.map(_.touch_ways))
-    re.way
-  }
-
-  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
-  normalPage.w_apply(
-    valid = { if (q.normalAsVictim) false.B
-    else refill && ptw.resp.bits.entry.level.get === 2.U },
-    wayIdx = normal_refill_idx,
-    data = ptw.resp.bits,
-    data_replenish = io.ptw_replenish
-  )
-  superPage.w_apply(
-    valid = { if (q.normalAsVictim) refill
-    else refill && ptw.resp.bits.entry.level.get =/= 2.U },
-    wayIdx = super_refill_idx,
-    data = ptw.resp.bits,
-    data_replenish = io.ptw_replenish
-  )
 
   // read TLB, get hit/miss, paddr, perm bits
   val readResult = (0 until Width).map(TLBRead(_))
@@ -186,15 +104,10 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   (NBWidth until Width)foreach{ handle_block(_) }
   io.ptw.resp.ready := true.B
 
+  /****  main body above | method/log/perf below ****/
 
   def TLBRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
-    val (super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
-    assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
-
-    val hit = normal_hit || super_hit
-    val ppn = Mux(super_hit, super_ppn, normal_ppn)
-    val perm = Mux(super_hit, super_perm, normal_perm)
+    val (hit, ppn, perm, super_hit, super_ppn, static_pm) = entries.io.r_resp_apply(i)
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
@@ -212,9 +125,9 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
-    val pmp_paddr = Mux(vmEnable, Cat(super_ppn, get_off(req_out(i).vaddr)), vaddr)
+    // val pmp_paddr = Mux(vmEnable, Cat(super_ppn, get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
-    val static_pm = normal_perm.pm
+    val pmp_paddr = Mux(vmEnable, paddr, vaddr)
     val static_pm_valid = !super_hit && vmEnable && q.partialStaticPMP.B
 
     (hit, miss, pmp_paddr, static_pm, static_pm_valid, perm)
@@ -236,8 +149,8 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
-    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!io.csr.priv.sum || ifecth))
+    val ldPermFail = !(modeCheck && (perm.r || io.csr.priv.mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
@@ -283,7 +196,7 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     }
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     when (io.ptw.resp.fire()) {
-      val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, satp.asid, allType = true)
+      val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true)
       when (hit && req_out_v(idx)) {
         resp(idx).valid := true.B
         resp(idx).bits.miss := false.B // for blocked tlb, this is useless
@@ -340,7 +253,7 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     XSDebug(resp(i).valid, p"resp(${i.U}): (${resp(i).valid} ${resp(i).ready}) ${resp(i).bits}\n")
   }
 
-  XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
+  XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
   XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
     XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")

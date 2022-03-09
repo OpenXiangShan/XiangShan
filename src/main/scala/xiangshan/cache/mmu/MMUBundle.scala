@@ -26,6 +26,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMPReqBundle, PMPConfig}
+import xiangshan.backend.fu.PMPBundle
 
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
@@ -323,6 +324,46 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
+class TlbStorageWrapperIO(ports: Int, q: TLBParameters)(implicit p: Parameters) extends MMUIOBaseBundle {
+  val r = new Bundle {
+    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
+      val vpn = Output(UInt(vpnLen.W))
+    })))
+    val resp = Vec(ports, ValidIO(new Bundle{
+      val hit = Output(Bool())
+      val ppn = Output(UInt(ppnLen.W))
+      val perm = Output(new TlbPermBundle())
+      // below are dirty code for timing optimization
+      val super_hit = Output(Bool())
+      val super_ppn = Output(UInt(ppnLen.W))
+      val spm = Output(new TlbPMBundle)
+    }))
+  }
+  val w = Flipped(ValidIO(new Bundle {
+    val data = Output(new PtwResp)
+    val data_replenish = Output(new PMPConfig)
+  }))
+  val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
+
+  def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
+    this.r.req(i).valid := valid
+    this.r.req(i).bits.vpn := vpn
+  }
+
+  def r_resp_apply(i: Int) = {
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm,
+    this.r.resp(i).bits.super_hit, this.r.resp(i).bits.super_ppn, this.r.resp(i).bits.spm)
+  }
+
+  def w_apply(valid: Bool, data: PtwResp, data_replenish: PMPConfig): Unit = {
+    this.w.valid := valid
+    this.w.bits.data := data
+    this.w.bits.data_replenish := data_replenish
+  }
+
+  override def cloneType: this.type = new TlbStorageWrapperIO(ports, q).asInstanceOf[this.type]
+}
+
 class ReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
   val sets = Output(UInt(log2Up(nSets).W))
   val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
@@ -400,11 +441,6 @@ class TlbRequestIO()(implicit p: Parameters) extends TlbBundle {
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class BlockTlbRequestIO()(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new TlbReq)
-  val resp = Flipped(DecoupledIO(new TlbResp))
-}
-
 class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val req = Vec(Width, DecoupledIO(new PtwReq))
   val resp = Flipped(DecoupledIO(new PtwResp))
@@ -419,6 +455,11 @@ class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
 class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
+
+  def base_connect(sfence: SfenceBundle, csr: TlbCsrBundle) {
+    this.sfence <> sfence
+    this.csr <> csr
+  }
 }
 
 class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends

@@ -41,7 +41,7 @@ class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
 
 class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromFtq         = Flipped(new FtqPrefechBundle)
-  val iTLBInter       = new BlockTlbRequestIO
+  val iTLBInter       = new TlbRequestIO
   val pmp             =   new ICachePMPBundle
   val toIMeta         = Decoupled(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
@@ -117,7 +117,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   //tlb resp
   val tlb_resp_valid = RegInit(false.B)
-  when(p0_fire) {tlb_resp_valid := true.B} 
+  when(p0_fire) {tlb_resp_valid := true.B}
   .elsewhen(tlb_resp_valid && (p1_fire || p1_discard)) {tlb_resp_valid := false.B}
 
   val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr)
