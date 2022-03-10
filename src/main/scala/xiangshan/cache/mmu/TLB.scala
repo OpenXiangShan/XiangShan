@@ -70,7 +70,6 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     entries.io.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = get_pn(req_in(i).bits.vaddr),
-      asid = io.csr.satp.asid,
       i = i
     )
     entries.io.w_apply(

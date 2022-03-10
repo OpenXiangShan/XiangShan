@@ -310,7 +310,7 @@ object TlbStorage {
 }
 
 class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
-  val io = new TlbStorageWrapperIO(ports, q)
+  val io = IO(new TlbStorageWrapperIO(ports, q))
 
 // TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
   val normalPage = TlbStorage(
@@ -331,27 +331,24 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
     nSets = q.superNSets,
     nWays = q.superNWays,
     sramSinglePort = sramSinglePort,
-    saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
   )
 
-  (0 until ports).foreach{i =>
+  for (i <- 0 until ports) {
     normalPage.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
-      asid = io.csr.satp.asid, // acturally, this is not used.
       i = i
     )
     superPage.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
-      asid = io.csr.satp.asid, // acturally, this is not used
       i = i
     )
   }
 
-  (0 until ports).foreach{i =>
+  for (i <- 0 until ports) {
     val nq = normalPage.r.req(i)
     val np = normalPage.r.resp(i)
     val sq = superPage.r.req(i)

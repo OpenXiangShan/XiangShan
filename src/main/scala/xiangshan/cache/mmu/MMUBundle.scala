@@ -305,7 +305,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
   }
@@ -345,7 +345,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters)(implicit p: Parameters) 
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
-  def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
   }
