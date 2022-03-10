@@ -586,6 +586,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     io.toIbuffer.bits.acf(0) := mmio_resend_af
     io.toIbuffer.bits.ipf(0) := mmio_resend_pf
+    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_pf
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
   }
