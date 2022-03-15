@@ -91,10 +91,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.pmp(2).resp <> pmp_check(2).resp
   ifu.io.pmp.resp <> pmp_check(3).resp
 
-  val itlb = Module(new TLB(4, 1, itlbParams))
-  itlb.io.requestor(0) <> icache.io.itlb(2) // prefetch need non-block tlb
-  itlb.io.requestor(1) <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
-  itlb.io.requestor.drop(2) zip icache.io.itlb.take(2) foreach { case (a,b) => a <> b}
+  val itlb = Module(new TLB(4, Seq(true, true, false, true), itlbParams))
+  itlb.io.requestor.take(3) zip icache.io.itlb foreach {case (a,b) => a <> b}
+  itlb.io.requestor(3) <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.base_connect(io.sfence, tlbCsr)
   io.ptw.connect(itlb.io.ptw)
   itlb.io.ptw_replenish <> DontCare

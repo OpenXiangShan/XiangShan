@@ -38,7 +38,7 @@ import firrtl.FirrtlProtos.Firrtl.Module.ExternalModule.Parameter
   */
 
 @chiselName
-class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
@@ -99,8 +99,10 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   // for non-block io, just return the above result, send miss to ptw
   // for block io, hold the request, send miss to ptw,
   //   when ptw back, return the result
-  (0 until NBWidth).foreach { handle_nonblock(_) }
-  (NBWidth until Width)foreach{ handle_block(_) }
+  (0 until Width) foreach {i =>
+    if (Block(i)) handle_block(i)
+    else handle_nonblock(i)
+  }
   io.ptw.resp.ready := true.B
 
   /****  main body above | method/log/perf below ****/
@@ -184,7 +186,8 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
     // three valid: 1. if exist a entry 2. if sent to ptw 3. unset resp.valid
     val miss_req_v = Reg(Bool()) // this valid for if req (not) sent to ptw
     val miss_v = Reg(Bool()) // this valid for if miss, try to unset resp.valid
-    io.requestor(idx).req.ready := req_out_v(idx) // req_out_v for if there is a request
+    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
+    // req_out_v for if there is a request, may long latency, fixme
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
@@ -217,27 +220,22 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
   val result_ok = req_in.map(a => RegNext(a.fire()))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until NBWidth).map(i => vmEnable && result_ok(i)))              ),
-      ("miss  ", PopCount((0 until NBWidth).map(i => vmEnable && result_ok(i) && missVec(i)))),
-    ) ++
-    Seq(
-      ("access", PopCount((NBWidth until Width).map(i => io.requestor(i).req.fire()))),
-      ("miss  ", PopCount((NBWidth until Width).map(i => ptw.req(i).fire()))         ),
+      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire() else vmEnable && result_ok(i) })),
+      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) vmEnable && result_ok(i) && missVec(i) else ptw.req(i).fire() })),
     )
   generatePerfEvent()
 
   // perf log
-  for (i <- 0 until NBWidth) {
-    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
-    XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && vmEnable)
-  }
-  for (i <- 0 until NBWidth) {
-    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
-    XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i))
-  }
-  for (i <- NBWidth until Width) {
-    XSPerfAccumulate(s"access${i}",result_ok(i)  && vmEnable)
-    XSPerfAccumulate(s"miss${i}", result_ok(i) && missVec(i))
+  for (i <- 0 until Width) {
+    if (Block(i)) {
+      XSPerfAccumulate(s"access${i}",result_ok(i)  && vmEnable)
+      XSPerfAccumulate(s"miss${i}", result_ok(i) && missVec(i))
+    } else {
+      XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && vmEnable)
+      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i))
+    }
   }
   //val reqCycleCnt = Reg(UInt(16.W))
   //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire || sfence.valid)
@@ -263,8 +261,8 @@ class TLB(Width: Int, NBWidth: Int, q: TLBParameters)(implicit p: Parameters) ex
 
 }
 
-class TLBNonBlock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Width, q)
-class TLBBLock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, 0, q)
+class TLBNonBlock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Seq.fill(Width)(false), q)
+class TLBBLock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Seq.fill(Width)(true), q)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))
