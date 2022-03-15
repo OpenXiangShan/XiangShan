@@ -163,7 +163,8 @@ class MinimalConfig(n: Int = 1) extends Config(
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024
+        sets = 1024,
+        simulation = true
       )),
       L3NBanks = 1
     )
