@@ -269,9 +269,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // val s1_tlb_miss    = RegEnable(next = tlb_slot.valid, enable = s0_fire)
 
   /** tlb response latch for pipeline stop */
-  fromITLB.map(_.ready := true.B)
   val tlb_back = fromITLB.map(_.fire())
   val tlb_resp_valid = VecInit((0 until PortNumber).map(i => ResultHoldBypass(RegNext(s0_fire, false.B) || s1_valid, fromITLB(i).fire())))
+  tlb_resp_valid zip fromITLB foreach { case (a,b) => b.ready := !a }
   // val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   // val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
@@ -386,6 +386,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_waymask      = RegEnable(next = s1_victim_oh, enable = s1_fire)
   val s2_victim_coh   = RegEnable(next = s1_victim_coh, enable = s1_fire)
   val s2_tag_match_vec = RegEnable(next = s1_tag_match_vec, enable = s1_fire)
+
+  assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */
   val sec_meet_vec = Wire(Vec(2, Bool()))
