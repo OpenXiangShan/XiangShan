@@ -125,10 +125,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
-    io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
+    io.dtlb.req.bits.debug.robIdx := in.uop.robIdx
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
@@ -354,7 +354,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     for (j <- 0 until 3) {
 
       val addrHit = TriggerCmp(
-        vaddr, 
+        vaddr,
         tdata(lTriggerMapping(j)).tdata2,
         tdata(lTriggerMapping(j)).matchType,
         tEnable(lTriggerMapping(j))
@@ -377,14 +377,14 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   io.out.bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
   when(isLr){
     // enable load trigger
-    io.out.bits.uop.cf.trigger.backendHit(2) := backendTriggerHitReg(2) 
-    io.out.bits.uop.cf.trigger.backendHit(3) := backendTriggerHitReg(3) 
-    io.out.bits.uop.cf.trigger.backendHit(5) := backendTriggerHitReg(5) 
+    io.out.bits.uop.cf.trigger.backendHit(2) := backendTriggerHitReg(2)
+    io.out.bits.uop.cf.trigger.backendHit(3) := backendTriggerHitReg(3)
+    io.out.bits.uop.cf.trigger.backendHit(5) := backendTriggerHitReg(5)
   }.otherwise{
     // enable store trigger
-    io.out.bits.uop.cf.trigger.backendHit(0) := backendTriggerHitReg(0) 
-    io.out.bits.uop.cf.trigger.backendHit(1) := backendTriggerHitReg(1) 
-    io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4) 
+    io.out.bits.uop.cf.trigger.backendHit(0) := backendTriggerHitReg(0)
+    io.out.bits.uop.cf.trigger.backendHit(1) := backendTriggerHitReg(1)
+    io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4)
   }
 
   if (env.EnableDifftest) {

@@ -50,7 +50,8 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
-  io.dtlbReq.bits.robIdx := io.in.bits.uop.robIdx
+  io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 

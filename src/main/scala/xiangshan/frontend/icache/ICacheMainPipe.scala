@@ -199,7 +199,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
-    port.bits.robIdx              := DontCare
+    port.bits.debug.robIdx        := DontCare
     port.bits.debug.isFirstIssue  := DontCare
   }
 
@@ -238,7 +238,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    * Solution: maybe give itlb a signal to tell whether acquire the slot?
    */
 
-  val s0_can_go      = !missSwitchBit && s1_ready && fetch_req(0).ready && fetch_req(1).ready && toITLB(0).ready && toITLB(1).ready
+  val itlb_can_go    = toITLB(0).ready && toITLB(1).ready
+  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready
+  val pipe_can_go    = !missSwitchBit && s1_ready
+  val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go
   // s0_slot_fire   := tlb_slot.valid && tlb_all_resp && s0_can_go
   // s0_fetch_fire  := s0_valid && !tlb_slot.valid && s0_can_go
   val s0_fetch_fire  = s0_valid && s0_can_go
@@ -246,9 +249,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s0_fire        := s0_fetch_fire
 
   //TODO: fix GTimer() condition
-  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
-                         s1_ready && GTimer() > 500.U )
+  fromIFU.map(_.ready := s0_can_go && GTimer() > 500.U )
+  // fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
+  //                        s1_ready && GTimer() > 500.U )
                         //  !tlb_slot.valid &&
+
+  toITLB.map{port => port.bits.kill := !icache_can_go || !pipe_can_go}
   /**
     ******************************************************************************
     * ICache Stage 1
@@ -270,8 +276,20 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** tlb response latch for pipeline stop */
   val tlb_back = fromITLB.map(_.fire())
-  val tlb_resp_valid = VecInit((0 until PortNumber).map(i => ResultHoldBypass(RegNext(s0_fire, false.B) || s1_valid, fromITLB(i).fire())))
-  tlb_resp_valid zip fromITLB foreach { case (a,b) => b.ready := !a }
+  val tlb_already_recv = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  val tlb_ready_recv = VecInit((0 until PortNumber)map(i => RegNext(s0_fire, false.B) || (s1_valid && !tlb_already_recv(i))))
+  val tlb_resp_valid = Wire(Vec(2, Bool()))
+  for (i <- 0 until PortNumber) {
+    tlb_resp_valid(i) := tlb_already_recv(i) || (tlb_ready_recv(i) && tlb_back(i))
+    when (tlb_already_recv(i) && s1_fire) {
+      tlb_already_recv(i) := false.B
+    }
+    when (tlb_back(i) && tlb_ready_recv(i)) {
+      tlb_already_recv(i) := true.B
+    }
+    fromITLB(i).ready := tlb_ready_recv(i)
+  }
+  // val tlb_resp_valid = VecInit((0 until PortNumber).map(i => ResultHoldBypass(RegNext(s0_fire, false.B) || s1_valid, fromITLB(i).fire())))
   // val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   // val s1_tlb_all_resp_reg        =  RegInit(false.B)
 

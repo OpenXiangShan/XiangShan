@@ -60,23 +60,15 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire, resp(i).fire, flush))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
 
+  val refill = ptw.resp.fire() && !io.sfence.valid && !io.csr.satp.changed
   val entries = Module(new TlbStorageWrapper(Width, q))
   entries.io.base_connect(io.sfence, io.csr)
   if (q.outReplace) { io.replace <> entries.io.replace }
-  val refill = ptw.resp.fire() && !io.sfence.valid && !io.csr.satp.changed
-  (0 until Width).foreach{i =>
-    entries.io.r_req_apply(
-      valid = io.requestor(i).req.valid,
-      vpn = get_pn(req_in(i).bits.vaddr),
-      i = i
-    )
-    entries.io.w_apply(
-      valid = refill,
-      data = ptw.resp.bits,
-      data_replenish = io.ptw_replenish
-    )
+  for (i <- 0 until Width) {
+    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
+    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
   }
 
   // read TLB, get hit/miss, paddr, perm bits
@@ -192,7 +184,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
     resp(idx).valid := req_out_v(idx) && !missVec(idx) && !miss_v
-    when (missVec(idx)) { // TODO: bypass ptw's resp
+    // when (missVec(idx) && req_out_v(idx)) { // TODO: bypass ptw's resp   // more precise
+    when (missVec(idx) && RegNext(req_in(idx).fire())/* && !req_in(idx).bits.kill)*/) { // more performance, may bug
       miss_v := true.B
       miss_req_v := true.B
     }

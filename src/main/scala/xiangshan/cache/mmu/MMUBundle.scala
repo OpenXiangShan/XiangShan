@@ -403,14 +403,16 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val cmd = Output(TlbCmd())
   val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
-  val robIdx = Output(new RobPtr)
+  val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
+    val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }
 
+  // Maybe Block req needs a kill: for itlb, itlb and icache may not sync, itlb should wait icache to go ahead
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} robIdx:${robIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
   }
 }
 
