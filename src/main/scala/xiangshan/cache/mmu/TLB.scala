@@ -61,6 +61,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
+  // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
 
   val refill = ptw.resp.fire() && !io.sfence.valid && !io.csr.satp.changed
   val entries = Module(new TlbStorageWrapper(Width, q))
@@ -198,6 +199,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       }
       // NOTE: the unfiltered req would be handled by Repeater
     }
+    assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
+
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
@@ -206,6 +209,13 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     when (flush) {
       miss_req_v := false.B
       miss_v := false.B
+
+      when (req_out_v(idx)) {
+        resp(idx).valid := true.B
+        resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
+        resp(idx).bits.excp.pf.st := true.B
+        resp(idx).bits.excp.pf.instr := true.B
+      }
     }
   }
 
