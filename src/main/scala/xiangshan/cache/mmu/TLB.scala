@@ -51,7 +51,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val ptw = io.ptw
   val pmp = io.pmp
 
-  val flush = io.sfence.valid
+  val flush = io.sfence.valid || io.csr.satp.changed
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) io.csr.priv.dmode else io.csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
@@ -63,7 +63,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
 
-  val refill = ptw.resp.fire() && !io.sfence.valid && !io.csr.satp.changed
+  val refill = ptw.resp.fire() && !flush
   val entries = Module(new TlbStorageWrapper(Width, q))
   entries.io.base_connect(io.sfence, io.csr)
   if (q.outReplace) { io.replace <> entries.io.replace }
