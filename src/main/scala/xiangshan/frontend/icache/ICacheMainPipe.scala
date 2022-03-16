@@ -276,15 +276,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** tlb response latch for pipeline stop */
   val tlb_back = fromITLB.map(_.fire())
+  val tlb_need_back = VecInit((0 until PortNumber).map(i => ValidHold(s0_fire && toITLB(i).fire(), s1_fire, false.B)))
   val tlb_already_recv = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  val tlb_ready_recv = VecInit((0 until PortNumber)map(i => RegNext(s0_fire, false.B) || (s1_valid && !tlb_already_recv(i))))
+  val tlb_ready_recv = VecInit((0 until PortNumber).map(i => RegNext(s0_fire, false.B) || (s1_valid && !tlb_already_recv(i))))
   val tlb_resp_valid = Wire(Vec(2, Bool()))
   for (i <- 0 until PortNumber) {
     tlb_resp_valid(i) := tlb_already_recv(i) || (tlb_ready_recv(i) && tlb_back(i))
     when (tlb_already_recv(i) && s1_fire) {
       tlb_already_recv(i) := false.B
     }
-    when (tlb_back(i) && tlb_ready_recv(i)) {
+    when (tlb_back(i) && tlb_ready_recv(i) && !s1_fire) {
       tlb_already_recv(i) := true.B
     }
     fromITLB(i).ready := tlb_ready_recv(i)
@@ -316,9 +317,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // val tlbExcpPF     = hit_tlbExcpPF
   // val tlbExcpAF     = hit_tlbExcpAF
 
-  val tlbRespAllValid = Cat(tlb_resp_valid).orR
+  val tlbRespAllValid = Cat((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i))).andR
   s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready
+  assert(RegNext(!s1_valid || Cat(tlb_need_back).orR, true.B), "when s1_valid, need at least one tlb_need_back")
+  assert(RegNext(s1_valid || !Cat(tlb_need_back).orR, true.B), "when !s1_valid, all the tlb_need_back should be false")
+  assert(RegNext(s1_valid || !Cat(tlb_already_recv).orR, true.B), "when !s1_valid, should not tlb_already_recv")
+  assert(RegNext(s1_valid || !Cat(tlb_resp_valid).orR, true.B), "when !s1_valid, should not tlb_resp_valid")
 
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
