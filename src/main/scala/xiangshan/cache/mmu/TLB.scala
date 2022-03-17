@@ -6,7 +6,7 @@
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
 * You may obtain a copy of Mulan PSL v2 at:
 *          http://license.coscl.org.cn/MulanPSL2
-*
+
 * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
@@ -203,10 +203,11 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     resp(idx).valid := req_out_v(idx) && !miss_v
     when (io.ptw.resp.fire()&& hit && req_out_v(idx)) {
+      val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
-      resp(idx).bits.paddr := Cat(io.ptw.resp.bits.entry.ppn, get_off(req_out(idx).vaddr))
-      perm_check(io.ptw.resp.bits, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
+      resp(idx).bits.paddr := Cat(genPPN(pte.entry.ppn, get_pn(req_out(idx).vaddr), pte.entry.level.get), get_off(req_out(idx).vaddr))
+      perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
       pmp_check(resp(idx).bits.paddr, req_out(idx).size, req_out(idx).cmd, idx)
       // NOTE: the unfiltered req would be handled by Repeater
     }

@@ -461,7 +461,7 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
 
-  def base_connect(sfence: SfenceBundle, csr: TlbCsrBundle) {
+  def base_connect(sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.sfence <> sfence
     this.csr <> csr
   }
@@ -485,7 +485,7 @@ class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
     val vector = Output(Vec(Width, Bool()))
   }))
 
-  def connect(normal: TlbPtwIO) {
+  def connect(normal: TlbPtwIO): Unit = {
     req <> normal.req
     resp.ready := normal.resp.ready
     normal.resp.bits := resp.bits.data
@@ -575,7 +575,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
+  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool): Unit = {
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
