@@ -23,10 +23,11 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
-import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
+import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPConfig => XSPMPConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import firrtl.FirrtlProtos.Firrtl.Module.ExternalModule.Parameter
+import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
   * support block request and non-block request io at the same time
@@ -51,16 +52,25 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val ptw = io.ptw
   val pmp = io.pmp
 
-  val flush = io.sfence.valid || io.csr.satp.changed
+
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) io.csr.priv.dmode else io.csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
     else (io.csr.satp.mode === 8.U && (mode < ModeM))
 
+  /** Sfence.vma & Svinval
+    * Sfence.vma will 1. flush old entries 2. flush inflight 3. flush pipe
+    * Svinval will 1. flush old entries 2. flush inflight
+    * So, Svinval will not flush pipe, which means
+    * it should not drop reqs from pipe and should return right resp
+    */
+  val flush = io.sfence.valid || io.csr.satp.changed
+  val flush_not_req = (0 until Width).map(i => if (Block(i)) !io.sfence.bits.redirect && !io.csr.satp.changed else false.B)
+
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush && !flush_not_req(i)))
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
 
   val refill = ptw.resp.fire() && !flush
@@ -177,45 +187,58 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
   def handle_block(idx: Int): Unit = {
     // three valid: 1. if exist a entry 2. if sent to ptw 3. unset resp.valid
-    val miss_req_v = Reg(Bool()) // this valid for if req (not) sent to ptw
-    val miss_v = Reg(Bool()) // this valid for if miss, try to unset resp.valid
+    val miss_req_v_reg = RegInit(false.B) // this valid for if req not sent to ptw
+    val miss_req_v_wire = Wire(Bool())
+    val miss_req_v = miss_req_v_wire || miss_req_v_reg
+    val miss_v_reg = RegInit(false.B) // this valid for if miss, try to unset resp.valid
+    val miss_v_wire = Wire(Bool())
+    val miss_v = miss_v_wire || miss_v_reg
     io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
     // req_out_v for if there is a request, may long latency, fixme
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
-    resp(idx).valid := req_out_v(idx) && !missVec(idx) && !miss_v
-    // when (missVec(idx) && req_out_v(idx)) { // TODO: bypass ptw's resp   // more precise
-    when (missVec(idx) && RegNext(req_in(idx).fire())/* && !req_in(idx).bits.kill)*/) { // more performance, may bug
-      miss_v := true.B
-      miss_req_v := true.B
+    val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true)
+    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill, false.B)
+    miss_v_wire := new_coming && missVec(idx)
+    miss_req_v_wire := miss_v_wire
+    resp(idx).valid := req_out_v(idx) && !miss_v
+    when (resp(idx).fire()) {
+      when (miss_v_reg) { miss_v_reg := false.B }
+      when (miss_req_v_reg) { miss_req_v_reg := false.B }
     }
+    when (miss_v_wire && !hit/* && !req_in(idx).bits.kill)*/) { miss_v_reg := true.B } // may long latency, from ptw->tlb->frontend/memend
+    when (miss_req_v_wire && !io.ptw.req(idx).fire()) { miss_req_v_reg := true.B }
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
-    when (io.ptw.resp.fire()) {
-      val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true)
-      when (hit && req_out_v(idx)) {
-        resp(idx).valid := true.B
-        resp(idx).bits.miss := false.B // for blocked tlb, this is useless
-      }
+    when (io.ptw.resp.fire()&& hit && req_out_v(idx)) {
+      resp(idx).valid := true.B
+      resp(idx).bits.miss := false.B // for blocked tlb, this is useless
+      resp(idx).bits.paddr := Cat(io.ptw.resp.bits.entry.ppn, get_off(req_out(idx).vaddr))
+      perm_check(io.ptw.resp.bits, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
+      pmp_check(resp(idx).bits.paddr, req_out(idx).size, req_out(idx).cmd, idx)
       // NOTE: the unfiltered req would be handled by Repeater
     }
     assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
+    assert(RegNext(req_out_v(idx) || !(miss_v_reg || miss_req_v_reg), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
 
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
-    when (ptw_req.fire()) { miss_req_v := false.B }
 
-    when (flush) {
-      miss_req_v := false.B
-      miss_v := false.B
+    when (flush && !flush_not_req(idx)) {
+      miss_req_v_reg := false.B
+      miss_v_reg := false.B
 
-      when (req_out_v(idx)) {
+      when (req_out_v(idx) && !hit) {
         resp(idx).valid := true.B
         resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
         resp(idx).bits.excp.pf.st := true.B
         resp(idx).bits.excp.pf.instr := true.B
       }
+    }
+    when (flush && flush_not_req(idx) && !hit) {
+      miss_req_v_reg := true.B // re-ptw, for inflight reqs are flushed
+      miss_v_reg := true.B
     }
   }
 

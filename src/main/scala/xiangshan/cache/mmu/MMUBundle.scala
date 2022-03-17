@@ -82,6 +82,21 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
 
   val pm = new TlbPMBundle
 
+  def apply(item: PtwResp, pm: PMPConfig) = {
+    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
+    this.pf := item.pf
+    this.af := item.af
+    this.d := ptePerm.d
+    this.a := ptePerm.a
+    this.g := ptePerm.g
+    this.u := ptePerm.u
+    this.x := ptePerm.x
+    this.w := ptePerm.w
+    this.r := ptePerm.r
+
+    this.pm.assign_ap(pm)
+    this
+  }
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} " +
     p"pm:${pm}"
@@ -221,19 +236,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
                           else 0.U})
     this.ppn := { if (!pageNormal) item.entry.ppn(ppnLen-1, vpnnLen)
                   else item.entry.ppn }
-    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    this.perm.pf := item.pf
-    this.perm.af := item.af
-    this.perm.d := ptePerm.d
-    this.perm.a := ptePerm.a
-    this.perm.g := ptePerm.g
-    this.perm.u := ptePerm.u
-    this.perm.x := ptePerm.x
-    this.perm.w := ptePerm.w
-    this.perm.r := ptePerm.r
-
-    this.perm.pm.assign_ap(pm)
-
+    this.perm.apply(item, pm)
     this
   }
 
@@ -730,6 +733,8 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.pf := pf
     this.af := af
   }
+
+
 
   override def toPrintable: Printable = {
     p"entry:${entry} pf:${pf} af:${af}"
