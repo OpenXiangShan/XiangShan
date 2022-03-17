@@ -187,29 +187,21 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
   def handle_block(idx: Int): Unit = {
     // three valid: 1. if exist a entry 2. if sent to ptw 3. unset resp.valid
-    val miss_req_v_reg = RegInit(false.B) // this valid for if req not sent to ptw
-    val miss_req_v_wire = Wire(Bool())
-    val miss_req_v = miss_req_v_wire || miss_req_v_reg
-    val miss_v_reg = RegInit(false.B) // this valid for if miss, try to unset resp.valid
-    val miss_v_wire = Wire(Bool())
-    val miss_v = miss_v_wire || miss_v_reg
     io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
     // req_out_v for if there is a request, may long latency, fixme
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
-    val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true)
-    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill, false.B)
-    miss_v_wire := new_coming && missVec(idx)
-    miss_req_v_wire := miss_v_wire
-    resp(idx).valid := req_out_v(idx) && !miss_v
-    when (resp(idx).fire()) {
-      when (miss_v_reg) { miss_v_reg := false.B }
-      when (miss_req_v_reg) { miss_req_v_reg := false.B }
-    }
-    when (miss_v_wire && !hit/* && !req_in(idx).bits.kill)*/) { miss_v_reg := true.B } // may long latency, from ptw->tlb->frontend/memend
-    when (miss_req_v_wire && !io.ptw.req(idx).fire()) { miss_req_v_reg := true.B }
+    val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
+
+    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !(flush && !flush_not_req(idx)), false.B)
+    val miss_wire = new_coming && missVec(idx)
+    val miss_reborn = req_out_v(idx) && flush && flush_not_req(idx)
+    val miss_req_v = ValidHoldBypass(miss_wire || miss_reborn, io.ptw.req(idx).fire() || resp(idx).fire(), flush && !flush_not_req(idx))
+    val miss_v = ValidHoldBypass(miss_wire || miss_reborn, resp(idx).fire(), flush && !flush_not_req(idx))
+
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
+    resp(idx).valid := req_out_v(idx) && !miss_v
     when (io.ptw.resp.fire()&& hit && req_out_v(idx)) {
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
@@ -219,26 +211,19 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       // NOTE: the unfiltered req would be handled by Repeater
     }
     assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
-    assert(RegNext(req_out_v(idx) || !(miss_v_reg || miss_req_v_reg), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
+    assert(RegNext(req_out_v(idx) || !(miss_v || miss_req_v), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
 
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
 
     when (flush && !flush_not_req(idx)) {
-      miss_req_v_reg := false.B
-      miss_v_reg := false.B
-
       when (req_out_v(idx) && !hit) {
         resp(idx).valid := true.B
         resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
         resp(idx).bits.excp.pf.st := true.B
         resp(idx).bits.excp.pf.instr := true.B
       }
-    }
-    when (flush && flush_not_req(idx) && !hit) {
-      miss_req_v_reg := true.B // re-ptw, for inflight reqs are flushed
-      miss_v_reg := true.B
     }
   }
 
