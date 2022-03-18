@@ -163,7 +163,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val counter = RegInit(0.U(log2Up(Size+1).W))
 
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed, 2)
-  val tlb_req = WireInit(io.tlb.req)
+  val tlb_req = WireInit(io.tlb.req) // NOTE: tlb_req is not io.tlb.req, see below codes, just use cloneType
   tlb_req.suggestName("tlb_req")
 
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
@@ -223,7 +223,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val canEnqueue = counter +& enqNum <= Size.U
 
   // the req may recv false ready, but actually received. Filter and TLB will handle it.
-  val enqNum_fake = PopCount(tlb_req.map(_.valid))
+  val enqNum_fake = PopCount(io.tlb.req.map(_.valid))
   val canEnqueue_fake = counter +& enqNum_fake <= Size.U
   io.tlb.req.map(_.ready := canEnqueue_fake) // NOTE: just drop un-fire reqs
 
