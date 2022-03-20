@@ -59,24 +59,26 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     * it should not drop reqs from pipe and should return right resp
     */
   val sfence = DelayN(io.sfence, q.fenceDelay)
-  val csr = DelayN(io.csr, q.fenceDelay)
+  val csr = io.csr
+  val satp = DelayN(io.csr.satp, q.fenceDelay)
   val flush = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
   // NOTE: the "2" should be same with Repeater to not to abanndon req sliently.
 
-  val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (csr.satp.mode === 8.U)
-    else (csr.satp.mode === 8.U && (mode < ModeM))
+  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
+    else (satp.mode === 8.U && (mode < ModeM))
 
+  val req_in = req
+  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
+  val req_in_flushed = (0 until Width).map(i => RegNext(req_in(i).fire && !req_in(i).bits.kill && flush, false.B))
 
   val refill = ptw.resp.fire() && !flush
   val entries = Module(new TlbStorageWrapper(Width, q))
-  entries.io.base_connect(sfence, csr)
+  entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
@@ -178,7 +180,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   }
 
   def handle_nonblock(idx: Int): Unit = {
-    io.requestor(idx).resp.valid := req_out_v(idx)
+    io.requestor(idx).resp.valid := req_out_v(idx) || req_in_flushed(idx)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx), false.B)
       !RegNext(refill, init = false.B) &&
@@ -218,13 +220,11 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
 
-    when (flush) {
-      when (req_out_v(idx) && !hit) {
-        resp(idx).valid := true.B
-        resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
-        resp(idx).bits.excp.pf.st := true.B
-        resp(idx).bits.excp.pf.instr := true.B
-      }
+    when ((flush && req_out_v(idx)) || req_in_flushed(idx)) {
+      resp(idx).valid := true.B
+      resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
+      resp(idx).bits.excp.pf.st := true.B
+      resp(idx).bits.excp.pf.instr := true.B
     }
   }
 

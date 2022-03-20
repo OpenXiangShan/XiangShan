@@ -465,6 +465,15 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
     this.sfence <> sfence
     this.csr <> csr
   }
+
+  // overwrite satp. write satp will cause flushpipe but csr.priv won't
+  // satp will be dealyed several cycles from writing, but csr.priv won't
+  // so inside mmu, these two signals should be divided
+  def base_connect(sfence: SfenceBundle, csr: TlbCsrBundle, satp: TlbSatpBundle) = {
+    this.sfence <> sfence
+    this.csr <> csr
+    this.csr.satp := satp
+  }
 }
 
 class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
