@@ -34,7 +34,7 @@ abstract trait DecodeConstants {
   def Y = BitPat("b1")
 
   def decodeDefault: List[BitPat] = // illegal instruction
-    //   srcType(0)   srcType(1)   srcType(2)   fuType      fuOpType    rfWen  
+    //   srcType(0)   srcType(1)   srcType(2)   fuType      fuOpType    rfWen
     //   |            |            |            |           |           |  fpWen
     //   |            |            |            |           |           |  |  isXSTrap
     //   |            |            |            |           |           |  |  |  noSpecExec
@@ -105,7 +105,7 @@ object XDecode extends DecodeConstants {
     LHU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lhu, Y, N, N, N, N, N, N, SelImm.IMM_I),
     LB      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lb, Y, N, N, N, N, N, N, SelImm.IMM_I),
     LBU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lbu, Y, N, N, N, N, N, N, SelImm.IMM_I),
-    
+
     SW      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, N, SelImm.IMM_S),
     SH      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sh, N, N, N, N, N, N, N, SelImm.IMM_S),
     SB      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sb, N, N, N, N, N, N, N, SelImm.IMM_S),
@@ -393,30 +393,30 @@ object FDivSqrtDecode extends DecodeConstants {
  */
 object SvinvalDecode extends DecodeConstants {
   val table: Array[(BitPat, List[BitPat])] = Array(
-  /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma 
+  /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma
    * must assure it is the ONLY instrucion executing in backend.
    */
-  SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, N, SelImm.IMM_X),
-  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals 
-   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit 
+  SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, N, N, Y, N, SelImm.IMM_X),
+  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals
+   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit
    * then dispatch and issue this instrucion to flush sbuffer to dcache
    * after this instrucion commits , issue following sinval_vma instructions (out of order) to flush TLB
    */
-  SFENCE_W_INVAL    ->List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, N, N, SelImm.IMM_X),
-  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals 
-   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit 
+  SFENCE_W_INVAL    ->List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, Y, N, SelImm.IMM_X),
+  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals
+   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit
    * then dispatch and issue this instrucion
-   * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map 
+   * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map
    */
   SFENCE_INVAL_IR   ->List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, Y, N, SelImm.IMM_X)
-  /* what is Svinval extension ? 
+  /* what is Svinval extension ?
    *                       ----->             sfecne.w.inval
    * sfence.vma   vpn1     ----->             sinval_vma   vpn1
    * sfence.vma   vpn2     ----->             sinval_vma   vpn2
    *                       ----->             sfecne.inval.ir
-   * 
+   *
    * sfence.vma should be executed in-order and it flushes the pipeline after committing
-   * we can parallel sfence instrucions with this extension 
+   * we can parallel sfence instrucions with this extension
    */
     )
 }

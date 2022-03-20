@@ -61,7 +61,6 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   sbuffer      := state === s_wait && !(func === FenceOpType.sfence && disableSfence)
   fencei       := state === s_icache
   sfence.valid := state === s_tlb && !disableSfence
-  sfence.bits.redirect := uop.ctrl.flushPipe // used for blocked tlb io
   sfence.bits.rs1  := uop.ctrl.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.ctrl.imm(9, 5) === 0.U
   XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
