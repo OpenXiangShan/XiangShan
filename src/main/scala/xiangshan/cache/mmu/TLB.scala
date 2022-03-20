@@ -52,30 +52,31 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val ptw = io.ptw
   val pmp = io.pmp
 
-
-  val ifecth = if (q.fetchi) true.B else false.B
-  val mode = if (q.useDmode) io.csr.priv.dmode else io.csr.priv.imode
-  // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
-    else (io.csr.satp.mode === 8.U && (mode < ModeM))
-
   /** Sfence.vma & Svinval
     * Sfence.vma will 1. flush old entries 2. flush inflight 3. flush pipe
     * Svinval will 1. flush old entries 2. flush inflight
     * So, Svinval will not flush pipe, which means
     * it should not drop reqs from pipe and should return right resp
     */
-  val flush = io.sfence.valid || io.csr.satp.changed
-  val flush_not_req = (0 until Width).map(i => if (Block(i)) !io.sfence.bits.redirect && !io.csr.satp.changed else false.B)
+  val sfence = DelayN(io.sfence, q.fenceDelay)
+  val csr = DelayN(io.csr, q.fenceDelay)
+  val flush = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
+  // NOTE: the "2" should be same with Repeater to not to abanndon req sliently.
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush && !flush_not_req(i)))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
+  val ifecth = if (q.fetchi) true.B else false.B
+  val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
+  // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
+  val vmEnable = if (EnbaleTlbDebug) (csr.satp.mode === 8.U)
+    else (csr.satp.mode === 8.U && (mode < ModeM))
+
 
   val refill = ptw.resp.fire() && !flush
   val entries = Module(new TlbStorageWrapper(Width, q))
-  entries.io.base_connect(io.sfence, io.csr)
+  entries.io.base_connect(sfence, csr)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
@@ -194,11 +195,10 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
     val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
-    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !(flush && !flush_not_req(idx)), false.B)
+    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush, false.B)
     val miss_wire = new_coming && missVec(idx)
-    val miss_reborn = req_out_v(idx) && flush && flush_not_req(idx)
-    val miss_req_v = ValidHoldBypass(miss_wire || miss_reborn, io.ptw.req(idx).fire() || resp(idx).fire(), flush && !flush_not_req(idx))
-    val miss_v = ValidHoldBypass(miss_wire || miss_reborn, resp(idx).fire(), flush && !flush_not_req(idx))
+    val miss_req_v = ValidHoldBypass(miss_wire, io.ptw.req(idx).fire() || resp(idx).fire(), flush)
+    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire(), flush)
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     resp(idx).valid := req_out_v(idx) && !miss_v
@@ -218,7 +218,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
 
-    when (flush && !flush_not_req(idx)) {
+    when (flush) {
       when (req_out_v(idx) && !hit) {
         resp(idx).valid := true.B
         resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr

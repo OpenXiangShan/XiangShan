@@ -30,6 +30,7 @@ case class TLBParameters
 (
   name: String = "none",
   fetchi: Boolean = false, // TODO: remove it
+  fenceDelay: Int = 2,
   useDmode: Boolean = true,
   normalNSets: Int = 1, // when da or sa
   normalNWays: Int = 8, // when fa or sa
