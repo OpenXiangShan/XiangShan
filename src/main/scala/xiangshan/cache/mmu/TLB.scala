@@ -116,8 +116,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     val fast_miss = !super_hit && vmEnable
-    hit.suggestName(s"hit_${i}")
-    miss.suggestName(s"miss_${i}")
+    hit.suggestName(s"hit_read_${i}")
+    miss.suggestName(s"miss_read_${i}")
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn)} perm:${perm}\n")
 
