@@ -111,7 +111,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   }
   io.ptw.resp.ready := true.B
 
-  /****  main body above | method/log/perf below ****/
+  /************************  main body above | method/log/perf below ****************************/
 
   def TLBRead(i: Int) = {
     val (hit, ppn, perm, super_hit, super_ppn, static_pm) = entries.io.r_resp_apply(i)
@@ -249,10 +249,6 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i))
     }
   }
-  //val reqCycleCnt = Reg(UInt(16.W))
-  //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire || sfence.valid)
-  //XSPerfAccumulate("ptw_req_count", ptw.req.fire())
-  //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
 
