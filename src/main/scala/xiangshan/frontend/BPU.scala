@@ -172,7 +172,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val out = Output(new BasePredictorOutput)
   // val flush_out = Valid(UInt(VAddrBits.W))
 
-  // val ctrl = Input(new BPUCtrl())
+  val ctrl = Input(new BPUCtrl)
 
   val s0_fire = Input(Bool())
   val s1_fire = Input(Bool())
@@ -234,13 +234,18 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
 class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtqIO()
   val ftq_to_bpu = Flipped(new FtqToBpuIO())
+  val ctrl = Input(new BPUCtrl)
 }
 
 @chiselName
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
+  val ctrl = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
+
+  // ctrl signal
+  predictors.io.ctrl := ctrl
 
   val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
   val s1_valid, s2_valid, s3_valid = RegInit(false.B)

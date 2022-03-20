@@ -180,7 +180,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s2_is_jalr = s2_full_pred.is_jalr
   val s2_is_ret = s2_full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
-  when(s2_is_ret) {
+  when(s2_is_ret && io.ctrl.ras_enable) {
     s2_jalr_target := spec_top_addr
     // FIXME: should use s1 globally
   }
@@ -196,7 +196,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred.is_jalr
   val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
-  when(s3_is_ret) {
+  when(s3_is_ret && io.ctrl.ras_enable) {
     s3_jalr_target := s3_top.retAddr
     // FIXME: should use s1 globally
   }

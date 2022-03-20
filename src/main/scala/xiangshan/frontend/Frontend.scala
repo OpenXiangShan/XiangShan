@@ -73,6 +73,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val triggerEn = csrCtrl.trigger_enable
   ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
+  // bpu ctrl
+  bpu.io.ctrl := csrCtrl.bp_ctrl
+
 // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
