@@ -10,9 +10,9 @@ English Readme is [here](README.md).
 
 ## 文档和报告
 
-在 2021 年 6 月的 RISC-V 中国峰会上，我们给出了超过 20 个技术报告。报告已经更新到[我们的文档仓库](https://github.com/OpenXiangShan/XiangShan-doc)。
+[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) 是我们的官方文档仓库，其中包含了设计文档、技术报告、使用教程等内容。
 
-更多的文档也将持续更新到相同的仓库。
+* 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
 
 ## 关注我们
 
