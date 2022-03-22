@@ -41,18 +41,19 @@ Some of the key directories are shown below.
 
 ```
 .
-├── ready-to-run           # pre-built simulation images
+├── src
+│   └── main/scala         # design files
+│       ├── device         # virtual device for simulation
+│       ├── system         # SoC wrapper
+│       ├── top            # top module
+│       ├── utils          # utilization code
+│       ├── xiangshan      # main design code
+│       └── xstransforms   # some useful firrtl transforms
 ├── scripts                # scripts for agile development
-└── src
-    ├── test               # test files (including diff-test, module-test, etc.)
-    └── main/scala         # design files
-        ├── device         # virtual device for simulation
-        ├── difftest       # diff-test chisel interface
-        ├── system         # SoC wrapper
-        ├── top            # top module
-        ├── utils          # utilization code
-        ├── xiangshan      # main design code
-        └── xstransforms   # some useful firrtl transforms
+├── fudian                 # floating unit submodule of XiangShan
+├── huancun                # L2/L3 cache submodule of XiangShan
+├── difftest               # difftest co-simulation framework
+└── ready-to-run           # pre-built simulation images
 ```
 
 ## IDE Support
@@ -110,7 +111,7 @@ In the development of XiangShan, some sub-modules from the open-source community
 | Sub-module         | Source                                                       | Detail                                                       |
 | ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | Our new L2/L3 design are inspired by Sifive's `block-inclusivecache`. |
-| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
+| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the Diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
 
 We are grateful for the support of the open-source community and encourage other open-source projects to reuse our code within the scope of the [license](LICENSE).
 

@@ -38,21 +38,33 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 ```
 .
-├── fpga                   # 支持的 FPGA 开发板、用于构建 Vivado 项目的文件
-├── read-to-run            # 预建的仿真镜像文件
+├── src
+│   └── main/scala         # 设计文件
+│       ├── device         # 用于仿真的虚拟设备
+│       ├── system         # SoC 封装
+│       ├── top            # 顶层模块
+│       ├── utils          # 复用封装
+│       ├── xiangshan      # 主体设计代码
+│       └── xstransforms   # 一些实用的 firrtl 变换代码
 ├── scripts                # 用于敏捷开发的脚本文件
-└── src
-    ├── test               # 测试文件（包括差异测试（diff-test）和模块测试（module-test） 等）
-    └── main/scala         # 设计文件
-        ├── bus/tilelink   # tilelink 实用工具
-        ├── device         # 用于仿真的虚拟设备
-        ├── difftest       # chisel 差异测试接口
-        ├── system         # SoC 封装
-        ├── top            # 顶层模块
-        ├── utils          # 复用封装
-        ├── xiangshan      # 主体设计代码
-        └── xstransforms   # 一些实用的 firrtl 变换代码
+├── fudian                 # 香山浮点子模块
+├── huancun                # 香山 L2/L3 缓存子模块
+├── difftest               # 香山协同仿真框架
+└── read-to-run            # 预建的仿真镜像文件
 ```
+
+## IDE 支持
+
+### bsp
+```
+make bsp
+```
+
+### IDEA
+```
+make idea
+```
+
 
 ## 生成 Verilog
 
@@ -83,14 +95,17 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
+## 错误排除指南
+
+[Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+
 ## 致谢
 
 在香山的开发过程中，我们采用了来自开源社区的子模块。具体情况如下：
 
 | 子模块         | 来源                                                       | 详细用途                                                       |
 | ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | 我们增强了原模块的功能和时序，最终使之能胜任 L2/LLC 任务的缓存生成器 |
-| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | 我们复用了来自 rocket-chip 的外接框架和链接，来调度总线 |
-| FPU                | [Berkeley hardfloat](https://github.com/ucb-bar/berkeley-hardfloat) | 我们使用了 Barkeley-hardfloat 作为浮点运算器并为之设计了 SRT-4 除法/开方运算单元。此外我们分割了 FMA 流水线以优化时序 |
+| L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | 我们的新 L2/L3 缓存设计受到了 Sifive `block-inclusivecache` 的启发. |
+| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | 我们复用了来自 rocket-chip 的 Diplomacy 框架和 Tilelink 工具，来协商总线. |
 
-我们深深地感谢来自开源社区的支持，我们也鼓励其他开源项目在[木兰宽松许可证](LICENSE)的范围下复用我们的代码。:)
+我们深深地感谢来自开源社区的支持，我们也鼓励其他开源项目在[木兰宽松许可证](LICENSE)的范围下复用我们的代码。
