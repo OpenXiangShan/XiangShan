@@ -1,11 +1,12 @@
 # 香山
 
-香山是一款开源的高性能 RISC-V 处理器。采用 Chisel 硬件设计语言开发，支持 RV64GC 指令集。
+香山（XiangShan）是一款开源的高性能 RISC-V 处理器。
 
-详细文档将在未来放出。
 English Readme is [here](README.md).
 
-©2020-2021 中国科学院计算技术研究所版权所有。
+©2020-2022 中国科学院计算技术研究所版权所有
+
+©2020-2022 鹏城实验室版权所有
 
 ## 文档和报告
 
@@ -29,8 +30,8 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。目前版本的香山（即南湖）正在 master 分支上不断开发中。
 
-微架构概览：
-![xs-arch-single](images/xs-arch-simple.svg)
+南湖微架构概览：
+![xs-arch-nanhu](images/xs-arch-nanhu.svg)
 
 ## 目录概览
 
