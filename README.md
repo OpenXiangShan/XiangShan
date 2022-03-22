@@ -5,6 +5,7 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 中文说明[在此](readme.zh-cn.md)。
 
 Copyright 2020-2022 by Institute of Computing Technology, Chinese Academy of Sciences.
+
 Copyright 2020-2022 by Peng Cheng Laboratory.
 
 ## Docs and slides
