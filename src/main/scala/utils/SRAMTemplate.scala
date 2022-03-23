@@ -118,7 +118,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
   when (wen) { array.write(setIdx, wdata, waymask.asBools) }
 
-  val raw_rdata = array.read(io.r.req.bits.setIdx, realRen)
+  val raw_rdata = Mux(RegNext(io.w.req.valid, false.B), RegNext(io.r.resp.data), array.read(io.r.req.bits.setIdx, realRen))
 
   // bypass for dual-port SRAMs
   require(!bypassWrite || bypassWrite && !singlePort)
