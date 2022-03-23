@@ -113,7 +113,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   def TLBNormalRead(i: Int) = {
     val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
     val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
-    assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
+    // assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
