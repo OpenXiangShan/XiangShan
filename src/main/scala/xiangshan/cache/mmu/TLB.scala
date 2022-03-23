@@ -142,7 +142,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || RegNext(io.ptw.resp.valid)) }
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
