@@ -3,9 +3,9 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, sram-test ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, sram-test ]
 
 jobs:
   generate-verilog:
