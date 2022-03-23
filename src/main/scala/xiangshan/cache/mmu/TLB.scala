@@ -138,12 +138,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
-
+    val refill_reg = RegNext(io.ptw.resp.valid)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || RegNext(io.ptw.resp.valid)) }
-    resp(i).bits.fast_miss := fast_miss
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || refill_reg) }
+    resp(i).bits.fast_miss := fast_miss || refill_reg
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     // for timing optimization, pmp check is divided into dynamic and static
