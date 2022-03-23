@@ -39,7 +39,7 @@ class ICacheReleaseBundle(implicit p: Parameters) extends  ICacheBundle{
   val req = Vec(2, Flipped(DecoupledIO(new ReleaseReq)))
 }
 
-class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
+class ReleaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 {
   val io = IO(new Bundle {
     val id = Input(UInt())
@@ -149,7 +149,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
 
-  val entry = Module(new RealeaseEntry(edge))
+  val entry = Module(new ReleaseEntry(edge))
 
   entry.io.id := 0.U
 
