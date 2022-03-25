@@ -35,8 +35,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
-  override def cloneType: DispatchQueueIO.this.type =
-    new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle

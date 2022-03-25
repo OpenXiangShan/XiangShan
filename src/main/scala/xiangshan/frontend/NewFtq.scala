@@ -28,7 +28,6 @@ import xiangshan.backend.decode.ImmUnion
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
 ){
-  override def cloneType = (new FtqPtr).asInstanceOf[this.type]
 }
 
 object FtqPtr {
@@ -195,7 +194,6 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
     this.offset := offset
     this.data
   }
-  override def cloneType = (new FtqRead(gen)).asInstanceOf[this.type]
 }
 
 

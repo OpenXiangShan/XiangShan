@@ -64,7 +64,6 @@ class ScoreTableEntry(implicit p: Parameters) extends PrefetchBundle {
   }
 
   override def toPrintable: Printable = { p"${offset}:${score}" }
-  override def cloneType: this.type = (new ScoreTableEntry).asInstanceOf[this.type]
 }
 
 class TestOffsetReq(implicit p: Parameters) extends PrefetchBundle {
@@ -76,7 +75,6 @@ class TestOffsetReq(implicit p: Parameters) extends PrefetchBundle {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} off=${testOffset} ptr=${ptr}"
   }
-  override def cloneType: this.type = (new TestOffsetReq).asInstanceOf[this.type]
 }
 
 class TestOffsetResp(implicit p: Parameters) extends PrefetchBundle {
@@ -87,7 +85,6 @@ class TestOffsetResp(implicit p: Parameters) extends PrefetchBundle {
   override def toPrintable: Printable = {
     p"pff=${testOffset} ptr=${ptr} hit=${hit}"
   }
-  override def cloneType: this.type = (new TestOffsetResp).asInstanceOf[this.type]
 }
 
 class TestOffsetBundle(implicit p: Parameters) extends PrefetchBundle {
@@ -98,7 +95,6 @@ class TestOffsetBundle(implicit p: Parameters) extends PrefetchBundle {
     p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
   }
-  override def cloneType: this.type = (new TestOffsetBundle).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchReq(implicit p: Parameters) extends PrefetchReq {
@@ -107,7 +103,6 @@ class BestOffsetPrefetchReq(implicit p: Parameters) extends PrefetchReq {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchReq).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchResp(implicit p: Parameters) extends PrefetchResp {
@@ -116,7 +111,6 @@ class BestOffsetPrefetchResp(implicit p: Parameters) extends PrefetchResp {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchResp).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchFinish(implicit p: Parameters) extends PrefetchFinish {
@@ -125,7 +119,6 @@ class BestOffsetPrefetchFinish(implicit p: Parameters) extends PrefetchFinish {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchFinish).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
@@ -140,7 +133,6 @@ class BestOffsetPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits} " +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchIO).asInstanceOf[this.type]
 }
 
 class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
