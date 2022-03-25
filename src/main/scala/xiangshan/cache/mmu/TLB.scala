@@ -113,7 +113,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   def TLBNormalRead(i: Int) = {
     val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
     val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
-    assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
+    // assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
@@ -138,12 +138,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
-
+    val refill_reg = RegNext(io.ptw.resp.valid)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
-    resp(i).bits.fast_miss := fast_miss
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || refill_reg) }
+    resp(i).bits.fast_miss := fast_miss || refill_reg
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     // for timing optimization, pmp check is divided into dynamic and static
