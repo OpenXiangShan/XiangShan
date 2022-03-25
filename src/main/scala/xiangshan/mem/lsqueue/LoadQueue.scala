@@ -30,7 +30,6 @@ import xiangshan.frontend.FtqPtr
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
 ){
-  override def cloneType = (new LqPtr).asInstanceOf[this.type]
 }
 
 object LqPtr {

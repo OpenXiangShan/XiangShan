@@ -105,9 +105,8 @@ class SelectTwoInterRes[T <: Data](gen: T) extends Bundle {
   // val valid = Bool()
   val hasOne = Bool()
   val hasTwo = Bool()
-  val first = chiselTypeOf(gen)
-  val second = chiselTypeOf(gen)
-  override def cloneType = new SelectTwoInterRes(gen).asInstanceOf[this.type]
+  val first = gen.cloneType
+  val second = gen.cloneType
 }
 
 object SelectTwoInterRes {

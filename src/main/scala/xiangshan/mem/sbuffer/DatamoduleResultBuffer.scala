@@ -31,8 +31,6 @@ class DatamoduleResultBufferIO[T <: Data](gen: T) extends Bundle
   val enq = Vec(2, Flipped(DecoupledIO(gen)))
   val deq = Vec(2, DecoupledIO(gen))
 
-  override def cloneType: DatamoduleResultBufferIO.this.type =
-    new DatamoduleResultBufferIO[T](gen).asInstanceOf[this.type]
 }
 
 class DatamoduleResultBuffer[T <: Data]

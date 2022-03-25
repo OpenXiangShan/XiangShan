@@ -25,16 +25,12 @@ import xiangshan._
 class RfReadPort(len: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
-  override def cloneType: RfReadPort.this.type =
-    new RfReadPort(len).asInstanceOf[this.type]
 }
 
 class RfWritePort(len: Int)(implicit p: Parameters) extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Input(UInt(len.W))
-  override def cloneType: RfWritePort.this.type =
-    new RfWritePort(len).asInstanceOf[this.type]
 }
 
 class Regfile

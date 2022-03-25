@@ -42,7 +42,6 @@ class PTWReapterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
     this.csr <> csr
   }
 
-  override def cloneType: this.type = (new PTWReapterIO(Width)).asInstanceOf[this.type]
 }
 
 class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -144,7 +143,6 @@ class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
     this.csr <> csr
   }
 
-  override def cloneType: this.type = (new PTWFilterIO(Width)).asInstanceOf[this.type]
 }
 
 class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {

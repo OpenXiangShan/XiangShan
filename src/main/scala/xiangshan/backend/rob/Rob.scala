@@ -35,7 +35,6 @@ class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
     redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx))
   }
 
-  override def cloneType = (new RobPtr).asInstanceOf[this.type]
 }
 
 object RobPtr {

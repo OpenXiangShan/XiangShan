@@ -26,7 +26,6 @@ import xiangshan.ExceptionNO._
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
   p => p(XSCoreParamsKey).IBufSize
 ){
-  override def cloneType = (new IbufPtr).asInstanceOf[this.type]
 }
 
 class IBufferIO(implicit p: Parameters) extends XSBundle {

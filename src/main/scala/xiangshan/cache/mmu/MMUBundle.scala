@@ -178,7 +178,6 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     p"level:${insideLevel} ppn:${Hexadecimal(ppn)} perm:${perm}"
   }
 
-  override def cloneType: this.type = (new TlbData(superpage)).asInstanceOf[this.type]
 }
 
 class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) extends TlbBundle {
@@ -258,7 +257,6 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     p"asid: ${asid} level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm}"
   }
 
-  override def cloneType: this.type = (new TlbEntry(pageNormal, pageSuper)).asInstanceOf[this.type]
 }
 
 object TlbCmd {
@@ -321,14 +319,12 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
     this.w.bits.data_replenish := data_replenish
   }
 
-  override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
 class ReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
   val sets = Output(UInt(log2Up(nSets).W))
   val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
 
-  override def cloneType: this.type =new ReplaceAccessBundle(nSets, nWays).asInstanceOf[this.type]
 }
 
 class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
@@ -356,7 +352,6 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
     this.superPage.apply_sep(in.map(_.superPage), vpn)
   }
 
-  override def cloneType = (new TlbReplaceIO(Width, q)).asInstanceOf[this.type]
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
@@ -410,7 +405,6 @@ class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val req = Vec(Width, DecoupledIO(new PtwReq))
   val resp = Flipped(DecoupledIO(new PtwResp))
 
-  override def cloneType: this.type = (new TlbPtwIO(Width)).asInstanceOf[this.type]
 
   override def toPrintable: Printable = {
     p"req(0):${req(0).valid} ${req(0).ready} ${req(0).bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
@@ -430,7 +424,6 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
-  override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }
 
 class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
@@ -440,7 +433,6 @@ class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
     val vector = Output(Vec(Width, Bool()))
   }))
 
-  override def cloneType: this.type = (new BTlbPtwIO(Width)).asInstanceOf[this.type]
 }
 /****************************  Bridge TLB *******************************/
 
@@ -448,7 +440,6 @@ class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbPtwIO()))
   val ptw = new BTlbPtwIO(Width)
 
-  override def cloneType: this.type = (new BridgeTLBIO(Width)).asInstanceOf[this.type]
 }
 
 
@@ -549,7 +540,6 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     e
   }
 
-  override def cloneType: this.type = (new PtwEntry(tagLen, hasPerm, hasLevel)).asInstanceOf[this.type]
 
   override def toPrintable: Printable = {
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
@@ -602,7 +592,6 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     ps
   }
 
-  override def cloneType: this.type = (new PtwEntries(num, tagLen, level, hasPerm)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
@@ -663,7 +652,6 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     this.encode()
   }
 
-  override def cloneType: this.type = new PTWEntriesWithEcc(eccCode, num, tagLen, level, hasPerm).asInstanceOf[this.type]
 }
 
 class PtwReq(implicit p: Parameters) extends PtwBundle {

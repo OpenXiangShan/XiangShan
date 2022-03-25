@@ -34,8 +34,6 @@ class StatusArrayUpdateIO(params: RSParams)(implicit p: Parameters) extends Bund
     PopCount(addr.asBools) === 0.U
   }
 
-  override def cloneType: StatusArrayUpdateIO.this.type =
-    new StatusArrayUpdateIO(params).asInstanceOf[this.type]
 }
 
 class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
@@ -71,8 +69,6 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
     srcState.asUInt.andR || midStateReady
   }
 
-  override def cloneType: StatusEntry.this.type =
-    new StatusEntry(params).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $robIdx"
   }

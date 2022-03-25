@@ -30,7 +30,6 @@ import device.RAMHelper
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
 ){
-  override def cloneType = (new SqPtr).asInstanceOf[this.type]
 }
 
 object SqPtr {
