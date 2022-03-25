@@ -54,7 +54,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+	$(TIME_CMD) mill -i XiangShan.runMain $(FPGATOP) -td $(@D)		\
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
