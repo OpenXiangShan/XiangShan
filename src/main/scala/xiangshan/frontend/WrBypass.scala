@@ -43,7 +43,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   })
 
   class WrBypassPtr extends CircularQueuePtr[WrBypassPtr](numEntries){
-    override def cloneType = (new WrBypassPtr).asInstanceOf[this.type]
   }
 
   class Idx_Tag extends Bundle {
