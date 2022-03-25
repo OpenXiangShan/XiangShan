@@ -142,7 +142,6 @@ class ShiftingGlobalHistory(implicit p: Parameters) extends GlobalHistory {
 class CGHPtr(implicit p: Parameters) extends CircularQueuePtr[CGHPtr](
   p => p(XSCoreParamsKey).HistoryLength
 ){
-  override def cloneType = (new CGHPtr).asInstanceOf[this.type]
 }
 
 object CGHPtr {
