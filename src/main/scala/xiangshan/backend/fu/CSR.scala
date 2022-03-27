@@ -402,7 +402,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
-  val mstatus = RegInit("ha00000000".U(XLEN.W))
+  val mstatus = RegInit("ha00002000".U(XLEN.W))
 
   // mstatus Value Table
   // | sd   |
@@ -417,7 +417,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // | sum  |
   // | mprv |
   // | xs   | 00 |
-  // | fs   | 00 |
+  // | fs   | 01 |
   // | mpp  | 00 |
   // | hpp  | 00 |
   // | spp  | 0 |
@@ -609,9 +609,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val priviledgeModeOH = UIntToOH(priviledgeMode)
   val perfEventscounten = RegInit(0.U.asTypeOf(Vec(nrPerfCnts, Bool())))
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
+                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
+                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
                    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
   for (i <-0 until nrPerfCnts) {
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
@@ -744,7 +744,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }}
   val cacheopMapping = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
     MaskedRegMap(
-      Scachebase + attribute("offset").toInt, 
+      Scachebase + attribute("offset").toInt,
       cacheopRegs(name)
     )
   }}
@@ -1148,11 +1148,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
   val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
   val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
-  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid, 
+  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid,
     delayedUpdate0.w.bits.addr,
     delayedUpdate1.w.bits.addr
   )
-  val distributedUpdateData = Mux(delayedUpdate0.w.valid, 
+  val distributedUpdateData = Mux(delayedUpdate0.w.valid,
     delayedUpdate0.w.bits.data,
     delayedUpdate1.w.bits.data
   )
@@ -1243,9 +1243,9 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
 
   val w = io.distribute_csr.w
 
-  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
+                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
+                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
                    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
 
   val perfEventMapping = (0 until 29).map(i => {Map(
@@ -1259,5 +1259,4 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   for(i <- 0 until 29){
     io.hpmevent(i) := perfEvents(i)
   }
-}             
-
+}
