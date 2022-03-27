@@ -35,6 +35,9 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
+  // Don't allow the top-level signals to be optimized out,
+  // so that we can re-use this SimTop for any generated Verilog RTL.
+  dontTouch(soc.io)
 
   l_soc.module.dma <> 0.U.asTypeOf(l_soc.module.dma)
 
