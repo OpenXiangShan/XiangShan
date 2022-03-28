@@ -87,7 +87,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** Prefetch Stage 0: req from Ftq */
   val p0_valid  =   fromFtq.req.valid
-  val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, PAddrBits)
+  val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, VAddrBits)
   p0_fire   :=   p0_valid && p1_ready && toITLB.fire() && !fromITLB.bits.miss && toIMeta.ready && enableBit
 
   toIMeta.valid     := p0_valid
