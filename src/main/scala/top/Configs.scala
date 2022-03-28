@@ -196,8 +196,20 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         nMissEntries = 16,
         nProbeEntries = 8,
         nReleaseEntries = 18
+      )),
+      icacheParameters = ICacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("parity"),
+        dataECC = Some("parity"),
+        replacer = Some("setplru"),
+        nMissEntries = 2,
+        nReleaseEntries = 1,
+        nProbeEntries = 2,
+        nPrefetchEntries = 2,
+        hasPrefetch = true
       ))
-    ))
+    )
 })
 
 class WithNKBL2
@@ -229,7 +241,7 @@ class WithNKBL2
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
         enablePerf = true,
-        sramDepthDiv = 2,
+        // sramDepthDiv = 2,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform
@@ -258,12 +270,12 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
         },
         enablePerf = true,
-        ctrl = Some(CacheCtrl(
-          address = 0x39000000,
-          numCores = tiles.size
-        )),
-        sramClkDivBy2 = true,
-        sramDepthDiv = 4,
+        // ctrl = Some(CacheCtrl(
+        //   address = 0x39000000,
+        //   numCores = tiles.size
+        // )),
+        // sramClkDivBy2 = true,
+        // sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform
@@ -301,5 +313,12 @@ class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+class WkfConfig(n: Int = 1) extends Config(
+  new WithNKBL3(2 * 1024, inclusive = false, banks = 4)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL1D(32)
     ++ new BaseConfig(n)
 )
