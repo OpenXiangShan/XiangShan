@@ -378,12 +378,19 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pendingRedirect := false.B
   }
 
-  //my celow
-  val MissPredRedirecting = RegInit(false.B)
+  //my below
+  val MissPredPending = RegInit(false.B)
+  val branch_resteers_cycles = RegInit(false.B)
   when (redirectGen.io.isMisspreRedirect) {
-    MissPredRedirecting := true.B
-  }.elsewhen (VecInit(decode.io.out.map(x => x.valid)).asUInt.orR) {
-    MissPredRedirecting := false.B
+    MissPredPending := true.B
+  //}.elsewhen (VecInit(decode.io.out.map(x => x.valid)).asUInt.orR) {
+  }.elsewhen (MissPredPending && RegNext(io.frontend.toFtq.redirect.valid)) {
+    MissPredPending := false.B
+    branch_resteers_cycles := true.B
+  }
+
+  when(branch_resteers_cycles && VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
+    branch_resteers_cycles := false.B
   }
   //my above
 
@@ -439,7 +446,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   //my below
-  XSPerfAccumulate("branch resteers", MissPredRedirecting)
+  XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
   //my above
 
   rename.io.redirect <> stage2Redirect
