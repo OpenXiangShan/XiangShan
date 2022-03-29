@@ -241,7 +241,7 @@ class WithNKBL2
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
         enablePerf = true,
-        // sramDepthDiv = 2,
+        sramDepthDiv = 2,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform
@@ -270,12 +270,12 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
         },
         enablePerf = true,
-        // ctrl = Some(CacheCtrl(
-        //   address = 0x39000000,
-        //   numCores = tiles.size
-        // )),
-        // sramClkDivBy2 = true,
-        // sramDepthDiv = 4,
+        ctrl = Some(CacheCtrl(
+          address = 0x39000000,
+          numCores = tiles.size
+        )),
+        sramClkDivBy2 = true,
+        sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform
