@@ -134,7 +134,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     else VecInit((0 until way).map(_ => LFSR64().asTypeOf(wordType)))
   val bypass_mask = need_bypass(io.w.req.valid, io.w.req.bits.setIdx, io.w.req.bits.waymask.getOrElse("b1".U), io.r.req.valid, io.r.req.bits.setIdx)
   val mem_rdata = {
-    if (singlePort) raw_rdata
+    if (singlePort) Mux(RegNext(io.w.req.valid, false.B), RegNext(raw_rdata), raw_rdata)
     else VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
       case ((m, r), w) => Mux(m, w, r)
     })
