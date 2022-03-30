@@ -385,23 +385,23 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   
   when (redirectGen.io.isMisspreRedirect) { // frontend_bound->fetch_lantency->branch_resteers
     MissPredPending := true.B
-    when(flushRedirect.valid)      {printf("\nredirectGen.io.isMisspreRedirect && flushRedirect.valid\n")}
-    when(redirectGen.io.loadReplay){printf("\nredirectGen.io.isMisspreRedirect && redirectGen.io.loadReplay\n")}
-    when(MissPredPending)          {printf("\nredirectGen.io.isMisspreRedirect && MissPredPending\n")}
-    when(RobFlushPending)          {printf("\nredirectGen.io.isMisspreRedirect && RobFlushPending\n")}
-    when(LdReplayPending)          {printf("\nredirectGen.io.isMisspreRedirect && LdReplayPending\n")}
+    when(flushRedirect.valid)            {printf("\nredirectGen.io.isMisspreRedirect && flushRedirect.valid\n")}
+    when(redirectGen.io.loadReplay.valid){printf("\nredirectGen.io.isMisspreRedirect && redirectGen.io.loadReplay\n")}
+    when(MissPredPending)                {printf("\nredirectGen.io.isMisspreRedirect && MissPredPending\n")}
+    when(RobFlushPending)                {printf("\nredirectGen.io.isMisspreRedirect && RobFlushPending\n")}
+    when(LdReplayPending)                {printf("\nredirectGen.io.isMisspreRedirect && LdReplayPending\n")}
   }
   when (flushRedirect.valid){ // frontend_bound->fetch_lantency->robflush_bubble
     RobFlushPending := true.B
-    when(MissPredPending)          {printf("\nflushRedirect.valid && MissPredPending\n")}
-    when(RobFlushPending)          {printf("\nflushRedirect.valid && RobFlushPending\n")}
-    when(LdReplayPending)          {printf("\nflushRedirect.valid && LdReplayPending\n")}
+    when(MissPredPending)                {printf("\nflushRedirect.valid && MissPredPending\n")}
+    when(RobFlushPending)                {printf("\nflushRedirect.valid && RobFlushPending\n")}
+    when(LdReplayPending)                {printf("\nflushRedirect.valid && LdReplayPending\n")}
   }
-  when (redirectGen.io.loadReplay){ // frontend_bound->fetch_lantency->ldReplay_bubble
+  when (redirectGen.io.loadReplay.valid){ // frontend_bound->fetch_lantency->ldReplay_bubble
     LdReplayPending := true.B
-    when(MissPredPending)          {printf("\nredirectGen.io.loadReplay && MissPredPending\n")}
-    when(RobFlushPending)          {printf("\nredirectGen.io.loadReplay && RobFlushPending\n")}
-    when(LdReplayPending)          {printf("\nredirectGen.io.loadReplay && LdReplayPending\n")}
+    when(MissPredPending)                {printf("\nredirectGen.io.loadReplay && MissPredPending\n")}
+    when(RobFlushPending)                {printf("\nredirectGen.io.loadReplay && RobFlushPending\n")}
+    when(LdReplayPending)                {printf("\nredirectGen.io.loadReplay && LdReplayPending\n")}
   }
   
   when (RegNext(io.frontend.toFtq.redirect.valid)) {
