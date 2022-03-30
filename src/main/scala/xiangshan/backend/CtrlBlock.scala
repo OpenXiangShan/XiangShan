@@ -379,19 +379,43 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   //my below
-  val MissPredPending = RegInit(false.B)
-  val branch_resteers_cycles = RegInit(false.B)
-  when (redirectGen.io.isMisspreRedirect) {
+  val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B)
+  val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B)
+  val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B)
+  
+  when (redirectGen.io.isMisspreRedirect) { // frontend_bound->fetch_lantency->branch_resteers
     MissPredPending := true.B
-  //}.elsewhen (VecInit(decode.io.out.map(x => x.valid)).asUInt.orR) {
-  }.elsewhen (MissPredPending && RegNext(io.frontend.toFtq.redirect.valid)) {
-    MissPredPending := false.B
-    branch_resteers_cycles := true.B
+    when(flushRedirect.valid)      {printf("\nredirectGen.io.isMisspreRedirect && flushRedirect.valid\n")}
+    when(redirectGen.io.loadReplay){printf("\nredirectGen.io.isMisspreRedirect && redirectGen.io.loadReplay\n")}
+    when(MissPredPending)          {printf("\nredirectGen.io.isMisspreRedirect && MissPredPending\n")}
+    when(RobFlushPending)          {printf("\nredirectGen.io.isMisspreRedirect && RobFlushPending\n")}
+    when(LdReplayPending)          {printf("\nredirectGen.io.isMisspreRedirect && LdReplayPending\n")}
+  }
+  when (flushRedirect.valid){ // frontend_bound->fetch_lantency->robflush_bubble
+    RobFlushPending := true.B
+    when(MissPredPending)          {printf("\nflushRedirect.valid && MissPredPending\n")}
+    when(RobFlushPending)          {printf("\nflushRedirect.valid && RobFlushPending\n")}
+    when(LdReplayPending)          {printf("\nflushRedirect.valid && LdReplayPending\n")}
+  }
+  when (redirectGen.io.loadReplay){ // frontend_bound->fetch_lantency->ldReplay_bubble
+    LdReplayPending := true.B
+    when(MissPredPending)          {printf("\nredirectGen.io.loadReplay && MissPredPending\n")}
+    when(RobFlushPending)          {printf("\nredirectGen.io.loadReplay && RobFlushPending\n")}
+    when(LdReplayPending)          {printf("\nredirectGen.io.loadReplay && LdReplayPending\n")}
+  }
+  
+  when (RegNext(io.frontend.toFtq.redirect.valid)) {
+    when(MissPredPending){MissPredPending := false.B; branch_resteers_cycles := true.B}
+    when(RobFlushPending){RobFlushPending := false.B; robFlush_bubble_cycles := true.B}
+    when(LdReplayPending){LdReplayPending := false.B; ldReplay_bubble_cycles := true.B}
   }
 
-  when(branch_resteers_cycles && VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
-    branch_resteers_cycles := false.B
+  when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
+    when(branch_resteers_cycles){branch_resteers_cycles := false.B}
+    when(robFlush_bubble_cycles){robFlush_bubble_cycles := false.B}
+    when(ldReplay_bubble_cycles){ldReplay_bubble_cycles := false.B}
   }
+
   //my above
 
   decode.io.in <> io.frontend.cfVec
