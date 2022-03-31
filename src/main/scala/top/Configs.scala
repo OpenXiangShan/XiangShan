@@ -196,8 +196,20 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         nMissEntries = 16,
         nProbeEntries = 8,
         nReleaseEntries = 18
+      )),
+      icacheParameters = ICacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("parity"),
+        dataECC = Some("parity"),
+        replacer = Some("setplru"),
+        nMissEntries = 2,
+        nReleaseEntries = 1,
+        nProbeEntries = 2,
+        nPrefetchEntries = 2,
+        hasPrefetch = true
       ))
-    ))
+    )
 })
 
 class WithNKBL2
@@ -301,5 +313,12 @@ class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+class WkfConfig(n: Int = 1) extends Config(
+  new WithNKBL3(512, inclusive = false, ways = 2, banks = 2)
+    ++ new WithNKBL2(256, inclusive = false, ways = 2, banks = 2, alwaysReleaseData = true)
+    ++ new WithNKBL1D(16)
     ++ new BaseConfig(n)
 )
