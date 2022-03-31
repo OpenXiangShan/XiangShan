@@ -689,6 +689,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.ppn := pte.ppn
     this.entry.prefetch := DontCare
     this.entry.asid := asid
+    this.entry.v := !pf
     this.pf := pf
     this.af := af
   }
