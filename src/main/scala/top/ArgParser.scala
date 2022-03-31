@@ -36,6 +36,7 @@ object ArgParser {
       |--enable-difftest
       |--enable-log
       |--disable-perf
+      |--mfc
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -46,9 +47,10 @@ object ArgParser {
     val c = Class.forName(prefix + confString).getConstructor(Integer.TYPE)
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
-  def parse(args: Array[String]): (Parameters, Array[String]) = {
+  def parse(args: Array[String]): (Parameters, Array[String], FirrtlCompiler) = {
     val default = new DefaultConfig(1)
     var firrtlOpts = Array[String]()
+    var firrtlCompiler: FirrtlCompiler = SFC
     @tailrec
     def nextOption(config: Parameters, list: List[String]): Parameters = {
       list match {
@@ -85,6 +87,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
+        case "--mfc" :: tail =>
+          firrtlCompiler = MFC
+          nextOption(config, tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
@@ -92,6 +97,6 @@ object ArgParser {
       }
     }
     var config = nextOption(default, args.toList)
-    (config, firrtlOpts)
+    (config, firrtlOpts, firrtlCompiler)
   }
 }
