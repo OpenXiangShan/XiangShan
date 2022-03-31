@@ -24,20 +24,11 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
-import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
-import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -201,13 +192,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        soc.module
-      })
-    ))
+    Generator.execute(firrtlOpts, soc.module, firrtlComplier)
     ElaborationArtefacts.files.foreach{ case (extension, contents) =>
       writeOutputFile("./build", s"XSTop.${extension}", contents())
     }
