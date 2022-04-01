@@ -39,15 +39,17 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   val perm = new PtePermBundle()
   val ecc = Bool()
   val level = UInt(2.W)
+  val v = Bool()
 
   def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
-            ecc: Bool = false.B, level: UInt = 0.U) {
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B) {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
     this.perm := perm
     this.ecc := ecc && hit
     this.level := level
+    this.v := valid
   }
 }
 
@@ -288,7 +290,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
-  val (spHit, spHitData, spPre) = {
+  val (spHit, spHitData, spPre, spValid) = {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stage1.bits.req_info.vpn, io.csr.satp.asid) && spv(i) }
     val hitVec = hitVecT.map(RegEnable(_, stage1.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
@@ -305,7 +307,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     VecInit(hitVecT).suggestName(s"sp_hitVecT")
     VecInit(hitVec).suggestName(s"sp_hitVec")
 
-    (hit, hitData, hitData.prefetch)
+    (hit, hitData, hitData.prefetch, hitData.v)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
@@ -314,7 +316,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   s2_res.l1.apply(l1Hit, l1Pre, l1HitPPN)
   s2_res.l2.apply(l2Hit, l2Pre, l2HitPPN, ecc = l2eccError)
   s2_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError)
-  s2_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel)
+  s2_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel, spValid)
   val s2_res_reg = DataHoldBypass(s2_res, RegNext(stage1.fire()))
 
   // stage3, add stage 3 for ecc check...
@@ -336,6 +338,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toTlb.perm.map(_ := Mux(s3_res.l3.hit, s3_res.l3.perm, s3_res.sp.perm))
   io.resp.bits.toTlb.level.map(_ := Mux(s3_res.l3.hit, 2.U, s3_res.sp.level))
   io.resp.bits.toTlb.prefetch := from_pre(stage3.bits.req_info.source)
+  io.resp.bits.toTlb.v := Mux(s3_res.sp.hit, s3_res.sp.v, s3_res.l3.v)
   io.resp.valid := stage3.valid
   assert(!(l3Hit && spHit), "normal page and super page both hit")
 
@@ -389,7 +392,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l1RefillPerf(i) := i.U === refillIdx
       }
 
-      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, 0.U, refill_prefetch)}\n")
+      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, 0.U, prefetch = refill_prefetch)}\n")
       XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
       refillIdx.suggestName(s"l1_refillIdx")
@@ -471,30 +474,33 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       victimWayOH.suggestName(s"l3_victimWayOH")
       rfvOH.suggestName(s"l3_rfvOH")
     }
-    when ((refill.level === 0.U || refill.level === 1.U) && memPte.isLeaf()) {
-      val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
-      val rfOH = UIntToOH(refillIdx)
-      sp(refillIdx).refill(
-        refill.req_info.vpn,
-        io.csr.satp.asid,
-        memSelData,
-        refill.level,
-        refill_prefetch
-      )
-      spreplace.access(refillIdx)
-      spv := spv | rfOH
-      spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
+  }
 
-      for (i <- 0 until l2tlbParams.spSize) {
-        spRefillPerf(i) := i.U === refillIdx
-      }
+  // misc entries: super & invalid
+  when (io.refill.valid && !flush && (refill.level === 0.U || refill.level === 1.U) && (memPte.isLeaf() || memPte.isPf(refill.level))) {
+    val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
+    val rfOH = UIntToOH(refillIdx)
+    sp(refillIdx).refill(
+      refill.req_info.vpn,
+      io.csr.satp.asid,
+      memSelData,
+      refill.level,
+      refill_prefetch,
+      !memPte.isPf(refill.level),
+    )
+    spreplace.access(refillIdx)
+    spv := spv | rfOH
+    spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
 
-      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, refill.level, refill_prefetch)}\n")
-      XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
-
-      refillIdx.suggestName(s"sp_refillIdx")
-      rfOH.suggestName(s"sp_rfOH")
+    for (i <- 0 until l2tlbParams.spSize) {
+      spRefillPerf(i) := i.U === refillIdx
     }
+
+    XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, refill.level, refill_prefetch)}\n")
+    XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
+
+    refillIdx.suggestName(s"sp_refillIdx")
+    rfOH.suggestName(s"sp_rfOH")
   }
 
   val l2eccFlush = s3_res.l2.ecc && stage3.fire() // RegNext(l2eccError, init = false.B)
