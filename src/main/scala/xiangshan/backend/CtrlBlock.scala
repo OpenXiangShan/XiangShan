@@ -379,30 +379,13 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   //my below
-  val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B)
-  val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B)
-  val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B)
+  val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->branch_resteers
+  val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->robflush_bubble
+  val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->ldReplay_bubble
   
-  when (redirectGen.io.isMisspreRedirect) { // frontend_bound->fetch_lantency->branch_resteers
-    MissPredPending := true.B
-    when(flushRedirect.valid)            {printf("\nredirectGen.io.isMisspreRedirect && flushRedirect.valid\n")}
-    when(redirectGen.io.loadReplay.valid){printf("\nredirectGen.io.isMisspreRedirect && redirectGen.io.loadReplay\n")}
-    when(MissPredPending)                {printf("\nredirectGen.io.isMisspreRedirect && MissPredPending\n")}
-    when(RobFlushPending)                {printf("\nredirectGen.io.isMisspreRedirect && RobFlushPending\n")}
-    when(LdReplayPending)                {printf("\nredirectGen.io.isMisspreRedirect && LdReplayPending\n")}
-  }
-  when (flushRedirect.valid){ // frontend_bound->fetch_lantency->robflush_bubble
-    RobFlushPending := true.B
-    when(MissPredPending)                {printf("\nflushRedirect.valid && MissPredPending\n")}
-    when(RobFlushPending)                {printf("\nflushRedirect.valid && RobFlushPending\n")}
-    when(LdReplayPending)                {printf("\nflushRedirect.valid && LdReplayPending\n")}
-  }
-  when (redirectGen.io.loadReplay.valid){ // frontend_bound->fetch_lantency->ldReplay_bubble
-    LdReplayPending := true.B
-    when(MissPredPending)                {printf("\nredirectGen.io.loadReplay && MissPredPending\n")}
-    when(RobFlushPending)                {printf("\nredirectGen.io.loadReplay && RobFlushPending\n")}
-    when(LdReplayPending)                {printf("\nredirectGen.io.loadReplay && LdReplayPending\n")}
-  }
+  when (redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
+  when (flushRedirect.valid)              { RobFlushPending := true.B }
+  when (redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
   
   when (RegNext(io.frontend.toFtq.redirect.valid)) {
     when(MissPredPending){MissPredPending := false.B; branch_resteers_cycles := true.B}
@@ -471,6 +454,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   //my below
   XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
+  XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
+  XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
   //my above
 
   rename.io.redirect <> stage2Redirect
