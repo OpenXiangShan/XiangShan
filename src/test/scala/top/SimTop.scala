@@ -61,7 +61,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.cacheable_check := DontCare
 
   val success = Wire(Bool())
-  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
+  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)
   soc.io.systemjtag.reset := reset
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
@@ -102,12 +102,12 @@ class SimTop(implicit p: Parameters) extends Module {
 object SimTop extends App {
   override def main(args: Array[String]): Unit = {
     // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        DisableMonitors(p => new SimTop()(p))(config)
-      })
-    ))
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    Generator.execute(
+      firrtlOpts,
+      DisableMonitors(p => new SimTop()(p))(config),
+      firrtlComplier
+    )
     ElaborationArtefacts.files.foreach{ case (extension, contents) =>
       writeOutputFile("./build", s"XSTop.${extension}", contents())
     }

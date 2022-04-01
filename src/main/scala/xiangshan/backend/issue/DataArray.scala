@@ -28,8 +28,6 @@ class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: P
   val addr = Input(UInt(numEntries.W))
   val data = Vec(numSrc, Output(UInt(dataBits.W)))
 
-  override def cloneType: DataArrayReadIO.this.type =
-    new DataArrayReadIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
 class DataArrayWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
@@ -38,8 +36,6 @@ class DataArrayWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: 
   val addr   = Input(UInt(numEntries.W))
   val data   = Vec(numSrc, Input(UInt(dataBits.W)))
 
-  override def cloneType: DataArrayWriteIO.this.type =
-    new DataArrayWriteIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
 class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
@@ -47,8 +43,6 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
   val addr   = Vec(numSrc, Input(UInt(numEntries.W)))
   val data   = Input(UInt(dataBits.W))
 
-  override def cloneType: DataArrayMultiWriteIO.this.type =
-    new DataArrayMultiWriteIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
@@ -58,8 +52,6 @@ class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
   val partialWrite = if (params.hasMidState) Vec(params.numDeq, new DataArrayWriteIO(params.numEntries, params.numSrc - 1, params.dataBits)) else null
 
-  override def cloneType: DataArrayIO.this.type =
-    new DataArrayIO(params).asInstanceOf[this.type]
 }
 
 class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {

@@ -26,8 +26,6 @@ class PayloadArrayReadIO[T <: Data](gen: T, params: RSParams) extends Bundle {
   val addr = Input(UInt(params.numEntries.W))
   val data = Output(gen)
 
-  override def cloneType: PayloadArrayReadIO.this.type =
-    new PayloadArrayReadIO(gen, params).asInstanceOf[this.type]
 }
 
 class PayloadArrayWriteIO[T <: Data](gen: T, params: RSParams) extends Bundle {
@@ -35,8 +33,6 @@ class PayloadArrayWriteIO[T <: Data](gen: T, params: RSParams) extends Bundle {
   val addr   = Input(UInt(params.numEntries.W))
   val data   = Input(gen)
 
-  override def cloneType: PayloadArrayWriteIO.this.type =
-    new PayloadArrayWriteIO(gen, params).asInstanceOf[this.type]
 }
 
 class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) extends XSModule {

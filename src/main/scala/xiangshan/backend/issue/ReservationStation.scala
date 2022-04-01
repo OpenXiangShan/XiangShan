@@ -232,8 +232,6 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   }) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 
-  override def cloneType: ReservationStationIO.this.type =
-    new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule with HasPerfEvents {

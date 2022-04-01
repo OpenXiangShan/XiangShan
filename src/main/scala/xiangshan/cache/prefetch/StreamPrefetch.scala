@@ -48,7 +48,6 @@ class StreamPrefetchReq(implicit p: Parameters) extends PrefetchReq {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchReq).asInstanceOf[this.type]
 }
 
 class StreamPrefetchResp(implicit p: Parameters) extends PrefetchResp {
@@ -60,7 +59,6 @@ class StreamPrefetchResp(implicit p: Parameters) extends PrefetchResp {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchResp).asInstanceOf[this.type]
 }
 
 class StreamPrefetchFinish(implicit p: Parameters) extends PrefetchFinish {
@@ -72,7 +70,6 @@ class StreamPrefetchFinish(implicit p: Parameters) extends PrefetchFinish {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchFinish).asInstanceOf[this.type]
 }
 
 class StreamPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
@@ -87,21 +84,18 @@ class StreamPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}" +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
-  override def cloneType: this.type = (new StreamPrefetchIO).asInstanceOf[this.type]
 }
 
 class StreamBufferUpdate(implicit p: Parameters) extends PrefetchBundle {
   val hitIdx = UInt(log2Up(streamParams.streamSize).W)
 
   override def toPrintable: Printable = { p"hitIdx=${hitIdx}" }
-  override def cloneType: this.type = (new StreamBufferUpdate).asInstanceOf[this.type]
 }
 
 class StreamBufferAlloc(implicit p: Parameters) extends StreamPrefetchReq {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamBufferAlloc).asInstanceOf[this.type]
 }
 
 
@@ -296,7 +290,6 @@ class CompareBundle(width: Int)(implicit p: Parameters) extends PrefetchBundle {
   val bits = UInt(width.W)
   val idx = UInt()
 
-  override def cloneType: this.type = (new CompareBundle(width)).asInstanceOf[this.type]
 }
 
 object ParallelMin {
