@@ -501,6 +501,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
   val prefetch = Bool()
+  val v = Bool()
 
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
@@ -523,7 +524,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
+  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) {
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
@@ -531,12 +532,13 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.asid := asid
     this.prefetch := prefetch
+    this.v := valid
     this.level.map(_ := level)
   }
 
-  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) = {
+  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, asid, pte, level, prefetch)
+    e.refill(vpn, asid, pte, level, prefetch, valid)
     e
   }
 
@@ -675,6 +677,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.ppn := pte.ppn
     this.entry.prefetch := DontCare
     this.entry.asid := asid
+    this.entry.v := !pf
     this.pf := pf
     this.af := af
   }
