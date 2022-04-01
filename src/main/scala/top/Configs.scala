@@ -317,8 +317,8 @@ class DefaultConfig(n: Int = 1) extends Config(
 )
 
 class WkfConfig(n: Int = 1) extends Config(
-  new WithNKBL3(512, inclusive = false, ways = 2, banks = 2)
-    ++ new WithNKBL2(256, inclusive = false, ways = 2, banks = 2, alwaysReleaseData = true)
+  new WithNKBL3(1024, inclusive = false, ways = 8, banks = 4)
+    ++ new WithNKBL2(256, inclusive = false, ways = 8, banks = 4, alwaysReleaseData = true)
     ++ new WithNKBL1D(16)
     ++ new BaseConfig(n)
 )
