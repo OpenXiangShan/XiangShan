@@ -243,7 +243,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   for (i <- 0 until PtwWidth) {
     outArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
     outArb(i).in(outArbCachePort).bits.entry := cache.io.resp.bits.toTlb
-    outArb(i).in(outArbCachePort).bits.pf := false.B
+    outArb(i).in(outArbCachePort).bits.pf := !cache.io.resp.bits.toTlb.v
     outArb(i).in(outArbCachePort).bits.af := false.B
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
@@ -291,6 +291,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
     ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && af
+    ptw_resp.entry.v := !ptw_resp.pf
     ptw_resp.entry.prefetch := DontCare
     ptw_resp.entry.asid := satp.asid
     ptw_resp
