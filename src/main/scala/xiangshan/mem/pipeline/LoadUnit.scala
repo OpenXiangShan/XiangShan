@@ -451,10 +451,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.rsFeedback.bits.hit := !s2_need_replay_from_rs
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  // feedback source priority: tlbMiss > dataInvalid > mshrFull
+  // general case priority: tlbMiss > exception (include forward_fail / ldld_violation) > mmio > dataInvalid > mshrFull > normal miss / hit
   io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
-    Mux(s2_cache_replay,
-      RSFeedbackType.mshrFull,
-      RSFeedbackType.dataInvalid
+    Mux(s2_data_invalid,
+      RSFeedbackType.dataInvalid,
+      RSFeedbackType.mshrFull
     )
   )
   io.rsFeedback.bits.dataInvalidSqIdx.value := io.dataInvalidSqIdx
@@ -496,7 +498,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && ldldVioReplay)
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents {
+class LoadUnit(implicit p: Parameters) extends XSModule 
+  with HasLoadHelper
+  with HasPerfEvents
+  with HasDCacheParameters
+{
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
@@ -508,6 +514,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     val dcache = new DCacheLoadIO
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
+    val refill = Flipped(ValidIO(new Refill))
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
     val trigger = Vec(3, new LoadUnitTriggerIO)
 
@@ -569,8 +576,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.lsq.dcacheRequireReplay := load_s2.io.dcacheRequireReplay
 
   // feedback tlb miss / dcache miss queue full
-  io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
   io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
+  val s3_replay_for_mshrfull = RegNext(!load_s2.io.rsFeedback.bits.hit && load_s2.io.rsFeedback.bits.sourceType === RSFeedbackType.mshrFull)
+  val s3_refill_hit_load_paddr = refill_addr_hit(RegNext(load_s2.io.out.bits.paddr), io.refill.bits.addr)
+  // update replay request
+  io.feedbackSlow.bits.hit := RegNext(load_s2.io.rsFeedback.bits).hit || 
+    s3_refill_hit_load_paddr && s3_replay_for_mshrfull
 
   // feedback bank conflict to rs
   io.feedbackFast.bits := load_s1.io.rsFeedback.bits
@@ -635,7 +647,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
   when(io.feedbackSlow.valid && !io.feedbackSlow.bits.hit){
+    // when need replay from rs, inst should not be writebacked to rob
     assert(RegNext(!hitLoadOut.valid))
+    // when need replay from rs
+    // * inst should not be writebacked to lq, or
+    // * lq state will be updated in load_s3 (next cycle)
     assert(RegNext(!io.lsq.loadIn.valid) || RegNext(load_s2.io.dcacheRequireReplay))
   }
 

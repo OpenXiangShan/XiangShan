@@ -93,7 +93,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
     val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-    val dcache = Flipped(ValidIO(new Refill)) // TODO: to be renamed
+    val refill = Flipped(ValidIO(new Refill))
     val release = Flipped(ValidIO(new Release))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
@@ -264,15 +264,15 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire())
   }
 
-  when(io.dcache.valid) {
-    XSDebug("miss resp: paddr:0x%x data %x\n", io.dcache.bits.addr, io.dcache.bits.data)
+  when(io.refill.valid) {
+    XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
   }
 
   // Refill 64 bit in a cycle
   // Refill data comes back from io.dcache.resp
-  dataModule.io.refill.valid := io.dcache.valid
-  dataModule.io.refill.paddr := io.dcache.bits.addr
-  dataModule.io.refill.data := io.dcache.bits.data
+  dataModule.io.refill.valid := io.refill.valid
+  dataModule.io.refill.paddr := io.refill.bits.addr
+  dataModule.io.refill.data := io.refill.bits.data
 
   val dcacheRequireReplay = WireInit(VecInit((0 until LoadPipelineWidth).map(i =>{
     RegNext(io.loadIn(i).fire()) && RegNext(io.dcacheRequireReplay(i))
@@ -284,10 +284,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     when(dataModule.io.refill.valid && dataModule.io.refill.refillMask(i) && dataModule.io.refill.matchMask(i)) {
       datavalid(i) := true.B
       miss(i) := false.B
-      when(!dcacheRequireReplay.asUInt.orR){
-        refilling(i) := true.B
-      }
-      when(io.dcache.bits.error) {
+      when(io.refill.bits.error) {
         error(i) := true.B
       }
     }
@@ -299,7 +296,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       // dcacheRequireReplay will be used to update lq flag 1 cycle after for better timing
       //
       // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate 
-      when(dcacheRequireReplay(i)) {
+      when(dcacheRequireReplay(i) && !refill_addr_hit(RegNext(io.loadIn(i).bits.paddr), io.refill.bits.addr)) {
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
         miss(RegNext(loadWbIndex)) := false.B // disable refill listening
@@ -790,7 +787,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
 
-    XSDebug("uncache resp: data %x\n", io.dcache.bits.data)
+    XSDebug("uncache resp: data %x\n", io.refill.bits.data)
   }
 
   // Read vaddr for mem exception
@@ -849,7 +846,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
-  XSPerfAccumulate("refill", io.dcache.valid)
+  XSPerfAccumulate("refill", io.refill.valid)
   XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire()))))
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
@@ -858,7 +855,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("rollback         ", io.rollback.valid                                                               ),
     ("mmioCycle        ", uncacheState =/= s_idle                                                         ),
     ("mmio_Cnt         ", io.uncache.req.fire()                                                           ),
-    ("refill           ", io.dcache.valid                                                                 ),
+    ("refill           ", io.refill.valid                                                                 ),
     ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
     ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
     ("ltq_1_4_valid    ", (validCount < (LoadQueueSize.U/4.U))                                            ),
