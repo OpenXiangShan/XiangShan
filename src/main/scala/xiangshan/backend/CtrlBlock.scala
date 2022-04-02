@@ -379,6 +379,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   //my below
+  val stage2Redirect_valid_when_pending = pendingRedirect && stage2Redirect.valid
+
   val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
   val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
   val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
@@ -460,6 +462,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
   XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
   XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
+
+  XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
   //my above
 
   rename.io.redirect <> stage2Redirect
