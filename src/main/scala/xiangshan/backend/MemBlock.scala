@@ -103,6 +103,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
+  val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
+
   val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   io.csrUpdate := RegNext(dcache.io.csr.update)
@@ -261,6 +263,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // ld-ld violation check
     loadUnits(i).io.lsq.loadViolationQuery <> lsq.io.loadViolationQuery(i)
     loadUnits(i).io.csrCtrl       <> csrCtrl
+    // dcache refill req
+    loadUnits(i).io.refill           <> delayedDcacheRefill
     // dtlb
     loadUnits(i).io.tlb <> dtlb_ld(i).requestor(0)
     // pmp
@@ -430,9 +434,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memoryViolation    <> lsq.io.rollback
   lsq.io.uncache        <> uncache.io.lsq
   // delay dcache refill for 1 cycle for better timing
-  // TODO: remove RegNext after fixing refill paddr timing
-  // lsq.io.dcache         <> dcache.io.lsu.lsq
-  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
+  lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
   lsq.io.lqCancelCnt <> io.lqCancelCnt
   lsq.io.sqCancelCnt <> io.sqCancelCnt
@@ -445,9 +447,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  // TODO: if dcache sbuffer resp needs to ne delayed 
-  // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
-  // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
