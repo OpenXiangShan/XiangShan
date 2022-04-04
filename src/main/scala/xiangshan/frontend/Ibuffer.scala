@@ -186,6 +186,10 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   QueuePerf(IBufSize, validEntries, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
+  //my below
+  val ibuffer_IDWidth_hvButNotFull = afterInit && (validEntries =/= 0.U) && (validEntries < DecodeWidth.U) && !headBubble
+  XSPerfAccumulate("hungry", ibuffer_IDWidth_hvButNotFull)
+  //my above
 
   val perfEvents = Seq(
     ("IBuffer_Flushed  ", io.flush                                                                     ),
