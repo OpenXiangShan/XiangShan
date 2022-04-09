@@ -29,7 +29,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 /* ptw finite state machine, the actual page table walker
  */
-class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
+class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
     val l1Hit = Bool()
@@ -59,8 +59,8 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
 }
 
 @chiselName
-class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
-  val io = IO(new PtwFsmIO)
+class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+  val io = IO(new PTWIO)
 
   val sfence = io.sfence
   val mem = io.mem
@@ -177,7 +177,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.refill.level := level
   io.refill.req_info.source := source
 
-  XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
+  XSDebug(p"[ptw] state:${state} level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())

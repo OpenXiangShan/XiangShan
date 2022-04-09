@@ -92,7 +92,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst w
   val cache_low_ptr = ParallelPriorityEncoder(is_caches_low)
 
   val cache_arb = Module(new RRArbiter(new L2TlbMQCacheBundle(), 2))
-  cache_arb.io.in(0).valid := Cat(is_caches_high).orR && io.fsm_done // fsm busy, required l1/l2 pte is not ready
+  cache_arb.io.in(0).valid := Cat(is_caches_high).orR && io.fsm_done // ptw busy, required l1/l2 pte is not ready
   cache_arb.io.in(0).bits := entries(cache_high_ptr).req_info
   cache_arb.io.in(1).valid := Cat(is_caches_low).orR
   cache_arb.io.in(1).bits := entries(cache_low_ptr).req_info
