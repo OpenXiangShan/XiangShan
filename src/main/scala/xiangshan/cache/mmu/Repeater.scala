@@ -233,10 +233,10 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
 
-  val issue_valid = v(issPtr) && !isEmptyIss
+  val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
   val issue_filtered = ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true)
   val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
-  io.ptw.req(0).valid := issue_valid && !issue_filtered && !inflight_full
+  io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.resp.ready := true.B
 
@@ -260,10 +260,10 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   when (do_enq) {
     enqPtr := enqPtr + enqNum
   }
-  when (do_deq && !inflight_full) {
+  when (do_deq) {
     deqPtr := deqPtr + 1.U
   }
-  when (do_iss && !inflight_full) {
+  when (do_iss) {
     issPtr := issPtr + 1.U
   }
   when (issue_fire_fake && issue_filtered) { // issued but is filtered
@@ -281,7 +281,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   }
 
   counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)
-  assert(counter <= Size.U, "counter should be less than Size")
+  assert(counter <= Size.U, "counter should be no more than Size")
+  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire(), "when counter is 0, should not req")
     assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
