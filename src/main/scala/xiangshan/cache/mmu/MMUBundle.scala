@@ -443,9 +443,9 @@ class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
 }
 
 
-/****************************  PTW  *************************************/
+/****************************  L2TLB  *************************************/
 abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
-abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
+abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{

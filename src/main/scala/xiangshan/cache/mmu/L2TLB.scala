@@ -29,7 +29,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
-class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -42,7 +42,7 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 }
 
 @chiselName
-class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
+class PTWImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
@@ -370,10 +370,10 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
-  val ptw = if (!useSoftPTW) LazyModule(new PTW()) else null
+  val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null
   if (!useSoftPTW) {
     node := ptw.node
   }
