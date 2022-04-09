@@ -687,7 +687,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   }
 }
 
-class PtwIO(implicit p: Parameters) extends PtwBundle {
+class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = new Bundle {
