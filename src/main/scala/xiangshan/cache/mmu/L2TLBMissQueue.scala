@@ -206,6 +206,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst w
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
+  assert(!(full && Cat(entries.map(_.req_info.source =/= 2.U)).andR), "l2tlb mq should not full of l1tlb reqs")
+
   XSPerfAccumulate("mq_in_count", io.in.fire())
   XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)
   for (i <- 0 until 7) {
