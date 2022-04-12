@@ -405,7 +405,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
   val mstatus = RegInit("ha00000000".U(XLEN.W))
 
-  csrio.mhartid := mhartid + 1.U               // Luoshan: for test
+  csrio.mhartid := mhartid               // Luoshan: for test  + 1.U
   
   // mstatus Value Table
   // | sd   |
@@ -518,6 +518,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // sdsid: Differentiated Services ID
   val sdsid = RegInit(UInt(XLEN.W), 0.U)
   csrio.customCtrl.dsid := sdsid
+  
+  // vhartid: virtual mhartid for nohype-OS that each core consider hartid=0
+  val vhartid = RegInit(UInt(XLEN.W), 0.U)
+  // TODO: can be config by control plane
 
   // slvpredctl: load violation predict settings
   val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
@@ -686,6 +690,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
+    MaskedRegMap(Vhartid, vhartid),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),

@@ -77,6 +77,7 @@ trait HasCSRConst {
   /** 0x5C5-0x5E5 for cache instruction register*/
 
   val Sdsid         = 0x9C0
+  val Vhartid       = 0x810
 
   // Machine Information Registers
   val Mvendorid     = 0xF11

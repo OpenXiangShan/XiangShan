@@ -113,7 +113,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.error.valid := false.B
   }
 
-  dcache.io.hartid <> io.hartid
+  dcache.io.hartid := io.hartid
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))

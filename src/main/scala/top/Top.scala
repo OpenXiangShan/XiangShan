@@ -88,7 +88,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2(i).debug_int_sink := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     misc.peripheral_ports(i) := core_with_l2(i).uncache
-    misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    /* cls: add an addr_transfer node for uart ports
+    val nohype_ioSize: BigInt = 0x20000L / NumCores
+    val IOMap = LazyModule(new TLMap_IO(i*nohype_ioSize))
+    misc.peripheral_ports(i) := IOMap.node := core_with_l2(i).uncache*/
+    //misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    // cls: add an addr_transfer node for mem ports
+    val nohype_memSize: BigInt = 0x10000000L / NumCores    // 256MB/2
+    val MemMap = LazyModule(new TLMap(i*nohype_memSize))
+    misc.core_to_l3_ports(i) :=* MemMap.node :=* core_with_l2(i).memory_port
     //misc.core_to_l3_ports(i) :=* tile_tokenBuckets(i).node :=* core_with_l2(i).memory_port
   }
 

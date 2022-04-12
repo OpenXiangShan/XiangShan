@@ -25,7 +25,7 @@ object log2Safe {
 case object ProcDSidWidth extends Field[Int](3)
 case object NumCores extends Field[Int](2)
 case object NL2CacheCapacity extends Field[Int](1024)
-case object NL2CacheWays extends Field[Int](16)
+case object NL2CacheWays extends Field[Int](8)
 
 
 trait HasControlPlaneParameters {
@@ -33,8 +33,8 @@ trait HasControlPlaneParameters {
   // val nTiles = p(NumCores)
   val nTiles = 2
   // val ldomDSidWidth = log2Up(nTiles)
-  val ldomDSidWidth = 3   // 1 ?
-  val procDSidWidth = p(ProcDSidWidth)   // 0 ?
+  val ldomDSidWidth = 1   // 3 ?
+  val procDSidWidth = 0   // p(ProcDSidWidth) ?
   val dsidWidth = ldomDSidWidth + procDSidWidth
   val nDSID = 1 << dsidWidth
   val cycle_counter_width = 64

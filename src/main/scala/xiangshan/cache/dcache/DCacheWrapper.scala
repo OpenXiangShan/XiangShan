@@ -543,7 +543,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
-  missQueue.io.hartid <> io.hartid   // add hartid to tilelinkA by missqueue
+  missQueue.io.hartid := io.hartid   // add hartid to tilelinkA by missqueue
 
   missQueue.io.main_pipe_resp := RegNext(mainPipe.io.atomic_resp)
 
@@ -607,7 +607,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // * and timing requirements
   // CHANGE IT WITH CARE
 
-  wb.io.hartid <> io.hartid      // add hartid to tilelinkC by writebackqueue
+  wb.io.hartid := io.hartid      // add hartid to tilelinkC by writebackqueue
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B

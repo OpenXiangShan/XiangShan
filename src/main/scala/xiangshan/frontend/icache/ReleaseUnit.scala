@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import xiangshan._
 import utils._
-import huancun.{DirtyField, DirtyKey}
+import huancun.{DirtyField, DirtyKey, DsidKey}
 
 class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(PAddrBits.W)
@@ -48,6 +48,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val hartid = Input(UInt(3.W))
   })
 
   val s_invalid :: s_release_req :: s_release_resp :: Nil = Enum(3)
@@ -110,6 +111,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req )
   io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
                             Mux(req.hasData,probeResponseData,probeResponse))
+  io.mem_release.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelinkC
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
 
@@ -138,6 +140,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
     val finish = Output(Bool())
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val hartid = Input(UInt(3.W))
   })
 
   //more than 1 release entries may cause bug
@@ -161,6 +164,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
   entry.io.mem_grant.valid := (0.U === io.mem_grant.bits.source) && io.mem_grant.valid
   entry.io.mem_grant.bits  := io.mem_grant.bits
   io.mem_grant.ready := entry.io.mem_grant.ready
+  entry.io.hartid := io.hartid
 
   io.mem_release <> entry.io.mem_release
   io.finish := entry.io.finish

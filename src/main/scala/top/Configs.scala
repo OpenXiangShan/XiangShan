@@ -163,8 +163,7 @@ class MinimalConfig(n: Int = 1) extends Config(
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024,
-        reqField = Seq(DsidField(1))
+        sets = 1024
       )),
       L3NBanks = 1
     )
@@ -226,10 +225,10 @@ class WithNKBL2
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
+        reqField = Seq(PreferCacheField(),DsidField(1)),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
-        enablePerf = true,
+        enablePerf = false,
         sramDepthDiv = 2,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
@@ -258,7 +257,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
         },
-        enablePerf = true,
+        enablePerf = false,
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
@@ -267,6 +266,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
+        reqField = Seq(DsidField(1)),
         simulation = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
@@ -301,6 +301,17 @@ class MediumConfig(n: Int = 1) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+// * Config for labeled XiangShan
+// * L1 cache included
+// * L2 cache NOT included, very small
+// * L3 cache NOT included
+class LabeledConfig(n: Int = 1) extends Config(
+  new WithNKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )

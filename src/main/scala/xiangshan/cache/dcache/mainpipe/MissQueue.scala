@@ -105,6 +105,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     })
+    val hartid = Input(UInt(3.W))
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -338,6 +339,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // prefer not to cache data in L2 by default
   io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   require(nSets <= 256)
+  // add hartid to tilelink
+  io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.hartid)    
 
   io.mem_grant.ready := !w_grantlast && s_acquire
 
@@ -546,6 +549,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       io.debug_early_replace(i) := e.io.debug_early_replace
+      e.io.hartid := io.hartid
   }
 
   io.req.ready := accept
@@ -554,7 +558,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
-  io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
 
   arbiter_with_pipereg(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
   arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))

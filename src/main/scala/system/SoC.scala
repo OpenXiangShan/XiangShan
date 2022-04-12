@@ -133,7 +133,7 @@ trait HaveAXI4MemPort {
   // 36-bit physical address
   val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
-    AXI4SlavePortParameters(
+    AXI4SlavePortParameters( 
       slaves = Seq(
         AXI4SlaveParameters(
           address = memRange,

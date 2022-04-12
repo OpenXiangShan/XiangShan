@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-import huancun.{AliasKey, DirtyKey}
+import huancun.{AliasKey, DirtyKey, DsidKey}
 import xiangshan.cache._
 import utils._
 
@@ -83,6 +83,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
+    val hartid = Input(UInt(3.W))
   })
 
   /** default value for control signals */
@@ -216,6 +217,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
   require(nSets <= 256) // icache size should not be more than 128KB
+  // add hartid to tilelinkA
+  io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.hartid)
 
   /** Grant ACK */
   io.mem_finish.valid := (state === s_send_grant_ack) && is_grant
@@ -274,6 +277,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
 
 
+    val hartid = Input(UInt(3.W))
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
@@ -320,6 +324,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
         startHighPriority = true)
     )
     XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+    entry.io.hartid := io.hartid
 
     entry
   }

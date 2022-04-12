@@ -71,6 +71,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
     val release_update = Flipped(ValidIO(new ReleaseUpdate))
+    val hartid = Input(UInt(3.W))
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
@@ -214,6 +215,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.bits  := Mux(req.voluntary,
     Mux(req.hasData, voluntaryReleaseData, voluntaryRelease),
     Mux(req.hasData, probeResponseData, probeResponse))
+  io.mem_release.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelinkC
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
 
@@ -409,7 +411,6 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
-  io.mem_release.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
 
   require(isPow2(cfg.nMissEntries))
   val grant_source = io.mem_grant.bits.source
@@ -443,6 +444,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
       entry.io.release_wakeup := io.release_wakeup
       entry.io.release_update := io.release_update
+      entry.io.hartid := io.hartid
   }
   assert(RegNext(!(io.mem_grant.valid && !io.mem_grant.ready)))
   io.mem_grant.ready := true.B

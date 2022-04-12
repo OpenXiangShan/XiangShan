@@ -54,15 +54,17 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val d_mmio_port = TLTempNode()
 
   val tile_bucket = LazyModule(new TokenBucketNode())
-  busPMU := tile_bucket.node := l1d_logger
-  //busPMU := l1d_logger
+  //busPMU := tile_bucket.node := l1d_logger
+  busPMU := l1d_logger
   l1_xbar :=* busPMU
 
   l2_binder match {
     case Some(binder) =>
-      memory_port := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder
+      //memory_port := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder
+      memory_port := tile_bucket.node := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder
     case None =>
-      memory_port := l1_xbar
+      //memory_port := l1_xbar
+      memory_port := tile_bucket.node := l1_xbar
   }
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port

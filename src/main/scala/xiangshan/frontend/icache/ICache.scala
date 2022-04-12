@@ -584,8 +584,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   replacePipe.io.release_finish := releaseUnit.io.finish
   bus.c <> releaseUnit.io.mem_release
 
-  bus.a.bits.user.lift(DsidKey).foreach(_ := io.hartid)
-  bus.c.bits.user.lift(DsidKey).foreach(_ := io.hartid)
+  /*bus.a.bits.user.lift(DsidKey).foreach(_ := io.hartid)
+  bus.c.bits.user.lift(DsidKey).foreach(_ := io.hartid)*/
+  missUnit.io.hartid := io.hartid
+  releaseUnit.io.hartid := io.hartid
 
   // connect bus d
   missUnit.io.mem_grant.valid := false.B
