@@ -131,6 +131,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_arb.io.in(LLPTWARB_CACHE).bits.req_info := cache.io.resp.bits.req_info
   llptw_arb.io.in(LLPTWARB_CACHE).bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw_arb.io.in(LLPTWARB_PTW) <> ptw.io.llptw
+  llptw.io.in <> llptw_arb.io.out
+  llptw.io.sfence := sfence
+  llptw.io.csr := csr
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
