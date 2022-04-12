@@ -106,7 +106,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val InArbMissQueuePort = 0
   val InArbTlbPort = 1
   val InArbPrefetchPort = 2
-  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), ptw.io.req.ready)
+  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
   arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
