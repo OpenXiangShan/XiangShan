@@ -343,7 +343,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach(index => {
-    loadWbSelGen(index) := Cat(loadRemSel(index), index.U(log2Ceil(LoadQueueSize).W))
+    loadWbSelGen(index) := Cat(loadRemSel(index), index.U(log2Ceil(LoadPipelineWidth).W))
     loadWbSelVGen(index) := Mux(io.ldout(index).fire, loadRemSelVecFire(index).asUInt.orR, loadRemSelVecNotFire(index).asUInt.orR)
   })
 
