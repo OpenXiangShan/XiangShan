@@ -52,7 +52,7 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 
-class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) with HasXSParameter {
   val numIntStateRead = outer.numIntStateRead
   val numFpStateRead = outer.numFpStateRead
 
@@ -171,6 +171,7 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
 }
 
 class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends Dispatch2RsImp(outer) {
+  require(LoadPipelineWidth == StorePipelineWidth)
   // in: to deal with lsq
   // in.valid: can leave dispatch queue (not blocked by lsq)
   // in.ready: can enter rs
@@ -189,7 +190,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val isAMO = fuType.map(f => FuType.isAMO(f))
 
     def isBlocked(index: Int): Bool = {
-      if (index >= 2) {
+      if (index >= LoadPipelineWidth) { // TODO: use mores instead of pairs
         val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
         val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
         val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
@@ -224,7 +225,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
-        val sta = io.out(idx - 2)
+        val sta = io.out(idx - StorePipelineWidth)
         sta.valid := io.out(idx).valid
         io.out(idx).bits.ctrl.srcType(0) := io.out(idx).bits.ctrl.srcType(1)
         io.out(idx).bits.psrc(0) := io.out(idx).bits.psrc(1)

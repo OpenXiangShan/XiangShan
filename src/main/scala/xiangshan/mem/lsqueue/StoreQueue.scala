@@ -79,7 +79,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val issuePtrExt = Output(new SqPtr) // used to wake up delayed load/store
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(2.W))
+    val sqDeq = Output(UInt(log2Ceil(StorePipelineWidth + 1).W))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -154,16 +154,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     )
   ))
   // deqPtrExtNext traces which inst is about to leave store queue
-  val deqPtrExtNext = Mux(io.sbuffer(1).fire(),
-    VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
-      VecInit(deqPtrExt.map(_ + 1.U)),
-      deqPtrExt
-    )
+  val deqPtrExtNext = PriorityMuxDefault(
+    Seq.tabulate(StorePipelineWidth)(i =>
+      io.sbuffer(i).fire -> VecInit(deqPtrExt.map(_ + (i + 1).U))
+    ).reverse :+ (io.mmioStout.fire -> VecInit(deqPtrExt.map(_ + 1.U))),
+    deqPtrExt
   )
-  io.sqDeq := RegNext(Mux(io.sbuffer(1).fire(), 2.U,
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U)
-  ))
+  io.sqDeq := RegNext(PriorityMuxDefault(Seq.tabulate(StorePipelineWidth)(i =>
+    io.sbuffer(i).fire -> (i + 1).U
+  ).reverse :+ (io.mmioStout.fire -> 1.U), 0.U))
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.raddr(i) := rdataPtrExtNext(i).value
     paddrModule.io.raddr(i) := rdataPtrExtNext(i).value
@@ -516,7 +515,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // module keeps growing higher. Now we give data read a whole cycle.
 
   // For now, data read logic width is hardcoded to 2
-  require(StorePipelineWidth == 2) // TODO: add EnsbufferWidth parameter
+  // require(StorePipelineWidth == 2) // TODO: add EnsbufferWidth parameter
   val mmioStall = mmio(rdataPtrExt(0).value)
   for (i <- 0 until StorePipelineWidth) {
     val ptr = rdataPtrExt(i).value
@@ -617,7 +616,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExtNext
 
-  val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
+  val dequeueCount = PriorityMuxDefault(Seq.tabulate(StorePipelineWidth)(i => io.sbuffer(i).fire -> (i + 1).U).reverse :+ (io.mmioStout.fire -> 1.U), 0.U)
 
   // If redirect at T0, sqCancelCnt is at T2
   io.sqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)

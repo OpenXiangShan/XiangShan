@@ -248,8 +248,11 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
 }
 
-class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
+class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
+}
+
+class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
   val flag = UInt(1.W)
 }
 
@@ -291,13 +294,11 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
-class ExuInput(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
   val src = Vec(3, UInt(XLEN.W))
 }
 
-class ExuOutput(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExuOutput(implicit p: Parameters) extends XSBundleWithMicroOp {
   val data = UInt(XLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
@@ -322,8 +323,7 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class ExceptionInfo(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
   val isInterrupt = Bool()
 }
 

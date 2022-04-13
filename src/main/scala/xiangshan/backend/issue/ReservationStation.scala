@@ -49,6 +49,7 @@ case class RSParams
   var isStore: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
+  var isStoreData: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
 ){
   def allWakeup: Int = numFastWakeup + numWakeup
@@ -81,6 +82,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
       case StaExeUnitCfg => params.isStore = true
+      case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
       case _ =>
@@ -127,7 +129,8 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
   override def toString: String = params.toString
   // for better timing, we limits the size of RS to 2-deq
-  val maxRsDeq = 2
+  // val maxRsDeq = 2
+  def maxRsDeq = if (params.isLoad || params.isStore || params.isStoreData) LsMaxRsDeq else 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents {
@@ -231,6 +234,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val fastMatch = Vec(params.numDeq, Output(UInt(exuParameters.LduCnt.W)))
   }) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
+  val full = Output(Bool())
 
 }
 
@@ -248,6 +252,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()
+  XSPerfAccumulate("full", statusArray.io.isValid.andR)
+
+  io.full := statusArray.io.isValid.andR
 
   statusArray.io.redirect := io.redirect
 

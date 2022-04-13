@@ -157,6 +157,7 @@ case class XSCoreParameters
     LduCnt = 2,
     StuCnt = 2
   ),
+  LsMaxRsDeq: Int = 4, // TODO: reduce it to 2
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
@@ -376,6 +377,7 @@ trait HasXSParameter {
   val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
   val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
+  val LsMaxRsDeq = coreParams.LsMaxRsDeq
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
@@ -398,8 +400,8 @@ trait HasXSParameter {
 
   val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
               (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
-              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2)
+              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+LsMaxRsDeq-1)/LsMaxRsDeq +
+              ((exuParameters.StuCnt+LsMaxRsDeq-1)/LsMaxRsDeq) + ((exuParameters.StuCnt+LsMaxRsDeq-1)/LsMaxRsDeq)
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
