@@ -25,6 +25,7 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.RobEnqIO
 import xiangshan.mem.mdp._
+import chisel3.util.experimental.BoringUtils
 
 case class DispatchParameters
 (
@@ -304,6 +305,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+  val stall_ls_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept
+  val store_queue_full = WireDefault(0.B)
+  BoringUtils.addSink(store_queue_full, "store_queue_full")
+  val stall_loads_bound = stall_ls_dq && !store_queue_full
+  val stall_stores_bound = stall_ls_dq && store_queue_full
+  BoringUtils.addSource(stall_loads_bound, "stall_loads_bound")
+  XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+  XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
   // TODO: we may need finer counters to count responding slots more precisely, i.e. per-slot granularity.
 
   val perfEvents = Seq(
