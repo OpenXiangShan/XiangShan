@@ -320,7 +320,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val insertVec = insertVecs(i)
     assert(!((PopCount(insertVec) > 1.U) && in.fire()))
     val insertIdx = OHToUInt(insertVec)
-    val flushMask = if(i == 0) true.B else (0 until i).map(j => !sameTag(i, j)).reduce(_ || _) // TODO: review here
+    val flushMask = if(i == 0) true.B else (0 until i).map(j => !sameTag(i, j)).reduce(_ && _)
     accessIdx(i).valid := RegNext(in.fire())
     accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
     when(in.fire()){
