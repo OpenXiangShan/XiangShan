@@ -153,7 +153,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.JmpCnt == 1)
   require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
   require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
-  // require(exuParameters.LduCnt == 2 && exuParameters.StuCnt == 2)
+  require(exuParameters.LduCnt == exuParameters.StuCnt)
 
   // one RS every 2 MDUs
   val schedulePorts = Seq(

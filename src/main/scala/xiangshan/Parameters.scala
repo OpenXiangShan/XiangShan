@@ -157,7 +157,7 @@ case class XSCoreParameters
     LduCnt = 2,
     StuCnt = 2
   ),
-  LsMaxRsDeq: Int = 4, // TODO: reduce it to 2
+  LsMaxRsDeq: Int = 4, // TODO: reduce it to 2 and delete it
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,

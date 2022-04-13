@@ -544,9 +544,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
-  when (io.sbuffer(1).fire()) {
-    assert(io.sbuffer(0).fire())
-  }
+  (1 until StorePipelineWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
   if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until StorePipelineWidth) {
       val ptr = deqPtrExt(i).value

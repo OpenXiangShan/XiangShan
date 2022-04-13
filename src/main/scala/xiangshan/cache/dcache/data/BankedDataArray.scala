@@ -314,7 +314,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val bank_set_addr = Mux(readline_match,
       addr_to_dcache_set(io.readline.bits.addr),
       PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
-    ) // for perf eval only
+    )
 
     // read raw data
     val data_bank = data_banks(bank_index)
