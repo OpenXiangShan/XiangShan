@@ -324,20 +324,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
   })).asUInt() // use uint instead vec to reduce verilog lines
-  def remDeqMask(rem: Int): UInt = getRemBits(deqMask)(rem)
+  val remDeqMask = Seq.tabulate(LoadPipelineWidth)(getRemBits(deqMask)(_))
   // generate lastCycleSelect mask
-  def remFireMask(rem: Int): UInt = getRemBits(UIntToOH(loadWbSel(rem)))(rem)
+  val remFireMask = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(UIntToOH(loadWbSel(rem)))(rem))
   // generate real select vec
   def toVec(a: UInt): Vec[Bool] = {
     VecInit(a.asBools)
   }
-  def loadRemSelVecFire(rem: Int): UInt = getRemBits(loadWbSelVec)(rem) & ~remFireMask(rem)
-  def loadRemSelVecNotFire(rem: Int): UInt = getRemBits(loadWbSelVec)(rem)
-  def loadRemSel(rem: Int): UInt = Mux(
+  val loadRemSelVecFire = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadWbSelVec)(rem) & ~remFireMask(rem))
+  val loadRemSelVecNotFire = Seq.tabulate(LoadPipelineWidth)(getRemBits(loadWbSelVec)(_))
+  val loadRemSel = Seq.tabulate(LoadPipelineWidth)(rem => Mux(
     io.ldout(rem).fire(),
     getFirstOne(toVec(loadRemSelVecFire(rem)), remDeqMask(rem)),
     getFirstOne(toVec(loadRemSelVecNotFire(rem)), remDeqMask(rem))
-  )
+  ))
 
 
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))

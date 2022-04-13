@@ -196,7 +196,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
       res1.valid := valid(1)
       res0.uop := uop(0)
       res1.uop := uop(1)
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(uop(0).robIdx, uop(1).robIdx), res1, res0), Mux(valid(0) && !valid(1), res0, res1))
+      val oldest = Mux(!valid(1) || valid(0) && isAfter(uop(1).robIdx, uop(0).robIdx), res0, res1)
       (Seq(oldest.valid), Seq(oldest.uop))
     } else {
       val left = getOldest(valid.take(valid.length / 2), uop.take(valid.length / 2))
@@ -212,14 +212,11 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
   val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
-  // s0: compare wb(1),wb(2) and wb(3),wb(4)
+  // s0: compare wb(1)~wb(1 + LoadPipelineWidth) and wb(1 + LoadPipelineWidth)~wb(1 + LoadPipelineWidth + StorePipelineWidth)
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }
   val csr_wb_bits = io.wb(0).bits
-  // val load_wb_bits = Mux(!in_wb_valid(2) || in_wb_valid(1) && isAfter(io.wb(2).bits.robIdx, io.wb(1).bits.robIdx), io.wb(1).bits, io.wb(2).bits)
   val load_wb_bits = getOldest(in_wb_valid.slice(1, 1 + LoadPipelineWidth), io.wb.map(_.bits).slice(1, 1 + LoadPipelineWidth))._2(0)
-  // val store_wb_bits = Mux(!in_wb_valid(4) || in_wb_valid(3) && isAfter(io.wb(4).bits.robIdx, io.wb(3).bits.robIdx), io.wb(3).bits, io.wb(4).bits)
   val store_wb_bits = getOldest(in_wb_valid.slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth), io.wb.map(_.bits).slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth))._2(0)
-  // val s0_out_valid = RegNext(VecInit(Seq(wb_valid(0), wb_valid(1) || wb_valid(2), wb_valid(3) || wb_valid(4))))
   val s0_out_valid = RegNext(VecInit(Seq(wb_valid(0), wb_valid.slice(1, 1 + LoadPipelineWidth).reduce(_ || _), wb_valid.slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth).reduce(_ || _))))
   val s0_out_bits = RegNext(VecInit(Seq(csr_wb_bits, load_wb_bits, store_wb_bits)))
 

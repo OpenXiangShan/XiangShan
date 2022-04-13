@@ -85,7 +85,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // customized cache op port 
     val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
-  // assert(LoadPipelineWidth <= 2) // BankedDataArray is designed for no more than 2 read ports
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -287,10 +286,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   for (bank_index <- 0 until DCacheBanks) {
     //     Set Addr & Read Way Mask
     //
-    //      Pipe 0      Pipe 1
-    //        +           +
-    //        |           |
-    // +------+-----------+-------+
+    //    Pipe 0   ....  Pipe (n-1)
+    //      +      ....     +
+    //      |      ....     |
+    // +----+---------------+-----+
     //  X                        X
     //   X                      +------+ Bank Addr Match
     //    +---------+----------+

@@ -507,8 +507,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // As store queue grows larger and larger, time needed to read data from data
   // module keeps growing higher. Now we give data read a whole cycle.
 
-  // For now, data read logic width is hardcoded to 2
-  // require(StorePipelineWidth == 2) // TODO: add EnsbufferWidth parameter
+  // TODO: add EnsbufferWidth parameter
   val mmioStall = mmio(rdataPtrExt(0).value)
   for (i <- 0 until StorePipelineWidth) {
     val ptr = rdataPtrExt(i).value
