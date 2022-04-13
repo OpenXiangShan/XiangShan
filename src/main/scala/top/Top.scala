@@ -128,10 +128,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
-      val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
-      val pll0_lock = Input(Bool())
-      val pll0_ctrl = Output(Vec(6, UInt(32.W)))
       val systemjtag = new Bundle {
         val jtag = Flipped(new JTAGIO(hasTRSTn = false))
         val reset = Input(Bool()) // No reset allowed on top
@@ -140,7 +137,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
-      val cacheable_check = new TLPMAIO()
+      val rtc_clock = Input(Bool())
+      val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_wfi = Output(Vec(NumCores, Bool()))
+      val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -155,10 +155,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
-    misc.module.pll0_lock := io.pll0_lock
-    misc.module.cacheable_check <> io.cacheable_check
-
-    io.pll0_ctrl <> misc.module.pll0_ctrl
+    misc.module.rtc_clock := io.rtc_clock
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U

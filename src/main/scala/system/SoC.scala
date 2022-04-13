@@ -38,8 +38,8 @@ case object SoCParamsKey extends Field[SoCParameters]
 case class SoCParameters
 (
   EnableILA: Boolean = false,
-  PAddrBits: Int = 36,
-  extIntrs: Int = 64,
+  PAddrBits: Int = 38,
+  extIntrs: Int = 256,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l3",
@@ -91,7 +91,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 trait HaveSlaveAXI4Port {
   this: BaseSoC =>
 
-  val idBits = 14
+  val idBits = 4
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -129,7 +129,7 @@ trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
   // 36-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  val memRange = AddressSet(0x00000000L, (1L << soc.PAddrBits) - 1).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -163,7 +163,7 @@ trait HaveAXI4MemPort {
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
-    AXI4IdIndexer(idBits = 14) :=
+    AXI4IdIndexer(idBits = 6) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
@@ -204,7 +204,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
-    AXI4IdIndexer(idBits = 2) :=
+    AXI4IdIndexer(idBits = 4) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
@@ -270,64 +270,25 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   plic.intnode := plicSource.sourceNode
   plic.node := peripheralXbar
 
-  val pll_node = TLRegisterNode(
-    address = Seq(AddressSet(0x3a000000L, 0xfff)),
-    device = new SimpleDevice("pll_ctrl", Seq()),
-    beatBytes = 8,
-    concurrency = 1
-  )
-  pll_node := peripheralXbar
-
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
     l3_xbar := TLBuffer() := sb2tl.node
   }
 
-  val pma = LazyModule(new TLPMA)
-  pma.node := 
-    TLBuffer.chainNode(4) :=
-    peripheralXbar
-
   lazy val module = new LazyModuleImp(this){
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    val pll0_lock = IO(Input(Bool()))
-    val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
-    val cacheable_check = IO(new TLPMAIO)
+    val rtc_clock = IO(Input(Bool()))
 
     val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
     val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
     ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs_wire.asBools
-    pma.module.io <> cacheable_check
 
-    val freq = 100
-    val cnt = RegInit(freq.U)
-    val tick = cnt === 0.U
-    cnt := Mux(tick, freq.U, cnt - 1.U)
-    clint.module.io.rtcTick := tick
+    clint.module.io.rtcTick := rtc_clock
 
-    val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
-    val pll_lock = RegNext(next = pll0_lock, init = false.B)
-
-    pll0_ctrl <> VecInit(pll_ctrl_regs)
-
-    pll_node.regmap(
-      0x000 -> RegFieldGroup(
-        "Pll", Some("PLL ctrl regs"),
-        pll_ctrl_regs.zipWithIndex.map{
-          case (r, i) => RegField(32, r, RegFieldDesc(
-            s"PLL_ctrl_$i",
-            desc = s"PLL ctrl register #$i"
-          ))
-        } :+ RegField.r(32, Cat(0.U(31.W), pll_lock), RegFieldDesc(
-          "PLL_lock",
-          "PLL lock register"
-        ))
-      )
-    )
   }
 }
