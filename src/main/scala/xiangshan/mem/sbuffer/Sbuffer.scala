@@ -214,8 +214,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // if first entry canMerge or second entry has the same ptag with the first entry,
   // secondInsert equal the first invalid entry, otherwise, the second invalid entry
   val invalidMask = VecInit(stateVec.map(s => s.isInvalid()))
-  val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
-  val oddInvalidMask = GetOddBits(invalidMask.asUInt)
   val remInvalidMask = GetRemBits(StorePipelineWidth)(invalidMask.asUInt)
 
   def getFirstOneOH(input: UInt): UInt = {
@@ -228,7 +226,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   val remRawInsertVec = remInvalidMask.map(getFirstOneOH(_))
-  val (remRawInsertIdx, remCanInsert) = remInvalidMask.map(PriorityEncoderWithFlag(_)).unzip
+  val remRawInsert = remInvalidMask.map(PriorityEncoderWithFlag(_)).unzip
+  val (remRawInsertIdx, remCanInsert) = (remRawInsert._1, VecInit(remRawInsert._2))
   val remInsertIdx = VecInit(remRawInsertIdx.zipWithIndex.map { case (raw, idx) => Cat(raw, idx.U(log2Ceil(StorePipelineWidth).W)) }) // slow to generate, for debug only
   val remInsertVec = VecInit(GetRemBits.reverse(StorePipelineWidth)(remRawInsertVec))
 
@@ -238,13 +237,13 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   val insertIdxs = (0 until StorePipelineWidth).map(i =>
-    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.U) else (0 until i).map(j => sameTag(i, j) -> remInsertIdx(j)), remInsertIdx(enbufferSelReg))
+    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.U) else (0 until i).map(j => sameTag(i, j) -> remInsertIdx(enbufferSelReg + j.U)), remInsertIdx(enbufferSelReg + i.U))
   ) // slow to generate, for debug only
   val insertVecs = (0 until StorePipelineWidth).map(i =>
-    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.U) else (0 until i).map(j => sameTag(i, j) -> remInsertVec(j)), remInsertVec(enbufferSelReg))
+    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.U) else (0 until i).map(j => sameTag(i, j) -> remInsertVec(enbufferSelReg + j.U)), remInsertVec(enbufferSelReg + i.U))
   ) // slow to generate, for debug only
   val canInserts = (0 until StorePipelineWidth).map(i =>
-    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.B) else (0 until i).map(j => sameTag(i, j) -> remCanInsert(j)), VecInit(remCanInsert)(enbufferSelReg))
+    PriorityMuxDefault(if (i == 0) Seq(0.B -> 0.B) else (0 until i).map(j => sameTag(i, j) -> remCanInsert(enbufferSelReg + j.U)), remCanInsert(enbufferSelReg + i.U))
   ).map(_ && sbuffer_state =/= x_drain_sbuffer)
   val forward_need_uarch_drain = WireInit(false.B)
   val merge_need_uarch_drain = WireInit(false.B)
