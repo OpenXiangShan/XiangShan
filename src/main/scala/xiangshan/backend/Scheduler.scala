@@ -30,6 +30,7 @@ import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import chisel3.util.experimental.BoringUtils
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -230,6 +231,20 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     println(s"  innerFastPorts: ${outer.innerFastPorts(i)}")
     println(s"  outFastPorts: ${outer.outFastPorts(i)}")
     println(s"  loadBalance: ${rs_all(i).params.needBalance}")
+  }
+
+  if (rs_all.exists(_.params.isLoad)) {
+    val stall_ls_dq = WireDefault(0.B)
+    BoringUtils.addSink(stall_ls_dq, "stall_ls_dq")
+    val ld_rs_full = rs_all.filter(_.params.isLoad).map(_.module.io.full).reduce(_ || _)
+    val st_rs_full = rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.full).reduce(_ || _)
+    val stall_stores_bound = stall_ls_dq && st_rs_full
+    val stall_loads_bound = stall_ls_dq && ld_rs_full
+    val stall_ls_bandwidth_bound = stall_ls_dq && !st_rs_full && !ld_rs_full
+    BoringUtils.addSource(stall_loads_bound, "stall_loads_bound")
+    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
+    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
   }
 
   class SchedulerExtraIO extends XSBundle {

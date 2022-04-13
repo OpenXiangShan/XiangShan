@@ -252,10 +252,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   XSPerfAccumulate("full", statusArray.io.isValid.andR)
 
   io.full := statusArray.io.isValid.andR
-  val full = WireDefault(statusArray.io.isValid.andR)
-  if (params.isStore) { BoringUtils.addSource(full, "sta_rs_full") }
-  if (params.isStoreData) { BoringUtils.addSource(full, "std_rs_full") }
-  if (params.isLoad) { BoringUtils.addSource(full, "ld_rs_full") }
 
   statusArray.io.redirect := io.redirect
 
