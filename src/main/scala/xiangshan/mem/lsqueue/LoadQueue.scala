@@ -25,6 +25,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
+import chisel3.util.experimental.BoringUtils
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -850,6 +851,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire()))))
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
+
+  val stall_loads_bound = WireDefault(0.B)
+  BoringUtils.addSink(stall_loads_bound, "stall_loads_bound")
+  val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
+  val l1d_loads_bound = stall_loads_bound && !have_miss_entry
+  XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
+  val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
+  BoringUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss")
 
   val perfEvents = Seq(
     ("rollback         ", io.rollback.valid                                                               ),
