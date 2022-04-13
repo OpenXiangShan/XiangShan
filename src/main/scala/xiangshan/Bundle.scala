@@ -61,6 +61,8 @@ object RSFeedbackType {
   val bankConflict = 3.U(3.W)
   val ldVioCheckRedo = 4.U(3.W)
 
+  val feedbackInvalid = 7.U(3.W)
+
   def apply() = UInt(3.W)
 }
 

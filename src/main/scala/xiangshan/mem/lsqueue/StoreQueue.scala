@@ -633,8 +633,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   )
 
   // perf counter
-  val store_queue_full = !allowEnqueue
-  BoringUtils.addSource(store_queue_full, "store_queue_full")
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
   io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req

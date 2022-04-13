@@ -28,6 +28,7 @@ import xiangshan.mem.{SqPtr, MemWaitUpdateReq}
 import xiangshan.backend.fu.fpu.{FMAMidResult, FMAMidResultIO}
 
 import scala.math.max
+import chisel3.util.experimental.BoringUtils
 
 case class RSParams
 (
@@ -248,6 +249,13 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()
+  XSPerfAccumulate("full", statusArray.io.isValid.andR)
+
+  io.full := statusArray.io.isValid.andR
+  val full = WireDefault(statusArray.io.isValid.andR)
+  if (params.isStore) { BoringUtils.addSource(full, "sta_rs_full") }
+  if (params.isStoreData) { BoringUtils.addSource(full, "std_rs_full") }
+  if (params.isLoad) { BoringUtils.addSource(full, "ld_rs_full") }
 
   statusArray.io.redirect := io.redirect
 
@@ -752,10 +760,24 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
+  if (params.isLoad) {
+    val l1d_loads_bound = WireDefault(0.B)
+    BoringUtils.addSink(l1d_loads_bound, "l1d_loads_bound")
+    val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
+    val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
+    val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
+    val bankConflict = !mshrFull && !tlbMiss && !dataInvalid && statusArray.io.rsFeedback(RSFeedbackType.bankConflict.litValue.toInt)
+    val ldVioCheckRedo = !mshrFull && !tlbMiss && !dataInvalid && !bankConflict && statusArray.io.rsFeedback(RSFeedbackType.ldVioCheckRedo.litValue.toInt)
+    XSPerfAccumulate("l1d_loads_mshr_bound", l1d_loads_bound && mshrFull)
+    XSPerfAccumulate("l1d_loads_tlb_bound", l1d_loads_bound && tlbMiss)
+    XSPerfAccumulate("l1d_loads_store_data_bound", l1d_loads_bound && dataInvalid)
+    XSPerfAccumulate("l1d_loads_bank_conflict_bound", l1d_loads_bound && bankConflict)
+    XSPerfAccumulate("l1d_loads_vio_check_redo_bound", l1d_loads_bound && ldVioCheckRedo)
+  }
+
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfHistogram("allocate_num", PopCount(io.fromDispatch.map(_.valid)), true.B, 0, params.numEnq, 1)
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 
   def size: Int = params.numEntries
 }
-
