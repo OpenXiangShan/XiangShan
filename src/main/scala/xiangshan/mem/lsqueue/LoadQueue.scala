@@ -856,6 +856,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   BoringUtils.addSink(stall_loads_bound, "stall_loads_bound")
   val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
   val l1d_loads_bound = stall_loads_bound && !have_miss_entry
+  BoringUtils.addSource(l1d_loads_bound, "l1d_loads_bound")
   XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
   val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
   BoringUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss")
