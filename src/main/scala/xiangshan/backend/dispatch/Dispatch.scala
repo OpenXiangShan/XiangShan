@@ -306,19 +306,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
   val stall_ls_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept
-  val sta_rs_full = WireDefault(0.B)
-  val std_rs_full = WireDefault(0.B)
-  val ld_rs_full = WireDefault(0.B)
-  BoringUtils.addSink(sta_rs_full, "sta_rs_full")
-  BoringUtils.addSink(std_rs_full, "std_rs_full")
-  BoringUtils.addSink(ld_rs_full, "ld_rs_full")
-  val stall_stores_bound = stall_ls_dq && (sta_rs_full || std_rs_full)
-  val stall_loads_bound = stall_ls_dq && ld_rs_full
-  val stall_ls_bandwidth_bound = stall_ls_dq && !(sta_rs_full || std_rs_full) && !ld_rs_full
-  BoringUtils.addSource(stall_loads_bound, "stall_loads_bound")
-  XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
-  XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
-  XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
+  BoringUtils.addSource(stall_ls_dq, "stall_ls_dq")
   // TODO: we may need finer counters to count responding slots more precisely, i.e. per-slot granularity.
 
   val perfEvents = Seq(
