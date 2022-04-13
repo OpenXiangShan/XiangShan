@@ -145,21 +145,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val commitCount = RegNext(io.rob.scommit)
 
   // Read dataModule
-  // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
-  val rdataPtrExtNext = WireInit(Mux(dataBuffer.io.enq(1).fire(),
-    VecInit(rdataPtrExt.map(_ + 2.U)),
-    Mux(dataBuffer.io.enq(0).fire() || io.mmioStout.fire(),
-      VecInit(rdataPtrExt.map(_ + 1.U)),
-      rdataPtrExt
-    )
-  ))
+  // rdataPtrExtNext to rdataPtrExtNext+StorePipelineWidth entries will be read from dataModule
+  val rdataPtrExtNext = PriorityMuxDefault(Seq.tabulate(StorePipelineWidth)(i =>
+    dataBuffer.io.enq(i).fire -> VecInit(rdataPtrExt.map(_ + (i + 1).U))
+  ).reverse :+ (io.mmioStout.fire -> VecInit(deqPtrExt.map(_ + 1.U))), rdataPtrExt)
   // deqPtrExtNext traces which inst is about to leave store queue
-  val deqPtrExtNext = PriorityMuxDefault(
-    Seq.tabulate(StorePipelineWidth)(i =>
-      io.sbuffer(i).fire -> VecInit(deqPtrExt.map(_ + (i + 1).U))
-    ).reverse :+ (io.mmioStout.fire -> VecInit(deqPtrExt.map(_ + 1.U))),
-    deqPtrExt
-  )
+  val deqPtrExtNext = PriorityMuxDefault(Seq.tabulate(StorePipelineWidth)(i =>
+    io.sbuffer(i).fire -> VecInit(deqPtrExt.map(_ + (i + 1).U))
+  ).reverse :+ (io.mmioStout.fire -> VecInit(deqPtrExt.map(_ + 1.U))), deqPtrExt)
   io.sqDeq := RegNext(PriorityMuxDefault(Seq.tabulate(StorePipelineWidth)(i =>
     io.sbuffer(i).fire -> (i + 1).U
   ).reverse :+ (io.mmioStout.fire -> 1.U), 0.U))
