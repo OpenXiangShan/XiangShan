@@ -129,8 +129,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
   override def toString: String = params.toString
   // for better timing, we limits the size of RS to 2-deq
-  // val maxRsDeq = 2
-  def maxRsDeq = if (params.isLoad || params.isStore || params.isStoreData) LsMaxRsDeq else 2
+  def maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents {
