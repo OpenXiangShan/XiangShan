@@ -476,7 +476,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
-    assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
+    if (exuParameters.StuCnt > 1)
+      assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
     assert((0 until exuParameters.StuCnt).map(state === s_atomics(_)).reduce(_ || _))
@@ -542,9 +543,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stDeqCount = PopCount(io.issue.drop(exuParameters.LduCnt).map(_.valid))
   val rsDeqCount = ldDeqCount + stDeqCount
   XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
-  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, exuParameters.LduCnt, 1)
+  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 0, exuParameters.LduCnt, 1)
   XSPerfAccumulate("store_rs_deq_count", stDeqCount)
-  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, exuParameters.StuCnt, 1)
+  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 0, exuParameters.StuCnt, 1)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
 
   val pfevent = Module(new PFEvent)

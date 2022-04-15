@@ -190,11 +190,12 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val isAMO = fuType.map(f => FuType.isAMO(f))
 
     def isBlocked(index: Int): Bool = {
-      if (index >= LoadPipelineWidth) { // TODO: use mores instead of pairs
-        val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
-        val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
-        val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
-        Mux(isStore(index), VecInit(foundStore).asUInt.orR, VecInit(foundLoad).asUInt.orR) || isBlocked(index - 1)
+      if (index >= LoadPipelineWidth) { // TODO: will this worsen timing?
+        val isLoadArray = (0 until index).map(i => io.in(i).valid && !isStore(i))
+        val isStoreArray = (0 until index).map(i => io.in(i).valid && isStore(i))
+        val blockLoad = PopCount(isLoadArray) >= LoadPipelineWidth.U
+        val blockStore = PopCount(isStoreArray) >= StorePipelineWidth.U
+        Mux(isStore(index), blockStore, blockLoad) || isBlocked(index - 1)
       }
       else {
         false.B
@@ -205,12 +206,14 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       in(i).valid := io.in(i).valid && !is_blocked(i)
       io.in(i).ready := in(i).ready && !is_blocked(i)
 
-      enqLsq.needAlloc(i) := Mux(io.in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
-      enqLsq.req(i).bits := io.in(i).bits
-      in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
-      in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
+      if (i < enqLsq.req.length) {
+        enqLsq.needAlloc(i) := Mux(io.in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
+        enqLsq.req(i).bits := io.in(i).bits
+        in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
+        in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
 
-      enqLsq.req(i).valid := in(i).valid && VecInit(io.out.map(_.ready)).asUInt.andR
+        enqLsq.req(i).valid := in(i).valid && VecInit(io.out.map(_.ready)).asUInt.andR
+      }
     }
   }
 

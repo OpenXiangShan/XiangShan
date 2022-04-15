@@ -133,7 +133,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val deqPtr = deqPtrExt.value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
-  val allowEnqueue = validCount <= (LoadQueueSize - 2).U
+  val allowEnqueue = validCount <= (LoadQueueSize - LoadPipelineWidth).U
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
@@ -343,7 +343,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach(index => {
-    loadWbSelGen(index) := Cat(loadRemSel(index), index.U(log2Ceil(LoadPipelineWidth).W))
+    loadWbSelGen(index) := (
+      if (LoadPipelineWidth > 1) Cat(loadRemSel(index), index.U(log2Ceil(LoadPipelineWidth).W))
+      else loadRemSel(index)
+    )
     loadWbSelVGen(index) := Mux(io.ldout(index).fire, loadRemSelVecFire(index).asUInt.orR, loadRemSelVecNotFire(index).asUInt.orR)
   })
 
@@ -426,7 +429,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   def getOldest[T <: XSBundleWithMicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     assert(isPow2(valid.length))
-    if (valid.length == 2) {
+    if (valid.length == 1) {
+      (valid, bits)
+    } else if (valid.length == 2) {
       val (res0, res1) = (Wire(ValidIO(chiselTypeOf(bits(0)))), Wire(ValidIO(chiselTypeOf(bits(0)))))
       res0.valid := valid(0)
       res1.valid := valid(1)

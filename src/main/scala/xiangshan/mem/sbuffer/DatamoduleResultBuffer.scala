@@ -53,8 +53,8 @@ class DatamoduleResultBuffer[T <: Data]
 
   val data = Reg(Vec(StorePipelineWidth, genType))
   val valids = RegInit(VecInit(Seq.fill(StorePipelineWidth)(false.B)))
-  val enq_flag = RegInit(0.U(log2Ceil(StorePipelineWidth).W)) // head is entry 0
-  val deq_flag = RegInit(0.U(log2Ceil(StorePipelineWidth).W)) // tail is entry 0
+  val enq_flag = RegInit(0.U(log2Up(StorePipelineWidth).W)) // head is entry 0
+  val deq_flag = RegInit(0.U(log2Up(StorePipelineWidth).W)) // tail is entry 0
 
   val entry_allowin = Wire(Vec(StorePipelineWidth, Bool()))
 
@@ -84,7 +84,7 @@ class DatamoduleResultBuffer[T <: Data]
   (0 until StorePipelineWidth).foreach(index => 
     when(io.deq(index).fire) {
       valids(deq_flag + index.U) := 0.B
-      deq_flag := deq_flag + index.U + 1.U
+      if (StorePipelineWidth > 1) deq_flag := deq_flag + index.U + 1.U
     }
   )
 
@@ -92,7 +92,7 @@ class DatamoduleResultBuffer[T <: Data]
     when(io.enq(index).fire) {
       valids(enq_flag + index.U) := 1.B
       data(enq_flag + index.U) := io.enq(index).bits
-      enq_flag := enq_flag + index.U + 1.U
+      if (StorePipelineWidth > 1) enq_flag := enq_flag + index.U + 1.U
     }
   )
 }

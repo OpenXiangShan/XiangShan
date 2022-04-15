@@ -228,11 +228,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val remRawInsertVec = remInvalidMask.map(getFirstOneOH(_))
   val remRawInsert = remInvalidMask.map(PriorityEncoderWithFlag(_)).unzip
   val (remRawInsertIdx, remCanInsert) = (remRawInsert._1, VecInit(remRawInsert._2))
-  val remInsertIdx = VecInit(remRawInsertIdx.zipWithIndex.map { case (raw, idx) => Cat(raw, idx.U(log2Ceil(StorePipelineWidth).W)) }) // slow to generate, for debug only
+  val remInsertIdx = VecInit(remRawInsertIdx.zipWithIndex.map { case (raw, idx) =>
+    if (StorePipelineWidth > 1) Cat(raw, idx.U(log2Ceil(StorePipelineWidth).W))
+    else raw
+  }) // slow to generate, for debug only
   val remInsertVec = VecInit(GetRemBits.reverse(StorePipelineWidth)(remRawInsertVec))
 
-  val enbufferSelReg = RegInit(0.U(log2Ceil(StorePipelineWidth).W))
-  when(io.in(0).valid) {
+  val enbufferSelReg = RegInit(0.U(log2Up(StorePipelineWidth).W))
+  if (StorePipelineWidth > 1) when(io.in(0).valid) {
     enbufferSelReg := enbufferSelReg + 1.U
   }
 
@@ -559,7 +562,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // ---------------------- Load Data Forward ---------------------
   val mismatch = Wire(Vec(LoadPipelineWidth, Bool()))
-  XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))
+  XSPerfAccumulate("vaddr_match_failed", mismatch.reduce(_ || _))
   for ((forward, i) <- io.forward.zipWithIndex) {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))

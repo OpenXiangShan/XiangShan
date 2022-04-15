@@ -185,7 +185,9 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   def getOldest(valid: Seq[Bool], uop: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
     assert(valid.length == uop.length)
     assert(isPow2(valid.length))
-    if (valid.length == 2) {
+    if (valid.length == 1) {
+      (valid, uop)
+    } else if (valid.length == 2) {
       class Result extends Bundle {
         val valid = Bool()
         val uop = new RobExceptionInfo()
@@ -212,7 +214,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
   val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
-  // s0: compare wb(1)~wb(1 + LoadPipelineWidth) and wb(1 + LoadPipelineWidth)~wb(1 + LoadPipelineWidth + StorePipelineWidth)
+  // s0: compare wb(1)~wb(LoadPipelineWidth) and wb(1 + LoadPipelineWidth)~wb(LoadPipelineWidth + StorePipelineWidth)
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }
   val csr_wb_bits = io.wb(0).bits
   val load_wb_bits = getOldest(in_wb_valid.slice(1, 1 + LoadPipelineWidth), io.wb.map(_.bits).slice(1, 1 + LoadPipelineWidth))._2(0)
