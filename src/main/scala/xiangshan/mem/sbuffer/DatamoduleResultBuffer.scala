@@ -28,8 +28,8 @@ import difftest._
 class DatamoduleResultBufferIO[T <: Data](gen: T)(implicit p: Parameters) extends XSBundle
 {
   // val flush = Input(Bool())
-  val enq = Vec(StorePipelineWidth, Flipped(DecoupledIO(gen)))
-  val deq = Vec(StorePipelineWidth, DecoupledIO(gen))
+  val enq = Vec(EnsbufferWidth, Flipped(DecoupledIO(gen)))
+  val deq = Vec(EnsbufferWidth, DecoupledIO(gen))
 
 }
 
@@ -51,48 +51,48 @@ class DatamoduleResultBuffer[T <: Data]
 
   val io = IO(new DatamoduleResultBufferIO[T](gen))
 
-  val data = Reg(Vec(StorePipelineWidth, genType))
-  val valids = RegInit(VecInit(Seq.fill(StorePipelineWidth)(false.B)))
-  val enq_flag = RegInit(0.U(log2Up(StorePipelineWidth).W)) // head is entry 0
-  val deq_flag = RegInit(0.U(log2Up(StorePipelineWidth).W)) // tail is entry 0
+  val data = Reg(Vec(EnsbufferWidth, genType))
+  val valids = RegInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+  val enq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // head is entry 0
+  val deq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // tail is entry 0
 
-  val entry_allowin = Wire(Vec(StorePipelineWidth, Bool()))
+  val entry_allowin = Wire(Vec(EnsbufferWidth, Bool()))
 
-  (0 until StorePipelineWidth).foreach(index => {
+  (0 until EnsbufferWidth).foreach(index => {
     io.deq(index).valid := valids(deq_flag + index.U) && (if (index == 0) 1.B else io.deq(index - 1).valid)
     io.deq(index).bits := data(deq_flag + index.U)
   })
 
-  (1 until StorePipelineWidth).foreach(i => {
+  (1 until EnsbufferWidth).foreach(i => {
     assert(!(io.deq(i).valid && !io.deq(i - 1).valid))
     assert(!(io.deq(i).ready && !io.deq(i - 1).ready))
   })
 
-  (0 until StorePipelineWidth).foreach(
-    index => entry_allowin(index) := !valids(index) || (0 until StorePipelineWidth).map(i => io.deq(i).fire && deq_flag + i.U === index.U).reduce(_ || _)
+  (0 until EnsbufferWidth).foreach(
+    index => entry_allowin(index) := !valids(index) || (0 until EnsbufferWidth).map(i => io.deq(i).fire && deq_flag + i.U === index.U).reduce(_ || _)
   )
 
-  (0 until StorePipelineWidth).foreach(
+  (0 until EnsbufferWidth).foreach(
     index => io.enq(index).ready := entry_allowin(enq_flag + index.U) && (if (index == 0) 1.B else io.enq(index - 1).ready)
   )
 
-  (1 until StorePipelineWidth).foreach(i => {
+  (1 until EnsbufferWidth).foreach(i => {
     assert(!(io.enq(i).ready && !io.enq(i - 1).ready))
     assert(!(io.enq(i).valid && !io.enq(i - 1).valid))
   })
 
-  (0 until StorePipelineWidth).foreach(index => 
+  (0 until EnsbufferWidth).foreach(index => 
     when(io.deq(index).fire) {
       valids(deq_flag + index.U) := 0.B
-      if (StorePipelineWidth > 1) deq_flag := deq_flag + index.U + 1.U
+      if (EnsbufferWidth > 1) deq_flag := deq_flag + index.U + 1.U
     }
   )
 
-  (0 until StorePipelineWidth).foreach(index =>
+  (0 until EnsbufferWidth).foreach(index =>
     when(io.enq(index).fire) {
       valids(enq_flag + index.U) := 1.B
       data(enq_flag + index.U) := io.enq(index).bits
-      if (StorePipelineWidth > 1) enq_flag := enq_flag + index.U + 1.U
+      if (EnsbufferWidth > 1) enq_flag := enq_flag + index.U + 1.U
     }
   )
 }

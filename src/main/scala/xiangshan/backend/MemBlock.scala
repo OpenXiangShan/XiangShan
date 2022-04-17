@@ -95,7 +95,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(log2Ceil(StorePipelineWidth + 1).W))
+    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
