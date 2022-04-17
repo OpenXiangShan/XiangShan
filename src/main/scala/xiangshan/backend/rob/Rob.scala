@@ -182,27 +182,22 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
     val state = ValidIO(new RobExceptionInfo)
   })
 
-  def getOldest(valid: Seq[Bool], uop: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
-    assert(valid.length == uop.length)
+  def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
+    assert(valid.length == bits.length)
     assert(isPow2(valid.length))
     if (valid.length == 1) {
-      (valid, uop)
+      (valid, bits)
     } else if (valid.length == 2) {
-      class Result extends Bundle {
-        val valid = Bool()
-        val uop = new RobExceptionInfo()
+      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+      for (i <- res.indices) {
+        res(i).valid := valid(i)
+        res(i).bits := bits(i)
       }
-      val res0 = Wire(new Result)
-      val res1 = Wire(new Result)
-      res0.valid := valid(0)
-      res1.valid := valid(1)
-      res0.uop := uop(0)
-      res1.uop := uop(1)
-      val oldest = Mux(!valid(1) || valid(0) && isAfter(uop(1).robIdx, uop(0).robIdx), res0, res1)
-      (Seq(oldest.valid), Seq(oldest.uop))
+      val oldest = Mux(!valid(1) || valid(0) && isAfter(bits(1).robIdx, bits(0).robIdx), res(0), res(1))
+      (Seq(oldest.valid), Seq(oldest.bits))
     } else {
-      val left = getOldest(valid.take(valid.length / 2), uop.take(valid.length / 2))
-      val right = getOldest(valid.takeRight(valid.length / 2), uop.takeRight(valid.length / 2))
+      val left = getOldest(valid.take(valid.length / 2), bits.take(valid.length / 2))
+      val right = getOldest(valid.takeRight(valid.length / 2), bits.takeRight(valid.length / 2))
       getOldest(left._1 ++ right._1, left._2 ++ right._2)
     }
   }

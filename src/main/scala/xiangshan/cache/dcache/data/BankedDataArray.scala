@@ -255,7 +255,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(bank_result)
   val read_bank_error = Wire(Vec(DCacheBanks, Bool()))
   dontTouch(read_bank_error)
-  def rr_bank_conflict(x: Int, y: Int): Bool = bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid
+  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
+    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid
+  ))
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
@@ -267,12 +269,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
   (0 until LoadPipelineWidth).foreach(i => {
     io.bank_conflict_fast(i) := rw_bank_conflict(i) || rrl_bank_conflict(i) ||
-      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_, i)).reduce(_ || _))
+      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
     io.bank_conflict_slow(i) := RegNext(io.bank_conflict_fast(i))
   })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
-    XSPerfAccumulate(s"data_array_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x, y))
+    XSPerfAccumulate(s"data_array_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y))
   ))
   (0 until LoadPipelineWidth).foreach(i => {
     XSPerfAccumulate(s"data_array_rrl_bank_conflict_${i}", rrl_bank_conflict(i))

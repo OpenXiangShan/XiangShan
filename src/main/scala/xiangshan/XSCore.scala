@@ -153,7 +153,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.JmpCnt == 1)
   require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
   require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
-  require(exuParameters.LduCnt == exuParameters.StuCnt)
+  require(exuParameters.LduCnt == exuParameters.StuCnt) // TODO: remove this limitation
 
   // one RS every 2 MDUs
   val schedulePorts = Seq(
@@ -197,7 +197,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
-  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq((3, i))) ++ // TODO: why not like this?
+  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq((3, i))) ++
                   (0 until exuParameters.StuCnt).map(i => Seq((4, i))) ++
                   (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {

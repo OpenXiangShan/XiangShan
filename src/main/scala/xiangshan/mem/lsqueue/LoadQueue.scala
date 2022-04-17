@@ -432,12 +432,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     if (valid.length == 1) {
       (valid, bits)
     } else if (valid.length == 2) {
-      val (res0, res1) = (Wire(ValidIO(chiselTypeOf(bits(0)))), Wire(ValidIO(chiselTypeOf(bits(0)))))
-      res0.valid := valid(0)
-      res1.valid := valid(1)
-      res0.bits := bits(0)
-      res1.bits := bits(1)
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res1, res0), Mux(valid(0) && !valid(1), res0, res1))
+      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+      for (i <- res.indices) {
+        res(i).valid := valid(i)
+        res(i).bits := bits(i)
+      }
+      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = getOldest(valid.take(valid.length / 2), bits.take(valid.length / 2))

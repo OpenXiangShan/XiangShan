@@ -180,8 +180,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   io.in.zip(in).foreach(x => x._1.ready := x._2.ready)
 
   // dirty code for lsq enq
-  val is_blocked = Wire(Vec(io.in.length, Bool()))
-  is_blocked.foreach(_ := false.B)
+  val is_blocked = WireDefault(VecInit(Seq.fill(io.in.length)(false.B)))
   if (io.enqLsq.isDefined) {
     val enqLsq = io.enqLsq.get
     val fuType = io.in.map(_.bits.ctrl.fuType)
@@ -189,20 +188,16 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val isStore = fuType.map(f => FuType.isStoreExu(f))
     val isAMO = fuType.map(f => FuType.isAMO(f))
 
-    def isBlocked(index: Int): Bool = {
-      if (index >= LoadPipelineWidth) { // TODO: will this worsen timing?
-        val isLoadArray = (0 until index).map(i => io.in(i).valid && !isStore(i))
-        val isStoreArray = (0 until index).map(i => io.in(i).valid && isStore(i))
-        val blockLoad = PopCount(isLoadArray) >= LoadPipelineWidth.U
-        val blockStore = PopCount(isStoreArray) >= StorePipelineWidth.U
-        Mux(isStore(index), blockStore, blockLoad) || isBlocked(index - 1)
-      }
-      else {
-        false.B
-      }
-    }
+    val isLoadArrays = Seq.tabulate(io.in.length)(Seq.tabulate(_)(i => io.in(i).valid && !isStore(i)))
+    val isStoreArrays = Seq.tabulate(io.in.length)(Seq.tabulate(_)(i => io.in(i).valid && isStore(i)))
+    val blockLoads = isLoadArrays.map(PopCount(_) >= LoadPipelineWidth.U)
+    val blockStores = isStoreArrays.map(PopCount(_) >= StorePipelineWidth.U)
+
     for (i <- io.in.indices) {
-      is_blocked(i) := isBlocked(i)
+      is_blocked(i) := (
+        if (i >= LoadPipelineWidth) Mux(isStore(i), blockStores(i), blockLoads(i)) || is_blocked(i - 1)
+        else false.B
+      )
       in(i).valid := io.in(i).valid && !is_blocked(i)
       io.in(i).ready := in(i).ready && !is_blocked(i)
 
