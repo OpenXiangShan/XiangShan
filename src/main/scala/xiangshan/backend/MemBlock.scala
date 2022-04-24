@@ -421,7 +421,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).bits  := atomicsUnit.io.out.bits
     assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
 
-    // when atom inst writeback, surprise normal load trigger
+    // when atom inst writeback, surpress normal load trigger
     (0 until 2).map(i => {
       io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
