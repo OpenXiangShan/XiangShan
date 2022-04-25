@@ -31,7 +31,7 @@ MFC ?= 0
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 
-# select firrtl complier
+# select firrtl compiler
 ifeq ($(MFC),1)
 override FC_ARGS = --mfc
 override FPGA_MEM_ARGS =
