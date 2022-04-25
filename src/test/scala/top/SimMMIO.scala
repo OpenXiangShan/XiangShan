@@ -28,7 +28,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   val node = AXI4MasterNode(List(edge.master))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
-  val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
+  val uart0 = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
+  val uart1 = LazyModule(new AXI4UART(Seq(AddressSet(0x40601000L, 0xf))))
   val vga = LazyModule(new AXI4VGA(
     sim = false,
     fbAddress = Seq(AddressSet(0x50000000L, 0x3fffffL)),
@@ -39,7 +40,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
 
   val axiBus = AXI4Xbar()
 
-  uart.node := axiBus
+  uart0.node := axiBus
+  uart1.node := axiBus
   vga.node :*= axiBus
   flash.node := axiBus
   sd.node := axiBus
@@ -53,10 +55,12 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle() {
-      val uart = new UARTIO
+      val uart0 = new UARTIO
+      val uart1 = new UARTIO
       val interrupt = new IntrGenIO
     })
-    io.uart <> uart.module.io.extra.get
+    io.uart0 <> uart0.module.io.extra.get
+    io.uart1 <> uart1.module.io.extra.get
     io.interrupt <> intrGen.module.io.extra.get
   }
 

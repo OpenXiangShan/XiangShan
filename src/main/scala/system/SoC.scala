@@ -191,9 +191,19 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     supportsWrite = TransferSizes(1, 8),
     resources = uartDevice.reg
   )
+  val uartRange1 = AddressSet(0x40601000, 0xf)
+  val uartDevice1 = new SimpleDevice("serial", Seq("xilinx,uartlite"))
+  val uartParams1 = AXI4SlaveParameters(
+    address = Seq(uartRange1),
+    regionType = RegionType.UNCACHED,
+    supportsRead = TransferSizes(1, 8),
+    supportsWrite = TransferSizes(1, 8),
+    resources = uartDevice1.reg
+  )
+  val uartRanges = AddressSet(0x40600000, 0x1fff)
   val peripheralRange = AddressSet(
     0x0, 0x7fffffff
-  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRanges))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
       address = peripheralRange,
@@ -201,7 +211,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       supportsRead = TransferSizes(1, 8),
       supportsWrite = TransferSizes(1, 8),
       interleavedId = Some(0)
-    ), uartParams),
+    ), uartParams, uartParams1),
     beatBytes = 8
   )))
 
