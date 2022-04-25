@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.ExceptionNO._
 
 class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
@@ -49,7 +50,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val fusionDecoder = Module(new FusionDecoder())
   fusionDecoder.io.in.zip(io.in).foreach{ case (d, in) =>
     // TODO: instructions with exceptions should not be considered fusion
-    d.valid := in.valid
+    d.valid := in.valid && !(in.bits.exceptionVec(instrPageFault) || in.bits.exceptionVec(instrAccessFault))
     d.bits := in.bits.instr
   }
   fusionDecoder.io.dec := decoders.map(_.io.deq.cf_ctrl.ctrl)

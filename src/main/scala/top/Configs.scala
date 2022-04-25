@@ -196,8 +196,20 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         nMissEntries = 16,
         nProbeEntries = 8,
         nReleaseEntries = 18
+      )),
+      icacheParameters = ICacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("parity"),
+        dataECC = Some("parity"),
+        replacer = Some("setplru"),
+        nMissEntries = 2,
+        nReleaseEntries = 1,
+        nProbeEntries = 2,
+        nPrefetchEntries = 2,
+        hasPrefetch = true
       ))
-    ))
+    )
 })
 
 class WithNKBL2

@@ -127,17 +127,17 @@ case class XSCoreParameters
 
       (preds, ras.io.out.resp)
     }),
-  IBufSize: Int = 48,
-  DecodeWidth: Int = 6,
-  RenameWidth: Int = 6,
-  CommitWidth: Int = 6,
+  IBufSize: Int = 32,
+  DecodeWidth: Int = 4,
+  RenameWidth: Int = 4,
+  CommitWidth: Int = 4,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IssQueSize: Int = 16,
-  NRPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  StoreQueueSize: Int = 64,
-  RobSize: Int = 256,
+  IssQueSize: Int = 8,
+  NRPhyRegs: Int = 128,
+  LoadQueueSize: Int = 48,
+  StoreQueueSize: Int = 48,
+  RobSize: Int = 128,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -151,8 +151,8 @@ case class XSCoreParameters
     AluCnt = 4,
     MulCnt = 0,
     MduCnt = 2,
-    FmacCnt = 4,
-    FmiscCnt = 2,
+    FmacCnt = 2,
+    FmiscCnt = 1,
     FmiscDivSqrtCnt = 0,
     LduCnt = 2,
     StuCnt = 2
@@ -263,7 +263,7 @@ case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
   EnableDifftest: Boolean = false,
-  AlwaysBasicDiff: Boolean = true,
+  AlwaysBasicDiff: Boolean = false,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false
