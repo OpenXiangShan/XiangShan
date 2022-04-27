@@ -92,32 +92,36 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
 }
 
 trait PMAMethod extends PMAConst {
-  /**
-  def SimpleMemMapList = List(
-      //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
-      MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RWX"),
-      MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
-      MemMap("h00_3001_0000", "h00_3004_FFFF",   "h0", "GPU",         "RWC"),
-      MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
-      MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
-      MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
-      MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
-      MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
-      MemMap("h00_3802_1000", "h00_3802_1FFF",   "h0", "MMPMA",       "RW"),
-      MemMap("h00_3802_2000", "h00_3900_0000",   "h0", "Reserved",    ""),
-      MemMap("h00_3900_0000", "h00_3900_1FFF",   "h0", "L3CacheCtrl",  "RW"),
-      MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3A00_0000", "h00_3A00_0FFF",   "h0", "PLL0",        "RW),
-      MemMap('h00_3A00_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
-      MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
-      MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
-    )
-   */
+  // def address_map = List(
+  //   MemMap("0x00_8000_0000", "0x00_FFFF_FFFF", "h0", "PCIe Slave Space Low PCIe",   "RWX"),
+  //   MemMap("0x01_0000_0000", "0x07_FFFF_FFFF", "h0", "PCIe Slave Space High PCIe",  "RWX"),
+  //   MemMap("0x08_0000_0000", "0x1E_FFFF_FFFF", "h0", "Reserved",                    "R"),
+  //   MemMap("0x1F_0000_0000", "0x1F_0FFF_FFFF", "h0", "CPUSS Perfipheral",           "RW"),
+  //   MemMap("0x1F_1000_0000", "0x1F_1FFF_FFFF", "h0", "Reserved",                    "R"),
+  //   MemMap("0x1F_2000_0000", "0x1F_201F_FFFF", "h0", "DDR Config",                  "RW"),
+  //   MemMap("0x1F_2020_0000", "0x1F_203F_FFFF", "h0", "PCIe PHY",                    "RW"),
+  //   MemMap("0x1F_2040_0000", "0x1F_2047_FFFF", "h0", "APGC Config",                 "RW"),
+  //   MemMap("0x1F_2048_0000", "0x1F_2048_FFFF", "h0", "SOC TOP Register",            "RW"),
+  //   MemMap("0x1F_2049_0000", "0x1F_2049_FFFF", "h0", "DTS",                         "RW"),
+  //   MemMap("0x1F_204A_0000", "0x1F_204A_FFFF", "h0", "GPIO PAR0",                   "RW"),
+  //   MemMap("0x1F_204B_0000", "0x1F_204B_FFFF", "h0", "GPIO PAR1",                   "RW"),
+  //   MemMap("0x1F_204C_0000", "0x1F_204C_FFFF", "h0", "PLL0",                        "RW"),
+  //   MemMap("0x1F_204D_0000", "0x1F_204D_FFFF", "h0", "PLL1",                        "RW"),
+  //   MemMap("0x1F_204E_0000", "0x1F_204E_FFFF", "h0", "PLL2",                        "RW"),
+  //   MemMap("0x1F_204F_0000", "0x1F_204F_03FF", "h0", "Fuse0",                       "RW"),
+  //   MemMap("0x1F_204F_0400", "0x1F_2049_07FF", "h0", "Fuse1",                       "RW"),
+  //   MemMap("0x1F_204F_0800", "0x1F_2049_0BFF", "h0", "RTC Register",                "RW"),
+  //   MemMap("0x1F_204F_0C00", "0x1F_7FFF_FFFF", "h0", "Reserved",                    "R"), // NOTE: not aligned to 4KB
+  //   MemMap("0x1F_8000_0000", "0x1F_BFFF_FFFF", "h0", "Peripheral SS",               "RWX"),
+  //   MemMap("0x1F_C000_0000", "0x1F_DFFF_FFFF", "h0", "PCIe Slave Space",            "RW"),
+  //   MemMap("0x1F_E000_0000", "0x1F_E1FF_FFFF", "h0", "PCI SS Config Space",         "RW"),
+  //   MemMap("0x1F_E200_0000", "0x1F_E21F_FFFF", "h0", "Shared SRAM",                 "RWX"),
+  //   MemMap("0x1F_E220_0000", "0x1F_FFF7_FFFF", "h0", "Reserved",                    "R"),
+  //   MemMap("0x1F_FFF8_0000", "0x1F_FFFB_FFFF", "h0", "BOOT ROM",                    "RWX"),
+  //   MemMap("0x1F_FFFC_0000", "0x1F_FFFF_FFFF", "h0", "Reserved",                    "R"),
+  //   MemMap("0x20_0000_0000", "0x23_FFFF_FFFF", "h0", "MEM SS[DDR]",                  "RWX")
+  // )
+  // TODO: use the address_map to generate pma init list.
 
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
     // the init value is zero
@@ -135,71 +139,82 @@ trait PMAMethod extends PMAConst {
 
     var idx = num-1
 
-    // TODO: turn to napot to save entries
-    // use tor instead of napot, for napot may be confusing and hard to understand
-    // NOTE: all the addr space are default set to DDR, RWXCA
-    idx = idx - 1
-    addr(idx) := shift_addr(0xFFFFFFFFFL) // all the addr are default ddr, whicn means rwxca
+    addr(idx) := shift_addr(0x2400000000L)
+
     cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
-    mask(idx) := match_mask(addr(idx), cfg(idx))
     idx = idx - 1
 
-    // NOTE: (0x0_0000_0000L, 0x0_8000_0000L) are default set to MMIO, only RW
-    addr(idx) := get_napot(0x00000000L, 0x80000000L)
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    mask(idx) := match_mask(addr(idx), cfg(idx))
+    addr(idx) := shift_addr(0x2000000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x3C000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
+    addr(idx) := shift_addr(0x1FFFFC0000L)
 
-    addr(idx) := shift_addr(0x3A001000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x3A000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x39002000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x39000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x38022000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x38021000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x38020000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    addr(idx) := shift_addr(0x1FFFF80000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x30050000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    addr(idx) := shift_addr(0x1FE2200000L)
+
+    cfg(idx).a := 1.U; cfg(idx).w := true.B; cfg(idx).r := true.B; cfg(idx).x := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x30010000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    addr(idx) := shift_addr(0x1FE2000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x20000000)
+    addr(idx) := shift_addr(0x1FC0000000L)
+
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x10000000)
+    addr(idx) := shift_addr(0x1F80000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B;
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x1F204F1000L) // NOTE: there is different with address_map for alignment with 4KB
+
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
-    
+
+    addr(idx) := shift_addr(0x1F20000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x1F10000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x1F00000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x800000000L)
+
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x80000000L)
+
+    cfg(idx).a := 1.U
+    idx = idx - 1
+
     require(idx >= 0)
     addr(idx) := shift_addr(0)
+
+    (0 until NumPMA).foreach { i =>
+      mask(i) := match_mask(addr(i), cfg(i))
+    }
 
     val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(PMXLEN.W)))
     (cfgInitMerge, addr, mask)
