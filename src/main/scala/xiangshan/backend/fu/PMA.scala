@@ -126,7 +126,6 @@ trait PMAMethod extends PMAConst {
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
     // the init value is zero
     // from 0 to num(default 16) - 1, lower priority
-    // according to simple map, 9 entries is needed, pick 6-14, leave 0-5 & 15 unusedcfgMerged.map(_ := 0.U)
 
     val num = NumPMA
     require(num >= 16)
@@ -141,7 +140,7 @@ trait PMAMethod extends PMAConst {
 
     addr(idx) := shift_addr(0x2400000000L)
 
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr(0x2000000000L)
