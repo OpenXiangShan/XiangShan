@@ -84,10 +84,10 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
   }
 
   when(in.aw.fire()){
-    assert(in.aw.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")
+    assert(in.aw.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt incr!")
   }
   when(in.ar.fire()){
-    assert(in.ar.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")
+    assert(in.ar.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt incr!")
   }
 
   val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)

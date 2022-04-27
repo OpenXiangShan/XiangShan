@@ -40,6 +40,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
+    val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO(6)
     val backend = new FrontendToCtrlIO
@@ -56,6 +57,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
       }
     }
   })
+  dontTouch(io)
 
   //decouped-frontend modules
   val instrUncache = outer.instrUncache.module
@@ -75,6 +77,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
   // bpu ctrl
+  bpu.io.reset_vector := io.reset_vector
   bpu.io.ctrl := csrCtrl.bp_ctrl
 
 // pmp

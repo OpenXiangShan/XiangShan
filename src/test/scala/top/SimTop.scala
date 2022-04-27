@@ -49,13 +49,16 @@ class SimTop(implicit p: Parameters) extends Module {
     val simAXIMem = Module(l_simAXIMem.module)
     l_simAXIMem.io_axi4 <> soc.memory
   }
+  dontTouch(soc.io)
 
   soc.io.clock := clock.asBool
   soc.io.reset := reset.asBool
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
-  soc.io.sram_config := 0.U
-  soc.io.pll0_lock := true.B
-  soc.io.cacheable_check := DontCare
+  soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
+  val rtcClockDiv = 100
+  val rtcCounter = RegInit(0.U)
+  rtcCounter := Mux(rtcCounter === (rtcClockDiv - 1).U, 0.U, rtcCounter + 1.U)
+  soc.io.rtc_clock := rtcCounter === 0.U
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
