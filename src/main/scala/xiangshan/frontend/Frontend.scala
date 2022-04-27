@@ -57,7 +57,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
       }
     }
   })
-  dontTouch(io)
 
   //decouped-frontend modules
   val instrUncache = outer.instrUncache.module

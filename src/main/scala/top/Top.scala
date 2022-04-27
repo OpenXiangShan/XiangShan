@@ -142,7 +142,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_wfi = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
-    dontTouch(io)
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
     childReset := io.reset
