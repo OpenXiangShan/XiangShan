@@ -142,6 +142,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_wfi = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
+    dontTouch(io)
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
     childReset := io.reset
@@ -159,6 +160,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+      core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){

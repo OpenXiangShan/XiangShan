@@ -177,6 +177,9 @@ class AXI4VGA
     val fbPixelAddrV1 = Counter(nextPixel && vCounterIsOdd, FBPixels)._1
 
     //   each pixel is 4 bytes
+    out_fb.ar.bits.burst := AXI4Parameters.BURST_INCR
+    out_fb.ar.bits.len := 0.U
+    out_fb.ar.bits.size := 3.U // each transfer is 64bit
     out_fb.ar.bits.prot := 0.U
     out_fb.ar.bits.addr := Cat(Mux(vCounterIsOdd, fbPixelAddrV1, fbPixelAddrV0), 0.U(2.W))
     out_fb.ar.valid := RegNext(nextPixel) && hCounterIs2

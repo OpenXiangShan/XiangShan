@@ -12,7 +12,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
@@ -127,6 +127,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
+      val reset_vector = Input(UInt(PAddrBits.W))
     })
 
     dontTouch(io.hartId)
@@ -134,6 +135,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val core_soft_rst = core_reset_sink.in.head._1
 
     core.module.io.hartId := io.hartId
+    core.module.io.reset_vector := DelayN(io.reset_vector, 5)
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }

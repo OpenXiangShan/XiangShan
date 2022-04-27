@@ -84,6 +84,31 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
   val l3_banked_xbar = TLXbar()
+
+  val address_map = Map(
+    "peripheral"     -> (0x0080000000L, 0x1fffffffffL),
+    "cpu_peripheral" -> (0x1f00000000L, 0x1f0fffffffL),
+    "memory"         -> (0x2000000000L, 0x23ffffffffL),
+  )
+  def getAddressSet(name: String): Seq[AddressSet] = {
+    // AddressSet(base, mask)
+    val (low, high) = address_map(name)
+    // case 1: low is x0000, high is xffff
+    val is_case_1 = isPow2(low) && isPow2(high + 1L)
+    // case 2: low = base, mask = high - low
+    val is_case_2 = ((high - low) & low) == 0
+    if (is_case_1) {
+      AddressSet(0, high).subtract(AddressSet(0, low - 1))
+    }
+    else if (is_case_2) {
+      Seq(AddressSet(low, high - low))
+    }
+    else {
+      require(false, s"cannot generate address set for ($low, $high)")
+      Seq(AddressSet(0, 0))
+    }
+  }
+  val paddrRange = AddressSet(0x00000000L, (1L << soc.PAddrBits) - 1)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -91,22 +116,21 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 trait HaveSlaveAXI4Port {
   this: BaseSoC =>
 
-  val idBits = 4
-
+  val dmaIdBits = 4
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "dma",
-      id = IdRange(0, 1 << idBits)
+      id = IdRange(0, 1 << dmaIdBits)
     ))
   )))
   private val errorDevice = LazyModule(new TLError(
     params = DevNullParams(
-      address = Seq(AddressSet(0x0, 0x7fffffffL)),
+      // requests to address below memory will be granted with erros
+      address = paddrRange.subtract(getAddressSet("memory")),
       maxAtomic = 8,
       maxTransfer = 64),
     beatBytes = L3InnerBusWidth / 8
   ))
-  private val error_xbar = TLXbar()
 
   l3_xbar :=
     TLFIFOFixer() :=
@@ -116,7 +140,6 @@ trait HaveSlaveAXI4Port {
     AXI4Fragmenter() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
-    AXI4IdIndexer(1) :=
     l3FrontendAXI4Node
   errorDevice.node := l3_xbar
 
@@ -128,8 +151,7 @@ trait HaveSlaveAXI4Port {
 trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
-  // 36-bit physical address
-  val memRange = AddressSet(0x00000000L, (1L << soc.PAddrBits) - 1).subtract(AddressSet(0x0L, 0x7fffffffL))
+  val memRange = getAddressSet("memory")
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -178,30 +200,19 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  // on-chip devices: 0x3800_0000 - 0x3fff_ffff 0x0000_0000 - 0x0000_0fff
-  val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-  val uartRange = AddressSet(0x40600000, 0xf)
-  val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
-  val uartParams = AXI4SlaveParameters(
-    address = Seq(uartRange),
-    regionType = RegionType.UNCACHED,
-    supportsRead = TransferSizes(1, 8),
-    supportsWrite = TransferSizes(1, 8),
-    resources = uartDevice.reg
-  )
-  val peripheralRange = AddressSet(
-    0x0, 0x7fffffff
-  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+  val peripheralBusWidth = if (debugOpts.FPGAPlatform) 32 else 8
+  val peripheralRange = getAddressSet("peripheral").flatMap(_.subtract(getAddressSet("cpu_peripheral")))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
       address = peripheralRange,
       regionType = RegionType.UNCACHED,
-      supportsRead = TransferSizes(1, 8),
-      supportsWrite = TransferSizes(1, 8),
+      supportsRead = TransferSizes(1, peripheralBusWidth),
+      supportsWrite = TransferSizes(1, peripheralBusWidth),
       interleavedId = Some(0)
-    ), uartParams),
-    beatBytes = 8
+    )),
+    beatBytes = peripheralBusWidth
   )))
+  val peripheralNodeSimNode =
 
   peripheralNode :=
     AXI4IdIndexer(idBits = 4) :=
@@ -212,6 +223,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
+    TLWidthWidget(8) :=
     TLBuffer.chainNode(3) :=
     peripheralXbar
 
