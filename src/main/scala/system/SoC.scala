@@ -201,7 +201,7 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  val peripheralBusWidth = 32
+  val peripheralBusWidth = if (debugOpts.FPGAPlatform) 32 else 8
   val peripheralRange = getAddressSet("peripheral").flatMap(_.subtract(getAddressSet("cpu_peripheral")))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
