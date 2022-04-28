@@ -116,7 +116,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 trait HaveSlaveAXI4Port {
   this: BaseSoC =>
 
-  val dmaIdBits = 4
+  val dmaIdBits = 8
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "dma",
@@ -140,6 +140,7 @@ trait HaveSlaveAXI4Port {
     AXI4Fragmenter() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
+    AXI4IdIndexer(5) :=
     l3FrontendAXI4Node
   errorDevice.node := l3_xbar
 
@@ -200,7 +201,7 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  val peripheralBusWidth = if (debugOpts.FPGAPlatform) 32 else 8
+  val peripheralBusWidth = 32
   val peripheralRange = getAddressSet("peripheral").flatMap(_.subtract(getAddressSet("cpu_peripheral")))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
@@ -212,10 +213,9 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     )),
     beatBytes = peripheralBusWidth
   )))
-  val peripheralNodeSimNode =
 
   peripheralNode :=
-    AXI4IdIndexer(idBits = 4) :=
+    AXI4IdIndexer(idBits = 5) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
