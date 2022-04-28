@@ -127,6 +127,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
+      val cpu_halt = Output(Bool())
     })
 
     dontTouch(io.hartId)
@@ -134,6 +135,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val core_soft_rst = core_reset_sink.in.head._1
 
     core.module.io.hartId := io.hartId
+    io.cpu_halt := core.module.io.cpu_halt
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }

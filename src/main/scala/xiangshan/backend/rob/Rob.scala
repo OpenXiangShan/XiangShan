@@ -90,6 +90,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val interrupt_safe = Input(Bool())
     val misPredBlock = Input(Bool())
     val isReplaying = Input(Bool())
+    val hasWFI = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RobPtr))
     val next_out = Vec(CommitWidth, Output(new RobPtr))
@@ -99,14 +100,14 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
+  val intrEnable = io.intrBitSetReg && ((!io.hasNoSpecExec && io.interrupt_safe) || io.hasWFI)
   val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.robIdx, deqPtrVec.last)
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying && !io.hasWFI))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg or there're possible exceptions in these instructions,
   // only one instruction is allowed to commit
@@ -285,6 +286,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
     val robFull = Output(Bool())
+    val cpu_halt = Output(Bool())
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -372,11 +374,20 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
   val doingSvinval = RegInit(false.B)
+  val state_wfi = RegInit(0.U(2.W))
+  val hasWFI = state_wfi === 2.U
+  io.cpu_halt := hasWFI
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
+  when (io.exception.valid) {
+    state_wfi := 0.U
+  }
+  when (state_wfi === 1.U && io.commits.valid.asUInt.orR) {
+    state_wfi := 2.U
+  }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.resp      := enqPtrVec
@@ -413,6 +424,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
       assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
         FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
+      when (enqUop.ctrl.isWFI) {
+        state_wfi := 1.U
+      }
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
@@ -455,7 +469,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
+  val intrEnable = intrBitSetReg && ((!hasNoSpecExec && interrupt_safe(deqPtr.value)) || hasWFI)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
     exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)
@@ -556,7 +570,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush && !hasWFI
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {
@@ -635,9 +649,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
-
   deqPtrGenModule.io.misPredBlock := misPredBlock
   deqPtrGenModule.io.isReplaying := isReplaying
+  deqPtrGenModule.io.hasWFI := hasWFI
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 
@@ -729,7 +743,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (canEnqueue(i)) {
       val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
       val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
-      writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !enqHasException && !enqHasTriggerHit
+      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove || io.enq.req(i).bits.ctrl.isWFI
+      writebacked(enqPtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
     }
