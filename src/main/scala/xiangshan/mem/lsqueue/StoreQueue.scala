@@ -356,7 +356,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
     // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) &
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt)
     ) =/= 0.U
@@ -573,7 +573,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   if (env.EnableDifftest) {
     for (i <- 0 until StorePipelineWidth) {
       val storeCommit = io.sbuffer(i).fire()
-      val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
+      val waddr = ZeroExt(io.sbuffer(i).bits.addr, 64)
       val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
       val wmask = io.sbuffer(i).bits.mask
 
@@ -628,7 +628,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqempty := RegNext(
-    enqPtrExt(0).value === deqPtrExt(0).value && 
+    enqPtrExt(0).value === deqPtrExt(0).value &&
     enqPtrExt(0).flag === deqPtrExt(0).flag
   )
 
