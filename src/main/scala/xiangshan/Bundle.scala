@@ -189,6 +189,8 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
     allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
     this
   }
+
+  def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {

@@ -160,6 +160,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
       core.module.io.reset_vector := io.riscv_rst_vec(i)
+      io.riscv_halt(i) := core.module.io.cpu_halt
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
