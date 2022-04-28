@@ -56,9 +56,23 @@ class AXI4IntrGenerator
 
     io.extra.get.intrVec := Cat(intrReg.reverse)
 
-    when (in.w.fire) {
+    // Delay the intr gen for 1000 cycles.
+    val delayCycles = 1000
+    var w_fire = in.w.fire && in.w.bits.data =/= 0.U
+    for (i <- 0 until delayCycles) {
+      w_fire = RegNext(w_fire, init=false.B)
+    }
+    val w_data = DelayN(in.w.bits.data(31, 0), delayCycles)
+    when (w_fire) {
+      intrGenRegs(DelayN(waddr(4, 2), delayCycles)) := w_data
+    }
+    // Clear takes effect immediately
+    when (in.w.fire && in.w.bits.data === 0.U) {
+      intrGenRegs(waddr(4, 2)) := 0.U
+    }
+    // write resets the threshold and counter
+    when (in.w.fire && in.w.bits.data === 0.U || w_fire) {
       randThres := LFSR64() & randMask
-      intrGenRegs(waddr(4, 2)) := in.w.bits.data(31, 0)
       randCounter := 0.U
     }
 
