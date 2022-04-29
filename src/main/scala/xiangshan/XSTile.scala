@@ -91,7 +91,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_sink = IntIdentityNode()
   val debug_int_sink = IntIdentityNode()
   val beu_int_source = IntIdentityNode()
-  val core_reset_sink = BundleBridgeSink(Some(() => Bool()))
+  val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
 
   core.clint_int_sink :*= IntBuffer() :*= IntBuffer() :*= clint_int_sink
   core.plic_int_sink :*= IntBuffer() :*= IntBuffer() :*= plic_int_sink
@@ -179,6 +179,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
-    ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }
 }

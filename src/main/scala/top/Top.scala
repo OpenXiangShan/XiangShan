@@ -97,7 +97,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
   } else {
-    core_with_l2.map(_ => BundleBridgeSource(() => Bool()))
+    core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
   }
 
   core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({
@@ -126,14 +126,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     val io = IO(new Bundle {
       val clock = Input(Bool())
-      val reset = Input(Bool())
+      val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       val pll0_lock = Input(Bool())
       val pll0_ctrl = Output(Vec(6, UInt(32.W)))
       val systemjtag = new Bundle {
         val jtag = Flipped(new JTAGIO(hasTRSTn = false))
-        val reset = Input(Bool()) // No reset allowed on top
+        val reset = Input(AsyncReset()) // No reset allowed on top
         val mfr_id = Input(UInt(11.W))
         val part_number = Input(UInt(16.W))
         val version = Input(UInt(4.W))
@@ -168,7 +168,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B
+        node.out.head._1 := false.B.asAsyncReset()
       }
     }
 
