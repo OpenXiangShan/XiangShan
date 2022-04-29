@@ -21,10 +21,10 @@ import chisel3.util._
 
 class ResetGen extends Module {
   val io = IO(new Bundle() {
-    val out = Output(Bool())
+    val out = Output(Reset())
   })
 
-  io.out := RegNext(RegNext(reset.asBool))
+  io.out := RegNext(RegNext(reset))
 }
 
 trait ResetNode
@@ -35,13 +35,13 @@ case class ResetGenNode(children: Seq[ResetNode]) extends ResetNode
 
 object ResetGen {
 
-  def apply(resetTree: ResetNode, reset: Bool, sim: Boolean): Unit = {
+  def apply(resetTree: ResetNode, reset: Reset, sim: Boolean): Unit = {
     if(!sim) {
       resetTree match {
         case ModuleNode(mod) =>
           mod.reset := reset
         case ResetGenNode(children) =>
-          val next_rst = Wire(Bool())
+          val next_rst = Wire(Reset())
           withReset(reset){
             val resetGen = Module(new ResetGen)
             next_rst := resetGen.io.out
@@ -51,8 +51,8 @@ object ResetGen {
     }
   }
 
-  def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Bool, sim: Boolean): Seq[Bool] = {
-    val resetReg = Wire(Vec(resetChain.length + 1, Bool()))
+  def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Reset, sim: Boolean): Seq[Reset] = {
+    val resetReg = Wire(Vec(resetChain.length + 1, Reset()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
       if (!sim) {
