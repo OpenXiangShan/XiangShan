@@ -60,6 +60,26 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
 }
 
+object PMPConfigUInt {
+  def apply(
+    l: Boolean = false,
+    c: Boolean = false,
+    atomic: Boolean = false,
+    a: Int = 0,
+    x: Boolean = false,
+    w: Boolean = false,
+    r: Boolean = false)(implicit p: Parameters): UInt = {
+    var config = 0
+    if (l) { config += (1 << 7) }
+    if (c) { config += (1 << 6) }
+    if (atomic) { config += (1 << 5) }
+    if (a > 0) { config += (a << 3) }
+    if (x) { config += (1 << 2) }
+    if (w) { config += (1 << 1) }
+    if (r) { config += (1 << 0) }
+    config.U(8.W)
+  }
+}
 trait PMPReadWriteMethodBare extends PMPConst {
   def match_mask(cfg: PMPConfig, paddr: UInt) = {
     val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)

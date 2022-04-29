@@ -652,7 +652,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 1)
 
   s0_pc         := npcGen()
-  s0_pc_reg     := s0_pc
   s0_folded_gh  := foldedGhGen()
   s0_ghist_ptr  := ghistPtrGen()
   s0_ahead_fh_oldest_bits := aheadFhObGen()
