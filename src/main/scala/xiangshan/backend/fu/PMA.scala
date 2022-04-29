@@ -19,8 +19,10 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
-import utils.{ParallelPriorityMux, ZeroExt, ValidHold}
+import utils.{ParallelPriorityMux, ValidHold, ZeroExt}
 import xiangshan.cache.mmu.TlbCmd
+
+import scala.collection.mutable.ListBuffer
 
 /* Memory Mapped PMA */
 case class MMPMAConfig
@@ -124,99 +126,59 @@ trait PMAMethod extends PMAConst {
   // TODO: use the address_map to generate pma init list.
 
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
-    // the init value is zero
-    // from 0 to num(default 16) - 1, lower priority
+    def genAddr(init_addr: BigInt) = init_addr.U((PMPAddrBits - PMPOffBits).W)
+    def genMask(init_addr: BigInt, a: BigInt) = {
+      val match_mask_addr = (init_addr << 1) | (a & 0x1) | (((1 << PlatformGrain) - 1) >> PMPOffBits)
+      val mask = ((match_mask_addr & ~(match_mask_addr + 1)) << PMPOffBits) | ((1 << PMPOffBits) - 1)
+      mask.U(PMPAddrBits.W)
+    }
 
     val num = NumPMA
     require(num >= 16)
-    val cfg = WireInit(0.U.asTypeOf(Vec(num, new PMPConfig())))
 
-    val addr = Wire(Vec(num, UInt((PMPAddrBits-PMPOffBits).W)))
-    val mask = Wire(Vec(num, UInt(PMPAddrBits.W)))
-    addr := DontCare
-    mask := DontCare
-
-    var idx = num-1
-
-    addr(idx) := shift_addr(0x2400000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x2000000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1FFFFC0000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1FFFF80000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1FE2200000L)
-
-    cfg(idx).a := 1.U; cfg(idx).w := true.B; cfg(idx).r := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1FE2000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1FC0000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1F80000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B;
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1F204F1000L) // NOTE: there is different with address_map for alignment with 4KB
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1F20000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1F10000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x1F00000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x800000000L)
-
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x80000000L)
-
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    require(idx >= 0)
-    addr(idx) := shift_addr(0)
-
-    (0 until NumPMA).foreach { i =>
-      mask(i) := match_mask(addr(i), cfg(i))
+    val cfg_list = ListBuffer[UInt]()
+    val addr_list = ListBuffer[UInt]()
+    val mask_list = ListBuffer[UInt]()
+    def addPMA(addr: BigInt,
+               l: Boolean = false,
+               c: Boolean = false,
+               atomic: Boolean = false,
+               a: Int = 0,
+               x: Boolean = false,
+               w: Boolean = false,
+               r: Boolean = false) = {
+      cfg_list.append(PMPConfigUInt(l, c, atomic, a, x, w, r))
+      addr_list.append(genAddr(shift_addr(addr)))
+      mask_list.append(genMask(shift_addr(addr), a))
     }
 
-    val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(PMXLEN.W)))
-    (cfgInitMerge, addr, mask)
+    addPMA(0x2400000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)
+    addPMA(0x2000000000L, a = 1, r = true)
+    addPMA(0x1FFFFC0000L, a = 1, r = true, x = true, w = true)
+    addPMA(0x1FFFF80000L, a = 1, r = true)
+    addPMA(0x1FE2200000L, a = 1, x = true, w = true, r = true)
+    addPMA(0x1FE2000000L, a = 1, r = true)
+    addPMA(0x1FC0000000L, a = 1, x = true, w = true, r = true)
+    addPMA(0x1F80000000L, a = 1, r = true)
+    addPMA(0x1F204F1000L, a = 1, w = true, r = true)
+    addPMA(0x1F20000000L, a = 1, r = true)
+    addPMA(0x1F10000000L, a = 1, w = true, r = true)
+    addPMA(0x1F00000000L, a = 1, r = true)
+    addPMA(0x800000000L, a = 1, x = true, w = true, r = true)
+    addPMA(0x80000000L, a = 1)
+    addPMA(0)
+    while (cfg_list.length < 16) {
+      addPMA(0)
+    }
+
+    val cfgInitMerge = Seq.tabulate(num / 8)(i => {
+      cfg_list.reverse.drop(8 * i).take(8).foldRight(BigInt(0L)) { case (a, result) =>
+        (result << a.getWidth) | a.litValue
+      }.U(PMXLEN.W)
+    })
+    val addr = addr_list.reverse
+    val mask = mask_list.reverse
+    (VecInit(cfgInitMerge), VecInit(addr), VecInit(mask))
   }
 
   def get_napot(base: BigInt, range: BigInt) = {
@@ -239,7 +201,7 @@ trait PMAMethod extends PMAConst {
   }
 
   def shift_addr(addr: BigInt) = {
-    (addr >> 2).U
+    addr >> 2
   }
 }
 

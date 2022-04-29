@@ -52,7 +52,7 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(soc.io)
 
   soc.io.clock := clock.asBool
-  soc.io.reset := reset.asBool
+  soc.io.reset := reset.asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
   val rtcClockDiv = 100
@@ -62,7 +62,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
-  soc.io.systemjtag.reset := reset
+  soc.io.systemjtag.reset := reset.asAsyncReset
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
