@@ -1087,6 +1087,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+    difftest.io.hasWFI   := hasWFI
   }
   else if (env.AlwaysBasicDiff) {
     val dt_isXSTrap = Mem(RobSize, Bool())
