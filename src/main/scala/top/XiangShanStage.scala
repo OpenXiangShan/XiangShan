@@ -49,7 +49,8 @@ object XiangShanStage {
       annotations ++ Seq(
         RunFirrtlTransformAnnotation(new PrintControl),
         RunFirrtlTransformAnnotation(new PrintModuleName),
-        RunFirrtlTransformAnnotation(new RenameDesiredNames)
+        RunFirrtlTransformAnnotation(new RenameDesiredNames),
+        RunFirrtlTransformAnnotation(new AddModulePrefix)
       )
     )
   }
