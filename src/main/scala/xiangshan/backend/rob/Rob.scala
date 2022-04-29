@@ -416,7 +416,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       {
         doingSvinval := true.B
       }
-      // the end instruction of Svinval enqs so clear doingSvinval 
+      // the end instruction of Svinval enqs so clear doingSvinval
       when(!enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := false.B
@@ -1003,7 +1003,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       runahead_commit.io.clock := clock
       runahead_commit.io.coreid := io.hartId
       runahead_commit.io.index := i.U
-      runahead_commit.io.valid := difftest.io.valid && 
+      runahead_commit.io.valid := difftest.io.valid &&
         (commitBranchValid(i) || commitIsStore(i))
       // TODO: is branch or store
       runahead_commit.io.pc    := difftest.io.pc
@@ -1086,6 +1086,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+    difftest.io.hasWFI   := hasWFI
   }
   else if (env.AlwaysBasicDiff) {
     val dt_isXSTrap = Mem(RobSize, Bool())
