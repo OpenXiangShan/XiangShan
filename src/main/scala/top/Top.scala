@@ -38,6 +38,7 @@ import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils,
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
+import xstransforms.ModulePrefixAnnotation
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -203,6 +204,7 @@ object TopMain extends App with HasRocketChipStageUtils {
     val (config, firrtlOpts) = ArgParser.parse(args)
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     XiangShanStage.execute(firrtlOpts, Seq(
+      ModulePrefixAnnotation("bosc_"),
       ChiselGeneratorAnnotation(() => {
         soc.module
       })
