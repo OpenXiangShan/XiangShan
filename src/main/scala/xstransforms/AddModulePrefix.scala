@@ -3,16 +3,19 @@ package xstransforms
 import firrtl._
 import firrtl.annotations.{ModuleTarget, NoTargetAnnotation}
 import firrtl.ir._
+import firrtl.options.Dependency
 import firrtl.stage.Forms
 import firrtl.stage.TransformManager.TransformDependency
-import firrtl.passes.memlib.DefAnnotatedMemory
-import firrtl.transforms.DontTouchAnnotation
+import firrtl.passes.memlib.{InferReadWrite, ReplSeqMem, GenVerilogMemBehaviorModelAnno}
 
 case class ModulePrefixAnnotation(prefix: String) extends NoTargetAnnotation
 
 class AddModulePrefix extends Transform with DependencyAPIMigration {
 
-  override def prerequisites: Seq[TransformDependency] = Forms.LowForm
+  override def prerequisites: Seq[TransformDependency] = Seq(
+    Dependency[InferReadWrite],
+    Dependency[ReplSeqMem]
+  ) ++ Forms.LowForm
   override def optionalPrerequisites:  Seq[TransformDependency] = Forms.LowFormOptimized
   override def optionalPrerequisiteOf: Seq[TransformDependency] = Forms.LowEmitters
   override def invalidates(a: Transform): Boolean = false
@@ -39,15 +42,17 @@ class AddModulePrefix extends Transform with DependencyAPIMigration {
         other.mapStmt(onStmt)
     }
 
-    def onModule(m: DefModule): DefModule = m match {
-      case Module(info, name, ports, body) =>
-        val newName = rename(name)
-        renameMap.record(
-          ModuleTarget(c.main, name), ModuleTarget(c.main, newName)
-        )
-        Module(info, newName, ports, body).mapStmt(onStmt)
-      case other =>
-        other
+    def onModule(m: DefModule): DefModule = {
+      val newName = rename(m.name)
+      renameMap.record(
+        ModuleTarget(c.main, m.name), ModuleTarget(c.main, newName)
+      )
+      m match {
+        case mod@Module(info, name, ports, body) =>
+          mod.copy(name = newName).mapStmt(onStmt)
+        case extMod@ExtModule(info, name, ports, defname, params) =>
+          extMod.copy(name = newName, defname = newName)
+      }
     }
 
     val newCircuit = c.mapModule(onModule)
