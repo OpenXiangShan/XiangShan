@@ -20,9 +20,13 @@ class AddModulePrefix extends Transform with DependencyAPIMigration {
   override protected def execute(state: CircuitState): CircuitState = {
     val c = state.circuit
 
-    val prefix = state.annotations.collectFirst {
+    val prefixOpt = state.annotations.collectFirst {
       case ModulePrefixAnnotation(p) => p
-    }.get
+    }
+
+    if (prefixOpt.isEmpty){ return state }
+
+    val prefix = prefixOpt.get
 
     def rename(old: String): String = prefix + old
 
