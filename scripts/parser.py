@@ -255,9 +255,9 @@ def generate_sram_conf(build_path, out_dir):
     return os.path.realpath(conf_path)
 
 def create_sram_xlsx(out_dir, collection, sram_conf, top_module):
+    module_prefix = "bosc_"
     workbook = xlsxwriter.Workbook(os.path.join(out_dir, "sram_list.xlsx"))
     worksheet = workbook.add_worksheet()
-
 
     # Header for the list. Starting from row 5.
     row = 5
@@ -274,7 +274,7 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module):
     with open(sram_conf) as f:
         for line in f:
             items = line.strip().split(" ")
-            sram_module_name = items[1]
+            sram_module_name = f"{module_prefix}{items[1]}"
             num_instances = collection.count_instances(top_module, sram_module_name)
             if items[7] == "mrw" or items[7] == "rw":
                 num_read_port = "shared 1"
