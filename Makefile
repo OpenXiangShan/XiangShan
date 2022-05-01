@@ -67,7 +67,7 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	python3 scripts/parser.py
+	python3 scripts/parser.py bosc_
 
 verilog: $(TOP_V)
 

@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 from datetime import date
 from shutil import copy
 
@@ -39,6 +40,7 @@ class VIO(object):
         return str(self) < str(other)
 
 class VModule(object):
+    module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
 
@@ -63,6 +65,17 @@ class VModule(object):
 
     def get_name(self):
         return self.name
+
+    def set_name(self, updated_name):
+        for i, line in enumerate(self.lines):
+            module_match = VModule.module_re.match(line)
+            if module_match:
+                print(f"Line Previously: {line.strip()}")
+                updated_line = line.replace(self.name, updated_name)
+                print(f"Line Updated: {updated_line.strip()}")
+                self.lines[i] = updated_line
+                break
+        self.name = updated_name
 
     def get_lines(self):
         return self.lines + ["\n"]
@@ -98,9 +111,8 @@ class VModule(object):
     def __repr__(self):
         return "{}".format(self.name)
 
-class VCollection(object):
-    module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
 
+class VCollection(object):
     def __init__(self):
         self.modules = []
 
@@ -111,7 +123,7 @@ class VCollection(object):
         with open(vfile) as f:
             print("Loading modules from {}...".format(vfile))
             for i, line in enumerate(f):
-                module_match = self.module_re.match(line)
+                module_match = VModule.module_re.match(line)
                 if module_match:
                     module_name = module_match.group(1)
                     if in_module or current_module is not None:
@@ -143,26 +155,33 @@ class VCollection(object):
         else:
             return self.modules
 
-    def get_module(self, name, with_submodule=False):
+    def get_module(self, name, with_submodule=False, try_prefix=None):
         target = None
         for module in self.modules:
             if module.get_name() == name:
                 target = module
+        if target is None and try_prefix is not None:
+            for module in self.modules:
+                name_no_prefix = name[len(try_prefix):]
+                if module.get_name() == name_no_prefix:
+                    target = module
+                    print(f"Replace {name_no_prefix} with modulename {name}. Please DOUBLE CHECK the verilog.")
+                    target.set_name(name)
         if target is None or not with_submodule:
             return target
         submodules = set()
         submodules.add(target)
         for submodule in target.get_submodule():
-            result = self.get_module(submodule, with_submodule=True)
+            result = self.get_module(submodule, with_submodule=True, try_prefix=try_prefix)
             if result is None:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
-                continue#return None
+                return None
             submodules.update(result)
         return submodules
 
-    def dump_to_file(self, name, output_dir, with_submodule=True, split=True):
+    def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None):
         print("Dump module {} to {}...".format(name, output_dir))
-        modules = self.get_module(name, with_submodule)
+        modules = self.get_module(name, with_submodule, try_prefix=try_prefix)
         if modules is None:
             print("does not find module", name)
             return False
@@ -182,6 +201,7 @@ class VCollection(object):
             with open(output_file, "w") as f:
                 for module in modules:
                     f.writelines(module.get_lines())
+        return True
 
     def add_module(self, name, line):
         module = VModule(name)
@@ -218,13 +238,15 @@ def check_data_module_template(collection):
             error_modules.append(module)
     return error_modules
 
-def create_verilog(files, top_module):
+def create_verilog(files, top_module, try_prefix=None):
     collection = VCollection()
     for f in files:
         collection.load_modules(f)
     today = date.today()
     directory = f'XSTop-Release-{today.strftime("%b-%d-%Y")}'
-    collection.dump_to_file(top_module, os.path.join(directory, top_module))
+    success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix)
+    if not success:
+        return None, None
     return collection, os.path.realpath(directory)
 
 def get_files(build_path):
@@ -254,11 +276,9 @@ def generate_sram_conf(build_path, out_dir):
     copy(conf_path, os.path.join(out_dir, "sram_configuration.txt"))
     return os.path.realpath(conf_path)
 
-def create_sram_xlsx(out_dir, collection, sram_conf, top_module):
-    module_prefix = "bosc_"
+def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None):
     workbook = xlsxwriter.Workbook(os.path.join(out_dir, "sram_list.xlsx"))
     worksheet = workbook.add_worksheet()
-
     # Header for the list. Starting from row 5.
     row = 5
     columns = ["Array Instance Name", "# Instances", "Memory Type",
@@ -269,13 +289,18 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module):
     for col, column_name in enumerate(columns):
         worksheet.write(row, col, column_name)
     row += 1
-
+    # Entries for the list.
     total_size = 0
     with open(sram_conf) as f:
         for line in f:
             items = line.strip().split(" ")
-            sram_module_name = f"{module_prefix}{items[1]}"
+            sram_module_name = items[1]
             num_instances = collection.count_instances(top_module, sram_module_name)
+            if num_instances == 0 and try_prefix is not None:
+                try_prefix_name = f"{try_prefix}{sram_module_name}"
+                num_instances = collection.count_instances(top_module, try_prefix_name)
+                if num_instances != 0:
+                    sram_module_name = try_prefix_name
             if items[7] == "mrw" or items[7] == "rw":
                 num_read_port = "shared 1"
                 num_write_port = "shared 1"
@@ -296,10 +321,8 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module):
                 worksheet.write(row, col, info)
             row += 1
             total_size += depth * width * num_instances
-
     # Total size of the SRAM in top of the sheet
     worksheet.write(0, 0, f"Total size: {total_size / (8 * 1024)} KiB")
-
     workbook.close()
 
 if __name__ == "__main__":
@@ -307,9 +330,15 @@ if __name__ == "__main__":
     build_path = os.path.join(xs_home, "build")
     files = get_files(build_path)
 
-    top_module = "bosc_XSTop"
-    collection, out_dir = create_verilog(files, top_module)
+    module_prefix = None
+    top_module = "XSTop"
+    if len(sys.argv) > 1:
+        module_prefix = sys.argv[1]
+        top_module = f"{module_prefix}{top_module}"
+    print(f"Top-level Module: {top_module} {module_prefix}")
+    collection, out_dir = create_verilog(files, top_module, try_prefix=module_prefix)
+    assert(collection)
 
     create_filelist(out_dir, top_module)
     sram_conf = generate_sram_conf(build_path, out_dir)
-    create_sram_xlsx(out_dir, collection, sram_conf, top_module)
+    create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
