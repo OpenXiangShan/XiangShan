@@ -28,14 +28,14 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   val node = AXI4MasterNode(List(edge.master))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x1ffff80000L, 0x3ffff))))
-  val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x1f40600000L, 0xf))))
+  val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x1f10050000L, 0xf))))
   val vga = LazyModule(new AXI4VGA(
     sim = false,
     fbAddress = Seq(AddressSet(0x1f50000000L, 0x3fffffL)),
     ctrlAddress = Seq(AddressSet(0x1f40001000L, 0x7L))
   ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x1f40002000L, 0xfff))))
-  val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x1f40070000L, 0x0000ffffL))))
+  val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x1f10060000L, 0x0000ffffL))))
 
   val axiBus = AXI4Xbar()
 
