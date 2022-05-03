@@ -265,7 +265,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
   l3_banked_xbar := TLBuffer.chainNode(2) := l3_xbar
 
-  val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
+  val clint = LazyModule(new CLINT(CLINTParams(0x1f00000000L), 8))
   clint.node := peripheralXbar
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
@@ -276,7 +276,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
+  val plic = LazyModule(new TLPLIC(PLICParams(0x1f0c000000L), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode

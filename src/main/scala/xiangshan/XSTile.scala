@@ -43,7 +43,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = TLIdentityNode()
   val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(), BusErrorUnitParams(0x38010000), new GenericLogicalTreeNode
+    new XSL1BusErrors(), BusErrorUnitParams(0x1f00010000L), new GenericLogicalTreeNode
   ))
   val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
