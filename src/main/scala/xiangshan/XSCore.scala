@@ -370,6 +370,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
+  csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
   csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
