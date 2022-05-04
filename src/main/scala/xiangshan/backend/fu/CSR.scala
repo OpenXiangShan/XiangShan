@@ -319,7 +319,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     tdata1_new.store := TypeLookup(tselectPhy) === S_Trigger
     tdata1_new.load := TypeLookup(tselectPhy) === L_Trigger
     when(valid && func =/= CSROpType.jmp && addr === Tdata1.U) {
-      tdata1Phy(tselectPhy) := tdata1_new.asUInt()
+      tdata1Phy(tselectPhy) := tdata1_new.asUInt
     }
     0.U
   }
@@ -442,14 +442,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
     GenMask(2)              // WPRI
-  ), 64)).asUInt()
+  ), 64)).asUInt
   val mstatusMask = (~ZeroExt((
     GenMask(XLEN - 2, 36) | // WPRI
     GenMask(31, 23)       | // WPRI
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
     GenMask(2)              // WPRI
-  ), 64)).asUInt()
+  ), 64)).asUInt
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
@@ -574,7 +574,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
     csrw_dirty_fp_state := true.B
     fcsrOld.frm := wdata(2,0)
-    fcsrOld.asUInt()
+    fcsrOld.asUInt
   }
   def frm_rfn(rdata: UInt): UInt = rdata(7,5)
 
@@ -587,7 +587,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     } else {
       fcsrNew.fflags := wdata(4,0)
     }
-    fcsrNew.asUInt()
+    fcsrNew.asUInt
   }
   def fflags_rfn(rdata:UInt): UInt = rdata(4,0)
 
@@ -765,10 +765,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdata | src1),
-    CSROpType.clr  -> (rdata & (~src1).asUInt()),
+    CSROpType.clr  -> (rdata & (~src1).asUInt),
     CSROpType.wrti -> csri,
     CSROpType.seti -> (rdata | csri),
-    CSROpType.clri -> (rdata & (~csri).asUInt())
+    CSROpType.clri -> (rdata & (~csri).asUInt)
   ))
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
@@ -811,10 +811,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val wdataFix = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdataFix | src1),
-    CSROpType.clr  -> (rdataFix & (~src1).asUInt()),
+    CSROpType.clr  -> (rdataFix & (~src1).asUInt),
     CSROpType.wrti -> csri,
     CSROpType.seti -> (rdataFix | csri),
-    CSROpType.clri -> (rdataFix & (~csri).asUInt())
+    CSROpType.clri -> (rdataFix & (~csri).asUInt)
   ))
   MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
@@ -826,7 +826,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
-    mstatus := mstatusNew.asUInt()
+    mstatus := mstatusNew.asUInt
   }
   csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
@@ -839,7 +839,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) === I_Trigger)
   csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) =/= I_Trigger)
-  XSDebug(csrio.customCtrl.trigger_enable.asUInt.orR(), p"Debug Mode: At least 1 trigger is enabled, trigger enable is ${Binary(csrio.customCtrl.trigger_enable.asUInt())}\n")
+  XSDebug(csrio.customCtrl.trigger_enable.asUInt.orR, p"Debug Mode: At least 1 trigger is enabled," +
+    p"trigger enable is ${Binary(csrio.customCtrl.trigger_enable.asUInt)}\n")
 
   // CSR inst decode
   val isEbreak = addr === privEbreak && func === CSROpType.jmp
@@ -848,6 +849,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val isSret   = addr === privSret   && func === CSROpType.jmp
   val isUret   = addr === privUret   && func === CSROpType.jmp
   val isDret   = addr === privDret   && func === CSROpType.jmp
+  val isWFI    = func === CSROpType.wfi
 
   XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", cfIn.pc, addr, rdata, wdata, func)
   XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
@@ -856,11 +858,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val illegalMret = valid && isMret && priviledgeMode < ModeM
   val illegalSret = valid && isSret && priviledgeMode < ModeS
   val illegalSModeSret = valid && isSret && priviledgeMode === ModeS && mstatusStruct.tsr.asBool
+  // When TW=1, then if WFI is executed in any less-privileged mode,
+  // and it does not complete within an implementation-specific, bounded time limit,
+  // the WFI instruction causes an illegal instruction exception.
+  // The time limit may always be 0, in which case WFI always causes
+  // an illegal instruction exception in less-privileged modes when TW=1.
+  val illegalWFI = valid && isWFI && priviledgeMode < ModeM && mstatusStruct.tw === 1.U
 
   // Illegal priviledged instruction check
-  val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
-  val isIllegalAccess = !permitted
-  val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret
+  val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
+  val isIllegalAccess = wen && !permitted
+  val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
 
   // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
@@ -941,7 +949,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Trigger an illegal instr exception when:
   // * unimplemented csr is being read/written
   // * csr access is illegal
-  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
+  csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
   cfOut.exceptionVec := csrExceptionVec
 
   XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
@@ -960,7 +968,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie)
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y) && !disableInterrupt}
   val intrVec = Cat(debugIntr && !debugMode, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
-  val intrBitSet = intrVec.orR()
+  val intrBitSet = intrVec.orR
   csrio.interrupt := intrBitSet
   // Page 45 in RISC-V Privileged Specification
   // The WFI instruction can also be executed when interrupts are disabled. The operation of WFI
@@ -1003,7 +1011,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
   val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val exceptionNO = Mux(hasSingleStep || hasTriggerHit, 3.U, regularExceptionNO)
-  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
+  val causeNO = (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionIntr = csrio.exception.valid
 

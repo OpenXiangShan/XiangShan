@@ -745,7 +745,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (canEnqueue(i)) {
       val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
       val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
-      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove || io.enq.req(i).bits.ctrl.isWFI
+      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
       writebacked(enqPtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
