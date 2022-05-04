@@ -252,7 +252,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
-    val doesNotNeedExec = io.fromRename(i).bits.eliminatedMove || io.fromRename(i).bits.ctrl.isWFI
+    val doesNotNeedExec = io.fromRename(i).bits.eliminatedMove
     io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !doesNotNeedExec
     io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && !doesNotNeedExec &&
                                canEnterDpq && io.toFpDq.canAccept && io.toLsDq.canAccept
