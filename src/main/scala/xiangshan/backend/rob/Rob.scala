@@ -49,11 +49,12 @@ object RobPtr {
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
-  val isXRet = Input(Bool())
+  val isXRet     = Input(Bool())
+  val wfiEvent   = Input(Bool())
 
-  val fflags = Output(Valid(UInt(5.W)))
-  val dirty_fs = Output(Bool())
-  val perfinfo = new Bundle {
+  val fflags     = Output(Valid(UInt(5.W)))
+  val dirty_fs   = Output(Bool())
+  val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
   }
 }
@@ -100,7 +101,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && ((!io.hasNoSpecExec && io.interrupt_safe) || io.hasWFI)
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
   val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
@@ -374,19 +375,19 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
   val doingSvinval = RegInit(false.B)
-  val state_wfi = RegInit(0.U(2.W))
-  val hasWFI = state_wfi === 2.U
-  io.cpu_halt := hasWFI
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
-  when (io.exception.valid) {
-    state_wfi := 0.U
-  }
-  when (state_wfi === 1.U && io.commits.valid.asUInt.orR) {
-    state_wfi := 2.U
+
+  // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
+  // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
+  // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
+  val hasWFI = RegInit(false.B)
+  io.cpu_halt := hasWFI
+  when (RegNext(RegNext(io.csr.wfiEvent))) {
+    hasWFI := false.B
   }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
@@ -425,7 +426,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
         FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
       when (enqUop.ctrl.isWFI) {
-        state_wfi := 1.U
+        hasWFI := true.B
       }
     }
   }
@@ -469,7 +470,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && ((!hasNoSpecExec && interrupt_safe(deqPtr.value)) || hasWFI)
+  val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
     exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)

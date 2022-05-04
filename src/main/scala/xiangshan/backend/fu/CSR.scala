@@ -114,6 +114,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val isXRet = Output(Bool())
   val trapTarget = Output(UInt(VAddrBits.W))
   val interrupt = Output(Bool())
+  val wfi_event = Output(Bool())
   // from LSQ
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   // from outside cpu,externalInterrupt
@@ -959,6 +960,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val intrVec = Cat(debugIntr && !debugMode, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
   val intrBitSet = intrVec.orR()
   csrio.interrupt := intrBitSet
+  // Page 45 in RISC-V Privileged Specification
+  // The WFI instruction can also be executed when interrupts are disabled. The operation of WFI
+  // must be unaffected by the global interrupt bits in mstatus (MIE and SIE) and the delegation
+  // register mideleg, but should honor the individual interrupt enables (e.g, MTIE).
+  csrio.wfi_event := (mie(11, 0) & mip.asUInt).orR
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
