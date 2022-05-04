@@ -194,6 +194,7 @@ package object xiangshan {
     def wrti = "b101".U
     def seti = "b110".U
     def clri = "b111".U
+    def needAccess(op: UInt): Bool = op(1, 0) =/= 0.U
   }
 
   // jump
