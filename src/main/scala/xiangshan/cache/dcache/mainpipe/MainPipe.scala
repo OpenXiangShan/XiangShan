@@ -283,7 +283,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       )
     )
   )
-  assert(!RegNext(s1_fire && PopCount(s1_tag_match_way) > 1.U))
+  assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
   val s1_tag = Mux(
     s1_req.replace,
     get_tag(s1_req.addr),
