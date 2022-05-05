@@ -329,7 +329,7 @@ class XiangShan(object):
 def get_free_cores(n):
     while True:
         # To avoid potential conflicts, we allow CI to use SMT.
-        num_logical_core = psutil.cpu_count(logical=True)
+        num_logical_core = psutil.cpu_count(logical=False)
         core_usage = psutil.cpu_percent(interval=1, percpu=True)
         num_window = num_logical_core // n
         for i in range(num_window):
