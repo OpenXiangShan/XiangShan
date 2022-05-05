@@ -503,7 +503,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val hit_0_hit_1_latch        = holdReleaseLatch(valid = hit_0_hit_1,   release = s2_fire,      flush = false.B)
 
 
-  /*** secondary miss judegment ***/
+  /*** secondary miss judgment ***/
 
   def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 

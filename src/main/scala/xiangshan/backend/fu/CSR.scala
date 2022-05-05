@@ -768,7 +768,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ))
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
-    (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U)
+    (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
+    addr === Mip.U
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
@@ -1124,7 +1125,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
+  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", cfIn.pc)
 
   // Distributed CSR update req
   //
