@@ -285,33 +285,23 @@ class XiangShan(object):
 
     def __get_ci_workloads(self, name):
         workloads = {
+            "coremark": "coremark-riscv64-xs-southlake.bin",
+            "microbench": "microbench-riscv64-xs-southlake.bin",
             "linux-hello": "bbl.bin",
-            "linux-hello-smp": "bbl.bin",
-            "povray": "_700480000000_.gz",
-            "mcf": "_17520000000_.gz",
-            "xalancbmk": "_266100000000_.gz",
-            "gcc": "_39720000000_.gz",
-            "namd": "_434640000000_.gz",
-            "milc": "_103620000000_.gz",
-            "lbm": "_140840000000_.gz",
-            "gromacs": "_275480000000_.gz",
-            "wrf": "_1916220000000_.gz",
-            "astar": "_122060000000_.gz"
         }
-        return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
+        return [os.path.join("/nfs-nvme/home/share/debug/southlake", name, workloads[name])]
 
     def run_ci(self, test):
         all_tests = {
-            "cputest": self.__get_ci_cputest,
-            "riscv-tests": self.__get_ci_rvtest,
-            "misc-tests": self.__get_ci_misc,
-            "mc-tests": self.__get_ci_mc,
-            "nodiff-tests": self.__get_ci_nodiff,
-            "microbench": self.__am_apps_path,
-            "coremark": self.__am_apps_path
+            # "cputest": self.__get_ci_cputest,
+            # "riscv-tests": self.__get_ci_rvtest,
+            # "misc-tests": self.__get_ci_misc,
+            # "mc-tests": self.__get_ci_mc,
+            # "nodiff-tests": self.__get_ci_nodiff,
+            # "microbench": self.__am_apps_path,
+            # "coremark": self.__am_apps_path
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
-            print(target)
             ret = self.run_emu(target)
             if ret:
                 if self.args.default_wave_home != self.args.wave_home:
