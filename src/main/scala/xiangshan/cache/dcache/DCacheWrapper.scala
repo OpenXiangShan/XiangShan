@@ -649,13 +649,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // assertions
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {
-    assert(bus.a.bits.address >= 0x80000000L.U)
+    assert(bus.a.bits.address >= 0x2000000000L.U)
   }
   when (bus.b.fire()) {
-    assert(bus.b.bits.address >= 0x80000000L.U)
+    assert(bus.b.bits.address >= 0x2000000000L.U)
   }
   when (bus.c.fire()) {
-    assert(bus.c.bits.address >= 0x80000000L.U)
+    assert(bus.c.bits.address >= 0x2000000000L.U)
   }
 
   //----------------------------------------

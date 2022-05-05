@@ -563,7 +563,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       fakeRAM.clk   := clock
       fakeRAM.en    := allocated(ptr) && committed(ptr) && !mmio(ptr)
       fakeRAM.rIdx  := 0.U
-      fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
+      fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h2000000000".U) >> 3
       fakeRAM.wdata := dataModule.io.rdata(i).data
       fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
       fakeRAM.wen   := allocated(ptr) && committed(ptr) && !mmio(ptr)

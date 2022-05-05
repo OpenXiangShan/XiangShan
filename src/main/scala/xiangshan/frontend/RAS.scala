@@ -69,7 +69,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top = RegInit(RASEntry(0x80000000L.U, 0.U))
+    val top = RegInit(RASEntry(0.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
 
     def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
@@ -138,7 +138,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
     val do_reset = RegInit(true.B)
     when (do_reset) {
-      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
+      stack.write(resetIdx, RASEntry(0.U, 0.U))
     }
     resetIdx := resetIdx + do_reset
     when (resetIdx === (RasSize-1).U) {
