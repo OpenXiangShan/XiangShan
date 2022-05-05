@@ -230,6 +230,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
+    val cpu_halt = Output(Bool())
     val frontend = Flipped(new FrontendToCtrlIO)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
@@ -456,6 +457,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 
   rob.io.hartId := io.hartId
+  io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
   rob.io.redirect <> stage2Redirect
   outer.rob.generateWritebackIO(Some(outer), Some(this))
 

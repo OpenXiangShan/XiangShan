@@ -49,11 +49,12 @@ object RobPtr {
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
-  val isXRet = Input(Bool())
+  val isXRet     = Input(Bool())
+  val wfiEvent   = Input(Bool())
 
-  val fflags = Output(Valid(UInt(5.W)))
-  val dirty_fs = Output(Bool())
-  val perfinfo = new Bundle {
+  val fflags     = Output(Valid(UInt(5.W)))
+  val dirty_fs   = Output(Bool())
+  val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
   }
 }
@@ -90,6 +91,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val interrupt_safe = Input(Bool())
     val misPredBlock = Input(Bool())
     val isReplaying = Input(Bool())
+    val hasWFI = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RobPtr))
     val next_out = Vec(CommitWidth, Output(new RobPtr))
@@ -106,7 +108,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.robIdx, deqPtrVec.last)
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying && !io.hasWFI))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg or there're possible exceptions in these instructions,
   // only one instruction is allowed to commit
@@ -285,6 +287,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
     val robFull = Output(Bool())
+    val cpu_halt = Output(Bool())
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -378,6 +381,15 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // When any instruction commits, hasNoSpecExec should be set to false.B
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
 
+  // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
+  // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
+  // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
+  val hasWFI = RegInit(false.B)
+  io.cpu_halt := hasWFI
+  when (RegNext(RegNext(io.csr.wfiEvent))) {
+    hasWFI := false.B
+  }
+
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.resp      := enqPtrVec
   val canEnqueue = VecInit(io.enq.req.map(_.valid && io.enq.canAccept))
@@ -405,7 +417,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       {
         doingSvinval := true.B
       }
-      // the end instruction of Svinval enqs so clear doingSvinval 
+      // the end instruction of Svinval enqs so clear doingSvinval
       when(!enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := false.B
@@ -413,6 +425,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
       assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
         FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
+      when (enqUop.ctrl.isWFI) {
+        hasWFI := true.B
+      }
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
@@ -556,7 +571,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush && !hasWFI
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {
@@ -635,9 +650,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
-
   deqPtrGenModule.io.misPredBlock := misPredBlock
   deqPtrGenModule.io.isReplaying := isReplaying
+  deqPtrGenModule.io.hasWFI := hasWFI
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 
@@ -729,7 +744,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (canEnqueue(i)) {
       val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
       val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
-      writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !enqHasException && !enqHasTriggerHit
+      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
+      writebacked(enqPtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
     }
@@ -988,7 +1004,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       runahead_commit.io.clock := clock
       runahead_commit.io.coreid := io.hartId
       runahead_commit.io.index := i.U
-      runahead_commit.io.valid := difftest.io.valid && 
+      runahead_commit.io.valid := difftest.io.valid &&
         (commitBranchValid(i) || commitIsStore(i))
       // TODO: is branch or store
       runahead_commit.io.pc    := difftest.io.pc
@@ -1071,6 +1087,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+    difftest.io.hasWFI   := hasWFI
   }
   else if (env.AlwaysBasicDiff) {
     val dt_isXSTrap = Mem(RobSize, Bool())
