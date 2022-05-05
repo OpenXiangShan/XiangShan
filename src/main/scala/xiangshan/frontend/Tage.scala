@@ -737,7 +737,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       when (updateProvided) {
         updateMask(i)(updateProvider) := true.B
         updateUMask(i)(updateProvider) := updateAltDiffers
-        updateU(i)(updateProvider) := !updateMispred
+        updateU(i)(updateProvider) := updateProviderCorrect
         updateTakens(i)(updateProvider) := updateTaken
         updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
         updateAlloc(i)(updateProvider) := false.B
