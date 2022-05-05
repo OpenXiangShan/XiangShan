@@ -16,28 +16,17 @@
 
 package top
 
-import chisel3._
-import chisel3.util._
-import xiangshan._
-import utils._
-import system._
-import device._
-import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, DebugModule, TLTimer}
+import chisel3._
+import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
-import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import freechips.rocketchip.tilelink
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
-import huancun.debug.TLLogger
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import huancun.{HCCacheParamsKey, HuanCun}
-import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
+import system._
+import utils._
+import xiangshan._
 import xstransforms.ModulePrefixAnnotation
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule

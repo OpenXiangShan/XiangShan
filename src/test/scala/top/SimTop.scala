@@ -40,6 +40,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
+  l_simMMIO.io_axi4 := DontCare
   l_simMMIO.io_axi4 <> soc.peripheral
 
   if(!useDRAMSim){

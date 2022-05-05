@@ -19,19 +19,18 @@ package system
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{DebugModule, TLPMA, TLPMAIO}
-import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
-import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
-import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
-import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utils.{BinaryArbiter, TLEdgeBuffer}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
+import device.DebugModule
 import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.tilelink._
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, TransferSizes}
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.tilelink._
 import top.BusPerfMonitor
-import xiangshan.backend.fu.PMAConst
+import utils.TLEdgeBuffer
 import huancun._
 import huancun.debug.TLLogger
+import xiangshan.backend.fu.PMAConst
+import xiangshan.{DebugOptionsKey, XSTileKey}
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -201,7 +200,7 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  val peripheralBusWidth = if (debugOpts.FPGAPlatform) 32 else 8
+  val peripheralBusWidth = 32
   val peripheralRange = getAddressSet("peripheral").flatMap(_.subtract(getAddressSet("cpu_peripheral")))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
