@@ -35,7 +35,6 @@ jobs:
         run:
           tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz XSTop-Release*
 
-jobs:
   default-emu:
     runs-on: bosc
     continue-on-error: false
@@ -70,8 +69,6 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
           cat perf.log | sort
 
-
-jobs:
   release-emu:
     runs-on: bosc
     continue-on-error: false
