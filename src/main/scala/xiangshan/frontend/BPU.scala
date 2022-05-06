@@ -257,7 +257,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
   val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
 
-  val s0_pc = Wire(UInt(PAddrBits.W))
+  val s0_pc = Wire(UInt(VAddrBits.W))
   val s0_pc_reg = RegNext(s0_pc)
   val reset_vector = DelayN(io.reset_vector, 5)
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
