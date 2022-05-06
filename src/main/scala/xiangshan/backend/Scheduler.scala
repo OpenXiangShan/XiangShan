@@ -178,9 +178,12 @@ class Scheduler(
   val numIssuePorts = configs.map(_._2).sum
   val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
   val memRsEntries = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
+  val memRsNum = reservationStations.filter(_.params.hasFeedback == true).map(_.numRS)
   val getMemRsEntries = {
     require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
-    if (memRsEntries.isEmpty) 0 else memRsEntries.max
+    require(memRsNum.isEmpty || memRsNum.max == memRsNum.min, "different num not supported")
+    require(memRsNum.isEmpty || memRsNum.min != 0, "at least 1 memRs required")
+    if (memRsEntries.isEmpty) 0 else (memRsEntries.max / memRsNum.max)
   }
   val numSTDPorts = reservationStations.filter(_.params.exuCfg.get == StdExeUnitCfg).map(_.params.numDeq).sum
 
@@ -252,7 +255,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // special ports for load / store rs
     val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
