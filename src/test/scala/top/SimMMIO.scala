@@ -20,15 +20,16 @@ import chipsalliance.rocketchip.config
 import chisel3._
 import device._
 import difftest._
-import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4ToTL, AXI4UserYanker, AXI4Xbar}
+import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4SlaveNode, AXI4ToTL, AXI4UserYanker, AXI4Xbar}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLFIFOFixer, TLToAXI4, TLWidthWidget, TLXbar}
 import system.SoCParamsKey
 
-class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
+class SimMMIO(edge: AXI4EdgeParameters, dmaEdge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
 
   val node = AXI4MasterNode(List(edge.master))
+  val dma_node = AXI4SlaveNode(List(dmaEdge.slave))
 
   val bootrom0 = LazyModule(new AXI4Flash(Seq(AddressSet(0x1f80000000L, 0x3fffffff))))
   val bootrom1 = LazyModule(new AXI4Flash(Seq(AddressSet(0x1fe2000000L, 0x1fffff))))
@@ -41,6 +42,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x1f40002000L, 0xfff))))
   val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x1f10060000L, 0x0000ffffL))))
+  val dmaGen = LazyModule(new AXI4FakeDMA(Seq(AddressSet(0x1f10070000L, 0x0000ffffL)), dmaEdge.master))
 
   val axiBus = AXI4Xbar()
   val paddrBits = p(SoCParamsKey).PAddrBits
@@ -62,6 +64,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   flash.node := axiBus
   sd.node := axiBus
   intrGen.node := axiBus
+  dmaGen.node := axiBus
 
   val tlBus = TLXbar()
   tlBus :=
@@ -72,9 +75,14 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
     node
   errorDev.node := tlBus
   axiBus := AXI4UserYanker(Some(1)) := TLToAXI4() := tlBus
+  dma_node := dmaGen.dma_node
 
   val io_axi4 = InModuleBody {
     node.makeIOs()
+  }
+
+  val io_dma = InModuleBody {
+    dma_node.makeIOs()
   }
 
   lazy val module = new LazyModuleImp(this){
