@@ -42,7 +42,6 @@ trait HasBPUConst extends HasXSParameter {
   val numBpStages = BP_STAGES.length
 
   val debug = true
-  val resetVector = 0x10000000L
   // TODO: Replace log2Up by log2Ceil
 }
 
@@ -167,6 +166,7 @@ class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUC
 }
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val reset_vector = Input(UInt(PAddrBits.W))
   val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
@@ -206,10 +206,15 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s2_ready := true.B
   io.s3_ready := true.B
 
+  val reset_vector = DelayN(io.reset_vector, 5)
   val s0_pc       = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
-  val s1_pc       = RegEnable(s0_pc, resetVector.U, io.s0_fire)
+  val s1_pc       = RegEnable(s0_pc, enable=io.s0_fire)
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
+
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    s1_pc := reset_vector
+  }
 
   io.out.resp.s1.pc := s1_pc
   io.out.resp.s2.pc := s2_pc
@@ -235,6 +240,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtqIO()
   val ftq_to_bpu = Flipped(new FtqToBpuIO())
   val ctrl = Input(new BPUCtrl)
+  val reset_vector = Input(UInt(PAddrBits.W))
 }
 
 @chiselName
@@ -246,14 +252,19 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // ctrl signal
   predictors.io.ctrl := ctrl
+  predictors.io.reset_vector := io.reset_vector
 
   val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
   val s1_valid, s2_valid, s3_valid = RegInit(false.B)
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
   val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
 
-  val s0_pc = WireInit(resetVector.U)
-  val s0_pc_reg = RegNext(s0_pc, init=resetVector.U)
+  val reset_vector = DelayN(io.reset_vector, 5)
+  val s0_pc = Wire(UInt(VAddrBits.W))
+  val s0_pc_reg = RegNext(s0_pc)
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    s0_pc_reg := reset_vector
+  }
   val s1_pc = RegEnable(s0_pc, s0_fire)
   val s2_pc = RegEnable(s1_pc, s1_fire)
   val s3_pc = RegEnable(s2_pc, s2_fire)
@@ -652,7 +663,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 1)
 
   s0_pc         := npcGen()
-  s0_pc_reg     := s0_pc
+  when (!(RegNext(RegNext(reset.asBool) && !reset.asBool) )) {
+    s0_pc_reg     := s0_pc
+  }
   s0_folded_gh  := foldedGhGen()
   s0_ghist_ptr  := ghistPtrGen()
   s0_ahead_fh_oldest_bits := aheadFhObGen()
