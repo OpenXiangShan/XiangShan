@@ -971,7 +971,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // The WFI instruction can also be executed when interrupts are disabled. The operation of WFI
   // must be unaffected by the global interrupt bits in mstatus (MIE and SIE) and the delegation
   // register mideleg, but should honor the individual interrupt enables (e.g, MTIE).
-  csrio.wfi_event := (mie(11, 0) & mip.asUInt).orR
+  csrio.wfi_event := debugIntr || (mie(11, 0) & mip.asUInt).orR
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
