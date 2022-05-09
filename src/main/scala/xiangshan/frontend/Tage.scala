@@ -548,7 +548,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
     VecInit(Seq.fill(numBr)(
-      VecInit(Seq.fill(USE_ALT_ON_NA_WIDTH)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
+      VecInit(Seq.fill(NUM_USE_ALT_ON_NA)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
     ))
   )
 
@@ -737,7 +737,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       when (updateProvided) {
         updateMask(i)(updateProvider) := true.B
         updateUMask(i)(updateProvider) := updateAltDiffers
-        updateU(i)(updateProvider) := !updateMispred
+        updateU(i)(updateProvider) := updateProviderCorrect
         updateTakens(i)(updateProvider) := updateTaken
         updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
         updateAlloc(i)(updateProvider) := false.B
