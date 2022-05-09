@@ -40,6 +40,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
+    val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO(6)
     val backend = new FrontendToCtrlIO
@@ -167,6 +169,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
   instrUncache.io.flush := false.B
   io.error <> RegNext(RegNext(icache.io.error))
+
+  icache.io.hartId := io.hartId
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)

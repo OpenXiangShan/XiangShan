@@ -261,6 +261,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
+  frontend.io.hartId  := io.hartId
   ctrlBlock.io.hartId := io.hartId
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId

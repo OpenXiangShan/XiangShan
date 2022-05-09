@@ -27,6 +27,7 @@ import xiangshan._
 import huancun.{AliasKey, DirtyKey}
 import xiangshan.cache._
 import utils._
+import difftest._
 
 
 abstract class ICacheMissUnitModule(implicit p: Parameters) extends XSModule
@@ -251,7 +252,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   dataWriteEn.zipWithIndex.map{ case(wen,i) => 
     wen := state_dup(i) === s_write_back
   }
-  io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0), writeEn = dataWriteEn)
+  io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0), writeEn = dataWriteEn, paddr = req.paddr)
 
   XSPerfAccumulate(
     "entryPenalty" + Integer.toString(id, 10),
@@ -268,6 +269,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissUnitModule
 {
   val io = IO(new Bundle{
+    val hartId      = Input(UInt(8.W))
     val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
     val resp        = Vec(2, ValidIO(new ICacheMissResp))
 
@@ -367,6 +369,16 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
   io.release_req    <> release_arb.io.out
+
+  if (env.EnableDifftest) {
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.cacheid := 0.U
+    difftest.io.valid := refill_arb.io.out.valid
+    difftest.io.addr := refill_arb.io.out.bits.paddr
+    difftest.io.data := refill_arb.io.out.bits.data.asTypeOf(difftest.io.data)
+  }
 
   (0 until nWays).map{ w =>
     XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)
