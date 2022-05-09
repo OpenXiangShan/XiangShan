@@ -63,12 +63,14 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
   val data    = UInt(blockBits.W)
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
+  val paddr   = UInt(PAddrBits.W)
 
-  def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool, paddr: UInt){
     this.virIdx  := idx
     this.data    := data
     this.waymask := waymask
     this.bankIdx := bankIdx
+    this.paddr   := paddr
   }
 
 }
