@@ -85,7 +85,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // customized cache op port 
     val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
-  assert(LoadPipelineWidth <= 2) // BankedDataArray is designed for no more than 2 read ports
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -256,43 +255,43 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(bank_result)
   val read_bank_error = Wire(Vec(DCacheBanks, Bool()))
   dontTouch(read_bank_error)
-  val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
-  val rrl_bank_conflict_0 = Wire(Bool())
-  val rrl_bank_conflict_1 = Wire(Bool())
+  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
+    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid
+  ))
+  val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
-    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
-    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
   } else {
-    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid
-    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid)
   }
-  
-  val rw_bank_conflict_0 = io.read(0).valid && rwhazard
-  val rw_bank_conflict_1 = io.read(1).valid && rwhazard
-  val perf_multi_read = io.read(0).valid && io.read(1).valid
-  io.bank_conflict_fast(0) := rw_bank_conflict_0 || rrl_bank_conflict_0
-  io.bank_conflict_slow(0) := RegNext(io.bank_conflict_fast(0))
-  io.bank_conflict_fast(1) := rw_bank_conflict_1 || rrl_bank_conflict_1 || rr_bank_conflict
-  io.bank_conflict_slow(1) := RegNext(io.bank_conflict_fast(1))
+
+  val rw_bank_conflict = VecInit(Seq.tabulate(LoadPipelineWidth)(io.read(_).valid && rwhazard))
+  val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
+  (0 until LoadPipelineWidth).foreach(i => {
+    io.bank_conflict_fast(i) := rw_bank_conflict(i) || rrl_bank_conflict(i) ||
+      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
+    io.bank_conflict_slow(i) := RegNext(io.bank_conflict_fast(i))
+  })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
-  XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict)
-  XSPerfAccumulate("data_array_rrl_bank_conflict_0", rrl_bank_conflict_0)
-  XSPerfAccumulate("data_array_rrl_bank_conflict_1", rrl_bank_conflict_1)
-  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict_0)
-  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict_1)
-  XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid)
-  XSPerfAccumulate("data_array_read_0", io.read(0).valid)
-  XSPerfAccumulate("data_array_read_1", io.read(1).valid)
+  (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
+    XSPerfAccumulate(s"data_array_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y))
+  ))
+  (0 until LoadPipelineWidth).foreach(i => {
+    XSPerfAccumulate(s"data_array_rrl_bank_conflict_${i}", rrl_bank_conflict(i))
+    XSPerfAccumulate(s"data_array_rw_bank_conflict_${i}", rw_bank_conflict(i))
+    XSPerfAccumulate(s"data_array_read_${i}", io.read(i).valid)
+  })
+  XSPerfAccumulate("data_array_access_total", PopCount(io.read.map(_.valid)))
   XSPerfAccumulate("data_array_read_line", io.readline.valid)
   XSPerfAccumulate("data_array_write", io.write.valid)
 
   for (bank_index <- 0 until DCacheBanks) {
     //     Set Addr & Read Way Mask
     //
-    //      Pipe 0      Pipe 1
-    //        +           +
-    //        |           |
-    // +------+-----------+-------+
+    //    Pipe 0   ....  Pipe (n-1)
+    //      +      ....     +
+    //      |      ....     |
+    // +----+---------------+-----+
     //  X                        X
     //   X                      +------+ Bank Addr Match
     //    +---------+----------+
@@ -311,11 +310,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     val bank_way_en = Mux(readline_match,
       io.readline.bits.way_en,
-      Mux(bank_addr_matchs(0), way_en(0), way_en(1))
+      PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> way_en(i)))
     )
     val bank_set_addr = Mux(readline_match,
       addr_to_dcache_set(io.readline.bits.addr),
-      Mux(bank_addr_matchs(0), set_addrs(0), set_addrs(1))
+      PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
     )
 
     // read raw data

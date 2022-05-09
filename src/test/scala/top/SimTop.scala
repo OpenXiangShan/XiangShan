@@ -59,6 +59,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.sram_config := 0.U
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
+  soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)

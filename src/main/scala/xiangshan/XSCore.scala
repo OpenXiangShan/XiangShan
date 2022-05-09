@@ -153,7 +153,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.JmpCnt == 1)
   require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
   require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
-  require(exuParameters.LduCnt == 2 && exuParameters.StuCnt == 2)
+  require(exuParameters.LduCnt == exuParameters.StuCnt) // TODO: remove this limitation
 
   // one RS every 2 MDUs
   val schedulePorts = Seq(
@@ -197,12 +197,9 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
-  val lsDpPorts = Seq(
-    Seq((3, 0)),
-    Seq((3, 1)),
-    Seq((4, 0)),
-    Seq((4, 1))
-  ) ++ (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
+  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq((3, i))) ++
+                  (0 until exuParameters.StuCnt).map(i => Seq((4, i))) ++
+                  (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
     if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((0, i))
@@ -211,7 +208,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts)
 
   val outIntRfReadPorts = Seq(0, 0)
-  val outFpRfReadPorts = Seq(0, 2)
+  val outFpRfReadPorts = Seq(0, StorePipelineWidth)
   val hasIntRf = Seq(true, false)
   val hasFpRf = Seq(false, true)
   val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
@@ -221,7 +218,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = exuBlocks.head.scheduler.memRsEntries.max
+      IssQueSize = exuBlocks.head.scheduler.getMemRsEntries
     )
   })))
 
@@ -243,6 +240,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
+    val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
@@ -264,6 +262,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
+  frontend.io.reset_vector := io.reset_vector
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 

@@ -63,8 +63,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val dcacheRequireReplay = Vec(LoadPipelineWidth, Input(Bool()))
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr))
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
@@ -80,7 +80,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val lqFull = Output(Bool())
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(2.W))
+    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
@@ -210,7 +210,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     val enq = new LsqEnqIO
     // from rob
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    // from `memBlock.io.sqDeq`
+    val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     // from/tp lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))

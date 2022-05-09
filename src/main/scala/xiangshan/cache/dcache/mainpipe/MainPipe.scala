@@ -488,11 +488,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       when (s3_sc_fail) {
         debug_sc_fail_addr := s3_req.addr
         debug_sc_fail_cnt  := 1.U
+        XSWarn(s3_sc_fail === 100.U, p"L1DCache failed too many SCs in a row 0x${Hexadecimal(debug_sc_fail_addr)}, check if sth went wrong\n")
       }
     }
   }
-  assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
-
+  // assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
 
   val banked_amo_wmask = UIntToOH(s3_req.word_idx)
 //  val banked_wmask = s3_banked_store_wmask

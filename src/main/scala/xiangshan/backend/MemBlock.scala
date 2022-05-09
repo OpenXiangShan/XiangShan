@@ -95,7 +95,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(2.W))
+    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -270,7 +270,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
 
-    // laod to load fast forward
+    // load to load fast forward
     for (j <- 0 until exuParameters.LduCnt) {
       loadUnits(i).io.fastpathIn(j) <> loadUnits(j).io.fastpathOut
     }
@@ -422,7 +422,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
 
     // when atom inst writeback, surpress normal load trigger
-    (0 until 2).map(i => {
+    (0 until exuParameters.LduCnt).map(i => {
       io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
@@ -459,41 +459,39 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
-  val s_normal :: s_atomics_0 :: s_atomics_1 :: Nil = Enum(3)
+  val s_normal +: s_atomics = Enum(exuParameters.StuCnt + 1)
   val state = RegInit(s_normal)
 
-  val atomic_rs0  = exuParameters.LduCnt + 0
-  val atomic_rs1  = exuParameters.LduCnt + 1
-  val st0_atomics = io.issue(atomic_rs0).valid && FuType.storeIsAMO(io.issue(atomic_rs0).bits.uop.ctrl.fuType)
-  val st1_atomics = io.issue(atomic_rs1).valid && FuType.storeIsAMO(io.issue(atomic_rs1).bits.uop.ctrl.fuType)
+  val atomic_rs = (0 until exuParameters.StuCnt).map(exuParameters.LduCnt + _)
+  val st_atomics = Seq.tabulate(exuParameters.StuCnt)(i =>
+    io.issue(atomic_rs(i)).valid && FuType.storeIsAMO((io.issue(atomic_rs(i)).bits.uop.ctrl.fuType))
+  )
 
-  val st0_data_atomics = stData(0).valid && FuType.storeIsAMO(stData(0).bits.uop.ctrl.fuType)
-  val st1_data_atomics = stData(1).valid && FuType.storeIsAMO(stData(1).bits.uop.ctrl.fuType)
+  val st_data_atomics = Seq.tabulate(exuParameters.StuCnt)(i =>
+    stData(i).valid && FuType.storeIsAMO(stData(i).bits.uop.ctrl.fuType)
+  )
 
-  when (st0_atomics) {
-    io.issue(atomic_rs0).ready := atomicsUnit.io.in.ready
-    storeUnits(0).io.stin.valid := false.B
+  for (i <- 0 until exuParameters.StuCnt) when(st_atomics(i)) {
+    io.issue(atomic_rs(i)).ready := atomicsUnit.io.in.ready
+    storeUnits(i).io.stin.valid := false.B
 
-    state := s_atomics_0
-    assert(!st1_atomics)
-  }
-  when (st1_atomics) {
-    io.issue(atomic_rs1).ready := atomicsUnit.io.in.ready
-    storeUnits(1).io.stin.valid := false.B
-
-    state := s_atomics_1
-    assert(!st0_atomics)
+    state := s_atomics(i)
+    if (exuParameters.StuCnt > 1)
+      assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
-    assert(state === s_atomics_0 || state === s_atomics_1)
+    assert((0 until exuParameters.StuCnt).map(state === s_atomics(_)).reduce(_ || _))
     state := s_normal
   }
 
-  atomicsUnit.io.in.valid := st0_atomics || st1_atomics
-  atomicsUnit.io.in.bits  := Mux(st0_atomics, io.issue(atomic_rs0).bits, io.issue(atomic_rs1).bits)
-  atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
-  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, stData(0).bits, stData(1).bits)
-  atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsfeedback(atomic_rs0).rsIdx, io.rsfeedback(atomic_rs1).rsIdx)
+  atomicsUnit.io.in.valid := st_atomics.reduce(_ || _)
+  atomicsUnit.io.in.bits  := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
+    st_atomics(i) -> io.issue(atomic_rs(i)).bits))
+  atomicsUnit.io.storeDataIn.valid := st_data_atomics.reduce(_ || _)
+  atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
+    st_data_atomics(i) -> stData(i).bits))
+  atomicsUnit.io.rsIdx    := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
+    st_atomics(i) -> io.rsfeedback(atomic_rs(i)).rsIdx))
   atomicsUnit.io.redirect <> io.redirect
 
   // TODO: complete amo's pmp support
@@ -510,7 +508,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
-  when (state === s_atomics_0 || state === s_atomics_1) {
+  when (state =/= s_normal) {
     loadUnits(0).io.ldout.ready := false.B
     atomicsUnit.io.dtlb <> amoTlb
 
@@ -518,15 +516,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!loadUnits(0).io.ldout.valid)
   }
 
-  when (state === s_atomics_0) {
-    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs0).feedbackSlow
+  for (i <- 0 until exuParameters.StuCnt) when (state === s_atomics(i)) {
+    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs(i)).feedbackSlow
 
-    assert(!storeUnits(0).io.feedbackSlow.valid)
-  }
-  when (state === s_atomics_1) {
-    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs1).feedbackSlow
-
-    assert(!storeUnits(1).io.feedbackSlow.valid)
+    assert(!storeUnits(i).io.feedbackSlow.valid)
   }
 
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
@@ -546,13 +539,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
-  val ldDeqCount = PopCount(io.issue.take(2).map(_.valid))
-  val stDeqCount = PopCount(io.issue.drop(2).map(_.valid))
+  val ldDeqCount = PopCount(io.issue.take(exuParameters.LduCnt).map(_.valid))
+  val stDeqCount = PopCount(io.issue.drop(exuParameters.LduCnt).map(_.valid))
   val rsDeqCount = ldDeqCount + stDeqCount
   XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
-  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)
+  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 0, exuParameters.LduCnt, 1)
   XSPerfAccumulate("store_rs_deq_count", stDeqCount)
-  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
+  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 0, exuParameters.StuCnt, 1)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
 
   val pfevent = Module(new PFEvent)
