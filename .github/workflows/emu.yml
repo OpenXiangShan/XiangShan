@@ -18,10 +18,9 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p $WAVE_HOME
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -45,10 +44,9 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p $WAVE_HOME
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -79,10 +77,9 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p $WAVE_HOME
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
