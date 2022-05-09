@@ -433,6 +433,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
+  val hartId = Input(UInt(8.W))
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
@@ -566,7 +567,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
-
+  missUnit.io.hartId       := io.hartId
   prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
 
   bus.b.ready := false.B
