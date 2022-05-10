@@ -412,21 +412,22 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       when (enqUop.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
       val enqHasException = ExceptionNO.selectFrontend(enqUop.cf.exceptionVec).asUInt.orR
       // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!enqHasException && FuType.isSvinvalBegin(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
+      when(!enqHasTriggerHit && !enqHasException && FuType.isSvinvalBegin(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := true.B
       }
-      // the end instruction of Svinval enqs so clear doingSvinval 
-      when(!enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
+      // the end instruction of Svinval enqs so clear doingSvinval
+      when(!enqHasTriggerHit && !enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
       assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
         FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
-      when (enqUop.ctrl.isWFI) {
+      when (enqUop.ctrl.isWFI && !enqHasException && !enqHasTriggerHit) {
         hasWFI := true.B
       }
     }
@@ -1005,7 +1006,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       runahead_commit.io.clock := clock
       runahead_commit.io.coreid := io.hartId
       runahead_commit.io.index := i.U
-      runahead_commit.io.valid := difftest.io.valid && 
+      runahead_commit.io.valid := difftest.io.valid &&
         (commitBranchValid(i) || commitIsStore(i))
       // TODO: is branch or store
       runahead_commit.io.pc    := difftest.io.pc
