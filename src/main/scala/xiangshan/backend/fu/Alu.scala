@@ -388,7 +388,6 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
   redirectOut.cfiUpdate.isMisPred := dataModule.io.mispredict
   redirectOut.cfiUpdate.taken := dataModule.io.taken
   redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
-  redirectOut.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid

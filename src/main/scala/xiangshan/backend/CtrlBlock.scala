@@ -184,16 +184,16 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   XSError(io.memPredUpdate.valid && RegNext(s1_real_pc_from_frontend) =/= RegNext(real_pc), "s1_real_pc error")
 
-  // recover runahead checkpoint if redirect
-  if (!env.FPGAPlatform) {
-    val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
-    runahead_redirect.io.clock := clock
-    runahead_redirect.io.coreid := io.hartId
-    runahead_redirect.io.valid := io.stage3Redirect.valid
-    runahead_redirect.io.pc :=  s2_pc // for debug only
-    runahead_redirect.io.target_pc := s2_target // for debug only
-    runahead_redirect.io.checkpoint_id := io.stage3Redirect.bits.debug_runahead_checkpoint_id // make sure it is right
-  }
+  // // recover runahead checkpoint if redirect
+  // if (!env.FPGAPlatform) {
+  //   val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
+  //   runahead_redirect.io.clock := clock
+  //   runahead_redirect.io.coreid := io.hartId
+  //   runahead_redirect.io.valid := io.stage3Redirect.valid
+  //   runahead_redirect.io.pc :=  s2_pc // for debug only
+  //   runahead_redirect.io.target_pc := s2_target // for debug only
+  //   runahead_redirect.io.checkpoint_id := io.stage3Redirect.bits.debug_runahead_checkpoint_id // make sure it is right
+  // }
 }
 
 class CtrlBlock(implicit p: Parameters) extends LazyModule
