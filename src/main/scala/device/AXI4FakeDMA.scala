@@ -189,7 +189,7 @@ class AXI4FakeDMA
     out.ar.bits.id := OHToUInt(out_read_index)
     out.ar.bits.addr := out_read_req.addr
     out.ar.bits.len := axi_len.U
-    out.ar.bits.size := log2Ceil(dmaReqBytes).U
+    out.ar.bits.size := log2Ceil(dmaBeatBytes).U
     out.ar.bits.burst := AXI4Parameters.BURST_INCR
 
     // DMA master WRIET Request
@@ -201,7 +201,7 @@ class AXI4FakeDMA
     out.aw.bits.id := OHToUInt(out_write_index)
     out.aw.bits.addr := out_write_req.addr
     out.aw.bits.len := axi_len.U
-    out.aw.bits.size := log2Ceil(dmaReqBytes).U
+    out.aw.bits.size := log2Ceil(dmaBeatBytes).U
     out.aw.bits.burst := AXI4Parameters.BURST_INCR
 
     // DMA master READ/WRITE handshake
