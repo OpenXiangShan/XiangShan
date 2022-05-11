@@ -144,6 +144,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -179,15 +180,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := reset_sync
 
-    // TODO: use synchronizer?
-    misc.module.debug_module_io.debugIO.reset := io.systemjtag.reset
+    misc.module.debug_module_io.debugIO.reset := jtag_reset_sync
     misc.module.debug_module_io.debugIO.clock := io.clock.asClock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
     misc.module.debug_module_io.debugIO.systemjtag.foreach { x =>
       x.jtag        <> io.systemjtag.jtag
-      x.reset       := io.systemjtag.reset
+      x.reset       := jtag_reset_sync
       x.mfr_id      := io.systemjtag.mfr_id
       x.part_number := io.systemjtag.part_number
       x.version     := io.systemjtag.version
