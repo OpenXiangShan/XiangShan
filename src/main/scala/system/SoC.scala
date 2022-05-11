@@ -293,6 +293,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
+    val rtc_clock = IO(Input(Bool()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
@@ -302,6 +303,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs_wire.asBools
+
+    clint.module.io.rtcTick := rtc_clock
+    
     pma.module.io <> cacheable_check
 
     val freq = 100
