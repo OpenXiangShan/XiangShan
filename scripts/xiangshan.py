@@ -79,6 +79,7 @@ class XSArgs(object):
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
+        self.ram_size = args.ram_size
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
         self.diff = args.diff
@@ -128,7 +129,8 @@ class XSArgs(object):
         emu_args = [
             (self.max_instr, "max-instr"),
             (self.diff,      "diff"),
-            (self.seed,      "seed")
+            (self.seed,      "seed"),
+            (self.ram_size,  "ram-size"),
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
         return args
@@ -422,6 +424,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
+    parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
 
     args = parser.parse_args()
 

@@ -1020,15 +1020,15 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
 
-      // runahead commit hint
-      val runahead_commit = Module(new DifftestRunaheadCommitEvent)
-      runahead_commit.io.clock := clock
-      runahead_commit.io.coreid := io.hartId
-      runahead_commit.io.index := i.U
-      runahead_commit.io.valid := difftest.io.valid &&
-        (commitBranchValid(i) || commitIsStore(i))
-      // TODO: is branch or store
-      runahead_commit.io.pc    := difftest.io.pc
+      // // runahead commit hint
+      // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
+      // runahead_commit.io.clock := clock
+      // runahead_commit.io.coreid := io.hartId
+      // runahead_commit.io.index := i.U
+      // runahead_commit.io.valid := difftest.io.valid &&
+      //   (commitBranchValid(i) || commitIsStore(i))
+      // // TODO: is branch or store
+      // runahead_commit.io.pc    := difftest.io.pc
     }
   }
   else if (env.AlwaysBasicDiff) {

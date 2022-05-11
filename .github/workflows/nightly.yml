@@ -34,49 +34,57 @@ jobs:
             --with-dramsim3 --threads 16 --spike
       - name: Random Checkpoint 0
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_0.txt
       - name: Random Checkpoint 1
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_1.txt
       - name: Random Checkpoint 2
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_2.txt
       - name: Random Checkpoint 3
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_3.txt
       - name: Random Checkpoint 4
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_4.txt
       - name: Random Checkpoint 5
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_5.txt
       - name: Random Checkpoint 6
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_6.txt
       - name: Random Checkpoint 7
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py         \
-            --wave-dump $WAVE_HOME --threads 16 --numa           \
-            --spike --ci random --timeout 3600 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
+            --wave-dump $WAVE_HOME --threads 16 --numa             \
+            --spike --ci random --timeout 3600 --ram-size=16GB     \
+            2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_7.txt
