@@ -19,17 +19,27 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class ResetGen extends Module {
-  val io = IO(new Bundle() {
-    val out = Output(Reset())
-  })
+// Async reset requires carefully synchronization of the reset deassertion.
+class RST_SYNC_NO_DFT(SYNC_NUM: Int = 2) extends Module {
+  val o_reset = IO(Output(AsyncReset()))
 
-  io.out := RegNext(RegNext(reset))
+  val pipe_reset = RegInit(((1L << SYNC_NUM) - 1).U(SYNC_NUM.W))
+  pipe_reset := Cat(pipe_reset(SYNC_NUM - 2, 0), 0.U(1.W))
+
+  // deassertion of the reset needs to be synchronized.
+  o_reset := pipe_reset(SYNC_NUM - 1).asAsyncReset
+}
+
+object RST_SYNC_NO_DFT {
+  def apply(SYNC_NUM: Int = 2): AsyncReset = {
+    val resetSync = Module(new RST_SYNC_NO_DFT(SYNC_NUM))
+    resetSync.o_reset
+  }
 }
 
 trait ResetNode
 
-case class ModuleNode(mod: MultiIOModule) extends ResetNode
+case class ModuleNode(mod: Module) extends ResetNode
 
 case class ResetGenNode(children: Seq[ResetNode]) extends ResetNode
 
@@ -43,22 +53,20 @@ object ResetGen {
         case ResetGenNode(children) =>
           val next_rst = Wire(Reset())
           withReset(reset){
-            val resetGen = Module(new ResetGen)
-            next_rst := resetGen.io.out
+            next_rst := RST_SYNC_NO_DFT()
           }
           children.foreach(child => apply(child, next_rst, sim))
       }
     }
   }
 
-  def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Reset, sim: Boolean): Seq[Reset] = {
+  def apply(resetChain: Seq[Seq[Module]], reset: Reset, sim: Boolean): Seq[Reset] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Reset()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
       if (!sim) {
         withReset(resetReg(i)) {
-          val resetGen = Module(new ResetGen)
-          resetReg(i + 1) := resetGen.io.out
+          resetReg(i + 1) := RST_SYNC_NO_DFT()
         }
       }
       resetLevel.foreach(_.reset := resetReg(i + 1))
