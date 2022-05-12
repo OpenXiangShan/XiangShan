@@ -86,7 +86,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 
   val address_map = Map(
     "peripheral"     -> (0x0080000000L, 0x1fffffffffL),
-    "cpu_peripheral" -> (0x1f00000000L, 0x1f0fffffffL),
+    "cpu_peripheral" -> (0x1f10000000L, 0x1f1fffffffL),
     "memory"         -> (0x2000000000L, 0x23ffffffffL),
   )
   def getAddressSet(name: String): Seq[AddressSet] = {
@@ -264,7 +264,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
   l3_banked_xbar := TLBuffer.chainNode(2) := l3_xbar
 
-  val clint = LazyModule(new CLINT(CLINTParams(0x1f00000000L), 8))
+  val clint = LazyModule(new CLINT(CLINTParams(0x1f10000000L), 8))
   clint.node := peripheralXbar
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
@@ -275,7 +275,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val plic = LazyModule(new TLPLIC(PLICParams(0x1f0c000000L), 8))
+  val plic = LazyModule(new TLPLIC(PLICParams(0x1f1c000000L), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode
