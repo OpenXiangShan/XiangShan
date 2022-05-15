@@ -86,7 +86,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 }
 
 @chiselName
-class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents with HasMBISTInterface {
   val io = IO(new PtwCacheIO)
 
   val ecc = Code.fromString(l2tlbParams.ecc)
@@ -124,7 +124,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1asids = Reg(Vec(l2tlbParams.l1Size, UInt(AsidLength.W)))
 
   // l2: level 1 non-leaf pte
-  val l2 = Module(new SRAMTemplate(
+  val l2 = Module(new SRAMTemplateWithMBIST(
     l2EntryType,
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
@@ -148,7 +148,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // l3: level 2 leaf pte of 4KB pages
-  val l3 = Module(new SRAMTemplate(
+  val l3 = Module(new SRAMTemplateWithMBIST(
     l3EntryType,
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
@@ -672,4 +672,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     ("out_blocked      ",  io.resp.valid && !io.resp.ready),
   )
   generatePerfEvent()
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(l2, l3)
+  connectMBIST()
 }

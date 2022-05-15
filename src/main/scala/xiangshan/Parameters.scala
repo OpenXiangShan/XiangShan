@@ -19,17 +19,15 @@ package xiangshan
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.exu._
-import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.DCacheParameters
-import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
-import xiangshan.frontend.icache.ICacheParameters
-import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import freechips.rocketchip.diplomacy.AddressSet
-import system.SoCParamsKey
 import huancun._
-import huancun.debug._
+import system.SoCParamsKey
+import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.exu._
+import xiangshan.cache.DCacheParameters
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.frontend._
+
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]

@@ -90,16 +90,32 @@ class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1
   }
 }
 
-class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
-  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false, bypassWrite: Boolean = false, debugHazardRdata: String = "rand+lastcycle") extends Module {
-  val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(gen, set, way))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
-  })
+class SRAMRawIO[T <: Data](gen: T, set: Int, way: Int) extends Bundle {
+  // WRITE
+  val wen   = Input(Bool())
+  val waddr = Input(UInt(log2Up(set).W))
+  val wmask = Input(UInt(way.W))
+  val wdata = Input(Vec(way, UInt(gen.getWidth.W)))
+  // READ
+  val ren   = Input(Bool())
+  val raddr = Input(waddr.cloneType)
+  val rdata = Output(wdata.cloneType)
+}
 
-  val wordType = UInt(gen.getWidth.W)
-  val array = SyncReadMem(set, Vec(way, wordType))
-  array.suggestName("sram")
+class SRAMFuncIO[T <: Data](gen: T, set: Int, way: Int) extends Bundle {
+  val r = Flipped(new SRAMReadBus(gen, set, way))
+  val w = Flipped(new SRAMWriteBus(gen, set, way))
+}
+
+class SRAMFuncTemplate[T <: Data](
+  gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
+  bypassWrite: Boolean = false, debugHazardRdata: String = "rand+lastcycle") extends Module {
+  val io = IO(new SRAMFuncIO(gen, set, way))
+  val sram = IO(Flipped(new SRAMRawIO(gen, set, way)))
+
+  val wordType = sram.wdata.head.cloneType
+
   val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
 
   if (shouldReset) {
@@ -115,11 +131,15 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val realRen = (if (singlePort) ren && !wen else ren)
 
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
-  val wdata = VecInit(Mux(resetState, 0.U.asTypeOf(Vec(way, gen)), io.w.req.bits.data).map(_.asTypeOf(wordType)))
+  val wdata = Mux(resetState, 0.U.asTypeOf(Vec(way, gen)), io.w.req.bits.data)
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
-  when (wen) { array.write(setIdx, wdata, waymask.asBools) }
-
-  val raw_rdata = array.read(io.r.req.bits.setIdx, realRen)
+  sram.wen   := wen
+  sram.waddr := setIdx
+  sram.wmask := waymask
+  sram.wdata := VecInit(wdata.map(_.asTypeOf(wordType)))
+  sram.ren   := ren
+  sram.raddr := io.r.req.bits.setIdx
+  val raw_rdata = sram.rdata
 
   // bypass for dual-port SRAMs
   require(!bypassWrite || bypassWrite && !singlePort)
@@ -172,7 +192,9 @@ class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4, way: Int =
 
   val nRows = set / width
 
-  val array = Module(new SRAMTemplate(gen, set=nRows, way=width*way, shouldReset=shouldReset, holdRead=holdRead, singlePort=singlePort))
+  val array = Module(new SRAMFuncTemplate(gen, set=nRows, way=width*way, shouldReset=shouldReset, holdRead=holdRead, singlePort=singlePort))
+  val sram = Module(new SRAMWrapper(gen, nRows, width*way, singlePort))
+  array.sram <> sram.io
 
   io.r.req.ready := array.io.r.req.ready
   io.w.req.ready := array.io.w.req.ready
@@ -198,22 +220,64 @@ class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4, way: Int =
 
   array.io.w.apply(wen, wdata, waddr, wmask)
 }
-class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
-  shouldReset: Boolean = false) extends Module {
-  val io = IO(new Bundle {
-    val r = Flipped(Vec(nRead, new SRAMReadBus(gen, set, way)))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
-  })
 
-  val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
-  ram.io.w <> io.w
+class SRAMWrapper[T <: Data](gen: T, set: Int, way: Int = 1, singlePort: Boolean = false) extends Module {
+  val io = IO(new SRAMRawIO(gen, set, way))
 
-  val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))
-  readArb.io.in <> io.r.map(_.req)
-  ram.io.r.req <> readArb.io.out
+  val wordType = UInt(gen.getWidth.W)
+  val array = SyncReadMem(set, Vec(way, wordType))
+  array.suggestName("sram")
+  when (io.wen) { array.write(io.waddr, io.wdata, io.wmask.asBools) }
 
-  // latch read results
-  io.r.map{ case r => {
-    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
-  }}
+  val ren = if (singlePort) io.ren && !io.wen else io.ren
+  io.rdata := array.read(io.raddr, ren)
+
+}
+
+class SRAMTemplate[T <: Data](
+  gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
+  bypassWrite: Boolean = false, debugHazardRdata: String = "rand+lastcycle") extends Module {
+  val io = IO(new SRAMFuncIO(gen, set, way))
+
+  val func_if = Module(new SRAMFuncTemplate(gen, set, way, shouldReset, holdRead, singlePort, bypassWrite, debugHazardRdata))
+  val sram = Module(new SRAMWrapper(gen, set, way, singlePort))
+
+  io.r <> func_if.io.r
+  io.w <> func_if.io.w
+  func_if.sram <> sram.io
+}
+
+class SRAMTemplateWithMBIST[T <: Data](
+  gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
+  bypassWrite: Boolean = false, debugHazardRdata: String = "rand+lastcycle")
+  extends SRAMTemplate(gen, set, way, shouldReset, holdRead, singlePort, bypassWrite, debugHazardRdata)
+    with HasMBISTInterface {
+
+  val mbist_if = Module(new MBIST2SRAM(gen, set, way, singlePort))
+  override val mbistSlaves = Seq(mbist_if)
+  connectMBIST()
+
+  mbist_if.sram := DontCare
+  // To simplify the design hierarchy, we instantiate the MUXes here.
+  when (mbist_if.mbist.get.ack) {
+    mbist_if.sram <> sram.io
+  }
+}
+
+class FoldedSRAMTemplateWithMBIST[T <: Data](gen: T, set: Int, width: Int = 4, way: Int = 1,
+                                    shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false, bypassWrite: Boolean = false)
+  extends FoldedSRAMTemplate(gen, set, width, way, shouldReset, holdRead, singlePort, bypassWrite)
+  with HasMBISTInterface {
+
+  val mbist_if = Module(new MBIST2SRAM(gen, nRows, width*way, singlePort))
+  override val mbistSlaves = Seq(mbist_if)
+  connectMBIST()
+
+  mbist_if.sram := DontCare
+  // To simplify the design hierarchy, we instantiate the MUXes here.
+  when (mbist_if.mbist.get.ack) {
+    mbist_if.sram <> sram.io
+  }
 }

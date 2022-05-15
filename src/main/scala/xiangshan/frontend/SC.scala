@@ -18,11 +18,12 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.internal.naming.chiselName
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
 
+import scala.collection.mutable.ListBuffer
 import scala.math.min
 
 trait HasSCParameter extends TageParams {
@@ -64,11 +65,11 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 
 @chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
-  extends SCModule with HasFoldedHistory {
+  extends SCModule with HasFoldedHistory with HasMBISTInterface {
   val io = IO(new SCTableIO(ctrBits))
 
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplateWithMBIST(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
@@ -163,6 +164,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     wrbypass.io.write_way_mask.map(_ := Mux1H(UIntToOH(br_pidx, numBr), per_br_update_way_mask))
   }
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(table)
+  connectMBIST()
 
   val u = io.update
   XSDebug(io.req.valid,
@@ -211,6 +214,7 @@ object SCThreshold {
 trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info = Set[FoldedHistoryInfo]()
+  val sc_mbist = ListBuffer.empty[HasMBISTSlave]
   if (EnableSC) {
     val scTables = SCTableInfos.map {
       case (nRows, ctrBits, histLen) => {
@@ -221,6 +225,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         req.bits.folded_hist := io.in.bits.folded_hist
         req.bits.ghist := DontCare
         if (!EnableSC) {t.io.update := DontCare}
+        sc_mbist += t
         t
       }
     }

@@ -29,10 +29,10 @@ trait BimParams extends HasXSParameter {
 }
 
 @chiselName
-class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils {
+class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils with HasMBISTInterface {
   val bimAddr = new TableAddr(log2Up(bimSize), 1)
 
-  val bim = Module(new SRAMTemplate(UInt(2.W), set = bimSize, way=numBr, shouldReset = false, holdRead = true))
+  val bim = Module(new SRAMTemplateWithMBIST(UInt(2.W), set = bimSize, way=numBr, shouldReset = false, holdRead = true))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(bimSize).W))
@@ -121,4 +121,6 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     XSDebug(u_valid, "newCtrs%d=%b\n", i.U, newCtrs(i))
   }
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(bim)
+  connectMBIST()
 }

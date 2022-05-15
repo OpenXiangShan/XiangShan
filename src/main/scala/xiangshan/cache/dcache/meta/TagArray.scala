@@ -19,7 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.SRAMTemplate
+import utils.{HasMBISTInterface, HasMBISTSlave, SRAMTemplateWithMBIST}
 import xiangshan.cache.CacheInstrucion._
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
@@ -35,7 +35,7 @@ class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
   val ecc = UInt(eccTagBits.W)
 }
 
-class TagArray(implicit p: Parameters) extends DCacheModule {
+class TagArray(implicit p: Parameters) extends DCacheModule with HasMBISTInterface {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new TagReadReq))
     val resp = Output(Vec(nWays, UInt(tagBits.W)))
@@ -57,10 +57,10 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
     rst_cnt := rst_cnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
+  val tag_array = Module(new SRAMTemplateWithMBIST(UInt(tagBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
-  val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
+  val ecc_array = Module(new SRAMTemplateWithMBIST(UInt(eccTagBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
   val wen = rst || io.write.valid
@@ -98,9 +98,12 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   io.read.ready := !wen
   io.ecc_write.ready := !rst
   io.ecc_read.ready := !ecc_wen
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(tag_array, ecc_array)
+  connectMBIST()
 }
 
-class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheModule {
+class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheModule with HasMBISTInterface {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))
@@ -181,4 +184,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, array(0).io.resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
   io.cacheOp.resp.bits.read_tag_ecc := Mux(io.cacheOp.resp.valid, array(0).io.ecc_resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
   // TODO: deal with duplicated array
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = array
+  connectMBIST()
 }

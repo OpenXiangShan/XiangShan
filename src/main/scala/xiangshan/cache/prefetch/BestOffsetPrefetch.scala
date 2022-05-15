@@ -143,7 +143,7 @@ class BestOffsetPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   override def cloneType: this.type = (new BestOffsetPrefetchIO).asInstanceOf[this.type]
 }
 
-class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
+class RecentRequestTable(implicit p: Parameters) extends PrefetchModule with HasMBISTInterface {
   val io = IO(new Bundle {
     val w = Flipped(DecoupledIO(UInt(PAddrBits.W)))
     val r = Flipped(new TestOffsetBundle)
@@ -173,7 +173,7 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
+  val rrTable = Module(new SRAMTemplateWithMBIST(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
@@ -211,6 +211,8 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
   XSDebug(io.w.fire(), p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
   XSDebug(io.r.req.fire(), p"rAddr=0x${Hexadecimal(rAddr)} idx=${Hexadecimal(idx(rAddr))} rData=${rData}\n")
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(rrTable)
+  connectMBIST()
 }
 
 class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {

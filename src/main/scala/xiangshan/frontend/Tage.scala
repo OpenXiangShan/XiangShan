@@ -18,18 +18,12 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.internal.naming.chiselName
 import chisel3.util._
-import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
+import xiangshan._
 
 import scala.math.min
-import scala.util.matching.Regex
-import os.followLink
 
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)
@@ -138,7 +132,7 @@ trait TBTParams extends HasXSParameter with TageParams {
 }
 
 @chiselName
-class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
+class TageBTable(implicit p: Parameters) extends XSModule with TBTParams with HasMBISTInterface {
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
     val s0_pc   = Input(UInt(VAddrBits.W))
@@ -152,7 +146,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
+  val bt = Module(new SRAMTemplateWithMBIST(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -221,15 +215,16 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), updateWayMask)
   )
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(bt)
+  connectMBIST()
 }
-
 
 @chiselName
 class TageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val tableIdx: Int
 )(implicit p: Parameters)
-  extends TageModule with HasFoldedHistory {
+  extends TageModule with HasFoldedHistory with HasMBISTInterface {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new TageReq))
     val resps = Output(Vec(numBr, Valid(new TageResp)))
@@ -302,12 +297,12 @@ class TageTable
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val us = withReset(reset.asBool || io.update.reset_u.reduce(_||_)) {
-      Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
+    Module(new FoldedSRAMTemplateWithMBIST(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
   }
 
 
   val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true)))
+    Module(new FoldedSRAMTemplateWithMBIST(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true)))
 
 
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
@@ -512,6 +507,8 @@ class TageTable
   XSDebug("Table usage:------------------------\n")
   XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = us +: table_banks
+  connectMBIST()
 }
 
 abstract class BaseTage(implicit p: Parameters) extends BasePredictor with TageParams with BPUUtils {
@@ -526,7 +523,7 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 }
 
 @chiselName
-class Tage(implicit p: Parameters) extends BaseTage {
+class Tage(implicit p: Parameters) extends BaseTage with HasMBISTInterface {
 
   val resp_meta = Wire(new TageMeta)
   override val meta_size = resp_meta.getWidth
@@ -900,7 +897,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = bt +: tables
+  // connectMBIST()
 }
 
 
-class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
+class Tage_SC(implicit p: Parameters) extends Tage with HasSC {
+  override val mbistSlaves: Seq[HasMBISTSlave] = (bt +: tables) ++ sc_mbist
+  connectMBIST()
+}

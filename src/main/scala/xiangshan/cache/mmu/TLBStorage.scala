@@ -22,6 +22,8 @@ import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
 
+import scala.collection.mutable.ListBuffer
+
 @chiselName
 class TLBFA(
   sameCycle: Boolean,
@@ -159,7 +161,7 @@ class TLBSA(
   sramSinglePort: Boolean,
   normalPage: Boolean,
   superPage: Boolean
-)(implicit p: Parameters) extends TlbModule {
+)(implicit p: Parameters) extends TlbModule with HasMBISTInterface {
   require(!superPage, "super page should use reg/fa")
   require(!sameCycle, "sram needs next cycle")
 
@@ -168,13 +170,15 @@ class TLBSA(
   io.r.req.map(_.ready := { if (sramSinglePort) !io.w.valid else true.B })
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
 
+  val mbist_slaves = ListBuffer.empty[HasMBISTSlave]
   for (i <- 0 until ports) { // duplicate sram
-    val entries = Module(new SRAMTemplate(
+    val entries = Module(new SRAMTemplateWithMBIST(
       new TlbEntry(normalPage, superPage),
       set = nSets,
       way = nWays,
       singlePort = sramSinglePort
     ))
+    mbist_slaves += entries
 
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -287,6 +291,9 @@ class TLBSA(
   }
 
   println(s"tlb_sa: nSets:${nSets} nWays:${nWays}")
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = mbist_slaves
+  connectMBIST()
 }
 
 object TlbStorage {
@@ -302,15 +309,15 @@ object TlbStorage {
     saveLevel: Boolean = false,
     normalPage: Boolean,
     superPage: Boolean
-  )(implicit p: Parameters) = {
+  )(implicit p: Parameters): (TlbStorageIO, Option[HasMBISTSlave]) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
-       storage.suggestName(s"tlb_${name}_fa")
-       storage.io
+      val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
+      storage.suggestName(s"tlb_${name}_fa")
+      (storage.io, None)
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
-       storage.suggestName(s"tlb_${name}_sa")
-       storage.io
+      val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+      storage.suggestName(s"tlb_${name}_sa")
+      (storage.io, Some(storage))
     }
   }
 }

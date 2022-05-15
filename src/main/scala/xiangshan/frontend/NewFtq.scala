@@ -25,6 +25,8 @@ import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.ImmUnion
 
+import scala.collection.mutable.ListBuffer
+
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
 ){
@@ -43,7 +45,7 @@ object FtqPtr {
   }
 }
 
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule with HasMBISTInterface {
 
   val io = IO(new Bundle() {
     val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
@@ -54,8 +56,10 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
     val wdata = Input(gen)
   })
 
+  override val mbistSlaves: Seq[HasMBISTSlave] = ListBuffer.empty[HasMBISTSlave]
   for(i <- 0 until numRead){
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplateWithMBIST(gen, FtqSize))
+    mbistSlaves.asInstanceOf[ListBuffer[HasMBISTSlave]] += sram
     sram.io.r.req.valid := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i) := sram.io.r.resp.data(0)
@@ -64,6 +68,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
     sram.io.w.req.bits.data := VecInit(io.wdata)
   }
 
+  connectMBIST()
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
@@ -421,7 +426,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
   with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents 
-  with HasICacheParameters{
+  with HasICacheParameters
+  with HasMBISTInterface
+{
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -1306,4 +1313,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ("ftb_hit                ", PopCount(ftb_hit)                                                           ),
   )
   generatePerfEvent()
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(ftq_redirect_sram, ftq_meta_1r_sram)
+  connectMBIST(true)
 }

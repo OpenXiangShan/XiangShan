@@ -38,6 +38,7 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
+  with HasMBISTInterface
 {
   val io = IO(new Bundle() {
     val reset_vector = Input(UInt(PAddrBits.W))
@@ -178,4 +179,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val allPerfEvents = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerf)
   override val perfEvents = HPerfMonitor(csrevents, allPerfEvents).getPerfEvents
   generatePerfEvent()
+
+  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(bpu, ftq, icache)
+  connectMBIST()
 }
