@@ -12,7 +12,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{DelayN, HasMBISTController, HasMBISTSlave, ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
@@ -124,7 +124,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this) with HasMBISTController {
+  lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
@@ -165,8 +165,5 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
     )
     ResetGen(resetChain, (reset.asBool() || core_soft_rst.asBool()).asAsyncReset(), !debugOpts.FPGAPlatform)
-
-    override val mbistSlave: Seq[HasMBISTSlave] = Seq(core.module)
-    instantiateMBISTController()
   }
 }

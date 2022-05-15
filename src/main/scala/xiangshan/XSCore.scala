@@ -240,9 +240,7 @@ class XSCore()(implicit p: config.Parameters) extends XSCoreBase
 
 class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasSoCParameter
-  with HasMBISTInterface
-  {
+  with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val reset_vector = Input(UInt(PAddrBits.W))
@@ -433,8 +431,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       ))
     )
   )
+
   ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
 
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(frontend, memBlock, ptw)
-  connectMBIST(true)
 }

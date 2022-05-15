@@ -29,11 +29,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule
-  with HasCSRConst
-  with HasPerfEvents
-  with HasMBISTInterface
-{
+class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
@@ -66,7 +62,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
-  val normal_tlb = TlbStorage(
+  val normalPage = TlbStorage(
     name = "normal",
     associative = q.normalAssociative,
     sameCycle = q.sameCycle,
@@ -78,8 +74,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage = true,
     superPage = false
   )
-  val (normalPage, normalPageMod) = normal_tlb
-  val super_tlb = TlbStorage(
+  val superPage = TlbStorage(
     name = "super",
     associative = q.superAssociative,
     sameCycle = q.sameCycle,
@@ -91,7 +86,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage = q.normalAsVictim,
     superPage = true,
   )
-  val (superPage, superPageMod) = super_tlb
+
 
   for (i <- 0 until Width) {
     normalPage.r_req_apply(
@@ -324,9 +319,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     )
   }
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(normalPageMod, superPageMod).filter(_.isDefined).map(_.get)
-  connectMBIST(true)
 }
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {

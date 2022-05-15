@@ -271,12 +271,12 @@ object FTBMeta {
 // }
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
-  with HasCircularQueuePtrHelper with HasPerfEvents with HasMBISTInterface {
+  with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
 
-  class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils with HasMBISTInterface {
+  class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val s1_fire = Input(Bool())
 
@@ -301,7 +301,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplateWithMBIST(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
@@ -434,9 +434,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
     // print hit entry info
     Mux1H(total_hits, ftb.io.r.resp.data).display(true.B)
-
-    override val mbistSlaves: Seq[HasMBISTSlave] = Seq(ftb)
-    connectMBIST()
   } // FTBBank
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
@@ -554,7 +551,4 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     ("ftb_commit_misses          ", RegNext(io.update.valid)  && !u_meta.hit),
   )
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(ftbBank)
-  connectMBIST()
 }

@@ -30,8 +30,6 @@ import utils._
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
-import scala.collection.mutable.ListBuffer
-
 case class ICacheParameters(
     nSets: Int = 256,
     nWays: Int = 8,
@@ -129,7 +127,7 @@ object ICacheMetadata {
 }
 
 
-class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray with HasMBISTInterface
+class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 {
   def onReset = ICacheMetadata(0.U, ClientMetadata.onReset)
   val metaBits = onReset.getWidth
@@ -164,7 +162,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray with HasMBIS
   val write_meta_bits = Wire(UInt(metaEntryBits.W))
 
   val tagArrays = (0 until 2) map { bank =>
-    val tagArray = Module(new SRAMTemplateWithMBIST(
+    val tagArray = Module(new SRAMTemplate(
       UInt(metaEntryBits.W),
       set=nSets/2,
       way=nWays,
@@ -267,13 +265,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray with HasMBIS
   )
   io.cacheOp.resp.bits.read_tag_ecc := DontCare // TODO
   // TODO: deal with duplicated array
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = tagArrays
-  connectMBIST()
 }
 
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasMBISTInterface
+class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 {
 
   def getECCFromEncUnit(encUnit: UInt) = {
@@ -317,7 +312,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasMBISTI
   val write_data_code = Wire(UInt(dataCodeEntryBits.W))
 
   val dataArrays = (0 until 2) map { i =>
-    val dataArray = Module(new SRAMTemplateWithMBIST(
+    val dataArray = Module(new SRAMTemplate(
       UInt(blockBits.W),
       set=nSets/2,
       way=nWays,
@@ -343,7 +338,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasMBISTI
   }
 
   val codeArrays = (0 until 2) map { i => 
-    val codeArray = Module(new SRAMTemplateWithMBIST(
+    val codeArray = Module(new SRAMTemplate(
       UInt(dataCodeEntryBits.W),
       set=nSets/2,
       way=nWays,
@@ -433,9 +428,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasMBISTI
     // bank_result(io.cacheOp.req.bits.bank_num).ecc, 
     // 0.U
   // )
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = dataArrays ++ codeArrays
-  connectMBIST()
 }
 
 
@@ -473,8 +465,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   lazy val module = new ICacheImp(this)
 }
 
-class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents
-  with HasMBISTInterface {
+class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io = IO(new ICacheIO)
 
   println("ICache:")
@@ -687,6 +678,4 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(metaArray, dataArray)
-  connectMBIST(true)
-}
+} 

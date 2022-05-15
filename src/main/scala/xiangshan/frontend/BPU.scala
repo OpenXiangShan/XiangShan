@@ -242,11 +242,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class Predictor(implicit p: Parameters) extends XSModule
-  with HasBPUConst
-  with HasPerfEvents
-  with HasCircularQueuePtrHelper
-  with HasMBISTInterface {
+class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
   val ctrl = DelayN(io.ctrl, 1)
@@ -714,7 +710,4 @@ class Predictor(implicit p: Parameters) extends XSModule
 
   val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(predictors.asInstanceOf[HasMBISTSlave])
-  connectMBIST(true)
 }

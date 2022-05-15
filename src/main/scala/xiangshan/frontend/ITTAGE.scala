@@ -18,12 +18,18 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
-import utils._
 import xiangshan._
+import utils._
+import chisel3.experimental.chiselName
+import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import firrtl.stage.RunFirrtlTransformAnnotation
+import firrtl.transforms.RenameModules
+import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
+import scala.util.matching.Regex
+import firrtl.passes.wiring.Wiring
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 
@@ -134,13 +140,12 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
   io.resp := DontCare
 
 }
-
 @chiselName
 class ITTageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int
 )(implicit p: Parameters)
-  extends ITTageModule with HasFoldedHistory with HasMBISTInterface {
+  extends ITTageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new ITTageReq))
     val resp = Output(Valid(new ITTageResp))
@@ -216,7 +221,7 @@ class ITTageTable
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplateWithMBIST(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=false, holdRead=true, singlePort=true)))
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=false, holdRead=true, singlePort=true)))
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -315,8 +320,6 @@ class ITTageTable
     XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
   }
 
-  override val mbistSlaves: Seq[HasMBISTSlave] = table_banks
-  connectMBIST()
 }
 
 abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITTageParams with BPUUtils {
@@ -346,10 +349,9 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
   io.s1_ready := true.B
   io.s2_ready := true.B
 }
-
 // TODO: check target related logics
 @chiselName
-class ITTage(implicit p: Parameters) extends BaseITTage with HasMBISTInterface {
+class ITTage(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
   val tables = ITTageTableInfos.zipWithIndex.map {
@@ -666,9 +668,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage with HasMBISTInterface {
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
 
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = tables
-  connectMBIST()
 }
 
 

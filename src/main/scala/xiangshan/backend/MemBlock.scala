@@ -58,7 +58,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasFPUParameters
   with HasWritebackSourceImp
   with HasPerfEvents
-  with HasMBISTInterface
 {
 
   val io = IO(new Bundle {
@@ -161,17 +160,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
-  val dtlb_ld_module = Seq.fill(exuParameters.LduCnt) {
-    // let the module have name in waveform
+  val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
     val tlb_ld = Module(new TLB(1, ldtlbParams))
-    tlb_ld
-  }
-  val dtlb_ld = VecInit(dtlb_ld_module.map(_.io))
-  val dtlb_st_module = Seq.fill(exuParameters.StuCnt) {
-    val tlb_st = Module(new TLB(1, sttlbParams))
-    tlb_st // let the module have name in waveform
-  }
-  val dtlb_st = VecInit(dtlb_st_module.map(_.io))
+    tlb_ld.io // let the module have name in waveform
+  })
+  val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt){
+    val tlb_st = Module(new TLB(1 , sttlbParams))
+    tlb_st.io // let the module have name in waveform
+  })
   dtlb_ld.map(_.sfence := sfence)
   dtlb_st.map(_.sfence := sfence)
   dtlb_ld.map(_.csr := tlbcsr)
@@ -572,7 +568,4 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val hpmEvents = allPerfEvents.map(_._2.asTypeOf(new PerfEvent)) ++ io.perfEventsPTW
   val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = (dcache +: dtlb_ld_module) ++ dtlb_st_module
-  connectMBIST()
 }

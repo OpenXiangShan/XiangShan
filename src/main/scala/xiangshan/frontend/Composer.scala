@@ -24,7 +24,7 @@ import xiangshan._
 import utils._
 
 @chiselName
-class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents with HasMBISTInterface {
+class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out.resp := resp
 
@@ -85,7 +85,4 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   override val perfEvents = components.map(_.getPerfEvents).reduce(_++_)
   generatePerfEvent()
-
-  override val mbistSlaves = components.filter(_.isInstanceOf[HasMBISTSlave]).map(_.asInstanceOf[HasMBISTSlave])
-  connectMBIST()
 }

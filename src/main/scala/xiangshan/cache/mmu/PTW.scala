@@ -19,14 +19,15 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
-import chisel3.internal.naming.chiselName
 import chisel3.util._
+import chisel3.internal.naming.chiselName
+import xiangshan._
+import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
+import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import utils._
-import xiangshan._
+import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
-import xiangshan.backend.fu.{PMP, PMPChecker}
 
 class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -41,11 +42,7 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 }
 
 @chiselName
-class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer)
-  with HasCSRConst
-  with HasPerfEvents
-  with HasMBISTInterface
- {
+class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
@@ -334,9 +331,6 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer)
 
   val perfEvents  = Seq(missQueue, cache, fsm).flatMap(_.getPerfEvents)
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(cache)
-  connectMBIST()
 }
 
 class PTEHelper() extends ExtModule {
@@ -383,7 +377,7 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
     node := ptw.node
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents with HasMBISTInterface {
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     val io = IO(new PtwIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
@@ -395,8 +389,5 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
         ptw.module.getPerfEvents
     }
     generatePerfEvent()
-
-    override val mbistSlaves: Seq[HasMBISTSlave] = Seq(ptw.module)
-    connectMBIST()
   }
 }

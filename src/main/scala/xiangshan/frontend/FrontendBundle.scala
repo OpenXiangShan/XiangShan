@@ -17,11 +17,12 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
-import utils._
+import chisel3.experimental.chiselName
 import xiangshan._
 import xiangshan.frontend.icache.HasICacheParameters
+import utils._
+import scala.math._
 
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -393,7 +394,6 @@ class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry w
     this.brNumOH := Mux(valid, entry.brNumOH, 1.U(3.W))
   }
 }
-
 @chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())

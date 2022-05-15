@@ -18,8 +18,13 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
 import utils._
+import chisel3.util._
+import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
+import xiangshan.L1CacheErrorInfo
+
+import scala.math.max
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -123,7 +128,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   }
 }
 
-class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray with HasMBISTInterface {
+class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   def getECCFromEncWord(encWord: UInt) = {
     require(encWord.getWidth == encWordBits)
     encWord(encWordBits - 1, wordBits)
@@ -134,7 +139,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray wi
   io.write.ready := true.B
 
   // wrap data rows of 8 ways
-  class DataSRAMBank(index: Int) extends Module with HasMBISTInterface {
+  class DataSRAMBank(index: Int) extends Module {
     val io = IO(new Bundle() {
       val w = new Bundle() {
         val en = Input(Bool())
@@ -155,7 +160,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray wi
 
     // multiway data bank
     val data_bank = Array.fill(DCacheWays) {
-      Module(new SRAMTemplateWithMBIST(
+      Module(new SRAMTemplate(
         Bits(DCacheSRAMRowBits.W),
         set = DCacheSets,
         way = 1,
@@ -211,13 +216,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray wi
       dump_w()
       dump_r()
     }
-
-    override val mbistSlaves: Seq[HasMBISTSlave] = data_bank
-    connectMBIST()
   }
 
   val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i)))
-  val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplateWithMBIST(
+  val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
     way = DCacheWays,
@@ -432,7 +434,4 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray wi
     eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
     0.U
   )
-
-  override val mbistSlaves = data_banks ++ ecc_banks
-  connectMBIST()
 }

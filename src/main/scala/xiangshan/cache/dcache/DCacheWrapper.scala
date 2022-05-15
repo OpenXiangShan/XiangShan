@@ -386,10 +386,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer)
-  with HasDCacheParameters
-  with HasPerfEvents
-  with HasMBISTInterface {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
 
   val io = IO(new DCacheIO)
 
@@ -718,9 +715,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer)
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(bankedDataArray, tagArray)
-  connectMBIST()
 }
 
 class AMOHelper() extends ExtModule {
@@ -742,7 +736,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
     clientNode := dcache.clientNode
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents with HasMBISTInterface {
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
     val io = IO(new DCacheIO)
     val perfEvents = if (!useDcache) {
       // a fake dcache which uses dpi-c to access memory, only for debug usage!
@@ -755,8 +749,5 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
       dcache.module.getPerfEvents
     }
     generatePerfEvent()
-
-    override val mbistSlaves: Seq[HasMBISTSlave] = Seq(dcache.module)
-    connectMBIST(true)
   }
 }

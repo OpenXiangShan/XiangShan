@@ -19,8 +19,8 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{HasMBISTInterface, HasMBISTSlave, SRAMTemplateWithMBIST, XSDebug}
+import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
 
 // basic building blocks for L1 DCache
@@ -49,7 +49,7 @@ class L1MetaWriteReq(implicit p: Parameters) extends L1MetaReadReq {
 }
 
 
-class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule with HasMBISTInterface {
+class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule {
   val rstVal = onReset()
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
@@ -70,7 +70,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     rst_cnt := rst_cnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplateWithMBIST(UInt(encMetaBits.W), set = nSets, way = nWays,
+  val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
   // tag write
@@ -121,9 +121,6 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     dumpWrite
     // dumpResp
   }
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = Seq(tag_array)
-  connectMBIST()
 }
 
 class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {

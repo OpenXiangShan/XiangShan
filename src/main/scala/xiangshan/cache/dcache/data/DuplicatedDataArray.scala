@@ -19,11 +19,12 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{HasMBISTInterface, HasMBISTSlave, SRAMTemplateWithMBIST, XSDebug}
+import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 
-import scala.collection.mutable.ListBuffer
+import scala.math.max
 
-class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with HasMBISTInterface {
+class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
   val singlePort = true
   val readHighPriority = false
 
@@ -53,7 +54,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
   })
 
   // wrap a data row and a ecc row
-  class DataSRAMGroup extends Module with HasMBISTInterface {
+  class DataSRAMGroup extends Module {
     val io = IO(new Bundle() {
       val wen, ren = Input(Bool())
       val waddr, raddr = Input(UInt())
@@ -64,13 +65,13 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
 
     val r_way_en_reg = RegNext(io.r_way_en)
     val data_array = Array.fill(nWays) {
-      Module(new SRAMTemplateWithMBIST(
+      Module(new SRAMTemplate(
         Bits(rowBits.W),
         set = nSets,
         way = 1,
         shouldReset = false,
         holdRead = false,
-        singlePort = mbistSinglePort
+        singlePort = singlePort
       ))
     }
 
@@ -95,12 +96,8 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
     val row_data = Mux(sel_low, data_left, data_right)
 
     io.rdata := row_data
-
-    override val mbistSlaves: Seq[HasMBISTSlave] = data_array
-    connectMBIST()
   }
 
-  val mbist_slaves = ListBuffer.empty[HasMBISTSlave]
   for (j <- 0 until 3) {
     val raddr = raddrs(j)
     val rmask = io.read(j).bits.rmask
@@ -116,7 +113,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
 
     val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
     for (r <- 0 until blockRows) {
-      val ecc_array = Module(new SRAMTemplateWithMBIST(
+      val ecc_array = Module(new SRAMTemplate(
         Vec(rowWords, Bits(eccBits.W)),
         set = nSets,
         way = nWays,
@@ -124,7 +121,6 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
         holdRead = false,
         singlePort = singlePort
       ))
-      mbist_slaves += ecc_array
       ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)
       ecc_array.io.w.req.bits.apply(
         setIdx = waddr,
@@ -138,7 +134,6 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
       ecc_array.io.r.req.bits.apply(setIdx = raddr)
 
       val dataGroup = Module(new DataSRAMGroup)
-      mbist_slaves += dataGroup
       dataGroup.io.wen := io.write.valid && io.write.bits.wmask(r)
       dataGroup.io.w_way_en := io.write.bits.way_en
       dataGroup.io.waddr := waddr
@@ -172,7 +167,4 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray with
 
     io.nacks(j) := false.B
   }
-
-  override val mbistSlaves: Seq[HasMBISTSlave] = mbist_slaves
-  connectMBIST()
 }
