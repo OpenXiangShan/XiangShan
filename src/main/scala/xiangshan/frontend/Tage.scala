@@ -301,9 +301,8 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = withReset(reset.asBool || io.update.reset_u.reduce(_||_)) {
-      Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
-  }
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
