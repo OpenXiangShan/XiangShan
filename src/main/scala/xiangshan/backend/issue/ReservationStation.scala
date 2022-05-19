@@ -268,7 +268,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // for better timing, we update statusArray no matter there's a flush or not
     statusArray.io.update(i).enable := io.fromDispatch(i).fire()
     statusArray.io.update(i).addr := select.io.allocate(i).bits
-    statusArray.io.update(i).data.valid := true.B
     statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
     statusArray.io.update(i).data.blocked := params.checkWaitBit.B && io.fromDispatch(i).bits.cf.loadWaitBit
     statusArray.io.update(i).data.credit := Mux(params.delayedRf.B && needFpSource(i), 3.U, 0.U)
