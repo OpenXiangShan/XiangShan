@@ -272,15 +272,6 @@ class SSIT(implicit p: Parameters) extends XSModule {
     }
   }
 
-  // make SyncDataModuleTemplate happy
-  when(valid_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === valid_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
-    valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
-  }
-
-  when(data_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === data_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
-    data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
-  }
-
   XSPerfAccumulate("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
   XSPerfAccumulate("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
   XSPerfAccumulate("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)

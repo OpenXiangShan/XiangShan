@@ -53,32 +53,26 @@ class AsyncRawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
 
 class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean) extends Module {
   val io = IO(new Bundle {
-    val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
+    val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
     val wen   = Vec(numWrite, Input(Bool()))
-    val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
+    val waddr = Vec(numWrite, Input(UInt(log2Ceil(numEntries).W)))
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val data = Mem(numEntries, gen)
+  val data = Reg(Vec(numEntries, gen))
 
   // read ports
-  val raddr = if (isSync) (RegNext(io.raddr)) else io.raddr
+  val raddr = if (isSync) RegNext(io.raddr) else io.raddr
   for (i <- 0 until numRead) {
     io.rdata(i) := data(raddr(i))
   }
 
-  // below is the write ports (with priorities)
-  for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
-      data(io.waddr(i)) := io.wdata(i)
-    }
-  }
-
-  // DataModuleTemplate should not be used when there're any write conflicts
-  for (i <- 0 until numWrite) {
-    for (j <- i+1 until numWrite) {
-      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+  // write ports
+  for (j <- 0 until numEntries) {
+    val write_wen = io.wen.zip(io.waddr).map(w => w._1 && w._2 === j.U)
+    when (VecInit(write_wen).asUInt.orR) {
+      data(j) := Mux1H(write_wen, io.wdata)
     }
   }
 }
