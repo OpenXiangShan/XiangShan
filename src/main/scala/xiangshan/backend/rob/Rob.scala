@@ -311,7 +311,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val stdWriteback = stdWbPorts.map(_._2)
 
   // instvalid field
-  val valid = Mem(RobSize, Bool())
+  val valid = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
   // writeback status
   val writebacked = Mem(RobSize, Bool())
   val store_data_writebacked = Mem(RobSize, Bool())
@@ -731,12 +731,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   for (i <- 0 until CommitWidth) {
     when (io.commits.valid(i) && state =/= s_extrawalk) {
       valid(commitReadAddr(i)) := false.B
-    }
-  }
-  // reset: when exception, reset all valid to false
-  when (reset.asBool) {
-    for (i <- 0 until RobSize) {
-      valid(i) := false.B
     }
   }
 

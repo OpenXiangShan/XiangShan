@@ -24,11 +24,13 @@ import utils._
 
 
 class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
-  val freeList = Mem(size, UInt(PhyRegIdxWidth.W))
+  val freeList = RegInit(VecInit(
+    // originally {32, 33, ..., size - 1} are free. Register 0-31 are mapped to x0-x31.
+    Seq.tabulate(size - 32)(i => (i + 32).U(PhyRegIdxWidth.W)) ++ Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
 
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false.B, 0.U))
-  val tailPtr = RegInit(FreeListPtr(false.B, (NRPhyRegs - 32).U))
+  val tailPtr = RegInit(FreeListPtr(false.B, (size - 32).U))
 
   val doRename = io.canAllocate && io.doAllocate && !io.redirect && !io.walk
 
@@ -55,11 +57,6 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
       freeList(freePtr.value) := io.freePhyReg(i)
     }
   }
-  when (reset.asBool) {
-    for (i <- 0 until NRPhyRegs - 32) {
-      freeList(i) := (i + 32).U
-    }
-  }
 
   // update tail pointer
   val tailPtrNext = tailPtr + PopCount(io.freeReq)
@@ -69,10 +66,10 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   io.canAllocate := RegNext(freeRegCnt) >= RenameWidth.U
 
   val perfEvents = Seq(
-    ("me_freelist_1_4_valid", (freeRegCnt < ((NRPhyRegs-32).U/4.U))                                             ),
-    ("me_freelist_2_4_valid", (freeRegCnt > ((NRPhyRegs-32).U/4.U)) & (freeRegCnt <= ((NRPhyRegs-32).U/2.U))    ),
-    ("me_freelist_3_4_valid", (freeRegCnt > ((NRPhyRegs-32).U/2.U)) & (freeRegCnt <= ((NRPhyRegs-32).U*3.U/4.U))),
-    ("me_freelist_4_4_valid", (freeRegCnt > ((NRPhyRegs-32).U*3.U/4.U))                                         ),
+    ("me_freelist_1_4_valid",  freeRegCnt <= (size / 4).U                                    ),
+    ("me_freelist_2_4_valid", (freeRegCnt >  (size / 4).U) & (freeRegCnt <= (size / 2).U)    ),
+    ("me_freelist_3_4_valid", (freeRegCnt >  (size / 2).U) & (freeRegCnt <= (size * 3 / 4).U)),
+    ("me_freelist_4_4_valid",  freeRegCnt >  (size * 3 / 4).U                                ),
   )
   generatePerfEvent()
 }
