@@ -190,7 +190,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule 
+abstract class BasePredictor(implicit p: Parameters) extends XSModule
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
@@ -214,7 +214,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.out.resp.s1.pc := s1_pc
   io.out.resp.s2.pc := s2_pc
   io.out.resp.s3.pc := s3_pc
-  
+
   val perfEvents: Seq[(String, UInt)] = Seq()
 
 
@@ -294,19 +294,19 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   println(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
-  
+
   val s0_ghist_ptr = Wire(new CGHPtr)
   val s0_ghist_ptr_reg = RegNext(s0_ghist_ptr, init=0.U.asTypeOf(new CGHPtr))
   val s1_ghist_ptr = RegEnable(s0_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s0_fire)
   val s2_ghist_ptr = RegEnable(s1_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s1_fire)
   val s3_ghist_ptr = RegEnable(s2_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s2_fire)
-  
+
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
   val resp = predictors.io.out.resp
-  
-  
+
+
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
   val s1_flush, s2_flush, s3_flush = Wire(Bool())
@@ -336,7 +336,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   s1_components_ready := predictors.io.s1_ready
   s1_ready := s1_fire || !s1_valid
-  s0_fire := RegNext(!reset.asBool) && s1_components_ready && s1_ready
+  s0_fire := s1_components_ready && s1_ready
   predictors.io.s0_fire := s0_fire
 
   s2_components_ready := predictors.io.s2_ready

@@ -1190,7 +1190,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Implicit add reset values for mepc[0] and sepc[0]
   // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
-  when (reset.asBool) {
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
     sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
   }
