@@ -264,17 +264,57 @@ def create_filelist(out_dir, top_module):
                 filelist_entry = os.path.join(top_module, filename)
                 f.write(f"{filelist_entry}\n")
 
-def generate_sram_conf(build_path, out_dir):
-    conf_path = None
-    for filename in os.listdir(build_path):
-        if filename.endswith(".conf"):
-            conf_path = os.path.join(build_path, filename)
-            break
-    if not conf_path:
-        print("Does not find the SRAM configuratin file.")
-    # copy the SRAM conf file to the out dir
-    copy(conf_path, os.path.join(out_dir, "sram_configuration.txt"))
-    return os.path.realpath(conf_path)
+def generate_sram_conf(collection, module_prefix, out_dir):
+    sram_conf = []
+    sram_array_name = module_prefix + "SRAM_Array_(1|2)P.*"
+    modules = collection.get_all_modules(match=sram_array_name)
+    for module in modules:
+        # name
+        module_name = module.get_name()
+        # depth
+        depth = 0
+        depth_re = re.compile(r'\s*reg (\[\d+:0\]|) ram(_\d*|) \[0:(\d+)\].*')
+        for line in module.get_lines():
+            depth_match = depth_re.match(line)
+            if depth_match:
+                ram_depth = int(depth_match.group(3)) + 1
+                assert(depth == 0 or ram_depth == depth)
+                depth = ram_depth
+        assert(depth > 0)
+        # width, ports, mask_gran
+        def get_data_and_mask_width_from_io(match):
+            io_ports = module.get_io(match=match)
+            data_width = []
+            mask_width = 1
+            for p in io_ports:
+                if p.get_name().endswith("data"):
+                    data_width.append(p.get_width())
+                elif p.get_name().endswith("mask"):
+                    mask_width = p.get_width()
+            assert(len(data_width) > 0 and max(data_width) == min(data_width))
+            return max(data_width), mask_width
+        if "1P" in module_name:
+            width, mask_width = get_data_and_mask_width_from_io(".* RW0_\w*")
+            ports = "rw" if mask_width == 1 else "mrw"
+            mask_gran = width // mask_width
+        else:
+            assert("2P" in module_name)
+            r0_data_width, _ = get_data_and_mask_width_from_io(".* R0_\w*")
+            w0_data_width, mask_width = get_data_and_mask_width_from_io(".* W0_\w*")
+            assert(r0_data_width == w0_data_width)
+            width = r0_data_width
+            ports = "write,read" if mask_width == 1 else "mwrite,read"
+            mask_gran = width // mask_width
+        assert(width % mask_gran == 0)
+        all_info = ["name", module_name, "depth", depth, "width", width, "ports", ports]
+        if mask_gran < width:
+            all_info += ["mask_gran", mask_gran]
+        sram_conf.append(all_info)
+    conf_path = os.path.join(out_dir, "sram_configuration.txt")
+    with open(conf_path, "w") as f:
+        for conf in sram_conf:
+            f.write(" ".join(map(str, conf)) + "\n")
+    return conf_path
 
 def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None):
     workbook = xlsxwriter.Workbook(os.path.join(out_dir, "sram_list.xlsx"))
@@ -340,5 +380,5 @@ if __name__ == "__main__":
     assert(collection)
 
     create_filelist(out_dir, top_module)
-    sram_conf = generate_sram_conf(build_path, out_dir)
+    sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
     create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
