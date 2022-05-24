@@ -157,7 +157,7 @@ trait PMAMethod extends PMAConst {
     addPMA(0x1FFFFC0000L, a = 1, r = true, x = true, w = true)
     addPMA(0x1FFFF80000L, a = 1, r = true)
     addPMA(0x1FE2200000L, a = 1, x = true, w = true, r = true)
-    addPMA(0x1FE2000000L, a = 1, r = true)
+    addPMA(0x1FE2000000L, a = 1, w = true, r = true)
     addPMA(0x1FC0000000L, a = 1, x = true, w = true, r = true)
     addPMA(0x1F80000000L, a = 1, r = true)
     addPMA(0x1F204F1000L, a = 1, w = true, r = true)
