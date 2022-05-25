@@ -564,7 +564,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   // **************************** to ifu ****************************
   // ****************************************************************
-  val bpu_in_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=bpu_in_fire)
+  val bpu_in_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), bpu_in_fire)
   val bpu_in_bypass_ptr = RegNext(bpu_in_resp_ptr)
   val last_cycle_bpu_in = RegNext(bpu_in_fire)
   val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
@@ -633,9 +633,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit && ifu_wb_valid
   val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
   val hit_pd_mispred_reg = RegNext(hit_pd_mispred, init=false.B)
-  val pd_reg       = RegEnable(pds,             enable = pdWb.valid)
-  val start_pc_reg = RegEnable(pdWb.bits.pc(0), enable = pdWb.valid)
-  val wb_idx_reg   = RegEnable(ifu_wb_idx,      enable = pdWb.valid)
+  val pd_reg       = RegEnable(pds,             pdWb.valid)
+  val start_pc_reg = RegEnable(pdWb.bits.pc(0), pdWb.valid)
+  val wb_idx_reg   = RegEnable(ifu_wb_idx,      pdWb.valid)
 
   when (ifu_wb_valid) {
     val comm_stq_wen = VecInit(pds.map(_.valid).zip(pdWb.bits.instrRange).map{

@@ -239,7 +239,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.refill.valid := RegNext(mem_resp_done && !flush && !flush_latch(mem.d.bits.source))
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info  := Mux(refill_from_mq, llptw_mem.refill, ptw.io.refill.req_info)
-  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
+  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire()))
   cache.io.refill.bits.addr_low := RegNext(req_addr_low(mem.d.bits.source))
 
   // pmp

@@ -182,10 +182,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     */
 
   val f1_valid      = RegInit(false.B)
-  val f1_ftq_req    = RegEnable(next = f0_ftq_req,    enable=f0_fire)
-  // val f1_situation  = RegEnable(next = f0_situation,  enable=f0_fire)
-  val f1_doubleLine = RegEnable(next = f0_doubleLine, enable=f0_fire)
-  val f1_vSetIdx    = RegEnable(next = f0_vSetIdx,    enable=f0_fire)
+  val f1_ftq_req    = RegEnable(f0_ftq_req,    f0_fire)
+  // val f1_situation  = RegEnable(f0_situation,  f0_fire)
+  val f1_doubleLine = RegEnable(f0_doubleLine, f0_fire)
+  val f1_vSetIdx    = RegEnable(f0_vSetIdx,    f0_fire)
   val f1_fire       = f1_valid && f1_ready
 
   f1_ready := f2_ready || !f1_valid
@@ -216,10 +216,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val icacheRespAllValid = WireInit(false.B)
 
   val f2_valid      = RegInit(false.B)
-  val f2_ftq_req    = RegEnable(next = f1_ftq_req,    enable=f1_fire)
-  // val f2_situation  = RegEnable(next = f1_situation,  enable=f1_fire)
-  val f2_doubleLine = RegEnable(next = f1_doubleLine, enable=f1_fire)
-  val f2_vSetIdx    = RegEnable(next = f1_vSetIdx,    enable=f1_fire)
+  val f2_ftq_req    = RegEnable(f1_ftq_req,    f1_fire)
+  // val f2_situation  = RegEnable(f1_situation,  f1_fire)
+  val f2_doubleLine = RegEnable(f1_doubleLine, f1_fire)
+  val f2_vSetIdx    = RegEnable(f1_vSetIdx,    f1_fire)
   val f2_fire       = f2_valid && f2_ready
 
   f2_ready := f3_ready && icacheRespAllValid || !f2_valid
@@ -248,11 +248,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault &&
                                                            !fromICache(0).bits.tlbExcp.pageFault
 
-  val f2_pc               = RegEnable(next = f1_pc, enable = f1_fire)
-  val f2_half_snpc        = RegEnable(next = f1_half_snpc, enable = f1_fire)
-  val f2_cut_ptr          = RegEnable(next = f1_cut_ptr, enable = f1_fire)
+  val f2_pc               = RegEnable(f1_pc,  f1_fire)
+  val f2_half_snpc        = RegEnable(f1_half_snpc,  f1_fire)
+  val f2_cut_ptr          = RegEnable(f1_cut_ptr,  f1_fire)
 
-  val f2_resend_vaddr     = RegEnable(next = f1_ftq_req.startAddr + 2.U, enable = f1_fire)
+  val f2_resend_vaddr     = RegEnable(f1_ftq_req.startAddr + 2.U,  f1_fire)
 
   def isNextLine(pc: UInt, startAddr: UInt) = {
     startAddr(blockOffBits) ^ pc(blockOffBits)
@@ -325,34 +325,34 @@ class NewIFU(implicit p: Parameters) extends XSModule
     */
 
   val f3_valid          = RegInit(false.B)
-  val f3_ftq_req        = RegEnable(next = f2_ftq_req,    enable=f2_fire)
-  // val f3_situation      = RegEnable(next = f2_situation,  enable=f2_fire)
-  val f3_doubleLine     = RegEnable(next = f2_doubleLine, enable=f2_fire)
+  val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
+  // val f3_situation      = RegEnable(f2_situation,  f2_fire)
+  val f3_doubleLine     = RegEnable(f2_doubleLine, f2_fire)
   val f3_fire           = io.toIbuffer.fire()
 
   f3_ready := io.toIbuffer.ready || !f3_valid
 
-  val f3_cut_data       = RegEnable(next = f2_cut_data, enable=f2_fire)
+  val f3_cut_data       = RegEnable(f2_cut_data, f2_fire)
 
-  val f3_except_pf      = RegEnable(next = f2_except_pf, enable = f2_fire)
-  val f3_except_af      = RegEnable(next = f2_except_af, enable = f2_fire)
-  val f3_mmio           = RegEnable(next = f2_mmio   , enable = f2_fire)
+  val f3_except_pf      = RegEnable(f2_except_pf,  f2_fire)
+  val f3_except_af      = RegEnable(f2_except_af,  f2_fire)
+  val f3_mmio           = RegEnable(f2_mmio   ,  f2_fire)
 
-  val f3_expd_instr     = RegEnable(next = f2_expd_instr,  enable = f2_fire)
-  val f3_pd             = RegEnable(next = f2_pd,          enable = f2_fire)
-  val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
-  val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
-  val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
-  val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
-  val f3_half_snpc        = RegEnable(next = f2_half_snpc, enable = f2_fire)
-  val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
-  val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
-  val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
-  val f3_hasHalfValid   = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
+  val f3_expd_instr     = RegEnable(f2_expd_instr,   f2_fire)
+  val f3_pd             = RegEnable(f2_pd,           f2_fire)
+  val f3_jump_offset    = RegEnable(f2_jump_offset,  f2_fire)
+  val f3_af_vec         = RegEnable(f2_af_vec,       f2_fire)
+  val f3_pf_vec         = RegEnable(f2_pf_vec ,      f2_fire)
+  val f3_pc             = RegEnable(f2_pc,           f2_fire)
+  val f3_half_snpc        = RegEnable(f2_half_snpc,  f2_fire)
+  val f3_instr_range    = RegEnable(f2_instr_range,  f2_fire)
+  val f3_foldpc         = RegEnable(f2_foldpc,       f2_fire)
+  val f3_crossPageFault = RegEnable(f2_crossPageFault,       f2_fire)
+  val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,       f2_fire)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
-  val f3_pAddrs   = RegEnable(next = f2_paddrs, enable = f2_fire)
-  val f3_resend_vaddr   = RegEnable(next = f2_resend_vaddr,      enable = f2_fire)
+  val f3_pAddrs   = RegEnable(f2_paddrs,  f2_fire)
+  val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,       f2_fire)
 
   when(f3_valid && !f3_ftq_req.ftqOffset.valid){
     assert(f3_ftq_req.startAddr + 32.U >= f3_ftq_req.nextStartAddr , "More tha 32 Bytes fetch is not allowed!")
@@ -692,7 +692,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** performance counter */
-  val f3_perf_info     = RegEnable(next = f2_perf_info, enable = f2_fire)
+  val f3_perf_info     = RegEnable(f2_perf_info,  f2_fire)
   val f3_req_0    = io.toIbuffer.fire()
   val f3_req_1    = io.toIbuffer.fire() && f3_doubleLine
   val f3_hit_0    = io.toIbuffer.fire() && f3_perf_info.bank_hit(0)

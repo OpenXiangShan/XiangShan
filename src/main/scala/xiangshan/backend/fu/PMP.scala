@@ -425,7 +425,7 @@ trait PMPCheckMethod extends PMPConst {
     cfg_vec(num) := pmpDefault
 
     if (leaveHitMux) {
-      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+      ParallelPriorityMux(match_vec.map(RegEnable(_, false.B, valid)), RegEnable(cfg_vec, valid))
     } else {
       ParallelPriorityMux(match_vec, cfg_vec)
     }
