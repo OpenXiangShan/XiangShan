@@ -905,7 +905,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** to bpu ****************************
   // ****************************************************************
 
-  io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
+  io.toBpu.redirect := Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
   val may_have_stall_from_bpu = RegInit(false.B)
   val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
