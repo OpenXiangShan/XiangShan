@@ -650,6 +650,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   ftb_entry_mem.io.raddr.head := ifu_wb_idx
   val has_false_hit = WireInit(false.B)
+  XSError(ftb_entry_mem.io.raddr.head === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
+    hit_pd_valid && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 0 conflicts with write port")
   when (RegNext(hit_pd_valid)) {
     // check for false hit
     val pred_ftb_entry = ftb_entry_mem.io.rdata.head
@@ -706,6 +708,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
 
   ftb_entry_mem.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
+    XSError(ftb_entry_mem.io.raddr.init.last === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
+    backendRedirect.valid && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 1 conflicts with write port")
 
   val stage3CfiInfo = ftq_redirect_sram.io.rdata.init.last
   val fromBackendRedirect = WireInit(backendRedirectReg)
@@ -751,8 +755,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   ftq_redirect_sram.io.ren.head := fromIfuRedirect.valid
   ftq_redirect_sram.io.raddr.head := fromIfuRedirect.bits.ftqIdx.value
-
-  ftb_entry_mem.io.raddr.head := fromIfuRedirect.bits.ftqIdx.value
 
   val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
   toBpuCfi.fromFtqRedirectSram(ftq_redirect_sram.io.rdata.head)
@@ -926,6 +928,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_meta = ftq_meta_1r_sram.io.rdata(0)
   ftb_entry_mem.io.raddr.last := commPtr.value
   val commit_ftb_entry = ftb_entry_mem.io.rdata.last
+
+  XSError(ftb_entry_mem.io.raddr.last === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
+    canCommit && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 2 conflicts with write port")
+  XSError(ftq_pd_mem.io.raddr.last === pdWb.bits.ftqIdx.value &&
+    canCommit && ifu_wb_valid, "ftq_pd_mem read port 0 conflicts with write port")
 
   // need one cycle to read mem and srams
   val do_commit_ptr = RegNext(commPtr)
