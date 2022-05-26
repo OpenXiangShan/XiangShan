@@ -147,10 +147,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegEnable(next = port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(port_0_read_0, io.read.fire())
+  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire())
+  val port_1_read_1_reg = RegEnable(port_1_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -298,8 +298,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))

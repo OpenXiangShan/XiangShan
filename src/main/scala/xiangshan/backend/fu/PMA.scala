@@ -275,7 +275,7 @@ trait PMACheckMethod extends PMPConst {
     match_vec(num) := true.B
     cfg_vec(num) := pmaDefault
     if (leaveHitMux) {
-      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+      ParallelPriorityMux(match_vec.map(RegEnable(_, false.B, valid)), RegEnable(cfg_vec, valid))
     } else {
       ParallelPriorityMux(match_vec, cfg_vec)
     }

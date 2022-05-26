@@ -374,9 +374,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val s2_resps = RegEnable(s1_resps, io.s1_fire)
 
-  val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
+  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire)
 
   val s2_tageTaken         = Wire(Bool())
   val s2_tageTarget        = Wire(UInt(VAddrBits.W))

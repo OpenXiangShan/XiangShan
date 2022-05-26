@@ -154,7 +154,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
 
   // update stage 0: read ssit
   val memPredUpdateReqValid = RegNext(io.update.valid)
-  val memPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
+  val memPredUpdateReqReg = RegEnable(io.update, io.update.valid)
 
   // when io.update.valid, take over ssit read port
   when (io.update.valid) {
