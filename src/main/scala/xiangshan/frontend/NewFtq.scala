@@ -498,9 +498,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.meta
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1))
-  ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid
-  ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.lastStage.ftb_entry
+  ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid)
+  ftb_entry_mem.io.waddr(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftq_idx.value)
+  ftb_entry_mem.io.wdata(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftb_entry)
 
 
   // multi-write
@@ -626,9 +626,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifu_wb_idx = pdWb.bits.ftqIdx.value
   // read ports:                                                         commit update
   val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, 1, 1))
-  ftq_pd_mem.io.wen(0) := ifu_wb_valid
-  ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
-  ftq_pd_mem.io.wdata(0).fromPdWb(pdWb.bits)
+  ftq_pd_mem.io.wen(0) := RegNext(ifu_wb_valid)
+  ftq_pd_mem.io.waddr(0) := RegNext(pdWb.bits.ftqIdx.value)
+  ftq_pd_mem.io.wdata(0).fromPdWb(RegNext(pdWb.bits))
 
   val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit && ifu_wb_valid
   val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
