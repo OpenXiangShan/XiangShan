@@ -67,7 +67,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         val out_mem = Output(Vec(RasSize, new RASEntry))
     })
 
-    val stack = Mem(RasSize, new RASEntry)
+    val stack = Reg(Vec(RasSize, new RASEntry))
     val sp = RegInit(0.U(log2Up(rasSize).W))
     val top = RegInit(RASEntry(0.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
@@ -88,7 +88,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
           topPtr := do_sp
           top.retAddr := do_new_addr
           top.ctr := 0.U
-          stack.write(do_sp, RASEntry(do_new_addr, 0.U))
+          stack(do_sp) := RASEntry(do_new_addr, 0.U)
         }.otherwise {
           when (recover) {
             sp := do_sp
@@ -96,13 +96,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
             top.retAddr := do_top.retAddr
           }
           top.ctr := do_top.ctr + 1.U
-          stack.write(do_top_ptr, RASEntry(do_new_addr, do_top.ctr + 1.U))
+          stack(do_top_ptr) := RASEntry(do_new_addr, do_top.ctr + 1.U)
         }
       }.elsewhen (do_pop) {
         when (do_top.ctr === 0.U) {
           sp     := ptrDec(do_sp)
           topPtr := ptrDec(do_top_ptr)
-          top := stack.read(ptrDec(do_top_ptr))
+          top := stack(ptrDec(do_top_ptr))
         }.otherwise {
           when (recover) {
             sp := do_sp
@@ -110,14 +110,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
             top.retAddr := do_top.retAddr
           }
           top.ctr := do_top.ctr - 1.U
-          stack.write(do_top_ptr, RASEntry(do_top.retAddr, do_top.ctr - 1.U))
+          stack(do_top_ptr) := RASEntry(do_top.retAddr, do_top.ctr - 1.U)
         }
       }.otherwise {
         when (recover) {
           sp := do_sp
           topPtr := do_top_ptr
           top := do_top
-          stack.write(do_top_ptr, do_top)
+          stack(do_top_ptr) := do_top
         }
       }
     }
@@ -138,7 +138,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
     val do_reset = RegInit(true.B)
     when (do_reset) {
-      stack.write(resetIdx, RASEntry(0.U, 0.U))
+      stack(resetIdx) := RASEntry(0.U, 0.U)
     }
     resetIdx := resetIdx + do_reset
     when (resetIdx === (RasSize-1).U) {
@@ -152,7 +152,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     debugIO.sp := sp
     debugIO.topRegister := top
     for (i <- 0 until RasSize) {
-        debugIO.out_mem(i) := stack.read(i.U)
+        debugIO.out_mem(i) := stack(i)
     }
   }
 

@@ -96,7 +96,7 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
 
   val nRows = numEntries / width
 
-  val data = Mem(nRows, Vec(width, gen))
+  val data = Reg(Vec(nRows, Vec(width, gen)))
 
   val doing_reset = RegInit(true.B)
   if (hasResetEn) {
@@ -116,11 +116,15 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
 
   val waddr = io.waddr >> log2Ceil(width)
   val wmask = UIntToOH(io.waddr(log2Ceil(width)-1, 0))
-  val wdata = VecInit(Seq.fill(width)(io.wdata))
+  val wdata = Seq.fill(width)(io.wdata)
 
   when(doing_reset) {
-    data.write(resetRow, 0.U.asTypeOf(Vec(width, gen)))
+    data(resetRow) := 0.U.asTypeOf(Vec(width, gen))
   }.elsewhen(io.wen) {
-    data.write(waddr, wdata, wmask.asBools)
+    for (((m, d), i) <- wmask.asBools.zip(wdata).zipWithIndex) {
+      when (m) {
+        data(waddr)(i) := d
+      }
+    }
   }
 }
