@@ -375,7 +375,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
-  val mepc = Reg(UInt(XLEN.W))
+  val mepc = RegInit(UInt(XLEN.W), 0.U)
   // Page 36 in riscv-priv: The low bit of mepc (mepc[0]) is always zero.
   val mepcMask = ~(0x1.U(XLEN.W))
 
@@ -1176,13 +1176,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if(HasCustomCSRCacheOp){
     val cache_error_decoder = Module(new CSRCacheErrorDecoder)
     cache_error_decoder.io.encoded_cache_error := cacheopRegs("CACHE_ERROR")
-  }
-
-  // Implicit add reset values for mepc[0] and sepc[0]
-  // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
-  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
-    mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
-    sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
   }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
