@@ -304,9 +304,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs_wire.asBools
 
-    clint.module.io.rtcTick := rtc_clock
-    
     pma.module.io <> cacheable_check
+
+    // positive edge sampling of the lower-speed rtc_clock
+    val rtcTick = RegInit(0.U(3.W))
+    rtcTick := Cat(rtcTick(1, 0), rtc_clock)
+    clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
 
     val freq = 100
     val cnt = RegInit(freq.U)

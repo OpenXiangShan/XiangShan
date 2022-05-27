@@ -16,18 +16,17 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.stage.ChiselGeneratorAnnotation
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
+import chisel3.stage.ChiselGeneratorAnnotation
 import device.{AXI4RAMWrapper, SimJTAG}
-import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
-import utils.GTimer
-import xiangshan.{DebugOptions, DebugOptionsKey}
-import chipsalliance.rocketchip.config._
-import freechips.rocketchip.devices.debug._
 import difftest._
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.ElaborationArtefacts
 import top.TopMain.writeOutputFile
+import utils.GTimer
+import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -60,10 +59,17 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
+
+  // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
-  val rtcCounter = RegInit(0.U)
-  rtcCounter := Mux(rtcCounter === (rtcClockDiv - 1).U, 0.U, rtcCounter + 1.U)
-  soc.io.rtc_clock := rtcCounter === 0.U
+  val rtcTickCycle = rtcClockDiv / 2
+  val rtcCounter = RegInit(0.U(log2Ceil(rtcTickCycle + 1).W))
+  rtcCounter := Mux(rtcCounter === (rtcTickCycle - 1).U, 0.U, rtcCounter + 1.U)
+  val rtcClock = RegInit(false.B)
+  when (rtcCounter === 0.U) {
+    rtcClock := ~rtcClock
+  }
+  soc.io.rtc_clock := rtcClock
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)
