@@ -78,11 +78,11 @@ class AMOALU(operandBits: Int) extends Module
     val out_unmasked = Output(Bits(operandBits.W))
   })
 
-  val max = io.cmd === M_XA_MAX || io.cmd === M_XA_MAXU
-  val min = io.cmd === M_XA_MIN || io.cmd === M_XA_MINU
-  val add = io.cmd === M_XA_ADD
-  val logic_and = io.cmd === M_XA_OR || io.cmd === M_XA_AND
-  val logic_xor = io.cmd === M_XA_XOR || io.cmd === M_XA_OR
+  val is_max = io.cmd === M_XA_MAX || io.cmd === M_XA_MAXU
+  val is_min = io.cmd === M_XA_MIN || io.cmd === M_XA_MINU
+  val is_add = io.cmd === M_XA_ADD
+  val is_logic_and = io.cmd === M_XA_OR || io.cmd === M_XA_AND
+  val is_logic_xor = io.cmd === M_XA_XOR || io.cmd === M_XA_OR
 
   val adder_out = {
     // partition the carry chain to support sub-xLen addition
@@ -108,13 +108,13 @@ class AMOALU(operandBits: Int) extends Module
     PriorityMux(widths.reverse.map(w => (io.mask(w/8/2), isLess(io.lhs, io.rhs, w))))
   }
 
-  val minmax = Mux(Mux(less, min, max), io.lhs, io.rhs)
+  val minmax = Mux(Mux(less, is_min, is_max), io.lhs, io.rhs)
   val logic =
-    Mux(logic_and, io.lhs & io.rhs, 0.U) |
-    Mux(logic_xor, io.lhs ^ io.rhs, 0.U)
+    Mux(is_logic_and, io.lhs & io.rhs, 0.U) |
+    Mux(is_logic_xor, io.lhs ^ io.rhs, 0.U)
   val out =
-    Mux(add,                    adder_out,
-    Mux(logic_and || logic_xor, logic,
+    Mux(is_add,                    adder_out,
+    Mux(is_logic_and || is_logic_xor, logic,
                                 minmax))
 
   val wmask = FillInterleaved(8, io.mask)
