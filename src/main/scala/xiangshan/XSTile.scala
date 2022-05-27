@@ -1,18 +1,17 @@
 package xiangshan
 
-import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.util.{Valid, ValidIO}
-import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike}
+import chisel3._
+import chisel3.util._
+import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
-import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{DelayN, ResetGen, TLClientsMerger}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
@@ -164,6 +163,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l2cache.map(_.module) ++
         l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
     )
-    ResetGen(resetChain, (reset.asBool() || core_soft_rst.asBool()).asAsyncReset(), !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, (reset.asBool || core_soft_rst.asBool).asAsyncReset, !debugOpts.FPGAPlatform, None)
   }
 }
