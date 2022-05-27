@@ -86,6 +86,10 @@ object ResetGen {
   }
 
   def apply(resetChain: Seq[Seq[Module]], reset: Reset, sim: Boolean, dft: Option[DFTResetGenIO]): Seq[Reset] = {
+    apply(resetChain.map(_.map(_.reset)), reset, sim, dft)
+  }
+
+  def apply(resetChain: Seq[Seq[Reset]], reset: Reset, sim: Boolean, dft: Option[DFTResetGenIO], dummy: Int = 0): Seq[Reset] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Reset()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
@@ -94,7 +98,7 @@ object ResetGen {
           resetReg(i + 1) := ResetGen(2, dft)
         }
       }
-      resetLevel.foreach(_.reset := resetReg(i + 1))
+      resetLevel.foreach(_ := resetReg(i + 1))
     }
     resetReg.tail
   }

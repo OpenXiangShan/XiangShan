@@ -50,7 +50,7 @@ class SimTop(implicit p: Parameters) extends Module {
   }
   dontTouch(soc.io)
 
-  soc.io.clock := clock.asBool
+  soc.io.clock := clock
   soc.io.reset := reset.asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
@@ -83,6 +83,17 @@ class SimTop(implicit p: Parameters) extends Module {
 
   if(useDRAMSim){
     io.memAXI <> soc.memory
+  }
+
+  soc.xsx_ultiscan_ijtag := DontCare
+  soc.xsl2_ultiscan_ijtag := DontCare
+  soc.xsx_ultiscan_uscan := DontCare
+  soc.xsl2_ultiscan_uscan := DontCare
+  soc.hd2prf_in := DontCare
+  soc.hsuspsr_in := DontCare
+  soc.l1l2_mbist_jtag := DontCare
+  if (soc.l3_mbist.ijtag.isDefined) {
+    soc.l3_mbist.ijtag.get := DontCare
   }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
