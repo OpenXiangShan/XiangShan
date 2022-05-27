@@ -19,10 +19,12 @@ package top
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
+import chisel3.util.MixedVec
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import huancun.mbist.{FUSEInterface, MBISTController, MBISTInterface, Ultiscan}
 import huancun.{HCCacheParamsKey, HuanCun}
 import system._
 import utils._
@@ -135,8 +137,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { RST_SYNC_NO_DFT() }
 
     // override LazyRawModuleImp's clock and reset
-    childClock := io.clock.asClock
+    val xsx_ultiscan = Module(new Ultiscan(1100,10,10,1,1,0,0,"xsx"))
+    xsx_ultiscan.io := DontCare
+    xsx_ultiscan.io.core_clock_preclk := io.clock
+    childClock := xsx_ultiscan.io.core_clock_postclk.asClock()
+//    childClock := io.clock.asClock
     childReset := reset_sync
+    core_with_l2.foreach(_.module.io.clock := io.clock)
+    core_with_l2.foreach(_.module.io.reset := io.reset)
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
@@ -162,13 +170,100 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
-    misc.module.debug_module_io.clock := io.clock
-    misc.module.debug_module_io.reset := reset_sync
+    //MBIST Interface Implementation begins
+
+    val xsx_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
+    val xsl2_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
+    val xsx_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
+    val xsl2_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
+
+    xsx_ultiscan.io.ijtag <> xsx_ultiscan_ijtag
+    xsx_ultiscan.io.uscan <> xsx_ultiscan_uscan
+
+    core_with_l2.head.module.ultiscan_ijtag <> xsl2_ultiscan_ijtag
+    core_with_l2.head.module.ultiscan_uscan <> xsl2_ultiscan_uscan
+
+    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_ultiscan.io.fscan_ram_bypsel
+    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_ultiscan.io.fscan_ram_wrdis_b
+    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_ultiscan.io.fscan_ram_rddis_b
+    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_ultiscan.io.fscan_ram_init_en
+    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_ultiscan.io.fscan_ram_init_val
+
+    val mbistInterfacesL3 = {
+      if (l3cacheOpt.nonEmpty) {
+        Some(
+          l3cacheOpt.get.module.mbist.zipWithIndex.map({
+            case (l3MbistPort, idx) =>
+              val intfName = f"MBIST_L3_Slice_${idx}_intf"
+              val intf = Module(new MBISTInterface(l3MbistPort.params, intfName))
+              intf.toPipeline <> l3MbistPort
+              intf
+          })
+        )
+      }
+      else {
+          None
+      }
+    }
+    val hd2prf_in = IO(new FUSEInterface)
+    core_with_l2.head.module.hd2prf_in <> hd2prf_in
+    val hsuspsr_in = IO(new FUSEInterface)
+    core_with_l2.head.module.hsuspsr_in <> hsuspsr_in
+    val mbistControllersL3 = {
+      if (l3cacheOpt.nonEmpty){
+        Some(
+          mbistInterfacesL3.get.zipWithIndex.map({
+            case (intf,idx) =>
+              val prefix = f"L3S${idx}"
+              val ctrl = Module(new MBISTController(Seq(intf.mbist.params),2,Seq(prefix)))
+              ctrl.io.mbist.head <> intf.mbist
+              ctrl.io.fscan_ram.head <> intf.fscan_ram
+              ctrl.io.static.head <> intf.static
+              ctrl.io.clock := childClock.asBool()
+              ctrl.io.hd2prf_in := hd2prf_in
+              ctrl.io.hsuspsr_in := hsuspsr_in
+              ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan_ram_bypsel
+              ctrl.io.fscan_in(0).wdis_b := xsx_ultiscan.io.fscan_ram_wrdis_b
+              ctrl.io.fscan_in(0).rdis_b := xsx_ultiscan.io.fscan_ram_rddis_b
+              ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan_ram_init_en
+              ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan_ram_init_val
+              ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
+              ctrl.io.fscan_clkungate := DontCare
+              ctrl
+          })
+        )
+      }
+      else{
+        None
+      }
+    }
+    val l1l2_mbist_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
+    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_jtag
+    val l3_mbist = IO(new Bundle {
+      val ijtag = {
+        if(l3cacheOpt.nonEmpty) {
+          Some(Vec(mbistControllersL3.get.length, mbistControllersL3.get.head.io.mbist_ijtag.cloneType))
+        } else {
+          None
+        }
+      }
+    })
+    if(l3cacheOpt.nonEmpty){
+      l3_mbist.ijtag.get.zip(mbistControllersL3.get).foreach({
+        case(port,ctrl) =>
+          port <> ctrl.io.mbist_ijtag
+      })
+    }
+    //MBIST Interface Implementation ends
+
+
+    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.reset.asBool)
+    misc.module.debug_module_io.clock := childClock.asBool()
+    misc.module.debug_module_io.reset := childReset
 
     // TODO: use synchronizer?
     misc.module.debug_module_io.debugIO.reset := jtag_reset_sync
-    misc.module.debug_module_io.debugIO.clock := io.clock.asClock
+    misc.module.debug_module_io.debugIO.clock := childClock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
@@ -180,10 +275,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, reset_sync) {
+    withClockAndReset(childClock, childReset) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
-      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
+      val resetChain = Seq(Seq(misc.module.reset) ++ l3cacheOpt.map(_.module.reset) ++ core_with_l2.map(_.module.io.reset))
       ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
 

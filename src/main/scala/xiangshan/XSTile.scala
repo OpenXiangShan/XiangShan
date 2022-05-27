@@ -3,16 +3,17 @@ package xiangshan
 import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
-import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike}
+import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike, LazyRawModuleImp}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
+import huancun.mbist.{FSCANInputInterface, FUSEInterface, JTAGInterface, MBISTController, MBISTInterface, MBISTPipeline, Ultiscan, UltiscanJTAGInterface, UltiscanUscanInterface}
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{DelayN, RST_SYNC_NO_DFT, ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
@@ -124,46 +125,107 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new LazyRawModuleImp(this) {
     val io = IO(new Bundle {
+      val clock = Input(Bool())
+      val reset = Input(AsyncReset())
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
     })
+    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) {
+      RST_SYNC_NO_DFT()
+    }
+    val ultiscanToControllerL2 = IO(new FSCANInputInterface)
+    val ultiscanToControllerL3 = IO(Flipped(new FSCANInputInterface))
+    val hsuspsr_in = IO(new FUSEInterface)
+    val hd2prf_in = IO(new FUSEInterface)
+    val mbist_ijtag = IO(new JTAGInterface)
+
 
     dontTouch(io)
+    val xsl2_ultiscan = Module(new Ultiscan(3400, 20, 20, 1, 1, 0, 0, "xsl2"))
+    xsl2_ultiscan.io := DontCare
+    xsl2_ultiscan.io.core_clock_preclk := io.clock
+    childClock := xsl2_ultiscan.io.core_clock_postclk.asClock()
+    childReset := reset_sync
+    val ultiscan_ijtag = IO(xsl2_ultiscan.io.ijtag.cloneType)
+    val ultiscan_uscan = IO(xsl2_ultiscan.io.uscan.cloneType)
+    withClockAndReset(childClock, childReset) {
+      val core_soft_rst = core_reset_sink.in.head._1
 
-    val core_soft_rst = core_reset_sink.in.head._1
+      core.module.io.hartId := io.hartId
+      core.module.io.reset_vector := DelayN(io.reset_vector, 5)
+      io.cpu_halt := core.module.io.cpu_halt
+      if (l2cache.isDefined) {
+        core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+      }
+      else {
+        core.module.io.perfEvents <> DontCare
+      }
 
-    core.module.io.hartId := io.hartId
-    core.module.io.reset_vector := DelayN(io.reset_vector, 5)
-    io.cpu_halt := core.module.io.cpu_halt
-    if(l2cache.isDefined){
-      core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+      misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
+      misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
+      if (l2cache.isDefined) {
+        misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
+        misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
+      } else {
+        misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
+      }
+
+      val mbistInterfaceL2 = {
+        Module(new MBISTInterface(
+          l2cache.get.module.mbist.head.params,
+          s"mbist_core${coreParams.HartId}_l2_intf"
+        ))
+      }
+      mbistInterfaceL2.toPipeline <> l2cache.get.module.mbist.head
+
+      val mbistControllerCoreWithL2 = Module(new MBISTController(
+        Seq(mbistInterfaceL2.mbist.params),
+        2,
+        Seq("L1L2")
+      ))
+
+      mbistControllerCoreWithL2.io.mbist.head <> mbistInterfaceL2.mbist
+      mbistControllerCoreWithL2.io.fscan_ram.head <> mbistInterfaceL2.fscan_ram
+      mbistControllerCoreWithL2.io.static.head <> mbistInterfaceL2.static
+      mbistControllerCoreWithL2.io.clock <> childClock.asBool()
+
+
+
+      mbistControllerCoreWithL2.io.fscan_in(0) <> ultiscanToControllerL2
+
+      mbistControllerCoreWithL2.io.fscan_in(1).bypsel := xsl2_ultiscan.io.fscan_ram_bypsel
+      mbistControllerCoreWithL2.io.fscan_in(1).wdis_b := xsl2_ultiscan.io.fscan_ram_wrdis_b
+      mbistControllerCoreWithL2.io.fscan_in(1).rdis_b := xsl2_ultiscan.io.fscan_ram_rddis_b
+      mbistControllerCoreWithL2.io.fscan_in(1).init_en := xsl2_ultiscan.io.fscan_ram_init_en
+      mbistControllerCoreWithL2.io.fscan_in(1).init_val := xsl2_ultiscan.io.fscan_ram_init_val
+
+      ultiscanToControllerL3.bypsel := xsl2_ultiscan.io.fscan_ram_bypsel
+      ultiscanToControllerL3.wdis_b := xsl2_ultiscan.io.fscan_ram_wrdis_b
+      ultiscanToControllerL3.rdis_b := xsl2_ultiscan.io.fscan_ram_rddis_b
+      ultiscanToControllerL3.init_en := xsl2_ultiscan.io.fscan_ram_init_en
+      ultiscanToControllerL3.init_val := xsl2_ultiscan.io.fscan_ram_init_val
+
+      mbist_ijtag <> mbistControllerCoreWithL2.io.mbist_ijtag
+      ultiscan_ijtag <> xsl2_ultiscan.io.ijtag
+      ultiscan_uscan <> xsl2_ultiscan.io.uscan
+      mbistControllerCoreWithL2.io.hd2prf_in <> hd2prf_in
+      mbistControllerCoreWithL2.io.hsuspsr_in <> hsuspsr_in
+
+
+      // Modules are reset one by one
+      // io_reset ----
+      //             |
+      //             v
+      // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
+      val resetChain = Seq(
+        Seq(misc.module.reset, core.module.reset, l1i_to_l2_buffer.module.reset) ++
+          l2cache.map(_.module.reset) ++
+          l1d_to_l2_bufferOpt.map(_.module.reset) ++ ptw_to_l2_bufferOpt.map(_.module.reset)
+      )
+      ResetGen(resetChain, (childReset.asBool() || core_soft_rst.asBool()).asAsyncReset(), !debugOpts.FPGAPlatform)
     }
-    else {
-      core.module.io.perfEvents <> DontCare
-    }
-
-    misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
-    misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
-    if(l2cache.isDefined){
-      misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
-      misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
-    } else {
-      misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
-    }
-
-    // Modules are reset one by one
-    // io_reset ----
-    //             |
-    //             v
-    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    val resetChain = Seq(
-      Seq(misc.module, core.module, l1i_to_l2_buffer.module) ++
-        l2cache.map(_.module) ++
-        l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
-    )
-    ResetGen(resetChain, (reset.asBool() || core_soft_rst.asBool()).asAsyncReset(), !debugOpts.FPGAPlatform)
   }
 }

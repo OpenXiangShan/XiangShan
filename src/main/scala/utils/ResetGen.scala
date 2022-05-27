@@ -60,7 +60,7 @@ object ResetGen {
     }
   }
 
-  def apply(resetChain: Seq[Seq[Module]], reset: Reset, sim: Boolean): Seq[Reset] = {
+  def apply(resetChain: Seq[Seq[Reset]], reset: Reset, sim: Boolean): Seq[Reset] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Reset()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
@@ -69,7 +69,7 @@ object ResetGen {
           resetReg(i + 1) := RST_SYNC_NO_DFT()
         }
       }
-      resetLevel.foreach(_.reset := resetReg(i + 1))
+      resetLevel.foreach(_ := resetReg(i + 1))
     }
     resetReg.tail
   }
