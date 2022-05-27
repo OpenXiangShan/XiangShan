@@ -393,18 +393,18 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.resp      := enqPtrVec
   val canEnqueue = VecInit(io.enq.req.map(_.valid && io.enq.canAccept))
-  val timer = GTimer()
+  val cycle_timer = GTimer()
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
     when (canEnqueue(i)) {
       val enqUop = io.enq.req(i).bits
       // store uop in data module and debug_microOp Vec
       debug_microOp(enqPtrVec(i).value) := enqUop
-      debug_microOp(enqPtrVec(i).value).debugInfo.dispatchTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.enqRsTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.selectTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.issueTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.writebackTime := timer
+      debug_microOp(enqPtrVec(i).value).debugInfo.dispatchTime := cycle_timer
+      debug_microOp(enqPtrVec(i).value).debugInfo.enqRsTime := cycle_timer
+      debug_microOp(enqPtrVec(i).value).debugInfo.selectTime := cycle_timer
+      debug_microOp(enqPtrVec(i).value).debugInfo.issueTime := cycle_timer
+      debug_microOp(enqPtrVec(i).value).debugInfo.writebackTime := cycle_timer
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -932,7 +932,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val issueLatency = commitDebugUop.map(uop => uop.debugInfo.issueTime - uop.debugInfo.selectTime)
   val executeLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.issueTime)
   val rsFuLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.enqRsTime)
-  val commitLatency = commitDebugUop.map(uop => timer - uop.debugInfo.writebackTime)
+  val commitLatency = commitDebugUop.map(uop => cycle_timer - uop.debugInfo.writebackTime)
   def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
     cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)
   }
@@ -1080,7 +1080,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.valid    := hitTrap
     difftest.io.code     := trapCode
     difftest.io.pc       := trapPC
-    difftest.io.cycleCnt := timer
+    difftest.io.cycleCnt := cycle_timer
     difftest.io.instrCnt := instrCnt
   }
   else if (env.AlwaysBasicDiff) {
@@ -1096,7 +1096,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.clock    := clock
     difftest.io.coreid   := io.hartId
     difftest.io.valid    := hitTrap
-    difftest.io.cycleCnt := timer
+    difftest.io.cycleCnt := cycle_timer
     difftest.io.instrCnt := instrCnt
   }
 
