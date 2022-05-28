@@ -19,12 +19,12 @@ package top
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chisel3.util.MixedVec
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import huancun.mbist.{FUSEInterface, MBISTController, MBISTInterface, Ultiscan}
+import huancun.utils.ResetGen
 import huancun.{HCCacheParamsKey, HuanCun}
 import system._
 import utils._
@@ -133,14 +133,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
-    val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, None) }
-    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, None) }
 
-    // override LazyRawModuleImp's clock and reset
     val xsx_ultiscan = Module(new Ultiscan(1100, 10, 10, 1, 1, 0, 0, "xsx", !debugOpts.FPGAPlatform))
     dontTouch(xsx_ultiscan.io)
     xsx_ultiscan.io := DontCare
     xsx_ultiscan.io.core_clock_preclk := io.clock
+
+    val dfx_reset = Some(xsx_ultiscan.toResetGen)
+    val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, dfx_reset) }
+    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, dfx_reset) }
+
+    // override LazyRawModuleImp's clock and reset
     childClock := xsx_ultiscan.io.core_clock_postclk
     childReset := reset_sync
 
@@ -273,7 +276,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.reset.asBool)
-    misc.module.debug_module_io.clock := childClock.asBool()
+    misc.module.debug_module_io.clock := childClock.asBool
     misc.module.debug_module_io.reset := childReset
 
     // TODO: use synchronizer?
@@ -294,7 +297,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq((Seq(misc.module) ++ l3cacheOpt.map(_.module)).map(_.reset) ++ core_with_l2.map(_.module.io.reset))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, None)
+      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, dfx_reset)
     }
 
   }

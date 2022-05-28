@@ -9,6 +9,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.mbist.{FSCANInputInterface, FUSEInterface, JTAGInterface, MBISTController, MBISTInterface, MBISTPipeline, Ultiscan, UltiscanJTAGInterface, UltiscanUscanInterface}
+import huancun.utils.ResetGen
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -139,21 +140,29 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val mbist_ijtag = IO(new JTAGInterface)
 
     dontTouch(io)
-
-    val reset_sync = withClockAndReset(io.clock, io.reset) {
-      ResetGen(2, None)
-    }
+    dontTouch(ultiscanToControllerL2)
+    dontTouch(ultiscanToControllerL3)
+    dontTouch(hsuspsr_in)
+    dontTouch(hd2prf_in)
+    dontTouch(mbist_ijtag)
 
     val xsl2_ultiscan = Module(new Ultiscan(3400, 20, 20, 1, 1, 0, 0, "xsl2", !debugOpts.FPGAPlatform))
     dontTouch(xsl2_ultiscan.io)
     xsl2_ultiscan.io := DontCare
     xsl2_ultiscan.io.core_clock_preclk := io.clock
 
+    val dfx_reset = Some(xsl2_ultiscan.toResetGen)
+    val reset_sync = withClockAndReset(io.clock, io.reset) {
+      ResetGen(2, dfx_reset)
+    }
+
     childClock := xsl2_ultiscan.io.core_clock_postclk
     childReset := reset_sync
 
     val ultiscan_ijtag = IO(xsl2_ultiscan.io.ijtag.cloneType)
     val ultiscan_uscan = IO(xsl2_ultiscan.io.uscan.cloneType)
+    dontTouch(ultiscan_ijtag)
+    dontTouch(ultiscan_uscan)
 
     withClockAndReset(childClock, childReset) {
       val core_soft_rst = core_reset_sink.in.head._1
@@ -167,6 +176,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       else {
         core.module.io.perfEvents <> DontCare
       }
+      core.module.io.dfx_reset := dfx_reset.get
 
       ultiscan_ijtag <> xsl2_ultiscan.io.ijtag
       ultiscan_uscan <> xsl2_ultiscan.io.uscan
@@ -234,7 +244,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
           l2cache.map(_.module) ++
           l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
       )
-      ResetGen(resetChain, (childReset.asBool || core_soft_rst.asBool).asAsyncReset, !debugOpts.FPGAPlatform, None)
+      ResetGen(resetChain, (childReset.asBool || core_soft_rst.asBool).asAsyncReset, !debugOpts.FPGAPlatform, dfx_reset)
     }
   }
 }

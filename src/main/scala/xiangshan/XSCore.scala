@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
+import huancun.utils.{DFTResetGen, ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
@@ -248,6 +249,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
+    val dfx_reset = Input(new DFTResetGen)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -432,6 +434,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     )
   )
 
-  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform, None)
+  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform, Some(io.dfx_reset))
 
 }
