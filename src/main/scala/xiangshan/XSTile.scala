@@ -194,17 +194,17 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
         mbistControllerCoreWithL2.io.fscan_in(0) <> ultiscanToControllerL2
 
-        mbistControllerCoreWithL2.io.fscan_in(1).bypsel := xsl2_ultiscan.io.fscan_ram_bypsel
-        mbistControllerCoreWithL2.io.fscan_in(1).wdis_b := xsl2_ultiscan.io.fscan_ram_wrdis_b
-        mbistControllerCoreWithL2.io.fscan_in(1).rdis_b := xsl2_ultiscan.io.fscan_ram_rddis_b
-        mbistControllerCoreWithL2.io.fscan_in(1).init_en := xsl2_ultiscan.io.fscan_ram_init_en
-        mbistControllerCoreWithL2.io.fscan_in(1).init_val := xsl2_ultiscan.io.fscan_ram_init_val
+        mbistControllerCoreWithL2.io.fscan_in(1).bypsel := xsl2_ultiscan.io.fscan.ram.bypsel
+        mbistControllerCoreWithL2.io.fscan_in(1).wdis_b := xsl2_ultiscan.io.fscan.ram.wrdis_b
+        mbistControllerCoreWithL2.io.fscan_in(1).rdis_b := xsl2_ultiscan.io.fscan.ram.rddis_b
+        mbistControllerCoreWithL2.io.fscan_in(1).init_en := xsl2_ultiscan.io.fscan.ram.init_en
+        mbistControllerCoreWithL2.io.fscan_in(1).init_val := xsl2_ultiscan.io.fscan.ram.init_val
 
-        ultiscanToControllerL3.bypsel := xsl2_ultiscan.io.fscan_ram_bypsel
-        ultiscanToControllerL3.wdis_b := xsl2_ultiscan.io.fscan_ram_wrdis_b
-        ultiscanToControllerL3.rdis_b := xsl2_ultiscan.io.fscan_ram_rddis_b
-        ultiscanToControllerL3.init_en := xsl2_ultiscan.io.fscan_ram_init_en
-        ultiscanToControllerL3.init_val := xsl2_ultiscan.io.fscan_ram_init_val
+        ultiscanToControllerL3.bypsel := xsl2_ultiscan.io.fscan.ram.bypsel
+        ultiscanToControllerL3.wdis_b := xsl2_ultiscan.io.fscan.ram.wrdis_b
+        ultiscanToControllerL3.rdis_b := xsl2_ultiscan.io.fscan.ram.rddis_b
+        ultiscanToControllerL3.init_en := xsl2_ultiscan.io.fscan.ram.init_en
+        ultiscanToControllerL3.init_val := xsl2_ultiscan.io.fscan.ram.init_val
 
         mbist_ijtag <> mbistControllerCoreWithL2.io.mbist_ijtag
 

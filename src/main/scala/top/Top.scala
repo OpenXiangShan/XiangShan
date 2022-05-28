@@ -188,11 +188,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2.head.module.ultiscan_ijtag <> xsl2_ultiscan_ijtag
     core_with_l2.head.module.ultiscan_uscan <> xsl2_ultiscan_uscan
 
-    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_ultiscan.io.fscan_ram_bypsel
-    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_ultiscan.io.fscan_ram_wrdis_b
-    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_ultiscan.io.fscan_ram_rddis_b
-    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_ultiscan.io.fscan_ram_init_en
-    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_ultiscan.io.fscan_ram_init_val
+    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_ultiscan.io.fscan.ram.bypsel
+    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
+    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
+    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_ultiscan.io.fscan.ram.init_en
+    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_ultiscan.io.fscan.ram.init_val
 
     val mbistInterfacesL3 = {
       if (l3cacheOpt.nonEmpty) {
@@ -229,11 +229,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
               ctrl.io.clock := childClock.asBool
               ctrl.io.hd2prf_in := hd2prf_in
               ctrl.io.hsuspsr_in := hsuspsr_in
-              ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan_ram_bypsel
-              ctrl.io.fscan_in(0).wdis_b := xsx_ultiscan.io.fscan_ram_wrdis_b
-              ctrl.io.fscan_in(0).rdis_b := xsx_ultiscan.io.fscan_ram_rddis_b
-              ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan_ram_init_en
-              ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan_ram_init_val
+              ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan.ram.bypsel
+              ctrl.io.fscan_in(0).wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
+              ctrl.io.fscan_in(0).rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
+              ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan.ram.init_en
+              ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan.ram.init_val
               ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
               ctrl.io.fscan_clkungate := DontCare
               ctrl
