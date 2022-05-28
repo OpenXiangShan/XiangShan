@@ -4,7 +4,7 @@ import os
 import re
 import sys
 from datetime import date
-from shutil import copytree
+from shutil import copytree, copy
 
 import xlsxwriter
 
@@ -368,8 +368,13 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None
     worksheet.write(0, 0, f"Total size: {total_size / (8 * 1024)} KiB")
     workbook.close()
 
-def create_extra_files(out_dir):
-    copytree("/nfs/home/share/southlake/extra", os.path.join(out_dir, "extra"))
+def create_extra_files(out_dir, build_path):
+    extra_path = os.path.join(out_dir, "extra")
+    copytree("/nfs/home/share/southlake/extra", extra_path)
+    for f in os.listdir(build_path):
+        file_path = os.path.join(build_path, f)
+        if f.endswith(".xls"):
+            copy(file_path, extra_path)
 
 if __name__ == "__main__":
     xs_home = os.path.realpath(os.getenv("NOOP_HOME"))
@@ -388,4 +393,4 @@ if __name__ == "__main__":
     create_filelist(out_dir, top_module)
     sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
     create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
-    create_extra_files(out_dir)
+    create_extra_files(out_dir, build_path)
