@@ -138,6 +138,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // override LazyRawModuleImp's clock and reset
     val xsx_ultiscan = Module(new Ultiscan(1100, 10, 10, 1, 1, 0, 0, "xsx", !debugOpts.FPGAPlatform))
+    dontTouch(xsx_ultiscan.io)
     xsx_ultiscan.io := DontCare
     xsx_ultiscan.io.core_clock_preclk := io.clock
     childClock := xsx_ultiscan.io.core_clock_postclk
@@ -167,7 +168,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset()
+        node.out.head._1 := false.B.asAsyncReset
       }
     }
 
@@ -223,10 +224,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
             case (intf, idx) =>
               val prefix = f"L3S$idx"
               val ctrl = Module(new MBISTController(Seq(intf.mbist.params), 2, Seq(prefix), !debugOpts.FPGAPlatform))
+              dontTouch(ctrl.io)
               ctrl.io.mbist.head <> intf.mbist
               ctrl.io.fscan_ram.head <> intf.fscan_ram
               ctrl.io.static.head <> intf.static
-              ctrl.io.clock := childClock.asBool
+              ctrl.io.fscan_clkungate := xsx_ultiscan.io.fscan.clkungate
+              ctrl.io.clock := childClock
               ctrl.io.hd2prf_in := hd2prf_in
               ctrl.io.hsuspsr_in := hsuspsr_in
               ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan.ram.bypsel
@@ -235,7 +238,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
               ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan.ram.init_en
               ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan.ram.init_val
               ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
-              ctrl.io.fscan_clkungate := DontCare
               ctrl
           })
         )

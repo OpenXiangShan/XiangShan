@@ -145,6 +145,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     }
 
     val xsl2_ultiscan = Module(new Ultiscan(3400, 20, 20, 1, 1, 0, 0, "xsl2", !debugOpts.FPGAPlatform))
+    dontTouch(xsl2_ultiscan.io)
     xsl2_ultiscan.io := DontCare
     xsl2_ultiscan.io.core_clock_preclk := io.clock
 
@@ -186,11 +187,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
           Seq("L1L2"),
           !debugOpts.FPGAPlatform
         ))
+        dontTouch(mbistControllerCoreWithL2.io)
 
         mbistControllerCoreWithL2.io.mbist.head <> mbistInterfaceL2.mbist
         mbistControllerCoreWithL2.io.fscan_ram.head <> mbistInterfaceL2.fscan_ram
         mbistControllerCoreWithL2.io.static.head <> mbistInterfaceL2.static
-        mbistControllerCoreWithL2.io.clock <> childClock.asBool()
+        mbistControllerCoreWithL2.io.fscan_clkungate := xsl2_ultiscan.io.fscan.clkungate
+        mbistControllerCoreWithL2.io.clock := childClock
 
         mbistControllerCoreWithL2.io.fscan_in(0) <> ultiscanToControllerL2
 
