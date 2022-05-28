@@ -164,7 +164,8 @@ trait PMAMethod extends PMAConst {
     // 0x1F_0000_0000 - 0x1F_1FFF_FFFF is marked as reserved in the SoC memory map.
     // This region is used by the CPU to accommodate internal devices.
     addPMA(0x1F20000000L, a = 1, w = true, r = true)
-    addPMA(0x1F10000000L, a = 1, w = true, r = true)
+    addPMA(0x1F10021000L, a = 1, w = true, r = true, x = true)
+    addPMA(0x1F10020000L, a = 1, w = true, r = true)
     addPMA(0x1F00000000L, a = 1, r = true)
     addPMA(0x800000000L, a = 1, x = true, w = true, r = true)
     addPMA(0x80000000L, a = 1)
