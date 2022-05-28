@@ -369,7 +369,7 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None
     workbook.close()
 
 def create_extra_files(out_dir):
-    copytree("/nfs/home/share/southlake/extra", out_dir)
+    copytree("/nfs/home/share/southlake/extra", os.path.join(out_dir, "extra"))
 
 if __name__ == "__main__":
     xs_home = os.path.realpath(os.getenv("NOOP_HOME"))
