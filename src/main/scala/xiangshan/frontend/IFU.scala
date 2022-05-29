@@ -666,10 +666,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.jalTarget         := wb_check_result.fixedTarget(ParallelPriorityEncoder(VecInit(wb_pd.zip(wb_instr_valid).map{case (pd, v) => v && pd.isJal })))
   checkFlushWb.bits.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
 
-  toFtq.pdWb := Mux(f3_req_is_mmio, mmioFlushWb,  checkFlushWb)
+  toFtq.pdWb := Mux(wb_valid, checkFlushWb,  mmioFlushWb)
 
   wb_redirect := checkFlushWb.bits.misOffset.valid && wb_valid
-
 
   /*write back flush type*/
   val checkFaultType = wb_check_result.faultType
