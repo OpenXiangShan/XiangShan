@@ -269,46 +269,24 @@ def create_filelist(out_dir, top_module):
 
 def generate_sram_conf(collection, module_prefix, out_dir):
     sram_conf = []
-    sram_array_name = module_prefix + "SRAM_Array_(1|2)P.*"
+    sram_array_name = module_prefix + "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)"
     modules = collection.get_all_modules(match=sram_array_name)
-    for module in modules:
+    sram_array_re = re.compile(sram_array_name)
+    for module in sorted(modules, key=lambda m: int(m.get_name().split("_")[3])):
         # name
         module_name = module.get_name()
-        # depth
-        depth = 0
-        depth_re = re.compile(r'\s*reg (\[\d+:0\]|) ram(_\d*|) \[0:(\d+)\].*')
-        for line in module.get_lines():
-            depth_match = depth_re.match(line)
-            if depth_match:
-                ram_depth = int(depth_match.group(3)) + 1
-                assert(depth == 0 or ram_depth == depth)
-                depth = ram_depth
-        assert(depth > 0)
-        # width, ports, mask_gran
-        def get_data_and_mask_width_from_io(match):
-            io_ports = module.get_io(match=match)
-            data_width = []
-            mask_width = 1
-            for p in io_ports:
-                if p.get_name().endswith("data"):
-                    data_width.append(p.get_width())
-                elif p.get_name().endswith("mask"):
-                    mask_width = p.get_width()
-            assert(len(data_width) > 0 and max(data_width) == min(data_width))
-            return max(data_width), mask_width
-        if "1P" in module_name:
-            width, mask_width = get_data_and_mask_width_from_io(".* RW0_\w*")
-            ports = "rw" if mask_width == 1 else "mrw"
-            mask_gran = width // mask_width
-        else:
-            assert("2P" in module_name)
-            r0_data_width, _ = get_data_and_mask_width_from_io(".* R0_\w*")
-            w0_data_width, mask_width = get_data_and_mask_width_from_io(".* W0_\w*")
-            assert(r0_data_width == w0_data_width)
-            width = r0_data_width
-            ports = "write,read" if mask_width == 1 else "mwrite,read"
-            mask_gran = width // mask_width
+        module_name_match = sram_array_re.match(module_name)
+        assert(module_name_match is not None)
+        num_ports = int(module_name_match.group(1))
+        depth = int(module_name_match.group(2))
+        width = int(module_name_match.group(3))
+        mask_gran = int(module_name_match.group(4))
         assert(width % mask_gran == 0)
+        mask_width = width // mask_gran
+        if num_ports == 1:
+            ports = "rw" if mask_width == 1 else "mrw"
+        else:
+            ports = "write,read" if mask_width == 1 else "mwrite,read"
         all_info = ["name", module_name, "depth", depth, "width", width, "ports", ports]
         if mask_gran < width:
             all_info += ["mask_gran", mask_gran]

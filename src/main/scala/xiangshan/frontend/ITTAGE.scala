@@ -18,18 +18,13 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
-import xiangshan._
-import utils._
 import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
+import chisel3.util._
+import huancun.utils.FoldedSRAMTemplate
+import utils._
+import xiangshan._
 
 import scala.math.min
-import scala.util.matching.Regex
-import firrtl.passes.wiring.Wiring
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 

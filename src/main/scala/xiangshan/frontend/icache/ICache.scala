@@ -22,13 +22,13 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
+import huancun.utils.SRAMTemplate
 import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
-import xiangshan._
-import xiangshan.frontend._
-import xiangshan.cache._
 import utils._
-import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
+import xiangshan._
+import xiangshan.cache._
+import xiangshan.cache.mmu.BlockTlbRequestIO
+import xiangshan.frontend._
 
 case class ICacheParameters(
     nSets: Int = 256,

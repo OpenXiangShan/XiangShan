@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
+import huancun.utils.SRAMTemplate
 import utils._
 
 @chiselName

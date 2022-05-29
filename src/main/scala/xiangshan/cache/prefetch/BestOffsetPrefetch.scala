@@ -16,13 +16,12 @@
 
 package xiangshan.cache.prefetch
 
-import chipsalliance.rocketchip.config.{Parameters, Field}
+import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.mmu.{HasTlbConst}
+import huancun.utils.SRAMTemplate
 import utils._
+import xiangshan.cache.mmu.HasTlbConst
 
 case object BOPParamsKey extends Field[BOPParameters]
 

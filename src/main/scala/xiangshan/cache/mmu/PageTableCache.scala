@@ -18,13 +18,11 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
 import chisel3.internal.naming.chiselName
-import xiangshan._
-import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
+import chisel3.util._
+import huancun.utils.SRAMTemplate
 import utils._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
+import xiangshan._
 
 /* ptw cache caches the page table of all the three layers
  * ptw cache resp at next cycle
