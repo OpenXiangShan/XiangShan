@@ -238,12 +238,12 @@ def check_data_module_template(collection):
             error_modules.append(module)
     return error_modules
 
-def create_verilog(files, top_module, try_prefix=None):
+def create_verilog(files, top_module, config, try_prefix=None):
     collection = VCollection()
     for f in files:
         collection.load_modules(f)
     today = date.today()
-    directory = f'XSTop-Release-{today.strftime("%b-%d-%Y")}'
+    directory = f'XSTop-Release-{config}-{today.strftime("%b-%d-%Y")}'
     success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix)
     if not success:
         return None, None
@@ -383,11 +383,15 @@ if __name__ == "__main__":
 
     module_prefix = None
     top_module = "XSTop"
+    config = "DefaultConfig"
     if len(sys.argv) > 1:
         module_prefix = sys.argv[1]
         top_module = f"{module_prefix}{top_module}"
-    print(f"Top-level Module: {top_module} {module_prefix}")
-    collection, out_dir = create_verilog(files, top_module, try_prefix=module_prefix)
+    if len(sys.argv) > 2:
+        config = sys.argv[2]
+    print(f"Top-level Module: {top_module} with prefix {module_prefix}")
+    print(f"Config:         : {config}")
+    collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix)
     assert(collection)
 
     create_filelist(out_dir, top_module)
