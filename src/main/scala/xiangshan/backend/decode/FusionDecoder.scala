@@ -18,10 +18,10 @@ package xiangshan.backend.decode
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import xiangshan._
+import freechips.rocketchip.rocket.Instructions
 import utils._
+import xiangshan._
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {
@@ -67,7 +67,7 @@ class FusedAdduw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ADDU_W)
+    val cs = getBaseCS(Instructions.ADD_UW)
     cs.lsrc(0) := instr1Rs1
     cs.lsrc(1) := 0.U
     cs

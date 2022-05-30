@@ -118,6 +118,7 @@ package object xiangshan {
 
   object FuOpType {
     def apply() = UInt(7.W)
+    def X = BitPat("b???????")
   }
 
   object CommitType {
