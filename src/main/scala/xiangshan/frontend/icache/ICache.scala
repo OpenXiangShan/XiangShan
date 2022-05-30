@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
+import huancun.mbist.MBISTPipeline
 import huancun.utils.SRAMTemplate
 import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import utils._
@@ -678,4 +679,5 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
+  val icacheMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_icache"))
 } 

@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
+import huancun.mbist.MBISTPipeline
 import huancun.utils.{DFTResetGen, ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
 import utils._
@@ -408,6 +409,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+
+  val coreMbistPipeline = Module(new MBISTPipeline(level = Int.MaxValue,infoName = "MBIST_Core_SRAM_info"))
+  val mbist = IO(coreMbistPipeline.io.mbist.get.cloneType)
+  coreMbistPipeline.io.mbist.get <> mbist
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

@@ -20,6 +20,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.uniqueId
 import xiangshan._
 import utils._
 
@@ -247,6 +249,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val ctrl = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
+  val bpuMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_bpu"))
 
   // ctrl signal
   predictors.io.reset_vector := io.reset_vector

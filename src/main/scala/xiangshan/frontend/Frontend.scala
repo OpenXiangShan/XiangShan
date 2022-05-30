@@ -19,9 +19,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import huancun.mbist.MBISTPipeline
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
@@ -123,6 +124,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     shouldBlock = true,
     itlbParams
   )
+  val frontendMBISTPipeline = Module(new MBISTPipeline(level = 3, infoName = "MBISTPipeline_frontend"))
 
   icache.io.prefetch <> ftq.io.toPrefetch
 

@@ -19,6 +19,7 @@ package xiangshan.cache.prefetch
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
+import huancun.mbist.MBISTPipeline
 import huancun.utils.SRAMTemplate
 import utils._
 import xiangshan.cache.mmu.HasTlbConst
@@ -388,6 +389,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
   val scoreTable = Module(new OffsetScoreTable)
   val rrTable = Module(new RecentRequestTable)
+  val bestOffsetPrefetcherMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_BestOffsetPrefetcher"))
   val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq, nEntries))
   val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish, nEntries))
   val writeRRTableArb = Module(new Arbiter(UInt(PAddrBits.W), nEntries))

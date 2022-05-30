@@ -26,6 +26,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import huancun.mbist.MBISTPipeline
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -87,6 +88,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
 
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
+  val ptwMBISTPipeline = Module(new MBISTPipeline(level = 3,infoName = "MBISTPipeline_PTW"))
   val fsm = Module(new PtwFsm)
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
+import huancun.mbist.MBISTPipeline
 import xiangshan._
 import utils._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
@@ -86,6 +87,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage = q.normalAsVictim,
     superPage = true,
   )
+  val tlbMBISTPipeline = Module(new MBISTPipeline(level = 2))
 
 
   for (i <- 0 until Width) {

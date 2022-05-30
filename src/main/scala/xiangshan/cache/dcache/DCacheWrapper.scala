@@ -26,8 +26,9 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
+import huancun.mbist.MBISTPipeline
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import mem.{AddPipelineReg}
+import mem.AddPipelineReg
 
 import scala.math.max
 
@@ -411,6 +412,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val errorArray = Module(new ErrorArray(readPorts = 3, writePorts = 2)) // TODO: add it to meta array
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
+  val dcacheMBISTPipeline = Module(new MBISTPipeline(level = 3,infoName = "MBISTPipeline_dcache"))
 
   //----------------------------------------
   // core modules
