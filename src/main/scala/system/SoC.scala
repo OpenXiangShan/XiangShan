@@ -285,7 +285,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   val pma = LazyModule(new TLPMA)
-  pma.node := 
+  pma.node :=
     TLBuffer.chainNode(4) :=
     peripheralXbar
 
@@ -297,11 +297,16 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
 
-    val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
-    val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
-    ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
-    plicSource.module.in := ext_intrs_wire.asBools
+
+    // sync external interrupts
+    require(plicSource.module.in.length == ext_intrs.getWidth)
+    for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
+      val ext_intr_sync = RegInit(0.U(3.W))
+      ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
+      plic_in := ext_intr_sync(1) && !ext_intr_sync(2)
+    }
+
     pma.module.io <> cacheable_check
 
     val freq = 100
