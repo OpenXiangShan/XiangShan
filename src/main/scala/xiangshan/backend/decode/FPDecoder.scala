@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
-import xiangshan.backend.decode.Instructions._
+import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.{FPUCtrlSignals, XSModule}
 
