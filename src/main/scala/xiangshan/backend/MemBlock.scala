@@ -92,6 +92,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
+    val sqFull = Output(Bool())
+    val lqFull = Output(Bool())
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -546,8 +548,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
-  val ldDeqCount = PopCount(io.issue.take(2).map(_.valid))
-  val stDeqCount = PopCount(io.issue.drop(2).map(_.valid))
+  io.lqFull := lsq.io.lqFull
+  io.sqFull := lsq.io.sqFull
+
+  val ldDeqCount = PopCount(io.issue.take(exuParameters.LduCnt).map(_.valid))
+  val stDeqCount = PopCount(io.issue.drop(exuParameters.LduCnt).map(_.valid))
   val rsDeqCount = ldDeqCount + stDeqCount
   XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
   XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)

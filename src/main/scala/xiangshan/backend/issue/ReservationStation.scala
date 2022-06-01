@@ -147,6 +147,13 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       Module(new ReservationStation(rsParam)(updatedP))
     })
 
+    if (params.isJump)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"jumpRS_${index}") }
+    if (params.isAlu)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"aluRS_${index}") }
+    if (params.isStore)     rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"staRS_${index}") }
+    if (params.isStoreData) rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"stdRS_${index}") }
+    if (params.isMul)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"mulRS_${index}") }
+    if (params.isLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"loadRS_${index}") }
+
     val updatedP = p.alter((site, here, up) => {
       case XSCoreParamsKey => up(XSCoreParamsKey).copy(
         IssQueSize = rs.map(_.size).max
@@ -158,6 +165,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     io.numExist <> rs.map(_.io.numExist).reduce(_ +& _)
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
+    io.full <> rs.map(_.io.full).reduce(_ && _)
     if (io.fpRegValue.isDefined) {
       io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
     }

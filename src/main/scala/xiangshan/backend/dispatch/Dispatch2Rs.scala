@@ -177,6 +177,25 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   val in = WireInit(io.in)
   in.foreach(_.ready := false.B)
   io.in.zip(in).foreach(x => x._1.ready := x._2.ready)
+  val out = Wire(chiselTypeOf(io.out))
+  io.out.zip(out).foreach { x =>
+    x._1.valid := x._2.valid
+    x._1.bits := x._2.bits
+    x._2.ready := x._1.ready
+  }
+  if (LoadPipelineWidth > 2) {
+    val rrFlag = RegInit(0.U(log2Ceil(LoadPipelineWidth / 2).W))
+    val rrFlag2 = rrFlag ## 0.B
+    rrFlag := rrFlag + 1.U
+    (0 until 3).foreach { i => // ld, sta, std
+      (0 until LoadPipelineWidth).foreach { j =>
+        io.out(4 * i + j).valid := out((4 * i).U + (rrFlag2 + j.U)(rrFlag.getWidth, 0)).valid
+        io.out(4 * i + j).bits := out((4 * i).U + (rrFlag2 + j.U)(rrFlag.getWidth, 0)).bits
+        out((4 * i).U + (rrFlag2 + j.U)(rrFlag.getWidth, 0)).ready := io.out(4 * i + j).ready
+      }
+    }
+  }
+  
 
   // dirty code for lsq enq
   val is_blocked = Wire(Vec(io.in.length, Bool()))
@@ -220,8 +239,8 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val select = SelectOne("naive", canAccept, numOfThisExu)
     for ((idx, j) <- outIndices.zipWithIndex) {
       val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      io.out(idx).valid := selectValid && !Mux1H(selectIdxOH, is_blocked)
-      io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
+      out(idx).valid := selectValid && !Mux1H(selectIdxOH, is_blocked)
+      out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
         val sta = io.out(idx - 2)
@@ -233,23 +252,23 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
         XSPerfAccumulate(s"std_rs_not_ready_$idx", selectValid && sta.ready && !io.out(idx).ready)
       }
       else {
-        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready }}
+        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := out(idx).ready }}
       }
     }
   }
 
   if (io.readIntState.isDefined) {
-    val stateReadReq = io.out.zip(outer.numIntSrc).flatMap(x => x._1.bits.psrc.take(x._2))
+    val stateReadReq = out.zip(outer.numIntSrc).flatMap(x => x._1.bits.psrc.take(x._2))
     io.readIntState.get.map(_.req).zip(stateReadReq).foreach(x => x._1 := x._2)
-    val stateReadResp = io.out.zip(outer.numIntSrc).flatMap(x => x._1.bits.srcState.take(x._2))
+    val stateReadResp = out.zip(outer.numIntSrc).flatMap(x => x._1.bits.srcState.take(x._2))
     io.readIntState.get.map(_.resp).zip(stateReadResp).foreach(x => x._2 := x._1)
   }
 
   if (io.readFpState.isDefined) {
-    val stateReadReq = io.out.zip(outer.numFpSrc).flatMap(x => x._1.bits.psrc.take(x._2))
+    val stateReadReq = out.zip(outer.numFpSrc).flatMap(x => x._1.bits.psrc.take(x._2))
     io.readFpState.get.map(_.req).zip(stateReadReq).foreach(x => x._1 := x._2)
-    val stateReadResp = io.out.zip(outer.numFpSrc).flatMap(x => x._1.bits.srcState.take(x._2))
-    val srcTypeOut = io.out.zip(outer.numFpSrc).flatMap(x => x._1.bits.ctrl.srcType.take(x._2))
+    val stateReadResp = out.zip(outer.numFpSrc).flatMap(x => x._1.bits.srcState.take(x._2))
+    val srcTypeOut = out.zip(outer.numFpSrc).flatMap(x => x._1.bits.ctrl.srcType.take(x._2))
     // When both int and fp are needed, need Mux
     io.readFpState.get.map(_.resp).zip(stateReadResp).zip(srcTypeOut).foreach{
       case ((resp, state), srcType) =>
@@ -262,9 +281,9 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   // dispatch is allowed when lsq and rs can accept all the instructions
   // TODO: better algorithm here?
   if (io.enqLsq.isDefined) {
-    when (!VecInit(io.out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
+    when (!VecInit(out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
       in.foreach(_.ready := false.B)
-      io.out.foreach(_.valid := false.B)
+      out.foreach(_.valid := false.B)
     }
   }
 }

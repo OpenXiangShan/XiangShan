@@ -233,20 +233,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     println(s"  loadBalance: ${rs_all(i).params.needBalance}")
   }
 
-  if (rs_all.exists(_.params.isLoad)) {
-    val stall_ls_dq = WireDefault(0.B)
-    BoringUtils.addSink(stall_ls_dq, "stall_ls_dq")
-    val ld_rs_full = rs_all.filter(_.params.isLoad).map(_.module.io.full).reduce(_ || _)
-    val st_rs_full = rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.full).reduce(_ || _)
-    val stall_stores_bound = stall_ls_dq && st_rs_full
-    val stall_loads_bound = stall_ls_dq && ld_rs_full
-    val stall_ls_bandwidth_bound = stall_ls_dq && !st_rs_full && !ld_rs_full
-    BoringUtils.addSource(stall_loads_bound, "stall_loads_bound")
-    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
-    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
-    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
-  }
-
   class SchedulerExtraIO extends XSBundle {
     // feedback ports
     val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, Flipped(new MemRSFeedbackIO()(updatedP)))) else None
@@ -275,6 +261,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    // perf
+    val sqFull = Input(Bool())
+    val lqFull = Input(Bool())
 
   }
 
@@ -538,6 +527,20 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
+
+  if (rs_all.exists(_.params.isLoad)) {
+    val stall_ls_dq = WireDefault(0.B)
+    BoringUtils.addSink(stall_ls_dq, "stall_ls_dq")
+    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val st_rs_full = !rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val stall_stores_bound = stall_ls_dq && (st_rs_full || io.extra.sqFull)
+    val stall_loads_bound = stall_ls_dq && (ld_rs_full || io.extra.lqFull)
+    val stall_ls_bandwidth_bound = stall_ls_dq && !(st_rs_full || io.extra.sqFull) && !(ld_rs_full || io.extra.lqFull)
+    BoringUtils.addSource(stall_loads_bound, "stall_loads_bound")
+    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
+    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
+  }
 
   val schedulerPerf = Seq(
     ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))),
