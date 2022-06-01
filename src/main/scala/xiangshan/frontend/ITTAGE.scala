@@ -278,7 +278,7 @@ class ITTageTable
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
   update_wdata.tag   := update_tag
   // only when ctr is null
-  update_wdata.target := Mux(ctr_null(old_ctr), update_target, io.update.old_target)
+  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
   
   val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
