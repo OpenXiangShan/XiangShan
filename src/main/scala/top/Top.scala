@@ -269,8 +269,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
             repairNodesList.filter(_.prefix.contains(s"slice${idx}"))
         })
         Some(
-          mbistInterfacesL3.zipWithIndex.zip(repairNodesForEveyController).map({
-            case ((intf, idx),nodes) =>
+          mbistInterfacesL3.zip(repairNodesForEveyController).map({
+            case (intf,nodes) =>
               val prefix = f"L3"
               val ctrl = Module(new MBISTController
               (
