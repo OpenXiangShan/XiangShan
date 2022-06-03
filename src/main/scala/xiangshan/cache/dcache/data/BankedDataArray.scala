@@ -124,7 +124,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   }
 }
 
-class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
+class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) extends AbstractBankedDataArray {
   def getECCFromEncWord(encWord: UInt) = {
     require(encWord.getWidth == encWordBits)
     encWord(encWordBits - 1, wordBits)
@@ -135,7 +135,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write.ready := true.B
 
   // wrap data rows of 8 ways
-  class DataSRAMBank(index: Int) extends Module {
+  class DataSRAMBank(parentName:String = "Unknown", index: Int) extends Module {
     val io = IO(new Bundle() {
       val w = new Bundle() {
         val en = Input(Bool())
@@ -155,16 +155,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val r_way_en_reg = RegNext(io.r.way_en)
 
     // multiway data bank
-    val data_bank = Array.fill(DCacheWays) {
+    val data_bank = (0 until DCacheWays).map(idx =>{
       Module(new SRAMTemplate(
         Bits(DCacheSRAMRowBits.W),
         set = DCacheSets,
         way = 1,
         shouldReset = false,
         holdRead = false,
-        singlePort = true
+        singlePort = true,
+        parentName = parentName + s"dataBank${idx}_"
       ))
-    }
+    })
 
     for (w <- 0 until DCacheWays) {
       val wen = io.w.en && io.w.way_en(w)
@@ -214,14 +215,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
-  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i)))
-  val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplate(
+  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(parentName = parentName ,i)))
+  val ecc_banks = List.tabulate(DCacheBanks)(idx => Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
     way = DCacheWays,
     shouldReset = false,
     holdRead = false,
-    singlePort = true
+    singlePort = true,
+    parentName = parentName + s"eccBank${idx}_"
   )))
 
   data_banks.map(_.dump())

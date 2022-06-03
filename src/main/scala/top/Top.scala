@@ -19,12 +19,13 @@ package top
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
+import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
-import huancun.mbist.{FUSEInterface, MBISTController, MBISTInterface, Ultiscan}
-import huancun.utils.ResetGen
+import huancun.mbist.{FUSEInterface, MBISTController, MBISTInterface, MbitsExtraInterface, Repair, Ultiscan}
+import huancun.utils.{DFTResetGen, ResetGen, SRAMTemplate}
 import huancun.{HCCacheParamsKey, HuanCun}
 import system._
 import utils._
@@ -61,14 +62,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
-  val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alterPartial({
-      case XSCoreParamsKey => coreParams
-    })))
+  val core_with_l2 = tiles.zipWithIndex.map({
+    case(coreParams,idx) =>
+      LazyModule(new XSTile(s"XSTop_CoreWithL2_${idx}_")(p.alterPartial({
+        case XSCoreParamsKey => coreParams
+      })))
+  }
   )
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
+    LazyModule(new HuanCun("XSTop_L3_")(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param
     })))
   )
@@ -133,18 +136,51 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
+    
+    val xsl2_fscan = IO(new Bundle{
+      val mode = Input(Bool())
+      val mode_atspeed = Input(Bool())
+      val state = Input(Bool())
 
-    val xsx_ultiscan = Module(new Ultiscan(1100, 10, 10, 1, 1, 0, 0, "xsx", !debugOpts.FPGAPlatform))
-    dontTouch(xsx_ultiscan.io)
-    xsx_ultiscan.io := DontCare
-    xsx_ultiscan.io.core_clock_preclk := io.clock
+      val byplatrst_b = Input(Bool())
+      val byprst_b = Input(Bool())
+      val clkgenctrl = Input(UInt(2.W))
+      val clkgenctrlen = Input(UInt(2.W))
+      val clkungate = Input(Bool())
+      val clkungate_syn = Input(Bool())
+      val rstbypen = Input(Bool())
+      val shiften = Input(Bool())
 
-    val dfx_reset = Some(xsx_ultiscan.toResetGen)
+      val ram = new Bundle () {
+        val bypsel = Input(Bool())
+        val hold = Input(Bool())
+        val init_en = Input(Bool())
+        val init_val = Input(Bool())
+        val mcp = Input(Bool())
+        val odis_b = Input(Bool())
+        val rddis_b = Input(Bool())
+        val wrdis_b = Input(Bool())
+      }
+      val scanchains_so_end = Output(UInt((1100 - 2).W))
+      val scanchains_si_bgn = Input(UInt((1100 - 2).W))
+      val dftclken = Input(Bool())
+      val core_clock_postclk = Input(Clock())
+
+      def toResetGen: DFTResetGen = {
+        val top_scan = Wire(new DFTResetGen)
+        top_scan.scan_mode := rstbypen
+        top_scan.dft_reset := !byprst_b
+        top_scan.dft_mode := rstbypen
+        top_scan
+      }
+    })
+
+    val dfx_reset = Some(xsl2_fscan.toResetGen)
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, dfx_reset) }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, dfx_reset) }
 
     // override LazyRawModuleImp's clock and reset
-    childClock := xsx_ultiscan.io.core_clock_postclk
+    childClock := xsl2_fscan.core_clock_postclk
     childReset := reset_sync
 
     // core_with_l2 still use io_clock and io_reset
@@ -177,43 +213,46 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // MBIST Interface Implementation begins
 
-    val xsx_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
-    val xsl2_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
-    val xsx_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
-    val xsl2_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
-    dontTouch(xsx_ultiscan_ijtag)
+    val xsl2_ultiscan_ijtag = IO(core_with_l2.head.module.ultiscan_ijtag.cloneType)
+    val xsl2_ultiscan_uscan = IO(core_with_l2.head.module.ultiscan_uscan.cloneType)
     dontTouch(xsl2_ultiscan_ijtag)
-    dontTouch(xsx_ultiscan_uscan)
     dontTouch(xsl2_ultiscan_uscan)
-
-    xsx_ultiscan.io.ijtag <> xsx_ultiscan_ijtag
-    xsx_ultiscan.io.uscan <> xsx_ultiscan_uscan
 
     core_with_l2.head.module.ultiscan_ijtag <> xsl2_ultiscan_ijtag
     core_with_l2.head.module.ultiscan_uscan <> xsl2_ultiscan_uscan
 
-    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_ultiscan.io.fscan.ram.bypsel
-    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
-    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
-    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_ultiscan.io.fscan.ram.init_en
-    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_ultiscan.io.fscan.ram.init_val
+    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsl2_fscan.ram.bypsel
+    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsl2_fscan.ram.wrdis_b
+    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsl2_fscan.ram.rddis_b
+    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsl2_fscan.ram.init_en
+    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsl2_fscan.ram.init_val
 
-    val mbistInterfacesL3 = {
+    val mbistExtra = IO(new MbitsExtraInterface)
+    dontTouch(mbistExtra)
+    core_with_l2.head.module.mbist_extra <> mbistExtra
+    
+    val mbistInterfacesL3SRAM = {
       if (l3cacheOpt.nonEmpty) {
-        Some(
-          l3cacheOpt.get.module.mbist.zipWithIndex.map({
-            case (l3MbistPort, idx) =>
-              val intfName = f"MBIST_L3_Slice_${idx}_intf"
-              val intf = Module(new MBISTInterface(l3MbistPort.params, intfName))
-              intf.toPipeline <> l3MbistPort
-              intf
-          })
-        )
-      }
-      else {
+        if(l3cacheOpt.get.module.mbist_sram.isDefined) {
+          Some(
+            l3cacheOpt.get.module.mbist_sram.get.zipWithIndex.map({
+              case (port, idx) =>
+                val intfName = f"MBIST_SRAM_L3_Slice_${idx}_intf"
+                val intf = Module(new MBISTInterface(port.params, intfName))
+                intf.toPipeline <> port
+                intf.extra <> mbistExtra
+                intf
+            })
+          )
+        }else{
+          None
+        }
+      } else {
           None
       }
     }
+
+
     val hd2prf_in = IO(new FUSEInterface)
     dontTouch(hd2prf_in)
     core_with_l2.head.module.hd2prf_in <> hd2prf_in
@@ -222,24 +261,39 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2.head.module.hsuspsr_in <> hsuspsr_in
     val mbistControllersL3 = {
       if (l3cacheOpt.nonEmpty){
+        val repairNodesList = Repair.globalRepairNode
+        val mbistInterfacesL3 = mbistInterfacesL3SRAM.get
+        require(repairNodesList.length % mbistInterfacesL3.length == 0)
+        val repairNodesForEveyController = mbistInterfacesL3.indices.map({
+          idx =>
+            repairNodesList.filter(_.prefix.contains(s"slice${idx}"))
+        })
         Some(
-          mbistInterfacesL3.get.zipWithIndex.map({
-            case (intf, idx) =>
-              val prefix = f"L3S$idx"
-              val ctrl = Module(new MBISTController(Seq(intf.mbist.params), 2, Seq(prefix), !debugOpts.FPGAPlatform))
+          mbistInterfacesL3.zipWithIndex.zip(repairNodesForEveyController).map({
+            case ((intf, idx),nodes) =>
+              val prefix = f"L3"
+              val ctrl = Module(new MBISTController
+              (
+                Seq(intf.mbist.params),
+                2,
+                Seq(prefix),
+                Some(nodes)
+              ))
               dontTouch(ctrl.io)
+              ctrl.repairPort.get.foreach(dontTouch(_))
+              MBISTController.connectRepair(ctrl.repairPort.get,nodes)
               ctrl.io.mbist.head <> intf.mbist
               ctrl.io.fscan_ram.head <> intf.fscan_ram
               ctrl.io.static.head <> intf.static
-              ctrl.io.fscan_clkungate := xsx_ultiscan.io.fscan.clkungate
+              ctrl.io.fscan_clkungate := xsl2_fscan.clkungate
               ctrl.io.clock := childClock
               ctrl.io.hd2prf_in := hd2prf_in
               ctrl.io.hsuspsr_in := hsuspsr_in
-              ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan.ram.bypsel
-              ctrl.io.fscan_in(0).wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
-              ctrl.io.fscan_in(0).rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
-              ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan.ram.init_en
-              ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan.ram.init_val
+              ctrl.io.fscan_in(0).bypsel := xsl2_fscan.ram.bypsel
+              ctrl.io.fscan_in(0).wdis_b := xsl2_fscan.ram.wrdis_b
+              ctrl.io.fscan_in(0).rdis_b := xsl2_fscan.ram.rddis_b
+              ctrl.io.fscan_in(0).init_en := xsl2_fscan.ram.init_en
+              ctrl.io.fscan_in(0).init_val := xsl2_fscan.ram.init_val
               ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
               ctrl
           })
@@ -249,29 +303,36 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         None
       }
     }
-    val l1l2_mbist_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
-    dontTouch(l1l2_mbist_jtag)
-    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_jtag
 
-    val l3_mbist = IO(new Bundle {
+    val l1l2_mbist_sram_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
+    dontTouch(l1l2_mbist_sram_jtag)
+    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_sram_jtag
+
+    val l3_sram_mbist = IO(new Bundle {
       val ijtag = {
         if(l3cacheOpt.nonEmpty) {
-          Some(Vec(mbistControllersL3.get.length, mbistControllersL3.get.head.io.mbist_ijtag.cloneType))
+          val sramPortsNum = mbistInterfacesL3SRAM.get.length
+          Some(Vec(sramPortsNum, mbistControllersL3.get.head.io.mbist_ijtag.cloneType))
         } else {
           None
         }
       }
     })
-    if (l3_mbist.ijtag.isDefined) {
-      dontTouch(l3_mbist.ijtag.get)
+    if (l3_sram_mbist.ijtag.isDefined) {
+      dontTouch(l3_sram_mbist.ijtag.get)
     }
 
     if(l3cacheOpt.nonEmpty){
-      l3_mbist.ijtag.get.zip(mbistControllersL3.get).foreach({
+      l3_sram_mbist.ijtag.get.zip(mbistControllersL3.get).foreach({
         case(port,ctrl) =>
           port <> ctrl.io.mbist_ijtag
       })
     }
+
+    val PWR_MGMT_IN = IO(Input(UInt(6.W)))
+    val PWR_MGMT_OUT = IO(Output(UInt(6.W)))
+    BoringUtils.addSource(PWR_MGMT_IN, "SRAM0_PWR_MGMT")
+    BoringUtils.addSink(PWR_MGMT_OUT, s"SRAM${SRAMTemplate.uniqueID}_PWR_MGMT")
     //MBIST Interface Implementation ends
 
 

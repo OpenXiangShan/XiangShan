@@ -133,7 +133,7 @@ trait TBTParams extends HasXSParameter with TageParams {
 }
 
 @chiselName
-class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
+class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
     val s0_pc   = Input(UInt(VAddrBits.W))
@@ -147,7 +147,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
+  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true, parentName = parentName + "bt_"))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -222,7 +222,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 @chiselName
 class TageTable
 (
-  val nRows: Int, val histLen: Int, val tagLen: Int, val tableIdx: Int
+  parentName:String = "Unknown",val nRows: Int, val histLen: Int, val tagLen: Int, val tableIdx: Int
 )(implicit p: Parameters)
   extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
@@ -296,12 +296,13 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true,parentName = parentName + "us_"))
   us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true)))
+  val table_banks = (0 until nBanks).map(idx => {
+    Module(new FoldedSRAMTemplate(new TageEntry, set = bankSize, width = bankFoldWidth, way = numBr, shouldReset = true, holdRead = true, singlePort = true, parentName = parentName + s"tableBank${idx}_"))
+  })
 
 
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
@@ -519,13 +520,13 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 }
 
 @chiselName
-class Tage(implicit p: Parameters) extends BaseTage {
+class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends BaseTage {
 
   val resp_meta = Wire(new TageMeta)
   override val meta_size = resp_meta.getWidth
   val tables = TageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) => {
-      val t = Module(new TageTable(nRows, histLen, tagLen, i))
+      val t = Module(new TageTable(parentName = parentName + s"table${i}_", nRows, histLen, tagLen, i))
       t.io.req.valid := io.s0_fire
       t.io.req.bits.pc := s0_pc
       t.io.req.bits.folded_hist := io.in.bits.folded_hist
@@ -533,7 +534,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       t
     }
   }
-  val bt = Module (new TageBTable)
+  val bt = Module (new TageBTable(parentName = parentName + "bt_")(p))
   bt.io.s0_fire := io.s0_fire
   bt.io.s0_pc   := s0_pc
 
@@ -896,4 +897,4 @@ class Tage(implicit p: Parameters) extends BaseTage {
 }
 
 
-class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
+class Tage_SC(parentName:String = "Unknown")(implicit p: Parameters) extends Tage(parentName = parentName)(p) with HasSC {}

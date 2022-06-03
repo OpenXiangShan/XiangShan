@@ -43,7 +43,7 @@ object FtqPtr {
   }
 }
 
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int, parentName:String = "Unknown")(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
     val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
@@ -55,7 +55,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for(i <- 0 until numRead){
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplate(gen, FtqSize,parentName = parentName + s"${i}" ))
     sram.io.r.req.valid := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i) := sram.io.r.resp.data(0)
@@ -418,8 +418,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.is_br_full := hit && is_new_br && may_have_to_replace
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents 
+class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+  with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents
   with HasICacheParameters{
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
@@ -484,7 +484,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata(0).fromBranchPrediction(bpu_in_resp)
 
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1))
+  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1, parentName = parentName + "ftqRedirectSram_"))
   // these info is intended to enq at the last stage of bpu
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
@@ -492,7 +492,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
   println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
-  val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
+  val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1, parentName = parentName + "ftqMeta1rSram_"))
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value

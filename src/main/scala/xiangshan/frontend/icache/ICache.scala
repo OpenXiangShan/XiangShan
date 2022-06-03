@@ -23,6 +23,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import utils._
@@ -128,7 +129,7 @@ object ICacheMetadata {
 }
 
 
-class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
+class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) extends ICacheArray
 {
   def onReset = ICacheMetadata(0.U, ClientMetadata.onReset)
   val metaBits = onReset.getWidth
@@ -169,7 +170,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = parentName + s"bank${bank}_"
     ))
 
     //meta connection
@@ -269,7 +271,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 }
 
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheArray
+class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) extends ICacheArray
 {
 
   def getECCFromEncUnit(encUnit: UInt) = {
@@ -319,7 +321,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = parentName + s"dataArray${i}_"
     ))
 
     if(i == 0) {
@@ -345,7 +348,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = parentName + s"codeArray${i}_"
     ))
 
     if(i == 0) {
@@ -448,7 +452,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val csr_parity_enable = Input(Bool())
 }
 
-class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+class ICache(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasICacheParameters {
 
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
@@ -463,10 +467,10 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 
   val clientNode = TLClientNode(Seq(clientParameters))
 
-  lazy val module = new ICacheImp(this)
+  lazy val module = new ICacheImp(parentName)(this)
 }
 
-class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
+class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io = IO(new ICacheIO)
 
   println("ICache:")
@@ -480,8 +484,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val metaArray      = Module(new ICacheMetaArray)
-  val dataArray      = Module(new ICacheDataArray)
+  val metaArray      = Module(new ICacheMetaArray(parentName = parentName + "metaArray_")(p))
+  val dataArray      = Module(new ICacheDataArray(parentName = parentName + "dataArray_")(p))
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
   val releaseUnit    = Module(new ReleaseUnit(edge))
@@ -679,5 +683,5 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
-  val icacheMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_icache"))
+  val (icacheMbistPipelineSram,icacheMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_icache")
 } 

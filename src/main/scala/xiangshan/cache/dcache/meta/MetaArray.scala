@@ -50,7 +50,7 @@ class L1MetaWriteReq(implicit p: Parameters) extends L1MetaReadReq {
 }
 
 
-class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule {
+class L1MetadataArray(parentName:String = "Unknown")(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule {
   val rstVal = onReset()
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
@@ -72,7 +72,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true,parentName = parentName + "tagArray_"))
 
   // tag write
   val wen = rst || io.write.valid
@@ -124,7 +124,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   }
 }
 
-class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {
+class DuplicatedMetaArray(parentName:String = "Unknown")(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {
   def onReset = L1Metadata(0.U, ClientMetadata.onReset, 0.U)
 
   val metaBits = onReset.getWidth
@@ -136,8 +136,8 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     val resp = Output(Vec(numReadPorts, Vec(nWays, UInt(encMetaBits.W))))
     val errors = Output(Vec(numReadPorts, new L1CacheErrorInfo))
   })
-  val meta = Seq.fill(numReadPorts) {
-    Module(new L1MetadataArray(onReset _))
+  val meta = Seq.tabulate(numReadPorts) { idx =>
+    Module(new L1MetadataArray(parentName + s"meta${idx}_")(onReset _))
   }
 
   for (w <- 0 until numReadPorts) {

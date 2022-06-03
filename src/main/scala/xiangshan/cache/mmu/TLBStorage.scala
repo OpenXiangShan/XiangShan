@@ -25,6 +25,7 @@ import utils._
 
 @chiselName
 class TLBFA(
+  parentName:String = "Unknown",
   sameCycle: Boolean,
   ports: Int,
   nSets: Int,
@@ -152,7 +153,9 @@ class TLBFA(
 }
 
 @chiselName
-class TLBSA(
+class TLBSA
+(
+  parentName:String = "Unknown",
   sameCycle: Boolean,
   ports: Int,
   nSets: Int,
@@ -174,7 +177,8 @@ class TLBSA(
       new TlbEntry(normalPage, superPage),
       set = nSets,
       way = nWays,
-      singlePort = sramSinglePort
+      singlePort = sramSinglePort,
+      parentName = parentName + "port" + i + "_"
     ))
 
     val req = io.r.req(i)
@@ -293,6 +297,7 @@ class TLBSA(
 object TlbStorage {
   def apply
   (
+    parentName:String = "Unknown",
     name: String,
     associative: String,
     sameCycle: Boolean,
@@ -305,11 +310,11 @@ object TlbStorage {
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(parentName = parentName, sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBSA(parentName = parentName, sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }

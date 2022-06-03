@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import utils._
 import xiangshan._
@@ -84,7 +85,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 }
 
 @chiselName
-class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
   val ecc = Code.fromString(l2tlbParams.ecc)
@@ -126,8 +127,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2EntryType,
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    parentName = parentName + "l2_"
   ))
+  val (ptwl2MbistPipelineSram,ptwl2MbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_PTW_PageTableCacheL2")
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2asids = Reg(Vec(l2tlbParams.l2nSets, Vec(l2tlbParams.l2nWays, UInt(AsidLength.W))))
@@ -150,8 +153,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l3EntryType,
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    parentName = parentName + "l3_"
   ))
+  val (ptwl3MbistPipelineSram,ptwl3MbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_PTW_PageTableCacheL3")
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3asids = Reg(Vec(l2tlbParams.l3nSets, Vec(l2tlbParams.l3nWays, UInt(AsidLength.W))))

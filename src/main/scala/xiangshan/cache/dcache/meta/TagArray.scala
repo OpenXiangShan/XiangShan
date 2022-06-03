@@ -35,7 +35,7 @@ class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
   val ecc = UInt(eccTagBits.W)
 }
 
-class TagArray(implicit p: Parameters) extends DCacheModule {
+class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new TagReadReq))
     val resp = Output(Vec(nWays, UInt(tagBits.W)))
@@ -58,10 +58,10 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, parentName = parentName + "tagArray_"))
 
   val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, parentName = parentName + "eccArray_"))
 
   val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen
@@ -100,7 +100,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   io.ecc_read.ready := !ecc_wen
 }
 
-class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheModule {
+class DuplicatedTagArray(readPorts: Int, parentName:String = "Unknown")(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))
@@ -109,7 +109,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
-  val array = Seq.fill(readPorts) { Module(new TagArray) }
+  val array = Seq.tabulate(readPorts)(idx => { Module(new TagArray(parentName = parentName + s"array${idx}_")) })
 
   def getECCFromEncTag(encTag: UInt) = {
     require(encTag.getWidth == encTagBits)

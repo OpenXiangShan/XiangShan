@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import utils._
 import xiangshan.cache.mmu.HasTlbConst
@@ -381,7 +382,7 @@ class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule wit
   XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
 }
 
-class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
+class BestOffsetPrefetch(parentName:String)(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new BestOffsetPrefetchIO)
 
   def nEntries = bopParams.nEntries
@@ -389,7 +390,6 @@ class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
   val scoreTable = Module(new OffsetScoreTable)
   val rrTable = Module(new RecentRequestTable)
-  val bestOffsetPrefetcherMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_BestOffsetPrefetcher"))
   val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq, nEntries))
   val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish, nEntries))
   val writeRRTableArb = Module(new Arbiter(UInt(PAddrBits.W), nEntries))
@@ -428,6 +428,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
   rrTable.io.r <> scoreTable.io.test
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := getBlockAddr(io.train.bits.addr)
+  val (bestOffsetPrefetcherMbistPipelineSram,bestOffsetPrefetcherMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_BestOffsetPrefetcher")
 
   XSDebug(p"io: ${io}\n")
   XSDebug(p"entryReadyIdx=${entryReadyIdx} inflightMatchVec=${Binary(inflightMatchVec.asUInt)}\n")

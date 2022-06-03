@@ -53,7 +53,7 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
 }
 
 @chiselName
-class MicroBTB(implicit p: Parameters) extends BasePredictor
+class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p)
   with MicroBTBParams with HasPerfEvents
 {
   
@@ -87,7 +87,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val decay_idx = RegInit(0.U(log2Ceil(nRows).W))
     decay_idx := decay_idx + doing_decay
 
-    val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, holdRead=true, singlePort=true))
+    val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, holdRead=true, singlePort=true, parentName = parentName + "ram_"))
     ram.io.r.req.valid := io.ren
     ram.io.r.req.bits.setIdx := io.ridx >> log2Ceil(ftPredFoldWidth)
     
@@ -134,7 +134,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   def get_ghist_from_fh(afh: AllFoldedHistories) = afh.getHistWithInfo(fh_info)
 
   val s0_data_ridx = getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
-  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=true))
+  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=true,parentName = parentName + "dataMem_"))
   val fallThruPredRAM = Module(new FallThruPred)
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 

@@ -266,7 +266,7 @@ object FTBMeta {
 //   }
 // }
 
-class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
+class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p) with FTBParams with BPUUtils
   with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
@@ -297,7 +297,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true, parentName = parentName + "ftb_"))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))

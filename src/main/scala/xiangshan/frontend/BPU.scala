@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
 import huancun.mbist.MBISTPipeline
-import huancun.mbist.MBISTPipeline.uniqueId
+import huancun.mbist.MBISTPipeline.{placePipelines, uniqueId}
 import xiangshan._
 import utils._
 
@@ -191,7 +191,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule
+abstract class BasePredictor(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
@@ -244,12 +244,12 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
+class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
   val ctrl = DelayN(io.ctrl, 1)
-  val predictors = Module(if (useBPD) new Composer else new FakePredictor)
-  val bpuMBISTPipeline = Module(new MBISTPipeline(level = 2, infoName = "MBISTPipeline_bpu"))
+  val predictors = Module(if (useBPD) new Composer(parentName = parentName + "predictors_")(p) else new FakePredictor)
+  val (bpuMbistPipelineSram,bpuMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_bpu")
 
   // ctrl signal
   predictors.io.reset_vector := io.reset_vector
