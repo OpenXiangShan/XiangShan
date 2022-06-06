@@ -178,7 +178,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
 
-  p3_discard := p3_hit_dir || p3_check_in_mshr
+  p3_discard := p3_hit_dir || p3_check_in_mshr || (p3_valid && enableBit && !toMissUnit.enqReq.ready)
 
   toMissUnit.enqReq.valid             := p3_valid && enableBit && !p3_discard
   toMissUnit.enqReq.bits.paddr        := p3_paddr
