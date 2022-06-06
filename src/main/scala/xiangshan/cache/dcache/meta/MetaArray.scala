@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import huancun.utils.SRAMTemplate
 import utils.XSDebug
 import xiangshan.L1CacheErrorInfo
+import huancun.mbist.MBISTPipeline.placePipelines
 
 // basic building blocks for L1 DCache
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {

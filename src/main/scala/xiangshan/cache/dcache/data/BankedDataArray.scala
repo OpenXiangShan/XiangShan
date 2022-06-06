@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import huancun.utils.SRAMTemplate
+import huancun.mbist.MBISTPipeline.placePipelines
 import utils.{XSDebug, XSPerfAccumulate}
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
@@ -216,6 +217,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   }
 
   val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(parentName = parentName ,i)))
+  val (dataBankMbistPipelineSram,dataBankMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcacheDataBank")
   val ecc_banks = List.tabulate(DCacheBanks)(idx => Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
@@ -225,7 +227,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     singlePort = true,
     parentName = parentName + s"eccBank${idx}_"
   )))
-
+  val (eccBankMbistPipelineSram,eccBankMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_dacacheEccBank")
   data_banks.map(_.dump())
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))

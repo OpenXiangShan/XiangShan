@@ -23,6 +23,7 @@ import chisel3.util._
 import huancun.utils.FoldedSRAMTemplate
 import utils._
 import xiangshan._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 import scala.math.min
 
@@ -588,6 +589,9 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
   XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
+
+  //place mbist pipelines
+  val (ittageMbistPipelineSram,ittageMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_ittage")
   // Debug and perf info
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)

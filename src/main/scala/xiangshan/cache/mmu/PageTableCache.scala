@@ -130,7 +130,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
     singlePort = sramSinglePort,
     parentName = parentName + "l2_"
   ))
-  val (ptwl2MbistPipelineSram,ptwl2MbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_PTW_PageTableCacheL2")
+  val (ptwl2MbistPipelineSram,ptwl2MbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_PTW_PageTableCacheL2")
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2asids = Reg(Vec(l2tlbParams.l2nSets, Vec(l2tlbParams.l2nWays, UInt(AsidLength.W))))
@@ -156,7 +156,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
     singlePort = sramSinglePort,
     parentName = parentName + "l3_"
   ))
-  val (ptwl3MbistPipelineSram,ptwl3MbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_PTW_PageTableCacheL3")
+  val (ptwl3MbistPipelineSram,ptwl3MbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_PTW_PageTableCacheL3")
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3asids = Reg(Vec(l2tlbParams.l3nSets, Vec(l2tlbParams.l3nWays, UInt(AsidLength.W))))

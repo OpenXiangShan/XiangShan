@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.frontend.icache._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -502,6 +503,10 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid)
   ftb_entry_mem.io.waddr(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftq_idx.value)
   ftb_entry_mem.io.wdata(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftb_entry)
+
+  //place mbist pipeline
+
+  val (ftqMbistPipelineSram,ftqMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_ftq")
 
 
   // multi-write

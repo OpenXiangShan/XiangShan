@@ -29,6 +29,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
 import xiangshan.mem._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -168,6 +169,8 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     val tlb_st = Module(new TLB(parentName = parentName + "tlbSt_", 1 , sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
+
+  val (memBlockMbistPipelineSram,memBlockMbistPipelineRf) = placePipelines(level = 3,infoName = s"MBISTPipeline_memBlock")
   dtlb_ld.map(_.sfence := sfence)
   dtlb_st.map(_.sfence := sfence)
   dtlb_ld.map(_.csr := tlbcsr)

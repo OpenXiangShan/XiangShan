@@ -23,6 +23,7 @@ import chisel3.util._
 import huancun.utils.{SRAMTemplate, FoldedSRAMTemplate}
 import utils._
 import xiangshan._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 import scala.math.min
 
@@ -897,4 +898,6 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 }
 
 
-class Tage_SC(parentName:String = "Unknown")(implicit p: Parameters) extends Tage(parentName = parentName)(p) with HasSC {}
+class Tage_SC(parentName:String = "Unknown")(implicit p: Parameters) extends Tage(parentName = parentName)(p) with HasSC {
+  val (tagescMbistPipelineSram,tagescMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_tagesc")
+}

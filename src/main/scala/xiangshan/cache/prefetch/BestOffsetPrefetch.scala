@@ -428,7 +428,7 @@ class BestOffsetPrefetch(parentName:String)(implicit p: Parameters) extends Pref
   rrTable.io.r <> scoreTable.io.test
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := getBlockAddr(io.train.bits.addr)
-  val (bestOffsetPrefetcherMbistPipelineSram,bestOffsetPrefetcherMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_BestOffsetPrefetcher")
+  val (bestOffsetPrefetcherMbistPipelineSram,bestOffsetPrefetcherMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_BestOffsetPrefetcher")
 
   XSDebug(p"io: ${io}\n")
   XSDebug(p"entryReadyIdx=${entryReadyIdx} inflightMatchVec=${Binary(inflightMatchVec.asUInt)}\n")
