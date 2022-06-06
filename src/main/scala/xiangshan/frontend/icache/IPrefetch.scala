@@ -112,7 +112,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   fromITLB.ready := true.B
 
-  fromFtq.req.ready :=  true.B //(!enableBit || (enableBit && p3_ready)) && toIMeta.ready //&& GTimer() > 500.U
+  fromFtq.req.ready :=  (!enableBit || (enableBit && p3_ready)) && toIMeta.ready
 
   /** Prefetch Stage 1: cache probe filter */
   val p1_valid =  generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)

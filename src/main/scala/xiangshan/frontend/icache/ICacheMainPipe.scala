@@ -188,7 +188,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toITLB.map{port => port.bits.kill := !icache_can_go || !pipe_can_go}
 
   //TODO: fix GTimer() condition
-  fromIFU.map(_.ready := s0_can_go) //&& GTimer() > 500.U )
+  fromIFU.map(_.ready := s0_can_go)
 
   /**
     ******************************************************************************
