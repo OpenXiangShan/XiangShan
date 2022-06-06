@@ -234,7 +234,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
                          !tlb_slot.valid && 
-                         s1_ready && GTimer() > 500.U )
+                         s1_ready )//&& GTimer() > 500.U )
   /**
     ******************************************************************************
     * ICache Stage 1
