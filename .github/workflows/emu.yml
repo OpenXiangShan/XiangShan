@@ -228,7 +228,7 @@ jobs:
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
       - name: Simple Test - CoreMark
         run: |
-          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 3600" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 1800" 2> /dev/zero
       - name: System Test - Linux
         run: |
-          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 3600" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 7200" 2> /dev/zero
