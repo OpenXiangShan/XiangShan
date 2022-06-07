@@ -78,6 +78,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)
+	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
