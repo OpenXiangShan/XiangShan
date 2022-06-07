@@ -214,18 +214,21 @@ jobs:
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Remote Connection Test
+        run: |
+          ssh -tt 172.28.10.101 "echo test-ok"
       - name: Generate Verilog for VCS
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --release
       - name: Build SIMV on Remote
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
       - name: Basic Test - cputest
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
       - name: Simple Test - CoreMark
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 3600" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 3600" 2> /dev/zero
       - name: System Test - Linux
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 3600" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 3600" 2> /dev/zero
