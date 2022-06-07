@@ -27,31 +27,33 @@ object PipelineConnect {
       val out = DecoupledIO(gen.cloneType)
       val rightOutFire = Input(Bool())
       val isFlush = Input(Bool())
-      val block = Input(Bool())
     })
 
     val valid = RegInit(false.B)
     valid.suggestName("pipeline_valid")
-    val leftFire = io.in.valid && io.out.ready && !io.block
+    val leftFire = io.in.valid && io.out.ready
     when (io.rightOutFire) { valid := false.B }
     when (leftFire) { valid := true.B }
     when (io.isFlush) { valid := false.B }
 
-    io.in.ready := io.out.ready && !io.block
+    io.in.ready := io.out.ready
     io.out.bits := RegEnable(io.in.bits, leftFire)
     io.out.valid := valid //&& !isFlush
   }
 
-  def apply[T <: Data]
-  (left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, block: Bool = false.B,
-   moduleName: Option[String] = None
-  ){
+  def apply[T <: Data] (
+    left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool,
+    block: Option[Bool] = None,
+    moduleName: Option[String] = None
+  ) {
     val pipelineConnect = Module(new PipelineConnectModule[T](left.bits.cloneType))
     if(moduleName.nonEmpty) pipelineConnect.suggestName(moduleName.get)
     pipelineConnect.io.in <> left
-    pipelineConnect.io.block := block
     pipelineConnect.io.rightOutFire := rightOutFire
     pipelineConnect.io.isFlush := isFlush
     right <> pipelineConnect.io.out
+    if (block.isDefined) {
+      pipelineConnect.io.out.ready := right.ready && !block.get
+    }
   }
 }

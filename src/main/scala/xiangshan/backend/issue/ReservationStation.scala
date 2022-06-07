@@ -219,8 +219,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }) else None
-  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, 
-    Flipped(new MemRSFeedbackIO) 
+  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq,
+    Flipped(new MemRSFeedbackIO)
   )) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr())
@@ -544,7 +544,13 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     // payload: send to function units
     // TODO: these should be done outside RS
-    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
+    PipelineConnect(s1_out(i), s2_deq(i),
+      // rightOutFire
+      s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect),
+      // isFlush
+      false.B,
+      moduleName = Some("deq_pipe")
+    )
     if (params.hasFeedback) {
       io.feedback.get(i).rsIdx := s2_issue_index(i)
       io.feedback.get(i).isFirstIssue := s2_first_issue(i)
@@ -757,4 +763,3 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   def size: Int = params.numEntries
 }
-

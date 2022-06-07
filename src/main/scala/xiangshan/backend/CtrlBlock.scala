@@ -363,7 +363,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.frontend.toFtq.for_redirect_gen.flushRedirect.bits := frontendFlushBits
 
   io.frontend.toFtq.for_redirect_gen.frontendFlushTarget := RegNext(flushTarget)
-  
+
 
   val pendingRedirect = RegInit(false.B)
   when (stage2Redirect.valid) {
@@ -420,7 +420,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // pipeline between decode and rename
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      stage2Redirect.valid || pendingRedirect)
+      stage2Redirect.valid || pendingRedirect, moduleName = Some("dec_ren_pipe"))
   }
 
   rename.io.redirect := stage2Redirect
@@ -430,7 +430,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
+    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i),
+      dispatch.io.recv(i), stage2Redirect.valid, moduleName = Some("ren_disp_pipe"))
   }
 
   dispatch.io.hartId := io.hartId

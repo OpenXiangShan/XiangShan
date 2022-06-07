@@ -110,9 +110,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
    * stage3.valid && io.resp.ready    : stage3 (out) -> outside
    */
   stage1 <> io.req
-  PipelineConnect(stage1, stage2(0), stage2(1).ready, flush, rwHarzad)
+  PipelineConnect(stage1, stage2(0), stage2(1).ready, flush, block = Some(rwHarzad), moduleName = Some("s1_s2_pipe"))
   InsideStageConnect(stage2(0), stage2(1))
-  PipelineConnect(stage2(1), stage3, io.resp.ready, flush)
+  PipelineConnect(stage2(1), stage3, io.resp.ready, flush, moduleName = Some("s2_s3_pipe"))
   stage3.ready := !stage3.valid || io.resp.ready
 
   // l1: level 0 non-leaf pte
