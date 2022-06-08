@@ -75,7 +75,7 @@ class XSArgs(object):
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
-        self.trace = 1 if args.trace or not args.disable_fork  else None
+        self.trace = 1 if args.trace or not args.disable_fork else None
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
@@ -96,7 +96,8 @@ class XSArgs(object):
             "NEMU_HOME"    : self.nemu_home,
             "WAVE_HOME"    : self.wave_home,
             "AM_HOME"      : self.am_home,
-            "DRAMSIM3_HOME": self.dramsim3_home
+            "DRAMSIM3_HOME": self.dramsim3_home,
+            "MODULEPATH": "/usr/share/Modules/modulefiles:/etc/modulefiles"
         }
         return all_env
 
@@ -198,12 +199,33 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME verilog SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
+    def generate_sim_verilog(self):
+        print("Generating XiangShan sim-verilog with the following configurations:")
+        self.show()
+        sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
+        make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME sim-verilog SIM_ARGS="{sim_args}" {make_args}')
+        return return_code
+
     def build_emu(self):
         print("Building XiangShan emu with the following configurations:")
         self.show()
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
+        return return_code
+
+    def build_simv(self):
+        print("Building XiangShan simv with the following configurations")
+        self.show()
+        make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
+        # TODO: make the following commands grouped as unseen scripts
+        return_code = self.__exec_cmd(f'\
+            eval `/usr/bin/modulecmd zsh load license`;\
+            eval `/usr/bin/modulecmd zsh load synopsys/vcs/Q-2020.03-SP2`;\
+            eval `/usr/bin/modulecmd zsh load synopsys/verdi/S-2021.09-SP1`;\
+            VERDI_HOME=/nfs/tools/synopsys/verdi/S-2021.09-SP1 \
+            make -C $NOOP_HOME simv {make_args} CONSIDER_FSDB=1')  # set CONSIDER_FSDB for compatibility
         return return_code
 
     def run_emu(self, workload):
@@ -220,12 +242,23 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
         return return_code
 
+    def run_simv(self, workload):
+        print("Running XiangShan simv with the following configurations:")
+        self.show()
+        diff_args = "$NOOP_HOME/"+ args.diff
+        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv +workload={workload} +diff={diff_args}')
+        return return_code
+
     def run(self, args):
         if args.ci is not None:
             return self.run_ci(args.ci)
+        if args.ci_vcs is not None:
+            return self.run_ci_vcs(args.ci_vcs)
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
+            (args.vcs_gen, lambda _ : self.generate_sim_verilog()),
             (args.build, lambda _ : self.build_emu()),
+            (args.vcs_build, lambda _ : self.build_simv()),
             (args.workload, lambda args: self.run_emu(args.workload)),
             (args.clean, lambda _ : self.make_clean())
         ]
@@ -373,6 +406,28 @@ class XiangShan(object):
                 return ret
         return 0
 
+    def run_ci_vcs(self, test):
+        all_tests = {
+            "cputest": self.__get_ci_cputest,
+            "riscv-tests": self.__get_ci_rvtest,
+            "misc-tests": self.__get_ci_misc,
+            "mc-tests": self.__get_ci_mc,
+            "nodiff-tests": self.__get_ci_nodiff,
+            "microbench": self.__am_apps_path,
+            "coremark": self.__am_apps_path
+        }
+        for target in all_tests.get(test, self.__get_ci_workloads)(test):
+            print(target)
+            ret = self.run_simv(target)
+            if ret:
+                if self.args.default_wave_home != self.args.wave_home:
+                    print("copy wave file to " + self.args.wave_home)
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                return ret
+        return 0
+
 def get_free_cores(n):
     while True:
         # To avoid potential conflicts, we allow CI to use SMT.
@@ -392,7 +447,10 @@ if __name__ == "__main__":
     # actions
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
+    parser.add_argument('--vcs-gen', action='store_true', help='generate XS sim verilog for vcs')
+    parser.add_argument('--vcs-build', action='store_true', help='build XS simv')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
+    parser.add_argument('--ci-vcs', nargs='?', type=str, const="", help='run CI tests on simv')
     parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
     parser.add_argument('--timeout', nargs='?', type=int, default=None, help='timeout (in seconds)')
     # environment variables
