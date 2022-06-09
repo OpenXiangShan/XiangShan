@@ -34,27 +34,13 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
-
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2, l_soc.misc.l3FrontendAXI4Node.out.head._2))
-  val simMMIO = Module(l_simMMIO.module)
-  l_simMMIO.io_axi4 := DontCare
-  l_simMMIO.io_axi4 <> soc.peripheral
-  l_simMMIO.io_dma <> soc.dma
-
-  if(!useDRAMSim){
-    val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.misc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
-    ))
-    val simAXIMem = Module(l_simAXIMem.module)
-    l_simAXIMem.io_axi4 <> soc.memory
-  }
   dontTouch(soc.io)
 
+  // Clock and Reset
   soc.io.clock := clock
-  soc.io.clock_div2 := Module(new Pow2ClockDivider(1)).io.clock_out
+  val clock_div2 = Module(new Pow2ClockDivider(1)).io.clock_out
+  soc.io.clock_div2 := clock_div2
   soc.io.reset := reset.asAsyncReset
-  soc.io.extIntrs := simMMIO.io.interrupt.intrVec
-  soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
   val rtcTickCycle = rtcClockDiv / 2
@@ -65,6 +51,25 @@ class SimTop(implicit p: Parameters) extends Module {
     rtcClock := ~rtcClock
   }
   soc.io.rtc_clock := rtcClock
+
+  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2, l_soc.misc.l3FrontendAXI4Node.out.head._2))
+  val simMMIO = Module(l_simMMIO.module)
+  l_simMMIO.io_axi4 := DontCare
+  l_simMMIO.io_axi4 <> soc.peripheral
+  l_simMMIO.io_dma <> soc.dma
+  simMMIO.clock := clock_div2
+
+  if(!useDRAMSim){
+    val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
+      l_soc.misc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
+    ))
+    val simAXIMem = Module(l_simAXIMem.module)
+    l_simAXIMem.io_axi4 <> soc.memory
+    simAXIMem.clock := clock_div2
+  }
+
+  soc.io.extIntrs := simMMIO.io.interrupt.intrVec
+  soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
@@ -80,7 +85,16 @@ class SimTop(implicit p: Parameters) extends Module {
     val memAXI = if(useDRAMSim) soc.memory.cloneType else null
   })
 
-  simMMIO.io.uart <> io.uart
+  // NOTE: SimMMIO has a 2-divided clock.
+  // Thus, uart.out.valid and uart.in.valid needs to be synchronized with clock.
+  val uart_in_valid_sync = RegInit(0.U(2.W))
+  uart_in_valid_sync := Cat(uart_in_valid_sync(0), simMMIO.io.uart.in.valid)
+  io.uart.in.valid := uart_in_valid_sync(0) && !uart_in_valid_sync(1)
+  simMMIO.io.uart.in.ch := io.uart.in.ch
+  val uart_out_valid_sync = RegInit(0.U(2.W))
+  uart_out_valid_sync := Cat(uart_out_valid_sync(0), simMMIO.io.uart.out.valid)
+  io.uart.out.valid := uart_out_valid_sync(0) && !uart_out_valid_sync(1)
+  io.uart.out.ch := RegNext(simMMIO.io.uart.out.ch)
 
   if(useDRAMSim){
     io.memAXI <> soc.memory

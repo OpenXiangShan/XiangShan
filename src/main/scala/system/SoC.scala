@@ -25,7 +25,7 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.FastToSlow
+import freechips.rocketchip.util.{FastToSlow, SlowToFast}
 import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
@@ -133,16 +133,31 @@ trait HaveSlaveAXI4Port {
     beatBytes = L3InnerBusWidth / 8
   ))
 
+  class DMAPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
+    val dmaNode = AXI4IdentityNode()
+    val rationalNode = TLRationalIdentityNode()
+
+    rationalNode :=
+      TLRationalCrossingSource() :=
+      TLFIFOFixer() :=
+      TLWidthWidget(32) :=
+      AXI4ToTL() :=
+      AXI4UserYanker(Some(1)) :=
+      AXI4Fragmenter() :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(5) :=
+      dmaNode
+
+    lazy val module = new LazyModuleImp(this) {
+      override def desiredName: String = "DMAPortClockDivDomain"
+    }
+  }
+  val dmaClkDiv2Domain = LazyModule(new DMAPortClockDivDomain)
+  dmaClkDiv2Domain.dmaNode := l3FrontendAXI4Node
+
   l3_xbar :=
-    TLFIFOFixer() :=
-    TLWidthWidget(32) :=
-    AXI4ToTL() :=
-    AXI4UserYanker(Some(1)) :=
-    AXI4Fragmenter() :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4IdIndexer(5) :=
-    l3FrontendAXI4Node
+    TLRationalCrossingSink(SlowToFast) :=
+    dmaClkDiv2Domain.rationalNode
   errorDevice.node := l3_xbar
 
   val dma = InModuleBody {
@@ -189,8 +204,6 @@ trait HaveAXI4MemPort {
 
     memoryNode :=
       AXI4Buffer() :=
-      AXI4Buffer() :=
-      AXI4Buffer() :=
       AXI4IdIndexer(idBits = 6) :=
       AXI4UserYanker() :=
       AXI4Deinterleaver(L3BlockSize) :=
@@ -205,13 +218,13 @@ trait HaveAXI4MemPort {
     }
   }
 
-  val clkDiv2Domain = LazyModule(new MemPortClockDivDomain())
+  val memClkDiv2Domain = LazyModule(new MemPortClockDivDomain)
 
-  clkDiv2Domain.rationalNode :=
+  memClkDiv2Domain.rationalNode :=
     TLRationalCrossingSource() :=
     mem_xbar
 
-  memAXI4SlaveNode := clkDiv2Domain.memoryNode
+  memAXI4SlaveNode := memClkDiv2Domain.memoryNode
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
@@ -232,18 +245,31 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     beatBytes = peripheralBusWidth
   )))
 
-  peripheralNode :=
-    AXI4IdIndexer(idBits = 5) :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4UserYanker() :=
-    AXI4Deinterleaver(8) :=
-    TLToAXI4() :=
-    TLWidthWidget(8) :=
-    TLBuffer.chainNode(3) :=
+  class PeriPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
+    val outNode = AXI4IdentityNode()
+    val rationalNode = TLRationalIdentityNode()
+
+    outNode :=
+      AXI4IdIndexer(idBits = 5) :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4UserYanker() :=
+      AXI4Deinterleaver(8) :=
+      TLToAXI4() :=
+      TLWidthWidget(8) :=
+      TLRationalCrossingSink(FastToSlow) :=
+      rationalNode
+
+    lazy val module = new LazyModuleImp(this) {
+      override def desiredName: String = "PeriPortClockDivDomain"
+    }
+  }
+  val periClkDiv2Domain = LazyModule(new PeriPortClockDivDomain)
+  periClkDiv2Domain.rationalNode :=
+    TLRationalCrossingSource() :=
     peripheralXbar
+
+  peripheralNode := periClkDiv2Domain.outNode
 
   val peripheral = InModuleBody {
     peripheralNode.makeIOs()
@@ -315,8 +341,13 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val reset_no_sync = IO(Input(Reset()))
     val dfx_reset = IO(Input(new DFTResetGen))
 
-    clkDiv2Domain.module.clock := clock_div2
-    clkDiv2Domain.module.reset := ResetGen(clock_div2, reset_no_sync, 2, Some(dfx_reset))
+    val reset_sync_div2 = ResetGen(clock_div2, reset_no_sync, 2, Some(dfx_reset))
+    memClkDiv2Domain.module.clock := clock_div2
+    memClkDiv2Domain.module.reset := reset_sync_div2
+    periClkDiv2Domain.module.clock := clock_div2
+    periClkDiv2Domain.module.reset := reset_sync_div2
+    dmaClkDiv2Domain.module.clock := clock_div2
+    dmaClkDiv2Domain.module.reset := reset_sync_div2
 
     debugModule.module.io <> debug_module_io
 
