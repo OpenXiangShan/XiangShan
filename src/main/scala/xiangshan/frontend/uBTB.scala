@@ -106,7 +106,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       (!doing_reset && doing_decay, decay_idx),
       (!(doing_reset || doing_decay) && io.wen, io.widx >> log2Ceil(ftPredFoldWidth))
     ))
-    val waymask = UIntToOH(io.widx(log2Ceil(ftPredFoldWidth)-1, 0)) | Fill(ftPredFoldWidth, 1.U(1.W)).asUInt
+    val waymask = UIntToOH(io.widx(log2Ceil(ftPredFoldWidth)-1, 0)) | Fill(ftPredFoldWidth, (doing_reset || doing_decay).asTypeOf(UInt(1.W))).asUInt
     val ram_wen = io.wen || doing_decay || doing_reset
 
     ram.io.w.apply(ram_wen, wdata, widx, waymask)
