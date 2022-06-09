@@ -308,7 +308,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.isCall := new_jmp_is_call
   init_entry.isRet  := new_jmp_is_ret
   // that means fall thru points to the middle of an inst
-  init_entry.last_may_be_rvi_call := io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask(pd.jmpOffset)
+  init_entry.last_may_be_rvi_call := pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask(pd.jmpOffset)
 
   // if hit, check whether a new cfi(only br is possible) is detected
   val oe = io.old_entry
