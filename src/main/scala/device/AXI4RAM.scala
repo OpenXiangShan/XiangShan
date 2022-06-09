@@ -93,10 +93,12 @@ class AXI4RAM
   }
 }
 
-class AXI4RAMWrapper
-(snode: AXI4SlaveNode, memByte: Long, useBlackBox: Boolean = false)
-(implicit p: Parameters)
-  extends LazyModule {
+class AXI4RAMWrapper(
+  snode: AXI4SlaveNode,
+  memByte: Long,
+  useBlackBox: Boolean = false,
+  addressSet: Option[Seq[AddressSet]] = None
+)(implicit p: Parameters) extends LazyModule {
 
   val mnode = AXI4MasterNode(List(snode.in.head._2.master))
 
@@ -104,7 +106,7 @@ class AXI4RAMWrapper
   val slaveParam = portParam.slaves.head
   val burstLen = portParam.maxTransfer / portParam.beatBytes
   val ram = LazyModule(new AXI4RAM(
-    slaveParam.address, memByte, useBlackBox,
+    addressSet.getOrElse(slaveParam.address), memByte, useBlackBox,
     slaveParam.executable, portParam.beatBytes, burstLen
   ))
   ram.node := mnode

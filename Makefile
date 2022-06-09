@@ -15,14 +15,22 @@
 #***************************************************************************************
 
 TOP = XSTop
+ifeq ($(NANHU),1)
+FPGATOP = top.FPGATop
+else
 FPGATOP = top.TopMain
+endif
 BUILD_DIR = ./build
 TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
+ifeq ($(NANHU),1)
+SIMTOP  = top.SimFPGA
+else
 SIMTOP  = top.SimTop
+endif
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
