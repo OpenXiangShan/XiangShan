@@ -25,10 +25,12 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.FastToSlow
 import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
 import huancun.debug.TLLogger
+import huancun.utils.{DFTResetGen, ResetGen}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 
@@ -181,18 +183,35 @@ trait HaveAXI4MemPort {
     TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
     peripheralXbar
 
-  memAXI4SlaveNode :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4IdIndexer(idBits = 6) :=
-    AXI4UserYanker() :=
-    AXI4Deinterleaver(L3BlockSize) :=
-    TLToAXI4() :=
-    TLSourceShrinker(64) :=
-    TLWidthWidget(L3OuterBusWidth / 8) :=
-    TLBuffer.chainNode(2) :=
+  class MemPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
+    val memoryNode = AXI4IdentityNode()
+    val rationalNode = TLRationalIdentityNode()
+
+    memoryNode :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(idBits = 6) :=
+      AXI4UserYanker() :=
+      AXI4Deinterleaver(L3BlockSize) :=
+      TLToAXI4() :=
+      TLSourceShrinker(64) :=
+      TLWidthWidget(L3OuterBusWidth / 8) :=
+      TLRationalCrossingSink(FastToSlow) :=
+      rationalNode
+
+    lazy val module = new LazyModuleImp(this) {
+      override def desiredName: String = "MemPortClockDivDomain"
+    }
+  }
+
+  val clkDiv2Domain = LazyModule(new MemPortClockDivDomain())
+
+  clkDiv2Domain.rationalNode :=
+    TLRationalCrossingSource() :=
     mem_xbar
+
+  memAXI4SlaveNode := clkDiv2Domain.memoryNode
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
@@ -270,6 +289,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
     val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
     lazy val module = new LazyModuleImp(this){
+      override def desiredName: String = "IntSourceNodeToModule"
       val in = IO(Input(Vec(num, Bool())))
       in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
     }
@@ -287,11 +307,16 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     l3_xbar := TLBuffer() := sb2tl.node
   }
 
-  lazy val module = new LazyModuleImp(this){
-
+  lazy val module = new LazyModuleImp(this) {
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val rtc_clock = IO(Input(Bool()))
+    val clock_div2 = IO(Input(Clock()))
+    val reset_no_sync = IO(Input(Reset()))
+    val dfx_reset = IO(Input(new DFTResetGen))
+
+    clkDiv2Domain.module.clock := clock_div2
+    clkDiv2Domain.module.reset := ResetGen(clock_div2, reset_no_sync, 2, Some(dfx_reset))
 
     debugModule.module.io <> debug_module_io
 

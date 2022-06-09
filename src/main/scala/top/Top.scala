@@ -119,6 +119,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     val io = IO(new Bundle {
       val clock = Input(Clock())
+      val clock_div2 = Input(Clock())
       val reset = Input(AsyncReset())
       val extIntrs = Input(UInt(NrExtIntr.W))
       val systemjtag = new Bundle {
@@ -161,6 +162,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
+    misc.module.clock_div2 := io.clock_div2
+    misc.module.reset_no_sync := io.reset
+    misc.module.dfx_reset := dfx_reset.get
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U

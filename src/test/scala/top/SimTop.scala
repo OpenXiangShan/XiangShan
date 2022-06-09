@@ -23,7 +23,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import device.{AXI4RAMWrapper, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import freechips.rocketchip.util.ElaborationArtefacts
+import freechips.rocketchip.util.{ElaborationArtefacts, Pow2ClockDivider}
 import top.TopMain.writeOutputFile
 import utils.GTimer
 import xiangshan.DebugOptionsKey
@@ -51,6 +51,7 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(soc.io)
 
   soc.io.clock := clock
+  soc.io.clock_div2 := Module(new Pow2ClockDivider(1)).io.clock_out
   soc.io.reset := reset.asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
