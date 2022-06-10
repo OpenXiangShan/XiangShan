@@ -137,7 +137,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
     
-    val xsl2_fscan = IO(new Bundle{
+    val xsx_fscan = IO(new Bundle{
       val mode = Input(Bool())
       val mode_atspeed = Input(Bool())
       val state = Input(Bool())
@@ -187,7 +187,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     val L3_mbist = if (l3cacheOpt.nonEmpty) Some(IO(Vec(4,new BISRInputInterface))) else None
 
-    val dfx_reset = Some(xsl2_fscan.toResetGen)
+    val dfx_reset = Some(xsx_fscan.toResetGen)
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, dfx_reset) }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, dfx_reset) }
 
@@ -228,19 +228,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // MBIST Interface Implementation begins
 
-    val xsl2_ultiscan_ijtag = IO(core_with_l2.head.module.ultiscan_ijtag.cloneType)
-    val xsl2_ultiscan_uscan = IO(core_with_l2.head.module.ultiscan_uscan.cloneType)
-    dontTouch(xsl2_ultiscan_ijtag)
-    dontTouch(xsl2_ultiscan_uscan)
+    val xsl2_ultiscan = IO(core_with_l2.head.module.ultiscanIO.cloneType)
+    dontTouch(xsl2_ultiscan)
 
-    core_with_l2.head.module.ultiscan_ijtag <> xsl2_ultiscan_ijtag
-    core_with_l2.head.module.ultiscan_uscan <> xsl2_ultiscan_uscan
-
-    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsl2_fscan.ram.bypsel
-    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsl2_fscan.ram.wrdis_b
-    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsl2_fscan.ram.rddis_b
-    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsl2_fscan.ram.init_en
-    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsl2_fscan.ram.init_val
+    core_with_l2.head.module.ultiscanIO <> xsl2_ultiscan
+    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_fscan.ram.bypsel
+    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_fscan.ram.wrdis_b
+    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_fscan.ram.rddis_b
+    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_fscan.ram.init_en
+    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_fscan.ram.init_val
 
     core_with_l2.head.module.mbist_extra_core_sram <> mem.core_sram
     core_with_l2.head.module.mbist_extra_core_rf <> mem.core_rf
@@ -306,7 +302,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
               val ctrl = Module(new MBISTController
               (
                 Seq(intf.mbist.params),
-                2,
                 1,
                 Seq(prefix),
                 Some(nodes)
@@ -318,16 +313,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
               ctrl.io.fscan_ram.head <> intf.fscan_ram
               ctrl.io.hd2prf_out := DontCare
               ctrl.io.hsuspsr_out <> intf.fuse
-              ctrl.io.fscan_clkungate := xsl2_fscan.clkungate
+              ctrl.io.fscan_clkungate := xsx_fscan.clkungate
               ctrl.io.clock := childClock
               ctrl.io.hd2prf_in := hd2prf_in
               ctrl.io.hsuspsr_in := hsuspsr_in
-              ctrl.io.fscan_in(0).bypsel := xsl2_fscan.ram.bypsel
-              ctrl.io.fscan_in(0).wdis_b := xsl2_fscan.ram.wrdis_b
-              ctrl.io.fscan_in(0).rdis_b := xsl2_fscan.ram.rddis_b
-              ctrl.io.fscan_in(0).init_en := xsl2_fscan.ram.init_en
-              ctrl.io.fscan_in(0).init_val := xsl2_fscan.ram.init_val
-              ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
+              ctrl.io.xsx_fscan_in.bypsel := xsx_fscan.ram.bypsel
+              ctrl.io.xsx_fscan_in.wdis_b := xsx_fscan.ram.wrdis_b
+              ctrl.io.xsx_fscan_in.rdis_b := xsx_fscan.ram.rddis_b
+              ctrl.io.xsx_fscan_in.init_en := xsx_fscan.ram.init_en
+              ctrl.io.xsx_fscan_in.init_val := xsx_fscan.ram.init_val
+              ctrl.io.xsl2_fscan_in <> core_with_l2.head.module.ultiscanToControllerL3
               L3_mbist.get(idx) <> ctrl.io.bisr.get
               ctrl
           })
