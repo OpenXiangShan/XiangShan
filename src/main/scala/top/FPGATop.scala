@@ -73,7 +73,8 @@ class TopIOAdapter(_top: XSTop)(implicit p: Parameters) extends RawModule {
     }
     top.rtc_clock := rtcClock
   }
-  top.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
+  // FPGA supports booting directly from memory.
+  top.riscv_rst_vec.foreach(_ := 0x2000000000L.U)
 
 }
 
