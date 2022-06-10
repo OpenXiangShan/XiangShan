@@ -96,7 +96,7 @@ class SimFPGA(implicit p: Parameters) extends Module {
   }
 
   soc.io.clock := clock
-  soc.io.reset := reset
+  soc.io.reset := reset.asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.sram_config := 0.U
   soc.io.pll0_lock := true.B
