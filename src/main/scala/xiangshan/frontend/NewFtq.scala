@@ -143,12 +143,12 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
 
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     assert(!resp.is_minimal)
-    this.rasSp := resp.rasSp
-    this.rasEntry := resp.rasTop
-    this.folded_hist := resp.folded_hist
-    this.afhob := resp.afhob
-    this.lastBrNumOH := resp.lastBrNumOH
-    this.histPtr := resp.histPtr
+    this.rasSp       := resp.spec_info.rasSp
+    this.rasEntry    := resp.spec_info.rasTop
+    this.folded_hist := resp.spec_info.folded_hist
+    this.afhob       := resp.spec_info.afhob
+    this.lastBrNumOH := resp.spec_info.lastBrNumOH
+    this.histPtr     := resp.spec_info.histPtr
     this
   }
 }
@@ -232,6 +232,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     val new_entry = Output(new FTBEntry)
     val new_br_insert_pos = Output(Vec(numBr, Bool()))
     val taken_mask = Output(Vec(numBr, Bool()))
+    val jmp_taken = Output(Bool())
     val mispred_mask = Output(Vec(numBr+1, Bool()))
 
     // for perf counters
@@ -386,6 +387,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.taken_mask := VecInit((io.new_entry.brOffset zip io.new_entry.brValids).map{
     case (off, v) => io.cfiIndex.bits === off && io.cfiIndex.valid && v
   })
+  io.jmp_taken := io.new_entry.jmpValid && io.new_entry.tailSlot.offset === io.cfiIndex.bits
   for (i <- 0 until numBr) {
     io.mispred_mask(i) := io.new_entry.brValids(i) && io.mispredict_vec(io.new_entry.brOffset(i))
   }
@@ -1099,6 +1101,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.false_hit   := commit_hit === h_false_hit
   update.pc          := commit_pc_bundle.startAddr
   update.meta        := commit_meta.meta
+  update.cfi_idx     := commit_cfi
   update.full_target := commit_target
   update.from_stage  := commit_stage
   update.fromFtqRedirectSram(commit_spec_meta)
@@ -1120,15 +1123,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.mispred_mask      := ftbEntryGen.mispred_mask
   update.old_entry         := ftbEntryGen.is_old_entry
   update.pred_hit          := commit_hit === h_hit || commit_hit === h_false_hit
+  update.br_taken_mask     := ftbEntryGen.taken_mask
+  update.jmp_taken         := ftbEntryGen.jmp_taken
 
-  update.is_minimal := false.B
-  update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
-  update.full_pred.br_taken_mask  := ftbEntryGen.taken_mask
-  update.full_pred.jalr_target := commit_target
-  update.full_pred.hit := true.B
-  when (update.full_pred.is_jalr) {
-    update.full_pred.targets.last := commit_target
-  }
+  // update.is_minimal := false.B
+  // update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
+  // update.full_pred.jalr_target := commit_target
+  // update.full_pred.hit := true.B
+  // when (update.full_pred.is_jalr) {
+  //   update.full_pred.targets.last := commit_target
+  // }
 
   // ****************************************************************
   // *********************** to prefetch ****************************

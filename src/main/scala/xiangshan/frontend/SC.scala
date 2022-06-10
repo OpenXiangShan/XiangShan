@@ -320,7 +320,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       when (updateValids(w) && updateSCMeta.scUsed(w)) {
         val scPred = updateSCMeta.scPreds(w)
         val tagePred = updateSCMeta.tageTakens(w)
-        val taken = update.full_pred.br_taken_mask(w)
+        val taken = update.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs(w)
         val pvdrCtr = updateTageMeta.providerResps(w).ctr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
