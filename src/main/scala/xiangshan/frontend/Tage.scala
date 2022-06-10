@@ -600,8 +600,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val update = io.update.bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
-      !(PriorityEncoder(update.full_pred.br_taken_mask) < w.U)))
-  val updateFHist = update.folded_hist
+      !(PriorityEncoder(update.br_taken_mask) < w.U)))
+  val updateFHist = update.spec_info.folded_hist
 
   val updateMeta = update.meta.asTypeOf(new TageMeta)
 
@@ -694,7 +694,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     //---------------- update logics below ------------------//
     val hasUpdate = updateValids(i)
     val updateMispred = updateMisPreds(i)
-    val updateTaken = hasUpdate && update.full_pred.br_taken_mask(i)
+    val updateTaken = hasUpdate && update.br_taken_mask(i)
 
     val updateProvided     = updateMeta.providers(i).valid
     val updateProvider     = updateMeta.providers(i).bits
@@ -881,7 +881,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val m = updateMeta
     // val bri = u.metas(b)
     XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
-      b.U, update.pc, 0.U, update.full_pred.br_taken_mask(b), update.mispred_mask(b),
+      b.U, update.pc, 0.U, update.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.providers(b).valid, m.providers(b).bits, m.altDiffers(b), m.providerResps(b).u,
       m.providerResps(b).ctr, m.allocates(b)
     )

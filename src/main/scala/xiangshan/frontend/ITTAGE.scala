@@ -413,9 +413,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_valid = io.update.valid
   val update = io.update.bits
   val updateValid =
-    update.full_pred.is_jalr && !update.full_pred.is_ret && u_valid && update.ftb_entry.jmpValid &&
-    !(update.full_pred.real_br_taken_mask().reduce(_||_))
-  val updateFhist = update.folded_hist
+    update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
+    update.jmp_taken
+  val updateFhist = update.spec_info.folded_hist
 
   // meta is splited by composer
   val updateMeta = update.meta.asTypeOf(new ITTageMeta)

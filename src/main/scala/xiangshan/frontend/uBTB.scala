@@ -42,12 +42,18 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
 
   def fromBpuUpdateBundle(u: BranchPredictionUpdate) = {
     // this.valid := true.B
-    assert(!u.is_minimal)
-    this.nextAddr := u.getTarget
-    this.cfiOffset := u.cfiIndex.bits
-    this.taken := u.taken
-    this.takenOnBr := (u.lastBrPosOH.tail zip u.full_pred.br_taken_mask).map{case (a, b) => a && b}.reduce(_||_)
-    this.brNumOH := u.lastBrPosOH.asUInt()
+    this.nextAddr := u.full_target
+    this.cfiOffset := u.cfi_idx.bits
+    this.taken := u.cfi_idx.valid
+    this.takenOnBr := u.br_taken_mask.reduce(_||_)
+    this.brNumOH := 
+      VecInit(!u.ftb_entry.brValids.reduce(_||_) +:
+        (0 until numBr).map(i =>
+          u.ftb_entry.brValids(i) &&
+          !u.br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
+          (u.br_taken_mask(i) || !u.ftb_entry.brValids.drop(i+1).reduceOption(_||_).getOrElse(false.B)) // no brs behind it
+        )
+      ).asUInt
   }
 }
 
@@ -192,11 +198,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_valid = RegNext(io.update.valid && (update_mispred || update_redirected))
   update_valid := u_valid
   val u_pc = update.pc
-  val u_br_taken_mask = update.full_pred.br_taken_mask
+  val u_br_taken_mask = update.br_taken_mask
   val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
   val u_data = Wire(new NewMicroBTBEntry)
   u_data.fromBpuUpdateBundle(update)
-  val u_idx = getIdx(update.pc) ^ get_ghist_from_fh(update.folded_hist).folded_hist
+  val u_idx = getIdx(update.pc) ^ get_ghist_from_fh(update.spec_info.folded_hist).folded_hist
 
   val u_ftPred = u_meta.ftPred.andR
   val u_ftMisPred = u_ftPred ^ update.pred_hit

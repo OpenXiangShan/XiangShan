@@ -66,7 +66,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val update = RegNext(io.update.bits)
   val u_idx = bimAddr.getIdx(update.pc)
   
-  val update_mask = LowerMask(PriorityEncoderOH(update.full_pred.br_taken_mask.asUInt))
+  val update_mask = LowerMask(PriorityEncoderOH(update.br_taken_mask.asUInt))
   val newCtrs = Wire(Vec(numBr, UInt(2.W)))
   val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
 
@@ -85,7 +85,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
         update.meta(2*i+1, 2*i))
     ))
 
-  val newTakens = update.full_pred.br_taken_mask
+  val newTakens = update.br_taken_mask
   newCtrs := VecInit((0 until numBr).map(i =>
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))

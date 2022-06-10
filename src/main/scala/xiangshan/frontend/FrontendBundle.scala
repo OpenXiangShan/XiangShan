@@ -539,6 +539,26 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   }
 }
 
+class SpeculativeInfo(implicit p: Parameters) extends XSBundle
+  with HasBPUConst with BPUUtils {
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+  val histPtr = new CGHPtr
+  val rasSp = UInt(log2Ceil(RasSize).W)
+  val rasTop = new RASEntry
+
+  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+    folded_hist := entry.folded_hist
+    afhob := entry.afhob
+    lastBrNumOH := entry.lastBrNumOH
+    histPtr := entry.histPtr
+    rasSp := entry.rasSp
+    rasTop := entry.rasEntry
+    this
+  }
+}
+
 @chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
@@ -554,13 +574,9 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   val minimal_pred = new MinimalBranchPrediction
   val full_pred = new FullBranchPrediction
 
+  val spec_info = new SpeculativeInfo
 
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
-  val histPtr = new CGHPtr
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry
+
   // val specCnt = Vec(numBr, UInt(10.W))
   // val meta = UInt(MaxMetaLength.W)
 
@@ -578,7 +594,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    folded_hist.display(cond)
+    spec_info.folded_hist.display(cond)
     full_pred.display(cond)
     ftb_entry.display(cond)
   }
@@ -626,7 +642,14 @@ object BpuToFtqBundle {
   }
 }
 
-class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
+class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val pc = UInt(VAddrBits.W)
+  val spec_info = new SpeculativeInfo
+  val ftb_entry = new FTBEntry()
+
+  val cfi_idx = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val br_taken_mask = Vec(numBr, Bool())
+  val jmp_taken = Bool()
   val mispred_mask = Vec(numBr+1, Bool())
   val pred_hit = Bool()
   val false_hit = Bool()
@@ -637,21 +660,20 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val from_stage = UInt(2.W)
   val ghist = UInt(HistoryLength.W)
 
+  def is_jal = ftb_entry.tailSlot.valid && ftb_entry.isJal
+  def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
+  def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
+  def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
+
+
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    folded_hist := entry.folded_hist
-    afhob := entry.afhob
-    lastBrNumOH := entry.lastBrNumOH
-    histPtr := entry.histPtr
-    rasSp := entry.rasSp
-    rasTop := entry.rasEntry
-    this
+    spec_info.fromFtqRedirectSram(entry)
   }
 
-  override def display(cond: Bool) = {
+  def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
     XSDebug(cond, p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] $false_hit\n")
     XSDebug(cond, p"[new_br_insert_pos] ${Binary(new_br_insert_pos.asUInt)}\n")
-    super.display(cond)
     XSDebug(cond, p"--------------------------------------------\n")
   }
 }

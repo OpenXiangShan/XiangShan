@@ -390,10 +390,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s3_fire && s3_redirect
   io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp)
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.last_stage_meta // TODO: change to lastStageMeta
-  io.bpu_to_ftq.resp.bits.s3.folded_hist := s3_folded_gh
-  io.bpu_to_ftq.resp.bits.s3.histPtr := s3_ghist_ptr
-  io.bpu_to_ftq.resp.bits.s3.lastBrNumOH := s3_last_br_num_oh
-  io.bpu_to_ftq.resp.bits.s3.afhob := s3_ahead_fh_oldest_bits
+  io.bpu_to_ftq.resp.bits.s3.spec_info.folded_hist := s3_folded_gh
+  io.bpu_to_ftq.resp.bits.s3.spec_info.histPtr := s3_ghist_ptr
+  io.bpu_to_ftq.resp.bits.s3.spec_info.lastBrNumOH := s3_last_br_num_oh
+  io.bpu_to_ftq.resp.bits.s3.spec_info.afhob := s3_ahead_fh_oldest_bits
 
   npcGen.register(true.B, s0_pc_reg, Some("stallPC"), 0)
   foldedGhGen.register(true.B, s0_folded_gh_reg, Some("stallFGH"), 0)
@@ -597,7 +597,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val redirect = do_redirect.bits
 
   predictors.io.update := RegNext(io.ftq_to_bpu.update)
-  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.histPtr))
+  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr))
   predictors.io.redirect := do_redirect
 
   // Redirect logic
