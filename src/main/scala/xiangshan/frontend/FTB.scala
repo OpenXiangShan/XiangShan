@@ -525,7 +525,7 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   ftbBank.io.try_to_write_way.bits := u_meta.writeWay
   ftbBank.io.try_to_write_pc := update.pc
 
-  val (ftbMbistPipelineSram,ftbMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_ftb")
+  val (ftbMbistPipelineSram,ftbMbistPipelineRf,ftbMbistPipelineSramRepair,ftbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_ftb")
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)

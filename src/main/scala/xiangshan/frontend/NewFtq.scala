@@ -506,7 +506,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   //place mbist pipeline
 
-  val (ftqMbistPipelineSram,ftqMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_ftq")
+  val (ftqMbistPipelineSram,ftqMbistPipelineRf,ftqMbistPipelineSramRepair,ftqMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_ftq")
 
 
   // multi-write

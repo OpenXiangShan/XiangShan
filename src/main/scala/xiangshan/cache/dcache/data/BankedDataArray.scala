@@ -217,7 +217,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   }
 
   val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(parentName = parentName ,i)))
-  val (dataBankMbistPipelineSram,dataBankMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcacheDataBank")
+  val (dataBankMbistPipelineSram,dataBankMbistPipelineRf,dataBankMbistPipelineSramRepair,dataBankMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcacheDataBank")
   val ecc_banks = List.tabulate(DCacheBanks)(idx => Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
@@ -227,7 +227,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     singlePort = true,
     parentName = parentName + s"eccBank${idx}_"
   )))
-  val (eccBankMbistPipelineSram,eccBankMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_dacacheEccBank")
+  val (eccBankMbistPipelineSram,eccBankMbistPipelineRf,eccBankMbistPipelineSramRepair,eccBankMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dacacheEccBank")
   data_banks.map(_.dump())
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))

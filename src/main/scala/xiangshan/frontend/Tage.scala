@@ -899,5 +899,5 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
 
 class Tage_SC(parentName:String = "Unknown")(implicit p: Parameters) extends Tage(parentName = parentName)(p) with HasSC {
-  val (tagescMbistPipelineSram,tagescMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_tagesc")
+  val (tagescMbistPipelineSram,tagescMbistPipelineRf,tagescMbistPipelineSramRepair,tagescMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_tagesc")
 }

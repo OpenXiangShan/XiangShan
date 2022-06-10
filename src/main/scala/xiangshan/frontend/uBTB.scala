@@ -195,7 +195,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   fallThruPredRAM.io.widx := getFtPredIdx(u_pc)
   fallThruPredRAM.io.wdata := satUpdate(u_meta.ftPred, ftPredBits, true.B)
 
-  val (uBTBMbistPipelineSram,uBTBMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_uBTB")
+  val (uBTBMbistPipelineSram,uBTBMbistPipelineRf,uBTBMbistPipelineSramRepair,uBTBMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_uBTB")
   // XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
   XSDebug("target=%x\n", io.out.resp.s1.getTarget)
 

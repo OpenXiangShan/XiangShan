@@ -591,7 +591,7 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
 
   //place mbist pipelines
-  val (ittageMbistPipelineSram,ittageMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_ittage")
+  val (ittageMbistPipelineSram,ittageMbistPipelineRf,ittageMbistPipelineSramRepair,ittageMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_ittage")
   // Debug and perf info
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)

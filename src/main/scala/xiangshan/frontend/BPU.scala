@@ -249,7 +249,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
 
   val ctrl = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer(parentName = parentName + "predictors_")(p) else new FakePredictor)
-  val (bpuMbistPipelineSram,bpuMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_bpu")
+  val (bpuMbistPipelineSram,bpuMbistPipelineRf,bpuMbistPipelineSramRepair,bpuMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_bpu")
 
   // ctrl signal
   predictors.io.reset_vector := io.reset_vector

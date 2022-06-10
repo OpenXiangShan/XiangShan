@@ -126,7 +126,7 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
     itlbParams,
     parentName = parentName + "TLB_"
   )
-  val (frontendMbistPipelineSram,frontendMbistPipelineRf) = placePipelines(level = 3,infoName = s"MBISTPipeline_frontend")
+  val (frontendMbistPipelineSram,frontendMbistPipelineRf,frontendMbistPipelineSramRepair,frontendMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_frontend")
 
   icache.io.prefetch <> ftq.io.toPrefetch
 

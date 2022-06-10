@@ -161,20 +161,22 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   // dtlb
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
-  val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
-    val tlb_ld = Module(new TLB(parentName = parentName + "tlbLd_",1, ldtlbParams))
+  val dtlb_ld = VecInit(Seq.tabulate(exuParameters.LduCnt){
+    idx =>
+    val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd${idx}_",1, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
-  val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt){
-    val tlb_st = Module(new TLB(parentName = parentName + "tlbSt_", 1 , sttlbParams))
+  val dtlb_st = VecInit(Seq.tabulate(exuParameters.StuCnt){
+    idx =>
+    val tlb_st = Module(new TLB(parentName = parentName + s"tlbSt${idx}_", 1 , sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
 
-  val (memBlockMbistPipelineSram,memBlockMbistPipelineRf) = placePipelines(level = 3,infoName = s"MBISTPipeline_memBlock")
-  dtlb_ld.map(_.sfence := sfence)
-  dtlb_st.map(_.sfence := sfence)
-  dtlb_ld.map(_.csr := tlbcsr)
-  dtlb_st.map(_.csr := tlbcsr)
+  val (memBlockMbistPipelineSram,memBlockMbistPipelineRf,memBlockMbistPipelineSramRepair,memBlockMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_memBlock")
+  dtlb_ld.foreach(_.sfence := sfence)
+  dtlb_st.foreach(_.sfence := sfence)
+  dtlb_ld.foreach(_.csr := tlbcsr)
+  dtlb_st.foreach(_.csr := tlbcsr)
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)

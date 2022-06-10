@@ -90,7 +90,7 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
     normalPage = q.normalAsVictim,
     superPage = true,
   )
-  val (tlbMbistPipelineSram,tlbMbistPipelineRf) = placePipelines(level = 1,infoName = s"TLB_${this.hashCode()}")
+  val (tlbMbistPipelineSram,tlbMbistPipelineRf,tlbMbistPipelineSramRepair,tlbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"TLB_${this.hashCode()}")
 
 
   for (i <- 0 until Width) {

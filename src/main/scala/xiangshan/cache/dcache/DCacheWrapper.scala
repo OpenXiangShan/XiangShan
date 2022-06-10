@@ -413,7 +413,7 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
   val errorArray = Module(new ErrorArray(readPorts = 3, writePorts = 2)) // TODO: add it to meta array
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1, parentName = parentName + "tagArray_"))
   bankedDataArray.dump()
-  val (dcacheMbistPipelineSram,dcacheMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_dcache")
+  val (dcacheMbistPipelineSram,dcacheMbistPipelineRf,dcacheMbistPipelineSramRepair,dcacheMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_dcache")
 
   //----------------------------------------
   // core modules

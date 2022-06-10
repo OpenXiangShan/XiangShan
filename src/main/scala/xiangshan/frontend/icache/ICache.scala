@@ -683,5 +683,5 @@ class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModule
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
-  val (icacheMbistPipelineSram,icacheMbistPipelineRf) = placePipelines(level = 2,infoName = s"MBISTPipeline_icache")
+  val (icacheMbistPipelineSram,icacheMbistPipelineRf,icacheMbistPipelineSramRepair,icacheMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_icache")
 } 

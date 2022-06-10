@@ -63,7 +63,7 @@ class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DC
 
   val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true, parentName = parentName + "eccArray_"))
-  val (dcachTagArrayMbistPipelineSram,dcachTagArrayMbistPipelineRf) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcachTagArray")
+  val (dcachTagArrayMbistPipelineSram,dcachTagArrayMbistPipelineRf,dcachTagArrayMbistPipelineSramRepair,dcachTagArrayMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcachTagArray")
   val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(

@@ -99,7 +99,7 @@ class PTWImp(parentName:String = "Unknown",outer: PTW)(implicit p: Parameters) e
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
-  val (ptwMbistPipelineSram,ptwMbistPipelineRf) = placePipelines(level = 3,infoName = s"MBISTPipeline_PTW")
+  val (ptwMbistPipelineSram,ptwMbistPipelineRf,ptwMbistPipelineSramRepair,ptwMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_PTW")
   // NOTE: when cache out but miss and fsm doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
   arb1.io.out.ready := arb2.io.in(1).ready

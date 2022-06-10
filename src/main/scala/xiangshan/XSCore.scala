@@ -411,11 +411,11 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
-  val (coreMbistPipelineSram,coreMbistPipelineRf) = placePipelines(level = Int.MaxValue,infoName = s"Core")
+  val (coreMbistPipelineSram,coreMbistPipelineRf,coreMbistPipelineSramRepair,coreMbistPipelineRfRepair) = placePipelines(level = Int.MaxValue,infoName = s"Core")
   val mbist_sram = IO(coreMbistPipelineSram.get.io.mbist.get.cloneType)
   coreMbistPipelineSram.get.io.mbist.get <> mbist_sram
   val mbist_rf = IO(coreMbistPipelineRf.get.io.mbist.get.cloneType)
-  coreMbistPipelineRf.get.io.mbist.get <> mbist_sram
+  coreMbistPipelineRf.get.io.mbist.get <> mbist_rf
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(
