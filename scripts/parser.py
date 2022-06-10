@@ -49,6 +49,7 @@ class VModule(object):
         self.lines = []
         self.io = []
         self.submodule = dict()
+        self.is_wrapper = True
 
     def add_line(self, line):
         self.lines.append(line)
@@ -170,14 +171,24 @@ class VCollection(object):
         if target is None or not with_submodule:
             return target
         submodules = set()
+        target.is_wrapper = False
         submodules.add(target)
         for submodule in target.get_submodule():
             result = self.get_module(submodule, with_submodule=True, try_prefix=try_prefix)
-            if result is None:
+            if result is None and not target.is_wrapper:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
                 return None
             submodules.update(result)
         return submodules
+
+    def get_wrapper(self):
+        wrapper_modules = set()
+        for module in self.modules:
+            if module.is_wrapper:
+                wrapper_modules.add(module)
+
+        return wrapper_modules
+
 
     def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None):
         print("Dump module {} to {}...".format(name, output_dir))
@@ -201,6 +212,19 @@ class VCollection(object):
             with open(output_file, "w") as f:
                 for module in modules:
                     f.writelines(module.get_lines())
+        return True
+
+    def dump_wrapper(self, name, output_dir):
+        print("Dump wrapper module {} to {}".format(name, output_dir))
+        modules = self.get_wrapper()
+        if modules is None:
+            print("No SimTop or other wrapper exists!")
+        if not os.path.isdir(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, name + ".v")
+        with open(output_file, "w") as f:
+            for module in modules:
+                f.writelines(module.get_lines())
         return True
 
     def add_module(self, name, line):
@@ -245,6 +269,7 @@ def create_verilog(files, top_module, config, try_prefix=None):
     today = date.today()
     directory = f'XSTop-Release-{config}-{today.strftime("%b-%d-%Y")}'
     success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix)
+    collection.dump_wrapper("SimTop", directory)
     if not success:
         return None, None
     return collection, os.path.realpath(directory)
