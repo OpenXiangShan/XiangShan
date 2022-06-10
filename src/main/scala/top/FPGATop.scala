@@ -231,19 +231,21 @@ class FPGATop()(implicit p: Parameters) extends RawModule {
   val io = IO(io_adapter.io.cloneType)
   io <> io_adapter.io
 
-  withClockAndReset(io_adapter.top.clock_div2, io.reset) {
-    val memory_adapter = Module(new TopMemoryAdapter(lazy_module_top))
-    memory_adapter.top <> top.memory
-    memory_adapter.clock_fast := io.clock
-    val memory = IO(memory_adapter.memory.cloneType)
-    memory <> memory_adapter.memory
-
-    val peripheral_adapter = Module(new TopPeripheralAdapter(lazy_module_top))
-    peripheral_adapter.top <> top.peripheral
-    peripheral_adapter.clock_fast := io.clock
-    val peripheral = IO(peripheral_adapter.peripheral.cloneType)
-    peripheral <> peripheral_adapter.peripheral
+  val memory_adapter = withClockAndReset(io_adapter.top.clock_div2, io.reset) {
+    Module(new TopMemoryAdapter(lazy_module_top))
   }
+  memory_adapter.top <> top.memory
+  memory_adapter.clock_fast := io.clock
+  val memory = IO(memory_adapter.memory.cloneType)
+  memory <> memory_adapter.memory
+
+  val peripheral_adapter = withClockAndReset(io_adapter.top.clock_div2, io.reset) {
+    Module(new TopPeripheralAdapter(lazy_module_top))
+  }
+  peripheral_adapter.top <> top.peripheral
+  peripheral_adapter.clock_fast := io.clock
+  val peripheral = IO(peripheral_adapter.peripheral.cloneType)
+  peripheral <> peripheral_adapter.peripheral
 
   val dma = IO(top.dma.cloneType)
   dma.elts.foreach(dontTouch(_))
