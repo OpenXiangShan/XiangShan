@@ -30,7 +30,7 @@ object ivys {
   val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
   val scalatest = ivy"org.scalatest::scalatest:3.2.2"
   val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
-  val poi = ivy"org.apache.poi:poi:4.1.1"
+  val chiselCirct = ivy"com.sifive::chisel-circt:0.4.0"
 }
 
 trait XSModule extends ScalaModule with PublishModule {
@@ -46,7 +46,7 @@ trait XSModule extends ScalaModule with PublishModule {
 
   override def scalacOptions = Seq("-Xsource:2.11")
 
-  override def ivyDeps = (if(chiselOpt.isEmpty) Agg(ivys.chisel3) else Agg.empty[Dep]) ++ Agg(ivys.poi)
+  override def ivyDeps = (if(chiselOpt.isEmpty) Agg(ivys.chisel3) else Agg.empty[Dep]) ++ Agg(ivys.chiselCirct)
 
   override def moduleDeps = Seq() ++ chiselOpt
 

@@ -22,6 +22,7 @@ import chisel3.util._
 import huancun.utils.SRAMTemplate
 import utils._
 import xiangshan._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
@@ -266,7 +267,7 @@ object FTBMeta {
 //   }
 // }
 
-class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
+class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p) with FTBParams with BPUUtils
   with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
@@ -297,7 +298,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true, parentName = parentName + "ftb_"))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
@@ -523,6 +524,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.try_to_write_way.valid := RegNext(io.update.valid) && u_meta.hit
   ftbBank.io.try_to_write_way.bits := u_meta.writeWay
   ftbBank.io.try_to_write_pc := update.pc
+
+  val (ftbMbistPipelineSram,ftbMbistPipelineRf,ftbMbistPipelineSramRepair,ftbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_ftb")
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)

@@ -100,15 +100,17 @@ class SimTop(implicit p: Parameters) extends Module {
     io.memAXI <> soc.memory
   }
 
-  soc.xsx_ultiscan_ijtag := DontCare
-  soc.xsl2_ultiscan_ijtag := DontCare
-  soc.xsx_ultiscan_uscan := DontCare
-  soc.xsl2_ultiscan_uscan := DontCare
+  soc.xsx_fscan := DontCare
+  soc.mem := DontCare
   soc.hd2prf_in := DontCare
   soc.hsuspsr_in := DontCare
-  soc.l1l2_mbist_jtag := DontCare
-  if (soc.l3_mbist.ijtag.isDefined) {
-    soc.l3_mbist.ijtag.get := DontCare
+  if (soc.L3_BISR.isDefined) {
+    soc.L3_BISR.get := DontCare
+  }
+  soc.xsl2_ultiscan := DontCare
+  soc.l1l2_mbist_sram_jtag := DontCare
+  if (soc.l3_sram_mbist.isDefined) {
+    soc.l3_sram_mbist.get := DontCare
   }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {

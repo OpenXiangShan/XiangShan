@@ -26,8 +26,10 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import mem.{AddPipelineReg}
+import mem.AddPipelineReg
 
 import scala.math.max
 
@@ -368,7 +370,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
 }
 
 
-class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+class DCache(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
@@ -382,11 +384,11 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 
   val clientNode = TLClientNode(Seq(clientParameters))
 
-  lazy val module = new DCacheImp(this)
+  lazy val module = new DCacheImp(this, parentName)
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
+class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
 
   val io = IO(new DCacheIO)
 
@@ -406,11 +408,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val bankedDataArray = Module(new BankedDataArray)
+  val bankedDataArray = Module(new BankedDataArray(parentName = parentName + "bankedDataArray_")(p))
   val metaArray = Module(new AsynchronousMetaArray(readPorts = 3, writePorts = 2))
   val errorArray = Module(new ErrorArray(readPorts = 3, writePorts = 2)) // TODO: add it to meta array
-  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
+  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1, parentName = parentName + "tagArray_"))
   bankedDataArray.dump()
+  val (dcacheMbistPipelineSram,dcacheMbistPipelineRf,dcacheMbistPipelineSramRepair,dcacheMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_dcache")
 
   //----------------------------------------
   // core modules
@@ -727,11 +730,11 @@ class AMOHelper() extends ExtModule {
   val rdata  = IO(Output(UInt(64.W)))
 }
 
-class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class DCacheWrapper(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasXSParameter {
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null
-  val dcache = if (useDcache) LazyModule(new DCache()) else null
+  val dcache = if (useDcache) LazyModule(new DCache(parentName)(p)) else null
   if (useDcache) {
     clientNode := dcache.clientNode
   }

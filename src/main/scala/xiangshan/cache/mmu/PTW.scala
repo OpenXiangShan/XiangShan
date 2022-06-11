@@ -26,10 +26,12 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
-class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+class PTW(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -38,11 +40,11 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     ))
   )))
 
-  lazy val module = new PTWImp(this)
+  lazy val module = new PTWImp(parentName = parentName,this)
 }
 
 @chiselName
-class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
+class PTWImp(parentName:String = "Unknown",outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
@@ -86,7 +88,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
 
   val missQueue = Module(new L2TlbMissQueue)
-  val cache = Module(new PtwCache)
+  val cache = Module(new PtwCache(parentName = parentName + "cache_")(p))
   val fsm = Module(new PtwFsm)
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
@@ -97,7 +99,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
-
+  val (ptwMbistPipelineSram,ptwMbistPipelineRf,ptwMbistPipelineSramRepair,ptwMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_PTW")
   // NOTE: when cache out but miss and fsm doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
   arb1.io.out.ready := arb2.io.in(1).ready
@@ -369,10 +371,10 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class PTWWrapper(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
-  val ptw = if (!useSoftPTW) LazyModule(new PTW()) else null
+  val ptw = if (!useSoftPTW) LazyModule(new PTW(parentName)(p)) else null
   if (!useSoftPTW) {
     node := ptw.node
   }

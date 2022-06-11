@@ -14,7 +14,7 @@
  <check level="warning" class="org.scalastyle.scalariform.SpacesAfterPlusChecker" enabled="false"></check>
  <check level="warning" class="org.scalastyle.file.WhitespaceEndOfLineChecker" enabled="true"></check>
  <check level="warning" class="org.scalastyle.scalariform.SpacesBeforePlusChecker" enabled="false"></check>
- <check level="warning" class="org.scalastyle.file.FileLineLengthChecker" enabled="true">
+ <check level="warning" class="org.scalastyle.file.FileLineLengthChecker" enabled="false">
   <parameters>
    <parameter name="maxLineLength"><![CDATA[120]]></parameter>
    <parameter name="tabSize"><![CDATA[4]]></parameter>
@@ -43,7 +43,7 @@
  </check>
  <check level="warning" class="org.scalastyle.scalariform.ParameterNumberChecker" enabled="true">
   <parameters>
-   <parameter name="maxParameters"><![CDATA[8]]></parameter>
+   <parameter name="maxParameters"><![CDATA[16]]></parameter>
   </parameters>
  </check>
  <check level="warning" class="org.scalastyle.scalariform.MagicNumberChecker" enabled="false">
@@ -77,12 +77,12 @@
  </check>
  <check level="warning" class="org.scalastyle.scalariform.CyclomaticComplexityChecker" enabled="true">
   <parameters>
-   <parameter name="maximum"><![CDATA[10]]></parameter>
+   <parameter name="maximum"><![CDATA[32]]></parameter>
   </parameters>
  </check>
  <check level="warning" class="org.scalastyle.scalariform.UppercaseLChecker" enabled="true"></check>
  <check level="warning" class="org.scalastyle.scalariform.SimplifyBooleanExpressionChecker" enabled="true"></check>
- <check level="warning" class="org.scalastyle.scalariform.IfBraceChecker" enabled="true">
+ <check level="warning" class="org.scalastyle.scalariform.IfBraceChecker" enabled="false">
   <parameters>
    <parameter name="singleLineAllowed"><![CDATA[true]]></parameter>
    <parameter name="doubleLineAllowed"><![CDATA[false]]></parameter>

@@ -29,10 +29,10 @@ class RASEntry()(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class RAS(implicit p: Parameters) extends BasePredictor {
+class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p) {
   object RASEntry {
     def apply(retAddr: UInt, ctr: UInt): RASEntry = {
-      val e = Wire(new RASEntry)
+      val e = Wire(new RASEntry()(p))
       e.retAddr := retAddr
       e.ctr := ctr
       e

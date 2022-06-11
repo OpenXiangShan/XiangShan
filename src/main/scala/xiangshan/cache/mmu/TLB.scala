@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import xiangshan._
 import utils._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
@@ -29,7 +31,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
+class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
@@ -63,6 +65,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
   // Normal page && Super page
   val normalPage = TlbStorage(
+    parentName = parentName + "normalPage_",
     name = "normal",
     associative = q.normalAssociative,
     sameCycle = q.sameCycle,
@@ -75,6 +78,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     superPage = false
   )
   val superPage = TlbStorage(
+    parentName = parentName + "superPage_",
     name = "super",
     associative = q.superAssociative,
     sameCycle = q.sameCycle,
@@ -86,6 +90,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage = q.normalAsVictim,
     superPage = true,
   )
+  val (tlbMbistPipelineSram,tlbMbistPipelineRf,tlbMbistPipelineSramRepair,tlbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"TLB_${this.hashCode()}")
 
 
   for (i <- 0 until Width) {
@@ -353,11 +358,12 @@ object TLB {
     csr: TlbCsrBundle,
     width: Int,
     shouldBlock: Boolean,
-    q: TLBParameters
+    q: TLBParameters,
+    parentName:String = "Unknown"
   )(implicit p: Parameters) = {
     require(in.length == width)
 
-    val tlb = Module(new TLB(width, q))
+    val tlb = Module(new TLB(parentName, width, q))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr

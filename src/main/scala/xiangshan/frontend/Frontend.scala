@@ -19,23 +19,25 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
 
-class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+class Frontend(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
   val instrUncache  = LazyModule(new InstrUncache())
-  val icache        = LazyModule(new ICache())
+  val icache        = LazyModule(new ICache(parentName = parentName + "icache_")(p))
 
-  lazy val module = new FrontendImp(this)
+  lazy val module = new FrontendImp(this,parentName)
 }
 
 
-class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
 {
@@ -61,10 +63,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu     = Module(new Predictor)
+  val bpu     = Module(new Predictor(parentName = parentName + "bpu_")(p))
   val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
-  val ftq = Module(new Ftq)
+  val ftq = Module(new Ftq(parentName = parentName + "ftq_")(p))
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -121,8 +123,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     csr = tlbCsr,
     width = 6,
     shouldBlock = true,
-    itlbParams
+    itlbParams,
+    parentName = parentName + "TLB_"
   )
+  val (frontendMbistPipelineSram,frontendMbistPipelineRf,frontendMbistPipelineSramRepair,frontendMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_frontend")
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
