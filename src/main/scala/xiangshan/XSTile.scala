@@ -133,8 +133,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
     })
-    val ultiscanToControllerL2 = IO(new FSCANInputInterface)
-    val ultiscanToControllerL3 = IO(Flipped(new FSCANInputInterface))
+    val xsx_ultiscan_in = IO(new FSCANInputInterface)
+    val xsl2_ultiscan_out = IO(Flipped(new FSCANInputInterface))
     val hsuspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
     val hd2prf_in = IO(new MbitsFuseInterface(isSRAM = false))
     val mbist_ijtag = IO(new JTAGInterface)
@@ -144,8 +144,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     val mbist_extra_l2_rf = IO(new MbitsExtraFullInterface)
 
     dontTouch(io)
-    dontTouch(ultiscanToControllerL2)
-    dontTouch(ultiscanToControllerL3)
+    dontTouch(xsx_ultiscan_in)
+    dontTouch(xsl2_ultiscan_out)
     dontTouch(hsuspsr_in)
     dontTouch(hd2prf_in)
     dontTouch(mbist_ijtag)
@@ -195,13 +195,14 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       val mbistInterfaceL2SRAM = if (l2cache.isDefined) {
         require(l2cache.get.module.mbist_sram.isDefined,"There is No L2 Mbist SRAM port!")
         val intf = Some(Module(new MBISTInterface(
-          Seq(l2cache.get.module.mbist_sram.get.head.params),
+          Seq(l2cache.get.module.mbist_sram.get.params),
           s"mbist_core${coreParams.HartId}_l2_sram_intf",
           isSRAM = true,
           1
         )))
         intf.get.extra := DontCare
-        intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get.head
+        intf.get.clock := childClock
+        intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
         mbist_extra_l2_sram.connectExtra(intf.get.extra.head)
         mbist_extra_l2_sram.connectPWR_MGNT(
           l2cache.get.module.sliceMbistPipelines.head._1.get.PWR_MGNT.get._1,
@@ -215,13 +216,14 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       val mbistInterfaceL2RF = if (l2cache.isDefined) {
         require(l2cache.get.module.mbist_rf.isDefined,"There is No L2 Mbist RF port!")
         val intf = Some(Module(new MBISTInterface(
-          Seq(l2cache.get.module.mbist_rf.get.head.params),
+          Seq(l2cache.get.module.mbist_rf.get.params),
           s"mbist_core${coreParams.HartId}_l2_rf_intf",
           isSRAM = false,
           1
         )))
         intf.get.extra := DontCare
-        intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get.head
+        intf.get.clock := childClock
+        intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
         mbist_extra_l2_rf.connectExtra(intf.get.extra.head)
         mbist_extra_l2_rf.connectPWR_MGNT(
           l2cache.get.module.sliceMbistPipelines.head._2.get.PWR_MGNT.get._1,
@@ -240,6 +242,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         1
       ))
       mbistInterfaceCoreSRAM.extra := DontCare
+      mbistInterfaceCoreSRAM.clock := childClock
       mbistInterfaceCoreSRAM.toPipeline.head <> core.module.mbist_sram
       mbist_extra_core_sram.connectExtra(mbistInterfaceCoreSRAM.extra.head)
       mbist_extra_core_sram.connectPWR_MGNT(
@@ -254,6 +257,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         1
       ))
       mbistInterfaceCoreRF.extra := DontCare
+      mbistInterfaceCoreRF.clock := childClock
       mbistInterfaceCoreRF.toPipeline.head <> core.module.mbist_rf
       mbist_extra_core_rf.connectExtra(mbistInterfaceCoreRF.extra.head)
       mbist_extra_core_rf.connectPWR_MGNT(
@@ -261,7 +265,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         core.module.coreMbistPipelineRf.get.PWR_MGNT.get._2
       )
 
-      val (intfParams,intfPrefixes) = if(l2cache.isDefined) {
+      val (intfParams,mbistNames,intfPrefixes) = if(l2cache.isDefined) {
         (
           Seq(
             mbistInterfaceCoreSRAM.mbist.params,
@@ -269,20 +273,24 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             mbistInterfaceL2SRAM.get.mbist.params,
             mbistInterfaceL2RF.get.mbist.params
         ),
-          Seq("L1","L2"))
+          Seq("L1_SRAM","L1_RF","L2_SRAM","L2_RF"),
+          Seq("L1","L2")
+          )
       } else {
         (
           Seq(
             mbistInterfaceCoreSRAM.mbist.params,
             mbistInterfaceCoreRF.mbist.params
           ),
-          Seq("L1"))
+          Seq("L1_SRAM","L1_RF"),
+          Seq("L1")
+          )
       }
 
 
       val mbistControllerCoreWithL2 = Module(new MBISTController(
         intfParams,
-        if(l2cache.isDefined) 2 else 1,
+        mbistNames,
         intfPrefixes,
         None
       ))
@@ -290,32 +298,32 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
       if(l2cache.isDefined){
         //Core
-        mbistControllerCoreWithL2.io.mbist(0) <> mbistInterfaceCoreSRAM.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
+        mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
+        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
         mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.fuse
-        mbistControllerCoreWithL2.io.mbist(1) <> mbistInterfaceCoreRF.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
+        mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
+        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
         mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.fuse
         //L2
-        mbistControllerCoreWithL2.io.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
+        mbistControllerCoreWithL2.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
+        mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
         mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.fuse
-        mbistControllerCoreWithL2.io.mbist(3) <> mbistInterfaceL2RF.get.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(1) <> mbistInterfaceL2RF.get.fscan_ram
+        mbistControllerCoreWithL2.mbist(3) <> mbistInterfaceL2RF.get.mbist
+        mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2RF.get.fscan_ram
         mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2RF.get.fuse
       }
       else{
-        mbistControllerCoreWithL2.io.mbist(0) <> mbistInterfaceCoreSRAM.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
+        mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
+        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
         mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.fuse
-        mbistControllerCoreWithL2.io.mbist(1) <> mbistInterfaceCoreRF.mbist
-        mbistControllerCoreWithL2.io.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
+        mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
+        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
         mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.fuse
       }
       mbistControllerCoreWithL2.io.fscan_clkungate := xsl2_ultiscan.io.fscan.clkungate
       mbistControllerCoreWithL2.io.clock := childClock
 
-      mbistControllerCoreWithL2.io.xsx_fscan_in <> ultiscanToControllerL2
+      mbistControllerCoreWithL2.io.xsx_fscan_in <> xsx_ultiscan_in
 
       mbistControllerCoreWithL2.io.xsl2_fscan_in.bypsel := xsl2_ultiscan.io.fscan.ram.bypsel
       mbistControllerCoreWithL2.io.xsl2_fscan_in.wdis_b := xsl2_ultiscan.io.fscan.ram.wrdis_b
@@ -323,11 +331,11 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       mbistControllerCoreWithL2.io.xsl2_fscan_in.init_en := xsl2_ultiscan.io.fscan.ram.init_en
       mbistControllerCoreWithL2.io.xsl2_fscan_in.init_val := xsl2_ultiscan.io.fscan.ram.init_val
 
-      ultiscanToControllerL3.bypsel := xsl2_ultiscan.io.fscan.ram.bypsel
-      ultiscanToControllerL3.wdis_b := xsl2_ultiscan.io.fscan.ram.wrdis_b
-      ultiscanToControllerL3.rdis_b := xsl2_ultiscan.io.fscan.ram.rddis_b
-      ultiscanToControllerL3.init_en := xsl2_ultiscan.io.fscan.ram.init_en
-      ultiscanToControllerL3.init_val := xsl2_ultiscan.io.fscan.ram.init_val
+      xsl2_ultiscan_out.bypsel := xsl2_ultiscan.io.fscan.ram.bypsel
+      xsl2_ultiscan_out.wdis_b := xsl2_ultiscan.io.fscan.ram.wrdis_b
+      xsl2_ultiscan_out.rdis_b := xsl2_ultiscan.io.fscan.ram.rddis_b
+      xsl2_ultiscan_out.init_en := xsl2_ultiscan.io.fscan.ram.init_en
+      xsl2_ultiscan_out.init_val := xsl2_ultiscan.io.fscan.ram.init_val
 
       mbist_ijtag <> mbistControllerCoreWithL2.io.mbist_ijtag
 
