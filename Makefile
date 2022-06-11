@@ -98,9 +98,22 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 
 sim-verilog: $(SIM_TOP_V)
 
+release-verilog:
+	# if you have generated $(SIM_TOP_V) without setting RELEASE = 1, make clean first 
+	# force set RELEASE = 1 to generate release rtl
+	$(MAKE) $(SIM_TOP_V) RELEASE=1 
+	# split rtl modules and sim top, copy extra files
+	# module name prefix is set to "bosc_"
+	python3 scripts/parser.py bosc_ $(CONFIG)
+	# update SimTop.v, use "bosc_" module name prefix
+	sed -i -e 's/XSTop /bosc_XSTop /g' XSTop-Release*/SimTop.v # 
+
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf ./build
+
+clean-release:
+	rm -rf ./XSTop-Release*
 
 init:
 	git submodule update --init
