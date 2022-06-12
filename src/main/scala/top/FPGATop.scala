@@ -220,9 +220,6 @@ class TopPeripheralAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
 }
 
 class FPGATop()(implicit p: Parameters) extends RawModule {
-  // override the module name to act the same like XSTop.
-  override def desiredName: String = "XSTop"
-
   val lazy_module_top = LazyModule(new XSTop)
   val top = Module(lazy_module_top.module)
 

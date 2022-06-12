@@ -304,3 +304,10 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
+
+class FPGAConfig(n: Int = 1) extends Config(
+  new WithNKBL3(3 * 1024, inclusive = false, banks = 4, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)

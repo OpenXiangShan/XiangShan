@@ -293,6 +293,8 @@ def create_filelist(out_dir, top_module):
                 f.write(f"{filelist_entry}\n")
 
 def generate_sram_conf(collection, module_prefix, out_dir):
+    if module_prefix is None:
+        module_prefix = ""
     sram_conf = []
     sram_array_name = module_prefix + "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)"
     modules = collection.get_all_modules(match=sram_array_name)
@@ -388,10 +390,10 @@ if __name__ == "__main__":
     top_module = "XSTop"
     config = "DefaultConfig"
     if len(sys.argv) > 1:
-        module_prefix = sys.argv[1]
-        top_module = f"{module_prefix}{top_module}"
+        config = sys.argv[1]
     if len(sys.argv) > 2:
-        config = sys.argv[2]
+        module_prefix = sys.argv[2]
+        top_module = f"{module_prefix}{top_module}"
     print(f"Top-level Module: {top_module} with prefix {module_prefix}")
     print(f"Config:         : {config}")
     collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix)

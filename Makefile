@@ -73,7 +73,14 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	python3 scripts/parser.py bosc_ $(CONFIG)
+ifeq ($(NANHU),1)
+	sed -i -e 's/ XSTop / SLTop /g' $(TOP_V)
+	sed -i -e 's/ XSTop(/ SLTop(/g' $(TOP_V)
+	sed -i -e 's/ FPGATop(/ XSTop(/g' $(TOP_V)
+	python3 scripts/parser.py $(CONFIG)
+else
+	python3 scripts/parser.py $(CONFIG) bosc_
+endif
 
 verilog: $(TOP_V)
 
@@ -104,7 +111,7 @@ release-verilog:
 	$(MAKE) $(SIM_TOP_V) RELEASE=1 
 	# split rtl modules and sim top, copy extra files
 	# module name prefix is set to "bosc_"
-	python3 scripts/parser.py bosc_ $(CONFIG)
+	python3 scripts/parser.py $(CONFIG) bosc_
 	# update SimTop.v, use "bosc_" module name prefix
 	sed -i -e 's/XSTop /bosc_XSTop /g' XSTop-Release*/SimTop.v # 
 
