@@ -274,7 +274,7 @@ def generate_sram_conf(collection, module_prefix, out_dir):
     sram_array_name = module_prefix + "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)"
     modules = collection.get_all_modules(match=sram_array_name)
     sram_array_re = re.compile(sram_array_name)
-    for module in sorted(modules, key=lambda m: int(m.get_name().split("_")[3])):
+    for module in sorted(modules, key=lambda m: int(m.get_name().replace(module_prefix, "").split("_")[2])):
         # name
         module_name = module.get_name()
         module_name_match = sram_array_re.match(module_name)
