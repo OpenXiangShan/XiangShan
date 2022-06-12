@@ -1,10 +1,10 @@
 #! /usr/bin/env python3
 
+import argparse
 import os
 import re
-import sys
 from datetime import date
-from shutil import copytree, copy
+from shutil import copy, copytree
 
 import xlsxwriter
 
@@ -155,7 +155,7 @@ class VCollection(object):
         else:
             return self.modules
 
-    def get_module(self, name, with_submodule=False, try_prefix=None):
+    def get_module(self, name, with_submodule=False, try_prefix=None, ignore_modules=None):
         target = None
         for module in self.modules:
             if module.get_name() == name:
@@ -172,16 +172,18 @@ class VCollection(object):
         submodules = set()
         submodules.add(target)
         for submodule in target.get_submodule():
-            result = self.get_module(submodule, with_submodule=True, try_prefix=try_prefix)
+            if ignore_modules is not None and submodule in ignore_modules:
+                continue
+            result = self.get_module(submodule, with_submodule=True, try_prefix=try_prefix, ignore_modules=ignore_modules)
             if result is None:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
                 return None
             submodules.update(result)
         return submodules
 
-    def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None):
+    def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None, ignore_modules=None):
         print("Dump module {} to {}...".format(name, output_dir))
-        modules = self.get_module(name, with_submodule, try_prefix=try_prefix)
+        modules = self.get_module(name, with_submodule, try_prefix=try_prefix, ignore_modules=ignore_modules)
         if modules is None:
             print("does not find module", name)
             return False
@@ -238,13 +240,13 @@ def check_data_module_template(collection):
             error_modules.append(module)
     return error_modules
 
-def create_verilog(files, top_module, config, try_prefix=None):
+def create_verilog(files, top_module, config, try_prefix=None, ignore_modules=None):
     collection = VCollection()
     for f in files:
         collection.load_modules(f)
     today = date.today()
-    directory = f'XSTop-Release-{config}-{today.strftime("%b-%d-%Y")}'
-    success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix)
+    directory = f'{top_module}-Release-{config}-{today.strftime("%b-%d-%Y")}'
+    success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix, ignore_modules=ignore_modules)
     if not success:
         return None, None
     return collection, os.path.realpath(directory)
@@ -357,24 +359,45 @@ def create_extra_files(out_dir, build_path):
             copy(file_path, extra_path)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Verilog parser for XS')
+    parser.add_argument('top', type=str, help='top-level module')
+    parser.add_argument('--config', type=str, default="Unknown", help='XSConfig')
+    parser.add_argument('--prefix', type=str, help='module prefix')
+    parser.add_argument('--ignore', type=str, default="", help='ignore modules (and their submodules)')
+    parser.add_argument('--include', type=str, help='include verilog from more directories')
+    parser.add_argument('--no-filelist', action='store_true', help='do not create filelist')
+    parser.add_argument('--no-sram-conf', action='store_true', help='do not create sram configuration file')
+    parser.add_argument('--no-sram-xlsx', action='store_true', help='do not create sram configuration xlsx')
+    parser.add_argument('--no-extra-files', action='store_true', help='do not copy extra files')
+
+    args = parser.parse_args()
+
     xs_home = os.path.realpath(os.getenv("NOOP_HOME"))
     build_path = os.path.join(xs_home, "build")
     files = get_files(build_path)
+    if args.include is not None:
+        for inc_path in args.include.split(","):
+            files += get_files(inc_path)
 
-    module_prefix = None
-    top_module = "XSTop"
-    config = "DefaultConfig"
-    if len(sys.argv) > 1:
-        config = sys.argv[1]
-    if len(sys.argv) > 2:
-        module_prefix = sys.argv[2]
+    top_module = args.top
+    module_prefix = args.prefix
+    config = args.config
+    ignore_modules = list(filter(lambda x: x != "", args.ignore.split(",")))
+    if module_prefix is not None:
         top_module = f"{module_prefix}{top_module}"
+        ignore_modules += list(map(lambda x: module_prefix + x, ignore_modules))
+
     print(f"Top-level Module: {top_module} with prefix {module_prefix}")
-    print(f"Config:         : {config}")
-    collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix)
+    print(f"Config:           {config}")
+    print(f"Ignored modules:  {ignore_modules}")
+    collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix, ignore_modules=ignore_modules)
     assert(collection)
 
-    create_filelist(out_dir, top_module)
-    sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
-    create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
-    create_extra_files(out_dir, build_path)
+    if not args.no_filelist:
+        create_filelist(out_dir, top_module)
+    if not args.no_sram_conf:
+        sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
+        if not args.no_sram_xlsx:
+            create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
+    if not args.no_extra_files:
+        create_extra_files(out_dir, build_path)

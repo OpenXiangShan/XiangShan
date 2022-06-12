@@ -180,6 +180,14 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME verilog SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
+    def generate_sim_release(self):
+        print("Generating XiangShan SimTop verilog with the following configurations:")
+        self.show()
+        sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
+        make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME sim-verilog-release SIM_ARGS="{sim_args}" {make_args}')
+        return return_code
+
     def build_emu(self):
         print("Building XiangShan emu with the following configurations:")
         self.show()
@@ -207,6 +215,7 @@ class XiangShan(object):
             return self.run_ci(args.ci)
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
+            (args.sim_release, lambda _ : self.generate_sim_release()),
             (args.build, lambda _ : self.build_emu()),
             (args.workload, lambda args: self.run_emu(args.workload)),
             (args.clean, lambda _ : self.make_clean())
@@ -333,6 +342,7 @@ if __name__ == "__main__":
     # actions
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
+    parser.add_argument('--sim-release', action='store_true', help='generate release verilog for simulation')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
     parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
     # environment variables
@@ -348,13 +358,13 @@ if __name__ == "__main__":
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--nanhu', action='store_true', help='enable release for NANHU FPGA')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
-    parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
+    parser.add_argument('--threads', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
-    parser.add_argument('--config', nargs='?', type=str, help='config')
+    parser.add_argument('--config', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
-    parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
-    parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
+    parser.add_argument('--diff', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
+    parser.add_argument('--max-instr', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     # ci action head sha
