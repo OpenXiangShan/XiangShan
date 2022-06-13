@@ -77,9 +77,6 @@ ifeq ($(NANHU),1)
 	sed -i -e 's/ XSTop / SLTop /g' $(TOP_V)
 	sed -i -e 's/ XSTop(/ SLTop(/g' $(TOP_V)
 	sed -i -e 's/ FPGATop(/ XSTop(/g' $(TOP_V)
-	python3 scripts/parser.py XSTop --config $(CONFIG) --no-extra-files
-else
-	python3 scripts/parser.py XSTop --config $(CONFIG) --prefix bosc_
 endif
 
 verilog: $(TOP_V)
@@ -106,9 +103,9 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 sim-verilog: $(SIM_TOP_V)
 
 sim-verilog-release:
-	# if you have generated $(SIM_TOP_V) without setting RELEASE = 1, make clean first 
+	# if you have generated $(SIM_TOP_V) without setting RELEASE = 1, make clean first
 	# force set RELEASE = 1 to generate release rtl
-	$(MAKE) $(SIM_TOP_V) RELEASE=1 
+	$(MAKE) $(SIM_TOP_V) RELEASE=1
 	# update SimTop.v, use "bosc_" module name prefix
 	sed -i -e 's/ XSTop / bosc_XSTop /g' $(SIM_TOP_V)
 	sed -i -e 's/ XSTop(/ bosc_XSTop(/g' $(SIM_TOP_V)
@@ -122,7 +119,7 @@ clean:
 	rm -rf ./build
 
 clean-release:
-	rm -rf ./XSTop-Release*
+	rm -rf ./*-Release-*
 
 init:
 	git submodule update --init
@@ -149,4 +146,3 @@ simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
-

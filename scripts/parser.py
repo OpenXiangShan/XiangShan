@@ -63,6 +63,10 @@ class VModule(object):
                 if this_submodule != "module":
                     self.add_submodule(this_submodule)
 
+    def add_lines(self, lines):
+        for line in lines:
+            self.add_line(line)
+
     def get_name(self):
         return self.name
 
@@ -102,6 +106,28 @@ class VModule(object):
 
     def replace(self, s):
         self.lines = [s]
+
+    def replace_with_macro(self, macro, s):
+        replaced_lines = []
+        in_io, in_body = False, False
+        for line in self.lines:
+            if self.io_re.match(line):
+                in_io = True
+                replaced_lines.append(line)
+            elif in_io:
+                in_io = False
+                in_body = True
+                replaced_lines.append(line) # This is ");"
+                replaced_lines.append(f"`ifdef {macro}\n")
+                replaced_lines.append(s)
+                replaced_lines.append(f"`else\n")
+            elif in_body:
+                if line.strip() == "endmodule":
+                    replaced_lines.append(f"`endif // {macro}\n")
+                replaced_lines.append(line)
+            else:
+                replaced_lines.append(line)
+        self.lines = replaced_lines
 
     def __str__(self):
         module_name = "Module {}: \n".format(self.name)
@@ -269,36 +295,166 @@ def create_filelist(out_dir, top_module):
                 filelist_entry = os.path.join(top_module, filename)
                 f.write(f"{filelist_entry}\n")
 
+class SRAMConfiguration(object):
+    ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)(_repair|)"
+
+    SINGLE_PORT = 0
+    SINGLE_PORT_MASK = 1
+    DUAL_PORT = 2
+    DUAL_PORT_MASK = 3
+
+    def __init__(self):
+        self.name = None
+        self.depth = None
+        self.width = None
+        self.ports = None
+        self.mask_gran = None
+
+    def size(self):
+        return self.depth * self.width
+
+    def is_single_port(self):
+        return self.ports == self.SINGLE_PORT or self.ports == self.SINGLE_PORT_MASK
+
+    def mask_width(self):
+        return self.width // self.mask_gran
+
+    def from_module_name(self, module_name):
+        self.name = module_name
+        sram_array_re = re.compile(self.ARRAY_NAME)
+        module_name_match = sram_array_re.match(self.name)
+        assert(module_name_match is not None)
+        num_ports = int(module_name_match.group(1))
+        self.depth = int(module_name_match.group(2))
+        self.width = int(module_name_match.group(3))
+        self.mask_gran = int(module_name_match.group(4))
+        assert(self.width % self.mask_gran == 0)
+        if num_ports == 1:
+            self.ports = self.SINGLE_PORT if self.mask_width() == 1 else self.SINGLE_PORT_MASK
+        else:
+            self.ports = self.DUAL_PORT if self.mask_width() == 1 else self.DUAL_PORT_MASK
+
+    def ports_s(self):
+        s = {
+            self.SINGLE_PORT: "rw",
+            self.SINGLE_PORT_MASK: "mrw",
+            self.DUAL_PORT: "write,read",
+            self.DUAL_PORT_MASK: "mwrite,read"
+        }
+        return s[self.ports]
+
+    def to_sram_conf_entry(self):
+        all_info = ["name", self.name, "depth", self.depth, "width", self.width, "ports", self.ports_s()]
+        if self.mask_gran < self.width:
+            all_info += ["mask_gran", self.mask_gran]
+        return " ".join(map(str, all_info))
+
+    def from_sram_conf_entry(self, line):
+        items = line.strip().split(" ")
+        self.name = items[1]
+        if items[7] == "rw":
+            self.ports = self.SINGLE_PORT
+        elif items[7] == "mrw":
+            self.ports = self.SINGLE_PORT_MASK
+        elif items[7] == "write,read":
+            self.ports = self.DUAL_PORT
+        elif items[7] == "mwrite,read":
+            self.ports = self.DUAL_PORT_MASK
+        else:
+            assert(0)
+        self.depth = int(items[3])
+        self.width = int(items[5])
+        self.mask_gran = int(items[-1]) if len(items) > 8 else self.width
+
+    def to_sram_xlsx_entry(self, num_instances):
+        if self.is_single_port():
+            num_read_port = "shared 1"
+            num_write_port = "shared 1"
+            read_clk = "RW0_clk"
+            write_clk = "RW0_clk"
+        else:
+            num_read_port = 1
+            num_write_port = 1
+            read_clk = "R0_clk"
+            write_clk = "W0_clk"
+        all_info = [self.name, num_instances, "SRAM", num_read_port, num_write_port, 0,
+                    self.depth, self.width, self.mask_gran, read_clk, write_clk, "N/A"]
+        return all_info
+
+    def get_foundry_sram_wrapper(self):
+        wrapper_type = "RAMSP" if self.is_single_port() else "RF2P"
+        wrapper_mask = "" if self.mask_width() == 1 else f"_M{self.mask_width()}"
+        wrapper_module = f"{wrapper_type}_{self.depth}x{self.width}{wrapper_mask}_WRAP"
+        wrapper_instance = "u_mem"
+        # common ports
+        common_ports = {
+            "FSCAN_RAM_BYPSEL": "mbist_bypsel",
+            "FSCAN_RAM_WDIS_B": "mbist_wdis_b",
+            "FSCAN_RAM_RDIS_B": "mbist_rdis_b",
+            "FSCAN_RAM_INIT_EN": "mbist_init_en",
+            "FSCAN_RAM_INIT_VAL": "mbist_init_val",
+            "FSCAN_CLKUNGATE": "mbist_clkungate",
+            "IP_RESET_B": "mbist_IP_RESET_B",
+            "OUTPUT_RESET": "mbist_OUTPUT_RESET",
+            "PWR_MGMT_IN": "mbist_PWR_MGNT_IN",
+            "PWR_MGMT_OUT": "mbist_PWR_MGNT_OUT"
+        }
+        if self.is_single_port():
+            extra_wrapper_ports = {
+                "CK"               : "RW0_clk",
+                "A"                : "RW0_addr",
+                "WEN"              : "RW0_en & RW0_wmode",
+                "D"                : "RW0_wdata",
+                "REN"              : "RW0_en & ~RW0_wmode",
+                "Q"                : "RW0_rdata",
+                "TRIM_FUSE_IN"     : "mbist_sram_trim_fuse",
+                "SLEEP_FUSE_IN"    : "mbist_sram_sleep_fuse",
+                "WRAPPER_CLK_EN"   : "mbist_WRAPPER_CLK_EN",
+            }
+            if self.mask_width() > 0:
+                extra_wrapper_ports["WM"] = "RW0_wmask"
+        else:
+            extra_wrapper_ports = {
+                "WCK"              : "W0_clk",
+                "WA"               : "W0_addr",
+                "WEN"              : "W0_en",
+                "D"                : "W0_data",
+                "RCK"              : "R0_clk",
+                "RA"               : "R0_addr",
+                "REN"              : "R0_en",
+                "Q"                : "R0_data",
+                "TRIM_FUSE_IN"     : "mbist_rf_trim_fuse",
+                "SLEEP_FUSE_IN"    : "mbist_rf_sleep_fuse",
+                "WRAPPER_WR_CLK_EN": "mbist_WRAPPER_RD_CLK_EN",
+                "WRAPPER_RD_CLK_EN": "mbist_WRAPPER_WR_CLK_EN",
+            }
+            if self.mask_width() > 0:
+                extra_wrapper_ports["WM"] = "W0_mask"
+        verilog_lines = []
+        verilog_lines.append(f"  {wrapper_module} {wrapper_instance} (\n")
+        connected_pins = []
+        for pin_name in common_ports:
+            connected_pins.append(f".{pin_name}({common_ports[pin_name]})")
+        for pin_name in extra_wrapper_ports:
+            connected_pins.append(f".{pin_name}({extra_wrapper_ports[pin_name]})")
+        verilog_lines.append("    " + ",\n    ".join(connected_pins) + "\n")
+        verilog_lines.append("  );\n")
+        return wrapper_module, "".join(verilog_lines)
+
 def generate_sram_conf(collection, module_prefix, out_dir):
     if module_prefix is None:
         module_prefix = ""
     sram_conf = []
-    sram_array_name = module_prefix + "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)"
+    sram_array_name = module_prefix + SRAMConfiguration.ARRAY_NAME
     modules = collection.get_all_modules(match=sram_array_name)
-    sram_array_re = re.compile(sram_array_name)
     for module in sorted(modules, key=lambda m: int(m.get_name().replace(module_prefix, "").split("_")[2])):
-        # name
-        module_name = module.get_name()
-        module_name_match = sram_array_re.match(module_name)
-        assert(module_name_match is not None)
-        num_ports = int(module_name_match.group(1))
-        depth = int(module_name_match.group(2))
-        width = int(module_name_match.group(3))
-        mask_gran = int(module_name_match.group(4))
-        assert(width % mask_gran == 0)
-        mask_width = width // mask_gran
-        if num_ports == 1:
-            ports = "rw" if mask_width == 1 else "mrw"
-        else:
-            ports = "write,read" if mask_width == 1 else "mwrite,read"
-        all_info = ["name", module_name, "depth", depth, "width", width, "ports", ports]
-        if mask_gran < width:
-            all_info += ["mask_gran", mask_gran]
-        sram_conf.append(all_info)
+        conf = SRAMConfiguration()
+        conf.from_module_name(module.get_name()[len(module_prefix):])
+        sram_conf.append(conf)
     conf_path = os.path.join(out_dir, "sram_configuration.txt")
     with open(conf_path, "w") as f:
         for conf in sram_conf:
-            f.write(" ".join(map(str, conf)) + "\n")
+            f.write(conf.to_sram_conf_entry() + "\n")
     return conf_path
 
 def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None):
@@ -318,34 +474,19 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None
     total_size = 0
     with open(sram_conf) as f:
         for line in f:
-            items = line.strip().split(" ")
-            sram_module_name = items[1]
-            num_instances = collection.count_instances(top_module, sram_module_name)
+            conf = SRAMConfiguration()
+            conf.from_sram_conf_entry(line)
+            num_instances = collection.count_instances(top_module, conf.name)
             if num_instances == 0 and try_prefix is not None:
-                try_prefix_name = f"{try_prefix}{sram_module_name}"
+                try_prefix_name = f"{try_prefix}{conf.name}"
                 num_instances = collection.count_instances(top_module, try_prefix_name)
                 if num_instances != 0:
-                    sram_module_name = try_prefix_name
-            if items[7] == "mrw" or items[7] == "rw":
-                num_read_port = "shared 1"
-                num_write_port = "shared 1"
-            elif items[7] == "mwrite,read" or items[7] == "write,read":
-                num_read_port = 1
-                num_write_port = 1
-            else:
-                num_read_port = 0
-                num_write_port = 0
-            depth = int(items[3])
-            width = int(items[5])
-            mask_gran = int(items[-1]) if len(items) > 8 else width
-            read_clk = "RW0_clk" if "rw" in items[7] else "R0_clk"
-            write_clk = "RW0_clk" if "rw" in items[7] else "W0_clk"
-            all_info = [sram_module_name, num_instances, "SRAM", num_read_port, num_write_port, 0,
-                        depth, width, mask_gran, read_clk, write_clk, "N/A"]
+                    conf.name = try_prefix_name
+            all_info = conf.to_sram_xlsx_entry(num_instances)
             for col, info in enumerate(all_info):
                 worksheet.write(row, col, info)
             row += 1
-            total_size += depth * width * num_instances
+            total_size += conf.size() * num_instances
     # Total size of the SRAM in top of the sheet
     worksheet.write(0, 0, f"Total size: {total_size / (8 * 1024)} KiB")
     workbook.close()
@@ -358,6 +499,50 @@ def create_extra_files(out_dir, build_path):
         if f.endswith(".xls"):
             copy(file_path, extra_path)
 
+def replace_sram(out_dir, sram_conf, top_module, module_prefix):
+    replace_sram_path = os.path.join(out_dir, "memory_array")
+    if not os.path.exists(replace_sram_path):
+        os.mkdir(replace_sram_path)
+    sram_wrapper_path = os.path.join(out_dir, "memory_wrapper")
+    if not os.path.exists(sram_wrapper_path):
+        os.mkdir(sram_wrapper_path)
+    replaced_sram = []
+    with open(sram_conf) as f:
+        for line in f:
+            conf = SRAMConfiguration()
+            conf.from_sram_conf_entry(line)
+            sim_sram_module = VModule(conf.name)
+            sim_sram_path = os.path.join(out_dir, top_module, f"{conf.name}.v")
+            if not os.path.exists(sim_sram_path) and module_prefix is not None:
+                sim_sram_path = os.path.join(out_dir, top_module, f"{module_prefix}{conf.name}.v")
+                sim_sram_module.name = f"{module_prefix}{conf.name}"
+            with open(sim_sram_path, "r") as sim_f:
+                sim_sram_module.add_lines(sim_f.readlines())
+            wrapper, instantiation_v = conf.get_foundry_sram_wrapper()
+            sim_sram_module.replace_with_macro("FOUNDRY_MEM", instantiation_v)
+            output_file = os.path.join(replace_sram_path, f"{sim_sram_module.name}.v")
+            with open(output_file, "w") as f:
+                f.writelines(sim_sram_module.get_lines())
+            # uncomment the following lines to copy the provided memory wrapper
+            # wrapper_dir = "/nfs/home/share/southlake/sram_replace/mem_wrap"
+            # wrapper_path = os.path.join(wrapper_dir, f"{wrapper}.v")
+            # copy(wrapper_path, os.path.join(sram_wrapper_path, f"{wrapper}.v"))
+            replaced_sram.append(sim_sram_module.name)
+    # create filelist
+    filelist_path = os.path.join(out_dir, f"{top_module}_with_foundry_sram.f")
+    with open(filelist_path, "w") as filelist_f:
+        for filename in os.listdir(os.path.join(out_dir, top_module)):
+            if filename.endswith(".v") and filename[:-2] not in replaced_sram:
+                filelist_entry = os.path.join(top_module, filename)
+                filelist_f.write(f"{filelist_entry}\n")
+        for filename in os.listdir(replace_sram_path):
+            if filename.endswith(".v"):
+                filelist_entry = os.path.join("memory_array", filename)
+                filelist_f.write(f"{filelist_entry}\n")
+        filelist_f.write("-F sram_wrapper.f\n")
+    with open(os.path.join(out_dir, f"sram_wrapper.f"), "w") as wrapper_f:
+        wrapper_f.write("// FIXME: include your wrappers here\n")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
     parser.add_argument('top', type=str, help='top-level module')
@@ -369,6 +554,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-sram-conf', action='store_true', help='do not create sram configuration file')
     parser.add_argument('--no-sram-xlsx', action='store_true', help='do not create sram configuration xlsx')
     parser.add_argument('--no-extra-files', action='store_true', help='do not copy extra files')
+    parser.add_argument('--sram-replace', action='store_true', help='replace SRAM libraries')
 
     args = parser.parse_args()
 
@@ -399,5 +585,7 @@ if __name__ == "__main__":
         sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
         if not args.no_sram_xlsx:
             create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
+        if args.sram_replace:
+            replace_sram(out_dir, sram_conf, top_module, module_prefix)
     if not args.no_extra_files:
         create_extra_files(out_dir, build_path)
