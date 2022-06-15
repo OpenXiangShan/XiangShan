@@ -245,8 +245,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   /** s1 control */
-  val tlbRespAllValid = WireInit(false.B)
-
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = tlb_miss_flush, lastFlush = false.B)
 
   val s1_req_vaddr   = RegEnable(s0_final_vaddr, s0_fire)
@@ -255,19 +253,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_double_line = RegEnable(s0_final_double_line, s0_fire)
   val s1_tlb_miss    = RegEnable(tlb_slot.valid, s0_fire)
 
-  s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !tlb_miss_flush
+  s1_ready := s2_ready  || !s1_valid
+  s1_fire  := s1_valid && s2_ready && !tlb_miss_flush
 
   fromITLB.map(_.ready := true.B)
-
-  /** tlb response latch for pipeline stop */
-  val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
-  val s1_tlb_all_resp_reg        =  RegInit(false.B)
-
-  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
-  .elsewhen(s1_fire && s1_tlb_all_resp_reg)             {s1_tlb_all_resp_reg := false.B}
-
-  tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
 
   val hit_tlbRespPAddr = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.paddr)))
   val hit_tlbExcpPF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.excp.pf.instr && fromITLB(i).valid)))   
