@@ -232,7 +232,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s0_fire        := s0_slot_fire || s0_fetch_fire              
 
   //TODO: fix GTimer() condition
-  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
+  fromIFU.map(_.ready := fetch_req(0).ready &&
+                          (fetch_req(1).ready || !s0_double_line) &&
+                         !missSwitchBit  &&
                          !tlb_slot.valid && 
                          s1_ready )//&& GTimer() > 500.U )
   /**
