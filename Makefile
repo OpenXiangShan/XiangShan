@@ -73,6 +73,8 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
+	# fix sram model when RANDOMIZE_REG_INIT is defined
+	sed -i -e '/.*data_hold_data.*=.*_RAND.*/d' $(TOP_V) 
 ifeq ($(NANHU),1)
 	sed -i -e 's/ XSTop / SLTop /g' $(TOP_V)
 	sed -i -e 's/ XSTop(/ SLTop(/g' $(TOP_V)
@@ -99,6 +101,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+	# fix sram model when RANDOMIZE_REG_INIT is defined
+	sed -i -e '/.*data_hold_data.*=.*_RAND.*/d' $(SIM_TOP_V) 
 
 sim-verilog: $(SIM_TOP_V)
 
