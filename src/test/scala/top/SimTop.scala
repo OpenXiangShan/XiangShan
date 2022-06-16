@@ -104,6 +104,8 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.mem := DontCare
   soc.hd2prf_in := DontCare
   soc.hsuspsr_in := DontCare
+  soc.uhdusplr_in := DontCare
+  soc.hduspsr_in := DontCare
   if (soc.L3_BISR.isDefined) {
     soc.L3_BISR.get := DontCare
   }
