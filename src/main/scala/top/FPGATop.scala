@@ -251,16 +251,16 @@ class FPGATop()(implicit p: Parameters) extends RawModule {
 
   // Extra bits are DontCare
   top.xsx_fscan := DontCare
-  top.mem := DontCare
+  top.xsl2_ultiscan := DontCare
   top.hd2prf_in := DontCare
   top.hsuspsr_in := DontCare
-  if (top.L3_BISR.isDefined) {
-    top.L3_BISR.get := DontCare
-  }
-  top.xsl2_ultiscan := DontCare
+  top.uhdusplr_in := DontCare
+  top.hduspsr_in := DontCare
+  top.mem := DontCare
   top.l1l2_mbist_sram_jtag := DontCare
   if (top.l3_sram_mbist.isDefined) {
-    top.l3_sram_mbist.get := DontCare
+    top.L3_BISR.get := DontCare
+    top.l3_sram_mbist.get.foreach(_ := DontCare)
   }
 }
 

@@ -33,8 +33,8 @@ class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
 }
 
 /**
-  *   XSTileMisc contains every module except Core and L2 Cache
-  */
+ *   XSTileMisc contains every module except Core and L2 Cache
+ */
 class XSTileMisc()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
@@ -135,8 +135,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     })
     val xsx_ultiscan_in = IO(new FSCANInputInterface)
     val xsl2_ultiscan_out = IO(Flipped(new FSCANInputInterface))
-    val hsuspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
     val hd2prf_in = IO(new MbitsFuseInterface(isSRAM = false))
+    val hsuspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val uhdusplr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val hduspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
     val mbist_ijtag = IO(new JTAGInterface)
     val mbist_extra_core_sram = IO(new MbitsExtraFullInterface)
     val mbist_extra_core_rf = IO(new MbitsExtraFullInterface)
@@ -148,6 +150,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     dontTouch(xsl2_ultiscan_out)
     dontTouch(hsuspsr_in)
     dontTouch(hd2prf_in)
+    dontTouch(uhdusplr_in)
+    dontTouch(hduspsr_in)
     dontTouch(mbist_ijtag)
     dontTouch(mbist_extra_core_sram)
     dontTouch(mbist_extra_core_rf)
@@ -194,8 +198,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
       val mbistInterfaceL2SRAM = if (l2cache.isDefined) {
         require(l2cache.get.module.mbist_sram.isDefined,"There is No L2 Mbist SRAM port!")
+        val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._1.get
         val intf = Some(Module(new MBISTInterface(
           Seq(l2cache.get.module.mbist_sram.get.params),
+          Seq(responseMbistPipeline.node.array_id),
           s"mbist_core${coreParams.HartId}_l2_sram_intf",
           isSRAM = true,
           1
@@ -205,8 +211,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
         mbist_extra_l2_sram.connectExtra(intf.get.extra.head)
         mbist_extra_l2_sram.connectPWR_MGNT(
-          l2cache.get.module.sliceMbistPipelines.head._1.get.PWR_MGNT.get._1,
-          l2cache.get.module.sliceMbistPipelines.head._1.get.PWR_MGNT.get._2
+          responseMbistPipeline.PWR_MGNT.get._1,
+          responseMbistPipeline.PWR_MGNT.get._2
         )
         intf
       }
@@ -215,8 +221,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       }
       val mbistInterfaceL2RF = if (l2cache.isDefined) {
         require(l2cache.get.module.mbist_rf.isDefined,"There is No L2 Mbist RF port!")
+        val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._2.get
         val intf = Some(Module(new MBISTInterface(
           Seq(l2cache.get.module.mbist_rf.get.params),
+          Seq(responseMbistPipeline.node.array_id),
           s"mbist_core${coreParams.HartId}_l2_rf_intf",
           isSRAM = false,
           1
@@ -226,8 +234,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
         mbist_extra_l2_rf.connectExtra(intf.get.extra.head)
         mbist_extra_l2_rf.connectPWR_MGNT(
-          l2cache.get.module.sliceMbistPipelines.head._2.get.PWR_MGNT.get._1,
-          l2cache.get.module.sliceMbistPipelines.head._2.get.PWR_MGNT.get._2
+          responseMbistPipeline.PWR_MGNT.get._1,
+          responseMbistPipeline.PWR_MGNT.get._2
         )
         intf
       }
@@ -237,6 +245,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
       val mbistInterfaceCoreSRAM = Module(new MBISTInterface(
         Seq(core.module.mbist_sram.params),
+        Seq(core.module.coreMbistPipelineSram.get.node.array_id),
         s"mbist_core${coreParams.HartId}_core_sram_intf",
         isSRAM = true,
         1
@@ -252,6 +261,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
       val mbistInterfaceCoreRF = Module(new MBISTInterface(
         Seq(core.module.mbist_rf.params),
+        Seq(core.module.coreMbistPipelineRf.get.node.array_id),
         s"mbist_core${coreParams.HartId}_core_rf_intf",
         isSRAM = false,
         1
@@ -272,10 +282,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             mbistInterfaceCoreRF.mbist.params,
             mbistInterfaceL2SRAM.get.mbist.params,
             mbistInterfaceL2RF.get.mbist.params
-        ),
+          ),
           Seq("L1_SRAM","L1_RF","L2_SRAM","L2_RF"),
           Seq("L1","L2")
-          )
+        )
       } else {
         (
           Seq(
@@ -284,7 +294,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
           ),
           Seq("L1_SRAM","L1_RF"),
           Seq("L1")
-          )
+        )
       }
 
 
@@ -300,25 +310,46 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         //Core
         mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
         mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreSRAM.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreSRAM.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreSRAM.hduspsr_fuse
+
         mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
         mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreRF.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreRF.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
         //L2
         mbistControllerCoreWithL2.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
         mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2SRAM.get.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
+
         mbistControllerCoreWithL2.mbist(3) <> mbistInterfaceL2RF.get.mbist
         mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2RF.get.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2RF.get.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2RF.get.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2RF.get.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2RF.get.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2RF.get.hduspsr_fuse
       }
       else{
         mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
         mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreSRAM.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreSRAM.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreSRAM.hduspsr_fuse
+
         mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
         mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.fuse
+        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.hd2prf_fuse
+        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreRF.hsuspsr_fuse
+        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreRF.uhdusplr_fuse
+        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
       }
       mbistControllerCoreWithL2.io.fscan_clkungate := xsl2_ultiscan.io.fscan.clkungate
       mbistControllerCoreWithL2.io.clock := childClock
@@ -341,6 +372,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
       mbistControllerCoreWithL2.io.hd2prf_in <> hd2prf_in
       mbistControllerCoreWithL2.io.hsuspsr_in <> hsuspsr_in
+      mbistControllerCoreWithL2.io.uhdusplr_in <> uhdusplr_in
+      mbistControllerCoreWithL2.io.hduspsr_in <> hduspsr_in
 
       misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
       misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache

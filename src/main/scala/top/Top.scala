@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package top
 
@@ -137,7 +137,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
-    
+
     val xsx_fscan = IO(new UltiscanExternalInterface)
 
     val mem = IO(new Bundle{
@@ -151,6 +151,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     mem := DontCare
     val hd2prf_in = IO(new MbitsFuseInterface(isSRAM = false))
     val hsuspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val uhdusplr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val hduspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
 
     val L3_BISR = if (l3cacheOpt.nonEmpty) Some(IO(Vec(4,new BISRInputInterface))) else None
 
@@ -170,6 +172,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     dontTouch(hd2prf_in)
     dontTouch(hsuspsr_in)
+    dontTouch(uhdusplr_in)
+    dontTouch(hduspsr_in)
     dontTouch(L3_BISR.get)
     dontTouch(dma)
     dontTouch(io)
@@ -215,6 +219,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     core_with_l2.head.module.hd2prf_in <> hd2prf_in
     core_with_l2.head.module.hsuspsr_in <> hsuspsr_in
+    core_with_l2.head.module.uhdusplr_in <> uhdusplr_in
+    core_with_l2.head.module.hduspsr_in <> hduspsr_in
 
 
     val l1l2_mbist_sram_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
@@ -236,6 +242,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       l3Module.xsl2_ultiscan.get <> core_with_l2.head.module.xsl2_ultiscan_out
       l3Module.hd2prf_in.get <> hd2prf_in
       l3Module.hsuspsr_in.get <> hsuspsr_in
+      l3Module.uhdusplr_in.get <> uhdusplr_in
+      l3Module.hduspsr_in.get <> hduspsr_in
       l3Module.bisr.get.zip(L3_BISR.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
       l3Module.mbist_jtag.get.zip(l3_sram_mbist.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
     }
