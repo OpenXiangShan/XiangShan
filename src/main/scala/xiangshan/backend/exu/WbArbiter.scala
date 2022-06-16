@@ -23,6 +23,7 @@ import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.HasExuWbHelper
 
 class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
@@ -320,11 +321,15 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
   }
 
-  lazy val module = new LazyModuleImp(this) with HasWritebackSourceImp {
+  lazy val module = new LazyModuleImp(this) 
+    with HasWritebackSourceImp 
+    with HasXSParameter
+  {
     val io = IO(new Bundle {
       val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(configs.length, Input(Decoupled(new ExuOutput)))
       val out = Vec(configs.length, ValidIO(new ExuOutput))
+      val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool())) // Dirty fix of data ecc error timing
     })
 
     for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
@@ -334,6 +339,14 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
         out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
         out.bits.uop := RegNext(in.bits.uop)
       }
+    }
+
+    for (((out, config), delayed_error) <- io.out.zip(configs)
+      .filter(_._2.hasLoadError)
+      .zip(io.delayedLoadError)
+    ){
+      // overwrite load exception writeback
+      out.bits.uop.cf.exceptionVec(loadAccessFault) := delayed_error
     }
 
     override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))

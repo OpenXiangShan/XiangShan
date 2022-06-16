@@ -53,6 +53,7 @@ case class FuConfig
   fastImplemented: Boolean = false,
   hasInputBuffer: Boolean = false,
   exceptionOut: Seq[Int] = Seq(),
+  hasLoadError: Boolean = false,
   flushPipe: Boolean = false,
   replayInst: Boolean = false,
   trigger: Boolean = false

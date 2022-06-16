@@ -257,7 +257,7 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val wline = Bool()
 }
 
-class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
+class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
@@ -268,11 +268,21 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val replay = Bool()
   // data has been corrupted
   val tag_error = Bool() // tag error
-  val error = Bool() // all kinds of errors, include tag error
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
+}
+
+class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
+{
+  // 1 cycle after data resp
+  val error_delayed = Bool() // all kinds of errors, include tag error
+}
+
+class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
+{
+  val error = Bool() // all kinds of errors, include tag error
 }
 
 class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
@@ -317,10 +327,16 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
-class DCacheWordIOWithVaddr(implicit p: Parameters) extends DCacheBundle
+class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheWordReq)
+  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+}
+
+class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReqWithVaddr)
-  val resp = Flipped(DecoupledIO(new DCacheWordResp))
+  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
 }
 
 // used by load unit
@@ -359,7 +375,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
-  val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
+  val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
 }
 
@@ -482,12 +498,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.write <> dataWriteArb.io.out
 
   bankedDataArray.io.readline <> mainPipe.io.data_read
-  mainPipe.io.readline_error := bankedDataArray.io.readline_error
+  mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
   mainPipe.io.data_resp := bankedDataArray.io.resp
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
-    bankedDataArray.io.read_error(i) <> ldu(i).io.read_error
+    bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.resp
 
