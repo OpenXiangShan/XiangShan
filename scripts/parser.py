@@ -294,13 +294,28 @@ def get_files(build_path):
             files += get_files(file_path)
     return files
 
-def create_filelist(out_dir, top_module):
-    filelist_name = f"{top_module}.f"
-    with open(os.path.join(out_dir, filelist_name), "w") as f:
-        for filename in os.listdir(os.path.join(out_dir, top_module)):
-            if filename.endswith(".v"):
-                filelist_entry = os.path.join(top_module, filename)
-                f.write(f"{filelist_entry}\n")
+def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
+    if file_dirs is None:
+        file_dirs = [filelist_name]
+    filelist_entries = []
+    for file_dir in file_dirs:
+        for filename in os.listdir(os.path.join(out_dir, file_dir)):
+            if filename.endswith(".v") or filename.endswith(".sv"):
+                # check whether it exists in previous directories
+                # this infers an implicit priority between the file_dirs
+                has_found = False
+                for entry in filelist_entries:
+                    if entry.endswith(filename):
+                        has_found = True
+                        break
+                if has_found:
+                    continue
+                filelist_entry = os.path.join(file_dir, filename)
+                filelist_entries.append(filelist_entry)
+    with open(os.path.join(out_dir, f"{filelist_name}.f"), "w") as f:
+        for entry in filelist_entries + extra_lines:
+            f.write(f"{entry}\n")
+
 
 class SRAMConfiguration(object):
     ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
@@ -346,8 +361,8 @@ class SRAMConfiguration(object):
             self.ports = self.SINGLE_PORT if self.mask_width() == 1 else self.SINGLE_PORT_MASK
         else:
             self.ports = self.DUAL_PORT if self.mask_width() == 1 else self.DUAL_PORT_MASK
-        self.has_multi_cycle = str(module_name_match.group(5)) is not ""
-        self.has_repair = str(module_name_match.group(6)) is not ""
+        self.has_multi_cycle = str(module_name_match.group(5)) != ""
+        self.has_repair = str(module_name_match.group(6)) != ""
 
     def ports_s(self):
         s = {
@@ -525,14 +540,16 @@ def create_extra_files(out_dir, build_path):
     copytree("/nfs/home/share/southlake/extra", extra_path)
     for f in os.listdir(build_path):
         file_path = os.path.join(build_path, f)
-        if f.endswith(".xls"):
+        if f.endswith(".csv"):
             copy(file_path, extra_path)
 
 def replace_sram(out_dir, sram_conf, top_module, module_prefix):
-    replace_sram_path = os.path.join(out_dir, "memory_array")
+    replace_sram_dir = "memory_array"
+    replace_sram_path = os.path.join(out_dir, replace_sram_dir)
     if not os.path.exists(replace_sram_path):
         os.mkdir(replace_sram_path)
-    sram_wrapper_path = os.path.join(out_dir, "memory_wrapper")
+    sram_wrapper_dir = "memory_wrapper"
+    sram_wrapper_path = os.path.join(out_dir, sram_wrapper_dir)
     if not os.path.exists(sram_wrapper_path):
         os.mkdir(sram_wrapper_path)
     replaced_sram = []
@@ -558,20 +575,24 @@ def replace_sram(out_dir, sram_conf, top_module, module_prefix):
             # wrapper_path = os.path.join(wrapper_dir, f"{wrapper}.v")
             # copy(wrapper_path, os.path.join(sram_wrapper_path, f"{wrapper}.v"))
             replaced_sram.append(sim_sram_module.name)
-    # create filelist
-    filelist_path = os.path.join(out_dir, f"{top_module}_with_foundry_sram.f")
-    with open(filelist_path, "w") as filelist_f:
-        for filename in os.listdir(os.path.join(out_dir, top_module)):
-            if filename.endswith(".v") and filename[:-2] not in replaced_sram:
-                filelist_entry = os.path.join(top_module, filename)
-                filelist_f.write(f"{filelist_entry}\n")
-        for filename in os.listdir(replace_sram_path):
-            if filename.endswith(".v"):
-                filelist_entry = os.path.join("memory_array", filename)
-                filelist_f.write(f"{filelist_entry}\n")
-        filelist_f.write("-F sram_wrapper.f\n")
-    with open(os.path.join(out_dir, f"sram_wrapper.f"), "w") as wrapper_f:
-        wrapper_f.write("// FIXME: include your wrappers here\n")
+    with open(os.path.join(out_dir, f"{sram_wrapper_dir}.f"), "w") as wrapper_f:
+        wrapper_f.write("// FIXME: include your SRAM wrappers here\n")
+    return replace_sram_dir, [f"-F {sram_wrapper_dir}.f"]
+
+
+def replace_mbist_scan_controller(out_dir):
+    target_dir = "scan_mbist_ctrl"
+    target_path = os.path.join(out_dir, target_dir)
+    if not os.path.exists(target_path):
+        os.mkdir(target_path)
+    blackbox_src_dir = "/nfs/home/share/southlake/sram_replace/scan_mbist_ctrl_rpl_rtl"
+    for filename in os.listdir(blackbox_src_dir):
+        if filename.startswith("bosc_") and (filename.endswith(".v") or filename.endswith(".sv")):
+            copy(os.path.join(blackbox_src_dir, filename), target_path)
+    with open(os.path.join(out_dir, "dfx_blackbox.f"), "w") as wrapper_f:
+        wrapper_f.write("// FIXME: include your blackbox mbist/scan controllers here\n")
+    return target_dir, [f"-F dfx_blackbox.f"]
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
@@ -586,6 +607,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-sram-xlsx', action='store_true', help='do not create sram configuration xlsx')
     parser.add_argument('--no-extra-files', action='store_true', help='do not copy extra files')
     parser.add_argument('--sram-replace', action='store_true', help='replace SRAM libraries')
+    parser.add_argument('--mbist-scan-replace', action='store_true', help='replace mbist and scan controllers')
 
     args = parser.parse_args()
 
@@ -613,13 +635,24 @@ if __name__ == "__main__":
     collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix, ignore_modules=ignore_modules)
     assert(collection)
 
+    rtl_dirs = [top_module]
+    extra_filelist_lines = []
+    if args.mbist_scan_replace:
+        dfx_ctrl, extra_dfx_lines = replace_mbist_scan_controller(out_dir)
+        rtl_dirs = [dfx_ctrl] + rtl_dirs
+        extra_filelist_lines += extra_dfx_lines
     if not args.no_filelist:
-        create_filelist(out_dir, top_module)
+        create_filelist(top_module, out_dir, rtl_dirs, extra_filelist_lines)
     if not args.no_sram_conf:
         sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
         if not args.no_sram_xlsx:
             create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
         if args.sram_replace:
-            replace_sram(out_dir, sram_conf, top_module, module_prefix)
+            sram_replace_dir, sram_extra_lines = replace_sram(out_dir, sram_conf, top_module, module_prefix)
+            # We create another filelist for foundry-provided SRAMs
+            if not args.no_filelist:
+                rtl_dirs = [sram_replace_dir] + rtl_dirs
+                extra_filelist_lines += sram_extra_lines
+                create_filelist(f"{top_module}_with_foundry_sram", out_dir, rtl_dirs, extra_filelist_lines)
     if not args.no_extra_files:
         create_extra_files(out_dir, build_path)
