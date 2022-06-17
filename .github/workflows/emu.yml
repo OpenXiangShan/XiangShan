@@ -34,7 +34,8 @@ jobs:
       - name: release
         run: |
           python3 scripts/parser.py XSTop --xs-home $GITHUB_WORKSPACE \
-            --config DefaultConfig --prefix bosc_ --sram-replace
+            --config DefaultConfig --prefix bosc_                     \
+            --sram-replace --mbist-scan-replace
           tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz bosc_XSTop-Release*
 
   generate-fpga-verilog:
