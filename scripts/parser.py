@@ -104,6 +104,13 @@ class VModule(object):
     def dump_io(self, prefix="", match=""):
         print("\n".join(map(lambda x: str(x), self.get_io(prefix, match))))
 
+    def get_mbist_type(self):
+        r = re.compile(r'input.*mbist_(\w+)_(trim|sleep)_fuse.*')
+        mbist_fuse_io = list(filter(lambda x: r.match(str(x)), self.io))
+        mbist_types = list(set(map(lambda io: io.get_name().split("_")[1], mbist_fuse_io)))
+        assert(len(mbist_types) == 1)
+        return mbist_types[0]
+
     def replace(self, s):
         self.lines = [s]
 
@@ -296,7 +303,7 @@ def create_filelist(out_dir, top_module):
                 f.write(f"{filelist_entry}\n")
 
 class SRAMConfiguration(object):
-    ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multi_cycle|)(_repair|)"
+    ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
 
     SINGLE_PORT = 0
     SINGLE_PORT_MASK = 1
@@ -309,6 +316,8 @@ class SRAMConfiguration(object):
         self.width = None
         self.ports = None
         self.mask_gran = None
+        self.has_multi_cycle = False
+        self.has_repair = False
 
     def size(self):
         return self.depth * self.width
@@ -319,10 +328,14 @@ class SRAMConfiguration(object):
     def mask_width(self):
         return self.width // self.mask_gran
 
-    def from_module_name(self, module_name):
-        self.name = module_name
+    def match_module_name(self, module_name):
         sram_array_re = re.compile(self.ARRAY_NAME)
         module_name_match = sram_array_re.match(self.name)
+        return module_name_match
+
+    def from_module_name(self, module_name):
+        self.name = module_name
+        module_name_match = self.match_module_name(self.name)
         assert(module_name_match is not None)
         num_ports = int(module_name_match.group(1))
         self.depth = int(module_name_match.group(2))
@@ -333,6 +346,8 @@ class SRAMConfiguration(object):
             self.ports = self.SINGLE_PORT if self.mask_width() == 1 else self.SINGLE_PORT_MASK
         else:
             self.ports = self.DUAL_PORT if self.mask_width() == 1 else self.DUAL_PORT_MASK
+        self.has_multi_cycle = str(module_name_match.group(5)) is not ""
+        self.has_repair = str(module_name_match.group(6)) is not ""
 
     def ports_s(self):
         s = {
@@ -353,18 +368,30 @@ class SRAMConfiguration(object):
         items = line.strip().split(" ")
         self.name = items[1]
         if items[7] == "rw":
-            self.ports = self.SINGLE_PORT
+            ports = self.SINGLE_PORT
         elif items[7] == "mrw":
-            self.ports = self.SINGLE_PORT_MASK
+            ports = self.SINGLE_PORT_MASK
         elif items[7] == "write,read":
-            self.ports = self.DUAL_PORT
+            ports = self.DUAL_PORT
         elif items[7] == "mwrite,read":
-            self.ports = self.DUAL_PORT_MASK
+            ports = self.DUAL_PORT_MASK
         else:
             assert(0)
-        self.depth = int(items[3])
-        self.width = int(items[5])
-        self.mask_gran = int(items[-1]) if len(items) > 8 else self.width
+        depth = int(items[3])
+        width = int(items[5])
+        mask_gran = int(items[-1]) if len(items) > 8 else width
+        matched_name = self.match_module_name(self.name) is not None
+        if matched_name:
+            self.from_module_name(self.name)
+            assert(self.ports == ports)
+            assert(self.depth == depth)
+            assert(self.width == width)
+            assert(self.mask_gran == mask_gran)
+        else:
+            self.ports = ports
+            self.depth = depth
+            self.width = width
+            self.mask_gran = mask_gran
 
     def to_sram_xlsx_entry(self, num_instances):
         if self.is_single_port():
@@ -381,62 +408,64 @@ class SRAMConfiguration(object):
                     self.depth, self.width, self.mask_gran, read_clk, write_clk, "N/A"]
         return all_info
 
-    def get_foundry_sram_wrapper(self):
+    def get_foundry_sram_wrapper(self, mbist_type):
         wrapper_type = "RAMSP" if self.is_single_port() else "RF2P"
         wrapper_mask = "" if self.mask_width() == 1 else f"_M{self.mask_width()}"
         wrapper_module = f"{wrapper_type}_{self.depth}x{self.width}{wrapper_mask}_WRAP"
         wrapper_instance = "u_mem"
-        # common ports
-        common_ports = {
-            "FSCAN_RAM_BYPSEL": "mbist_bypsel",
-            "FSCAN_RAM_WDIS_B": "mbist_wdis_b",
-            "FSCAN_RAM_RDIS_B": "mbist_rdis_b",
-            "FSCAN_RAM_INIT_EN": "mbist_init_en",
-            "FSCAN_RAM_INIT_VAL": "mbist_init_val",
-            "FSCAN_CLKUNGATE": "mbist_clkungate",
-            "IP_RESET_B": "mbist_IP_RESET_B",
-            "OUTPUT_RESET": "mbist_OUTPUT_RESET",
-            "PWR_MGMT_IN": "mbist_PWR_MGNT_IN",
-            "PWR_MGMT_OUT": "mbist_PWR_MGNT_OUT"
+        foundry_ports = {
+            "IP_RESET_B"           :  "mbist_IP_RESET_B",
+            "PWR_MGMT_IN"          :  "mbist_PWR_MGNT_IN",
+            "TRIM_FUSE_IN"         : f"mbist_{mbist_type}_trim_fuse",
+            "SLEEP_FUSE_IN"        : f"mbist_{mbist_type}_sleep_fuse",
+            "FSCAN_RAM_BYPSEL"     :  "mbist_bypsel",
+            "FSCAN_RAM_WDIS_B"     :  "mbist_wdis_b",
+            "FSCAN_RAM_RDIS_B"     :  "mbist_rdis_b",
+            "FSCAN_RAM_INIT_EN"    :  "mbist_init_en",
+            "FSCAN_RAM_INIT_VAL"   :  "mbist_init_val",
+            "FSCAN_CLKUNGATE"      :  "mbist_clkungate",
+            "OUTPUT_RESET"         :  "mbist_OUTPUT_RESET",
+            "PWR_MGMT_OUT"         :  "mbist_PWR_MGNT_OUT"
         }
         if self.is_single_port():
-            extra_wrapper_ports = {
-                "CK"               : "RW0_clk",
-                "A"                : "RW0_addr",
-                "WEN"              : "RW0_en & RW0_wmode",
-                "D"                : "RW0_wdata",
-                "REN"              : "RW0_en & ~RW0_wmode",
-                "Q"                : "RW0_rdata",
-                "TRIM_FUSE_IN"     : "mbist_sram_trim_fuse",
-                "SLEEP_FUSE_IN"    : "mbist_sram_sleep_fuse",
-                "WRAPPER_CLK_EN"   : "mbist_WRAPPER_CLK_EN",
-            }
-            if self.mask_width() > 0:
-                extra_wrapper_ports["WM"] = "RW0_wmask"
+            foundry_ports["WRAPPER_CLK_EN"] = "mbist_WRAPPER_CLK_EN"
         else:
-            extra_wrapper_ports = {
-                "WCK"              : "W0_clk",
-                "WA"               : "W0_addr",
-                "WEN"              : "W0_en",
-                "D"                : "W0_data",
-                "RCK"              : "R0_clk",
-                "RA"               : "R0_addr",
-                "REN"              : "R0_en",
-                "Q"                : "R0_data",
-                "TRIM_FUSE_IN"     : "mbist_rf_trim_fuse",
-                "SLEEP_FUSE_IN"    : "mbist_rf_sleep_fuse",
-                "WRAPPER_WR_CLK_EN": "mbist_WRAPPER_RD_CLK_EN",
-                "WRAPPER_RD_CLK_EN": "mbist_WRAPPER_WR_CLK_EN",
+            foundry_ports["WRAPPER_WR_CLK_EN"] = "mbist_WRAPPER_RD_CLK_EN"
+            foundry_ports["WRAPPER_RD_CLK_EN"] = "mbist_WRAPPER_WR_CLK_EN"
+        if self.has_repair:
+            foundry_ports["ROW_REPAIR_IN"] = "repair_rowRepair"
+            foundry_ports["COL_REPAIR_IN"] = "repair_colRepair"
+        if self.is_single_port():
+            func_ports = {
+                "CK"  : "RW0_clk",
+                "A"   : "RW0_addr",
+                "WEN" : "RW0_en & RW0_wmode",
+                "D"   : "RW0_wdata",
+                "REN" : "RW0_en & ~RW0_wmode",
+                "Q"   : "RW0_rdata"
             }
-            if self.mask_width() > 0:
-                extra_wrapper_ports["WM"] = "W0_mask"
+            if self.mask_width() > 1:
+                func_ports["WM"] = "RW0_wmask"
+        else:
+            func_ports = {
+                "WCK" : "W0_clk",
+                "WA"  : "W0_addr",
+                "WEN" : "W0_en",
+                "D"   : "W0_data",
+                "RCK" : "R0_clk",
+                "RA"  : "R0_addr",
+                "REN" : "R0_en",
+                "Q"   : "R0_data"
+            }
+            if self.mask_width() > 1:
+                func_ports["WM"] = "W0_mask"
         verilog_lines = []
         verilog_lines.append(f"  {wrapper_module} {wrapper_instance} (\n")
         connected_pins = []
-        for pin_name in common_ports:
-            connected_pins.append(f".{pin_name}({common_ports[pin_name]})")
-        for pin_name in extra_wrapper_ports:
-            connected_pins.append(f".{pin_name}({extra_wrapper_ports[pin_name]})")
+        for pin_name in func_ports:
+            connected_pins.append(f".{pin_name}({func_ports[pin_name]})")
+        for pin_name in foundry_ports:
+            connected_pins.append(f".{pin_name}({foundry_ports[pin_name]})")
         verilog_lines.append("    " + ",\n    ".join(connected_pins) + "\n")
         verilog_lines.append("  );\n")
         return wrapper_module, "".join(verilog_lines)
@@ -518,7 +547,8 @@ def replace_sram(out_dir, sram_conf, top_module, module_prefix):
                 sim_sram_module.name = f"{module_prefix}{conf.name}"
             with open(sim_sram_path, "r") as sim_f:
                 sim_sram_module.add_lines(sim_f.readlines())
-            wrapper, instantiation_v = conf.get_foundry_sram_wrapper()
+            mbist_type = sim_sram_module.get_mbist_type()
+            wrapper, instantiation_v = conf.get_foundry_sram_wrapper(mbist_type)
             sim_sram_module.replace_with_macro("FOUNDRY_MEM", instantiation_v)
             output_file = os.path.join(replace_sram_path, f"{sim_sram_module.name}.v")
             with open(output_file, "w") as f:
