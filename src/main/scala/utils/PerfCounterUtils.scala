@@ -22,8 +22,22 @@ import chisel3.util._
 import xiangshan.DebugOptionsKey
 import xiangshan._
 
-object XSPerfAccumulate {
+trait HasRegularPerfName {
+  def judgeName(perfName: String) = {
+    val regular = """(\w+)""".r
+    perfName match {
+      case regular(_) => true
+      case _ => {
+        println("PerfName " + perfName + " is not '\\w+' regular")
+        require(false)
+      }
+    }
+  }
+}
+
+object XSPerfAccumulate extends HasRegularPerfName {
   def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -44,7 +58,7 @@ object XSPerfAccumulate {
   }
 }
 
-object XSPerfHistogram {
+object XSPerfHistogram extends HasRegularPerfName {
   // instead of simply accumulating counters
   // this function draws a histogram
   def apply
@@ -59,6 +73,7 @@ object XSPerfHistogram {
     right_strict: Boolean = false
   )
   (implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -105,8 +120,9 @@ object XSPerfHistogram {
     }
   }
 }
-object XSPerfMax {
+object XSPerfMax extends HasRegularPerfName {
   def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
