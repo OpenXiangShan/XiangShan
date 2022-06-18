@@ -23,8 +23,8 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
 
   def PERF_CHN[T <: TLChannel](clientName: String, chn: DecoupledIO[T]) = {
 
-    XSPerfAccumulate(s"$clientName ${chn.bits.channelName} fire", chn.fire())
-    XSPerfAccumulate(s"$clientName ${chn.bits.channelName} stall", chn.valid && !chn.ready)
+    XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_fire", chn.fire())
+    XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_stall", chn.valid && !chn.ready)
 
     val ops = chn.bits match {
       case _: TLBundleA => TLMessages.a.map(_._1)
@@ -36,31 +36,31 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
     for((op, i) <- ops.zipWithIndex){
       chn.bits match {
         case a: TLBundleA =>
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op fire",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op fire",
             i.U === a.opcode && chn.fire()
           )
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op stall",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op stall",
             i.U === a.opcode && chn.valid && !chn.ready
           )
         case b: TLBundleB =>
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op fire",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op fire",
             i.U === b.opcode && chn.fire()
           )
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op stall",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op stall",
             i.U === b.opcode && chn.valid && !chn.ready
           )
         case c: TLBundleC =>
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op fire",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op fire",
             i.U === c.opcode && chn.fire()
           )
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op stall",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op stall",
             i.U === c.opcode && chn.valid && !chn.ready
           )
         case d: TLBundleD =>
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op fire",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op fire",
             i.U === d.opcode && chn.fire()
           )
-          XSPerfAccumulate(s"$clientName ${chn.bits.channelName} $op stall",
+          XSPerfAccumulate(s"$clientName_${chn.bits.channelName}_$op stall",
             i.U === d.opcode && chn.valid && !chn.ready
           )
       }
