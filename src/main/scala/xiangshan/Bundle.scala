@@ -248,6 +248,8 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+  // Assume only the LUI instruction is decoded with IMM_U in ALU.
+  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
 }
 
 class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
