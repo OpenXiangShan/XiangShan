@@ -511,24 +511,22 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // when l/s writeback to rob together, check if rollback is needed
     val wbViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
       io.loadIn(j).valid &&
-      isAfter(io.loadIn(j).bits.uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
-      io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
-      (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
+        isAfter(io.loadIn(j).bits.uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
+        io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
+        (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
     })))
-    // have violation: load valid, addr match and store valid
-    val wbViolation = wbViolationVec.asUInt().orR() && io.storeIn(j).valid && io.storeIn(j).bits.miss
+    val wbViolation = wbViolationVec.asUInt().orR()
     val wbViolationUop = getOldestInTwo(wbViolationVec, RegNext(VecInit(io.loadIn.map(_.bits.uop))))
     XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
     // check if rollback is needed for load in l1
     val l1ViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
       io.load_s1(j).valid && // L1 valid
-      isAfter(io.load_s1(j).uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
-      io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s1(j).paddr(PAddrBits - 1, 3) &&
-      (io.storeIn(i).bits.mask & io.load_s1(j).mask).orR
+        isAfter(io.load_s1(j).uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
+        io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s1(j).paddr(PAddrBits - 1, 3) &&
+        (io.storeIn(i).bits.mask & io.load_s1(j).mask).orR
     })))
-    // have violation: load valid, addr match and store valid
-    val l1Violation = l1ViolationVec.asUInt().orR() && io.storeIn(i).valid && io.storeIn(i).bits.miss 
+    val l1Violation = l1ViolationVec.asUInt().orR()
     val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.load_s1.map(_.uop))))
     XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
