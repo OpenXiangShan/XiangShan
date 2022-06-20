@@ -21,9 +21,13 @@ import chisel3._
 import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation
 import device.{AXI4RAMWrapper, SimJTAG}
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
+import utils.GTimer
+import xiangshan.{DebugOptions, DebugOptionsKey}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.ElaborationArtefacts
+import huancun.utils.ChiselDB
 import top.TopMain.writeOutputFile
 import utils.GTimer
 import xiangshan.DebugOptionsKey
@@ -119,8 +123,14 @@ object SimTop extends App {
       DisableMonitors(p => new SimTop()(p))(config),
       firrtlComplier
     )
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
+    ChiselDB.addToElaborationArtefacts
+    ElaborationArtefacts.files.foreach{
+      case (extension, contents) =>
+        val prefix = extension match {
+          case "h" | "cpp" => "chisel_db"
+          case _ => "XSTop"
+        }
+        writeOutputFile("./build", s"$prefix.${extension}", contents())
     }
   }
 }
