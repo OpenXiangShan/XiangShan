@@ -374,12 +374,14 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   decode.io.in <> io.frontend.cfVec
   decode.io.csrCtrl := RegNext(io.csrCtrl)
+  decode.io.intRat <> rat.io.intReadPorts
+  decode.io.fpRat <> rat.io.fpReadPorts
 
   // memory dependency predict
   // when decode, send fold pc to mdp
   for (i <- 0 until DecodeWidth) {
     val mdp_foldpc = Mux(
-      decode.io.out(i).fire(),
+      decode.io.out(i).fire,
       decode.io.in(i).bits.foldpc,
       rename.io.in(i).bits.cf.foldpc
     )
@@ -400,19 +402,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   lfst.io.dispatch <> dispatch.io.lfst
 
   rat.io.robCommits := rob.io.commits
-  for ((r, i) <- rat.io.intReadPorts.zipWithIndex) {
-    val raddr = decode.io.out(i).bits.ctrl.lsrc.take(2) :+ decode.io.out(i).bits.ctrl.ldest
-    r.map(_.addr).zip(raddr).foreach(x => x._1 := x._2)
-    rename.io.intReadPorts(i) := r.map(_.data)
-    r.foreach(_.hold := !rename.io.in(i).ready)
-  }
   rat.io.intRenamePorts := rename.io.intRenamePorts
-  for ((r, i) <- rat.io.fpReadPorts.zipWithIndex) {
-    val raddr = decode.io.out(i).bits.ctrl.lsrc.take(3) :+ decode.io.out(i).bits.ctrl.ldest
-    r.map(_.addr).zip(raddr).foreach(x => x._1 := x._2)
-    rename.io.fpReadPorts(i) := r.map(_.data)
-    r.foreach(_.hold := !rename.io.in(i).ready)
-  }
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.debug_int_rat <> io.debug_int_rat
   rat.io.debug_fp_rat <> io.debug_fp_rat
@@ -421,12 +411,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
       stage2Redirect.valid || pendingRedirect)
+    rename.io.intReadPorts(i) := rat.io.intReadPorts(i).map(_.data)
+    rename.io.fpReadPorts(i) := rat.io.fpReadPorts(i).map(_.data)
+    if (i < RenameWidth - 1) {
+      rename.io.fusionInfo(i) := RegEnable(decode.io.fusionInfo(i), decode.io.out(i).fire)
+    }
+    rename.io.waittable(i) := RegEnable(waittable.io.rdata(i), decode.io.out(i).fire)
   }
 
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
-  rename.io.waittable <> RegNext(waittable.io.rdata)
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {

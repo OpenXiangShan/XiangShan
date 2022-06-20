@@ -45,7 +45,7 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  |  |  selImm
     List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
-    val table: Array[(BitPat, List[BitPat])]
+  val table: Array[(BitPat, List[BitPat])]
 }
 
 trait DecodeUnitConstants
