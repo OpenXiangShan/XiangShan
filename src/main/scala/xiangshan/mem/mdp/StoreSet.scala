@@ -72,27 +72,28 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val SSIT_UPDATE_STORE_WRITE_PORT = 1
   val SSIT_WRITE_PORT_NUM = 2
 
-  val valid_sram = Module(new SyncDataModuleTemplate(
+  val valid_array = Module(new SyncDataModuleTemplate(
     Bool(),
     SSITSize,
     SSIT_READ_PORT_NUM,
     SSIT_WRITE_PORT_NUM
   ))
 
-  val data_sram = Module(new SyncDataModuleTemplate(
+  val data_array = Module(new SyncDataModuleTemplate(
     new SSITDataEntry,
     SSITSize,
     SSIT_READ_PORT_NUM,
     SSIT_WRITE_PORT_NUM
   ))
 
+  // TODO: use SRAM or not?
   (0 until SSIT_WRITE_PORT_NUM).map(i => {
-    valid_sram.io.wen(i) := false.B
-    valid_sram.io.waddr(i) := DontCare
-    valid_sram.io.wdata(i) := DontCare
-    data_sram.io.wen(i) := false.B
-    data_sram.io.waddr(i) := DontCare
-    data_sram.io.wdata(i) := DontCare
+    valid_array.io.wen(i) := false.B
+    valid_array.io.waddr(i) := DontCare
+    valid_array.io.wdata(i) := DontCare
+    data_array.io.wen(i) := false.B
+    data_array.io.waddr(i) := DontCare
+    data_array.io.wdata(i) := DontCare
   })
 
   val debug_valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
@@ -113,13 +114,13 @@ class SSIT(implicit p: Parameters) extends XSModule {
     // io.rdata(i).strict := RegNext(strict(io.raddr(i)) && valid(io.raddr(i)))
 
     // read SSIT in decode stage
-    valid_sram.io.raddr(i) := io.raddr(i)
-    data_sram.io.raddr(i) := io.raddr(i)
+    valid_array.io.raddr(i) := io.raddr(i)
+    data_array.io.raddr(i) := io.raddr(i)
     
     // gen result in rename stage
-    io.rdata(i).valid := valid_sram.io.rdata(i)
-    io.rdata(i).ssid := data_sram.io.rdata(i).ssid
-    io.rdata(i).strict := data_sram.io.rdata(i).strict
+    io.rdata(i).valid := valid_array.io.rdata(i)
+    io.rdata(i).ssid := data_array.io.rdata(i).ssid
+    io.rdata(i).strict := data_array.io.rdata(i).strict
   }
 
   // flush SSIT
@@ -141,9 +142,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
         state := s_idle // reset finished
         resetStepCounter := 0.U
       }.otherwise{
-        valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
-        valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
-        valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+        valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+        valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+        valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
         debug_valid(resetStepCounter) := false.B
         resetStepCounter := resetStepCounter + 1.U
       }
@@ -153,78 +154,87 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // update SSIT if load violation redirect is detected
 
   // update stage 0: read ssit
-  val memPredUpdateReqValid = RegNext(io.update.valid)
-  val memPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
+  val s1_mempred_update_req_valid = RegNext(io.update.valid)
+  val s1_mempred_update_req = RegEnable(io.update, io.update.valid)
 
   // when io.update.valid, take over ssit read port
   when (io.update.valid) {
-    valid_sram.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
-    valid_sram.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
-    data_sram.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
-    data_sram.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+    valid_array.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
+    valid_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+    data_array.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
+    data_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
   }
 
-  // update stage 1: get ssit read result, update ssit data_sram
+  // update stage 1: get ssit read result
 
   // Read result
   // load has already been assigned with a store set
-  val loadAssigned = valid_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT)
-  val loadOldSSID = data_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).ssid
-  val loadStrict = data_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).strict
+  val s1_loadAssigned = valid_array.io.rdata(SSIT_UPDATE_LOAD_READ_PORT)
+  val s1_loadOldSSID = data_array.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).ssid
+  val s1_loadStrict = data_array.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).strict
   // store has already been assigned with a store set
-  val storeAssigned = valid_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT)
-  val storeOldSSID = data_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT).ssid
-  val storeStrict = data_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT).strict
+  val s1_storeAssigned = valid_array.io.rdata(SSIT_UPDATE_STORE_READ_PORT)
+  val s1_storeOldSSID = data_array.io.rdata(SSIT_UPDATE_STORE_READ_PORT).ssid
+  val s1_storeStrict = data_array.io.rdata(SSIT_UPDATE_STORE_READ_PORT).strict
+  // val s1_ssidIsSame = s1_loadOldSSID === s1_storeOldSSID
+
+  // update stage 2, update ssit data_array
+  val s2_mempred_update_req_valid = RegNext(s1_mempred_update_req_valid)
+  val s2_mempred_update_req = RegEnable(s1_mempred_update_req, s1_mempred_update_req_valid)
+  val s2_loadAssigned = RegEnable(s1_loadAssigned, s1_mempred_update_req_valid)
+  val s2_storeAssigned = RegEnable(s1_storeAssigned, s1_mempred_update_req_valid)
+  val s2_loadOldSSID = RegEnable(s1_loadOldSSID, s1_mempred_update_req_valid)
+  val s2_storeOldSSID = RegEnable(s1_storeOldSSID, s1_mempred_update_req_valid)
+  val s2_loadStrict = RegEnable(s1_loadStrict, s1_mempred_update_req_valid)
+
+  val s2_ssidIsSame = s2_loadOldSSID === s2_storeOldSSID
+  // for now we just use lowest bits of ldpc as store set id
+  val s2_ssidAllocate = s1_mempred_update_req.ldpc(SSIDWidth-1, 0)
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
-  val winnerSSID = Mux(loadOldSSID < storeOldSSID, loadOldSSID, storeOldSSID)
-  val ssidIsSame = loadOldSSID === storeOldSSID
-
-  // for now we just use lowest bits of ldpc as store set id
-  val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
+  val s2_winnerSSID = Mux(s2_loadOldSSID < s2_storeOldSSID, s2_loadOldSSID, s2_storeOldSSID)
 
   def update_ld_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
-    valid_sram.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
-    valid_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
-    valid_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT) := valid
-    data_sram.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
-    data_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
-    data_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).ssid := ssid
-    data_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).strict := strict
+    valid_array.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
+    valid_array.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
+    valid_array.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT) := valid
+    data_array.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
+    data_array.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
+    data_array.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).ssid := ssid
+    data_array.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).strict := strict
     debug_valid(pc) := valid
     debug_ssid(pc) := ssid
     debug_strict(pc) := strict 
   }
 
   def update_st_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
-    valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
-    valid_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
-    valid_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT):= valid
-    data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
-    data_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
-    data_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).ssid := ssid
-    data_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).strict := strict
+    valid_array.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
+    valid_array.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
+    valid_array.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT):= valid
+    data_array.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
+    data_array.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
+    data_array.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).ssid := ssid
+    data_array.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).strict := strict
     debug_valid(pc) := valid
     debug_ssid(pc) := ssid
     debug_strict(pc) := strict 
   }
 
-  // update stage 1
-  when(memPredUpdateReqValid){
-    switch (Cat(loadAssigned, storeAssigned)) {
+  when(s2_mempred_update_req_valid){
+    switch (Cat(s2_loadAssigned, s2_storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set,
       // one is allocated and assigned to both instructions."
       is ("b00".U(2.W)) {
         update_ld_ssit_entry(
-          pc = memPredUpdateReqReg.ldpc,
+          pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = ssidAllocate,
+          ssid = s2_ssidAllocate,
           strict = false.B
         )
         update_st_ssit_entry(
-          pc = memPredUpdateReqReg.stpc,
+          pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = ssidAllocate,
+          ssid = s2_ssidAllocate,
           strict = false.B
         )
       }
@@ -232,9 +242,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // the store is assigned the load’s store set."
       is ("b10".U(2.W)) {
         update_st_ssit_entry(
-          pc = memPredUpdateReqReg.stpc,
+          pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = loadOldSSID,
+          ssid = s2_loadOldSSID,
           strict = false.B
         )
       }
@@ -242,9 +252,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // the load is assigned the store’s store set."
       is ("b01".U(2.W)) {
         update_ld_ssit_entry(
-          pc = memPredUpdateReqReg.ldpc,
+          pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = storeOldSSID,
+          ssid = s2_storeOldSSID,
           strict = false.B
         )
       }
@@ -253,49 +263,49 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // The instruction belonging to the loser’s store set is assigned the winner’s store set."
       is ("b11".U(2.W)) {
         update_ld_ssit_entry(
-          pc = memPredUpdateReqReg.ldpc,
+          pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = winnerSSID,
+          ssid = s2_winnerSSID,
           strict = false.B
         )
         update_st_ssit_entry(
-          pc = memPredUpdateReqReg.stpc,
+          pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = winnerSSID,
+          ssid = s2_winnerSSID,
           strict = false.B
         )
-        when(ssidIsSame){
-          data_sram.io.wdata(SSIT_UPDATE_LOAD_READ_PORT).strict := true.B
-          debug_strict(memPredUpdateReqReg.ldpc) := false.B
+        when(s2_ssidIsSame){
+          data_array.io.wdata(SSIT_UPDATE_LOAD_READ_PORT).strict := true.B
+          debug_strict(s2_mempred_update_req.ldpc) := true.B
         }
       }
     }
   }
 
   // make SyncDataModuleTemplate happy
-  when(valid_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === valid_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
-    valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+  when(valid_array.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === valid_array.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
+    valid_array.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
   }
 
-  when(data_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === data_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
-    data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+  when(data_array.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) === data_array.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT)){
+    data_array.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
   }
 
-  XSPerfAccumulate("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
-  XSPerfAccumulate("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
-  XSPerfAccumulate("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
-  XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
-  XSPerfAccumulate("ssit_update_should_strict", memPredUpdateReqValid && ssidIsSame && loadAssigned && storeAssigned)
+  XSPerfAccumulate("ssit_update_lxsx", s2_mempred_update_req_valid && !s2_loadAssigned && !s2_storeAssigned)
+  XSPerfAccumulate("ssit_update_lysx", s2_mempred_update_req_valid && s2_loadAssigned && !s2_storeAssigned)
+  XSPerfAccumulate("ssit_update_lxsy", s2_mempred_update_req_valid && !s2_loadAssigned && s2_storeAssigned)
+  XSPerfAccumulate("ssit_update_lysy", s2_mempred_update_req_valid && s2_loadAssigned && s2_storeAssigned)
+  XSPerfAccumulate("ssit_update_should_strict", s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadAssigned && s2_storeAssigned)
   XSPerfAccumulate("ssit_update_strict_failed", 
-    memPredUpdateReqValid && ssidIsSame && loadStrict && loadAssigned && storeAssigned
+    s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadStrict && s2_loadAssigned && s2_storeAssigned
   ) // should be zero
 
 
   // debug
   for (i <- 0 until StorePipelineWidth) {
-    when (memPredUpdateReqReg.valid) {
-      XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), memPredUpdateReqReg.ldpc, memPredUpdateReqReg.stpc)
-      XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), loadAssigned, loadOldSSID, storeAssigned, storeOldSSID)
+    when (s2_mempred_update_req.valid) {
+      XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
+      XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
     }
   }
 }
