@@ -206,10 +206,14 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
                      Mux(event_op_1(2), events_incr_1.value + events_incr_0.value,
                                         events_incr_1.value | events_incr_0.value)))
 
-  val selected = Mux(event_op_1(0), event_step_0 & event_step_1,
-                 Mux(event_op_1(1), event_step_0 ^ event_step_1,
-                 Mux(event_op_1(2), event_step_0 + event_step_1,
-                                    event_step_0 | event_step_1)))
+  val event_op_1_reg = RegNext(event_op_1)
+  val event_step_0_reg = RegNext(event_step_0)
+  val event_step_1_reg = RegNext(event_step_1)
+  val selected = Mux(event_op_1_reg(0), event_step_0_reg & event_step_1_reg,
+                 Mux(event_op_1_reg(1), event_step_0_reg ^ event_step_1_reg,
+                 Mux(event_op_1_reg(2), event_step_0_reg + event_step_1_reg,
+                   event_step_0_reg | event_step_1_reg)))
+
   val perfEvents = Seq(("selected", selected))
   generatePerfEvent()
 }
