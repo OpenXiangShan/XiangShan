@@ -197,47 +197,52 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       xsl2_ultiscan.io.fdfx_powergood := ultiscanIO.fdfx_powergood
 
       val mbistInterfaceL2SRAM = if (l2cache.isDefined) {
-        require(l2cache.get.module.mbist_sram.isDefined,"There is No L2 Mbist SRAM port!")
-        val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._1.get
-        val intf = Some(Module(new MBISTInterface(
-          Seq(l2cache.get.module.mbist_sram.get.params),
-          Seq(responseMbistPipeline.node.array_id),
-          s"mbist_core${coreParams.HartId}_l2_sram_intf",
-          isSRAM = true,
-          1
-        )))
-        intf.get.extra := DontCare
-        intf.get.clock := childClock
-        intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
-        mbist_extra_l2_sram.connectExtra(intf.get.extra.head)
-        mbist_extra_l2_sram.connectPWR_MGNT(
-          responseMbistPipeline.PWR_MGNT.get._1,
-          responseMbistPipeline.PWR_MGNT.get._2
-        )
-        intf
-      }
-      else {
+        if (l2cache.get.module.mbist_sram.isDefined) {
+          val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._1.get
+          val intf = Some(Module(new MBISTInterface(
+            Seq(l2cache.get.module.mbist_sram.get.params),
+            Seq(responseMbistPipeline.node.array_id),
+            s"mbist_core${coreParams.HartId}_l2_sram_intf",
+            isSRAM = true,
+            1
+          )))
+          intf.get.extra := DontCare
+          intf.get.clock := childClock
+          intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
+          mbist_extra_l2_sram.connectExtra(intf.get.extra.head)
+          mbist_extra_l2_sram.connectPWR_MGNT(
+            responseMbistPipeline.PWR_MGNT.get._1,
+            responseMbistPipeline.PWR_MGNT.get._2
+          )
+          intf
+        } else{
+          None
+        }
+      } else {
         None
       }
       val mbistInterfaceL2RF = if (l2cache.isDefined) {
-        require(l2cache.get.module.mbist_rf.isDefined,"There is No L2 Mbist RF port!")
-        val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._2.get
-        val intf = Some(Module(new MBISTInterface(
-          Seq(l2cache.get.module.mbist_rf.get.params),
-          Seq(responseMbistPipeline.node.array_id),
-          s"mbist_core${coreParams.HartId}_l2_rf_intf",
-          isSRAM = false,
-          1
-        )))
-        intf.get.extra := DontCare
-        intf.get.clock := childClock
-        intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
-        mbist_extra_l2_rf.connectExtra(intf.get.extra.head)
-        mbist_extra_l2_rf.connectPWR_MGNT(
-          responseMbistPipeline.PWR_MGNT.get._1,
-          responseMbistPipeline.PWR_MGNT.get._2
-        )
-        intf
+        if (l2cache.get.module.mbist_rf.isDefined) {
+          val responseMbistPipeline = l2cache.get.module.sliceMbistPipelines.head._2.get
+          val intf = Some(Module(new MBISTInterface(
+            Seq(l2cache.get.module.mbist_rf.get.params),
+            Seq(responseMbistPipeline.node.array_id),
+            s"mbist_core${coreParams.HartId}_l2_rf_intf",
+            isSRAM = false,
+            1
+          )))
+          intf.get.extra := DontCare
+          intf.get.clock := childClock
+          intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
+          mbist_extra_l2_rf.connectExtra(intf.get.extra.head)
+          mbist_extra_l2_rf.connectPWR_MGNT(
+            responseMbistPipeline.PWR_MGNT.get._1,
+            responseMbistPipeline.PWR_MGNT.get._2
+          )
+          intf
+        }else{
+          None
+        }
       }
       else {
         None
@@ -276,16 +281,28 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       )
 
       val (intfParams,mbistNames,intfPrefixes) = if(l2cache.isDefined) {
-        (
-          Seq(
-            mbistInterfaceCoreSRAM.mbist.params,
-            mbistInterfaceCoreRF.mbist.params,
-            mbistInterfaceL2SRAM.get.mbist.params,
-            mbistInterfaceL2RF.get.mbist.params
-          ),
-          Seq("L1_SRAM","L1_RF","L2_SRAM","L2_RF"),
-          Seq("L1","L2")
-        )
+        if (mbistInterfaceL2RF.isDefined) {
+          (
+            Seq(
+              mbistInterfaceCoreSRAM.mbist.params,
+              mbistInterfaceCoreRF.mbist.params,
+              mbistInterfaceL2SRAM.get.mbist.params,
+              mbistInterfaceL2RF.get.mbist.params
+            ),
+            Seq("L1_SRAM", "L1_RF", "L2_SRAM", "L2_RF"),
+            Seq("L1", "L2")
+          )
+        }else{
+          (
+            Seq(
+              mbistInterfaceCoreSRAM.mbist.params,
+              mbistInterfaceCoreRF.mbist.params,
+              mbistInterfaceL2SRAM.get.mbist.params,
+            ),
+            Seq("L1_SRAM", "L1_RF", "L2_SRAM"),
+            Seq("L1", "L2")
+          )
+        }
       } else {
         (
           Seq(
@@ -307,34 +324,58 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       dontTouch(mbistControllerCoreWithL2.io)
 
       if(l2cache.isDefined){
-        //Core
-        mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
-        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreSRAM.hd2prf_fuse
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.hsuspsr_fuse
-        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreSRAM.uhdusplr_fuse
-        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreSRAM.hduspsr_fuse
+        if (mbistInterfaceL2RF.isDefined) {
+          //Core
+          mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
+          mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreSRAM.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreSRAM.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreSRAM.hduspsr_fuse
 
-        mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
-        mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.hd2prf_fuse
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreRF.hsuspsr_fuse
-        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreRF.uhdusplr_fuse
-        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
-        //L2
-        mbistControllerCoreWithL2.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
-        mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2SRAM.get.hd2prf_fuse
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.hsuspsr_fuse
-        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
-        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
+          mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
+          mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreRF.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreRF.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
+          //L2
+          mbistControllerCoreWithL2.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
+          mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2SRAM.get.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
 
-        mbistControllerCoreWithL2.mbist(3) <> mbistInterfaceL2RF.get.mbist
-        mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2RF.get.fscan_ram
-        mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2RF.get.hd2prf_fuse
-        mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2RF.get.hsuspsr_fuse
-        mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2RF.get.uhdusplr_fuse
-        mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2RF.get.hduspsr_fuse
+          mbistControllerCoreWithL2.mbist(3) <> mbistInterfaceL2RF.get.mbist
+          mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2RF.get.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2RF.get.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2RF.get.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2RF.get.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2RF.get.hduspsr_fuse
+        }else{
+          //Core
+          mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
+          mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreSRAM.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreSRAM.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreSRAM.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreSRAM.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreSRAM.hduspsr_fuse
+
+          mbistControllerCoreWithL2.mbist(1) <> mbistInterfaceCoreRF.mbist
+          mbistControllerCoreWithL2.fscan_ram(0) <> mbistInterfaceCoreRF.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceCoreRF.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceCoreRF.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceCoreRF.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
+          //L2
+          mbistControllerCoreWithL2.mbist(2) <> mbistInterfaceL2SRAM.get.mbist
+          mbistControllerCoreWithL2.fscan_ram(1) <> mbistInterfaceL2SRAM.get.fscan_ram
+          mbistControllerCoreWithL2.io.hd2prf_out <> mbistInterfaceL2SRAM.get.hd2prf_fuse
+          mbistControllerCoreWithL2.io.hsuspsr_out <> mbistInterfaceL2SRAM.get.hsuspsr_fuse
+          mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
+          mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
+        }
       }
       else{
         mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
