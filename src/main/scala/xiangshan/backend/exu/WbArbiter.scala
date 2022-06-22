@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{XSPerfAccumulate, XSPerfHistogram}
+import utils._
 import xiangshan._
 import xiangshan.backend.HasExuWbHelper
 
@@ -117,6 +117,8 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   val otherConnections = splitN(otherPorts, sharedPorts.length)
   val sharedConnections = sharedPorts.zip(otherConnections).map{ case (s, o) => s +: o }
   val allConnections: Seq[Seq[Int]] = exclusivePorts.map(Seq(_)) ++ sharedConnections
+  val hasWbPipeline = allConnections.map(_.map(cfgs(_).needWbPipeline(isFp)))
+  val cfgHasFast = cfgs.map(_.hasFastUopOut)
   val hasFastUopOutVec = allConnections.map(_.map(cfgs(_).hasFastUopOut))
   val hasFastUopOut: Seq[Boolean] = hasFastUopOutVec.map(_.reduce(_ || _))
   hasFastUopOutVec.zip(hasFastUopOut).foreach{ case (vec, fast) =>
@@ -133,8 +135,9 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   for ((port, i) <- sharedPorts.zipWithIndex) {
     sb.append(s"[ ${cfgs(port).name} ")
     val useArb = otherConnections(i).nonEmpty
-    for (req <- otherConnections(i)) {
-      sb.append(s"${cfgs(req).name} ")
+    for ((req, j) <- otherConnections(i).zipWithIndex) {
+      val hasBuffer = if (hasWbPipeline(exclusivePorts.length + i)(j + 1)) "(buffered)" else ""
+      sb.append(s"${cfgs(req).name}$hasBuffer ")
     }
     val hasFastUopOutS = if (hasFastUopOut(i + exclusivePorts.length)) s" (hasFastUopOut)" else ""
     sb.append(s"] -> ${if(useArb) "arb ->" else ""} out$hasFastUopOutS #${exclusivePorts.size + i}\n")
@@ -176,10 +179,33 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
 
   // shared ports are connected with an arbiter
   for (i <- sharedIn.indices) {
-    val out = io.out(exclusiveIn.size + i)
-    val shared = outer.sharedConnections(i).map(io.in(_))
-    val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
-    val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
+    val portIndex = exclusiveIn.length + i
+    val out = io.out(portIndex)
+    val shared = outer.sharedConnections(i).zip(outer.hasWbPipeline(portIndex)).map { case (i, hasPipe) =>
+      if (hasPipe) {
+        // Some function units require int/fp sources and write to the other register file, such as f2i, i2f.
+        // Their out.ready depends on the other function units and may cause timing issues.
+        // For the function units that operate across int and fp, we add a buffer after their output.
+        val flushFunc = (o: ExuOutput, r: Valid[Redirect]) => o.uop.robIdx.needFlush(r)
+        if (outer.cfgHasFast(i)) {
+          val ctrl_pipe = Wire(io.in(i).cloneType)
+          val buffer = PipelineConnect(io.in(i), ctrl_pipe, flushFunc, io.redirect, io.in(i).bits, 1)
+          buffer.extra.in := io.in(i).bits
+          val buffer_out = Wire(io.in(i).cloneType)
+          ctrl_pipe.ready := buffer_out.ready
+          buffer_out.valid := ctrl_pipe.valid
+          buffer_out.bits := buffer.extra.out
+          buffer_out.bits.uop := ctrl_pipe.bits.uop
+          buffer_out
+        }
+        else {
+          PipelineNext(io.in(i), flushFunc, io.redirect)
+        }
+      }
+      else io.in(i)
+    }
+    val hasFastUopOut = outer.hasFastUopOut(portIndex)
+    val fastVec = outer.hasFastUopOutVec(portIndex)
     val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
     arb.io.redirect <> io.redirect
     arb.io.in <> shared

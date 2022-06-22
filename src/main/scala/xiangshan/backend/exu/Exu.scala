@@ -99,8 +99,12 @@ case class ExuConfig
   val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
   val needLoadBalance = hasUncertainlatency
 
+  def needWbPipeline(isFp: Boolean): Boolean = {
+    (isFp && readIntRf && writeFpRf) || (!isFp && readFpRf && writeIntRf)
+  }
+
   def canAccept(fuType: UInt): Bool = {
-    Cat(fuConfigs.map(_.fuType === fuType)).orR()
+    Cat(fuConfigs.map(_.fuType === fuType)).orR
   }
 }
 
