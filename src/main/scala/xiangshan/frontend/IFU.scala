@@ -274,21 +274,23 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_perf_info    = io.icachePerfInfo
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
-    if(HasCExtension){
+    require(HasCExtension)
+    // if(HasCExtension){
+      val partCacheline = cacheline((blockBytes * 8 * 2 * 3) / 4 - 1, 0)
       val result   = Wire(Vec(PredictWidth + 1, UInt(16.W)))
-      val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 2, UInt(16.W)))
+      val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 3 /4, UInt(16.W))) //47 16-bit data vector
       (0 until PredictWidth + 1).foreach( i =>
-        result(i) := dataVec(cutPtr(i))
+        result(i) := dataVec(cutPtr(i)) //the max ptr is 3*blockBytes/4-1
       )
       result
-    } else {
-      val result   = Wire(Vec(PredictWidth, UInt(32.W)) )
-      val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 4, UInt(32.W)))
-      (0 until PredictWidth).foreach( i =>
-        result(i) := dataVec(cutPtr(i))
-      )
-      result
-    }
+    // } else {
+    //   val result   = Wire(Vec(PredictWidth, UInt(32.W)) )
+    //   val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 4, UInt(32.W)))
+    //   (0 until PredictWidth).foreach( i =>
+    //     result(i) := dataVec(cutPtr(i))
+    //   )
+    //   result
+    // }
   }
 
   val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
@@ -733,3 +735,4 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire() )
   XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire() )
 }
+
