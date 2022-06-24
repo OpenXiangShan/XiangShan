@@ -341,12 +341,15 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
       }
     }
 
-    for (((out, config), delayed_error) <- io.out.zip(configs)
-      .filter(_._2.hasLoadError)
-      .zip(io.delayedLoadError)
-    ){
-      // overwrite load exception writeback
-      out.bits.uop.cf.exceptionVec(loadAccessFault) := delayed_error
+    if(EnableAccurateLoadError){
+      for ((((out, in), config), delayed_error) <- io.out.zip(io.in).zip(configs)
+        .filter(_._2.hasLoadError)
+        .zip(io.delayedLoadError)
+      ){
+        // overwrite load exception writeback
+        out.bits.uop.cf.exceptionVec(loadAccessFault) := delayed_error ||
+          RegNext(in.bits.uop.cf.exceptionVec(loadAccessFault))
+      }
     }
 
     override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))

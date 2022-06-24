@@ -167,7 +167,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  RefillSize: Int = 512,
+  EnableAccurateLoadError: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
@@ -387,7 +387,7 @@ trait HasXSParameter {
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val RefillSize = coreParams.RefillSize
+  val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

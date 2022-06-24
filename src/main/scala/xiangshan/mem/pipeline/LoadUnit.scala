@@ -321,9 +321,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // now cache ecc error will raise an access fault
   // at the same time, error info (including error paddr) will be write to
   // an customized CSR "CACHE_ERROR"
-  io.delayedLoadError := io.dcacheResp.bits.error_delayed &&
-    io.csrCtrl.cache_error_enable && 
-    RegNext(io.out.valid)
+  if (EnableAccurateLoadError) {
+    io.delayedLoadError := io.dcacheResp.bits.error_delayed &&
+      io.csrCtrl.cache_error_enable && 
+      RegNext(io.out.valid)
+  } else {
+    io.delayedLoadError := false.B
+  }
 
   val actually_mmio = pmp.mmio
   val s2_uop = io.in.bits.uop
