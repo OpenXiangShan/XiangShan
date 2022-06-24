@@ -29,7 +29,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   val headPtr  = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
   val headPtrOHShift = CircularShift(headPtrOH)
-  val headPtrOHVec = VecInit.tabulate(RenameWidth)(headPtrOHShift.left)
+  // may shift [0, RenameWidth] steps
+  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
   XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
   val fakeTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
@@ -82,7 +83,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   // Since the update of headPtr should have a good timing,
   // we calculate the OH index here to optimize the freelist read timing.
-  val stepBackHeadPtrOHVec = VecInit.tabulate(RenameWidth)(headPtrOHShift.right)
+  // may shift [0, RenameWidth] steps
+  val stepBackHeadPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.right)
   val stepBackHeadPtrOH = stepBackHeadPtrOHVec(io.stepBack)
   headPtrOH := Mux(io.walk, stepBackHeadPtrOH,
     Mux(realDoAllocate, headPtrOHVec(numAllocate), headPtrOH))
