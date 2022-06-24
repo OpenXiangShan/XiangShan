@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, nanhu ]
   pull_request:
     branches: [ master ]
 
@@ -21,6 +21,8 @@ jobs:
           export HEAD_SHA=${{ github.run_number }}
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "RELEASE_HOME=/nfs/home/share/nanhu_release" >> $GITHUB_ENV
+          echo "XSTOP_RELEASE_HOME=/nfs/home/share/nanhu_XSTop_release" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
         run: |
@@ -34,128 +36,18 @@ jobs:
       - name: check verilog
         run:
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
-      - name: build MinimalConfig Release emu
+      - name: release
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig --release
-      - name: run MinimalConfig - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
-          cat perf.log | sort
-  emu-basics:
-    runs-on: bosc
-    continue-on-error: false
-    timeout-minutes: 900
-    name: EMU - Basics
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-      - name: set env
-        run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Build EMU
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
-      - name: Basic Test - cputest
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
-      - name: Basic Test - riscv-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
-      - name: Basic Test - misc-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci misc-tests 2> /dev/zero
-      - name: Basic Test - nodiff-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --no-diff --ci nodiff-tests 2> /dev/zero
-      - name: Simple Test - microbench
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci microbench 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/microbench.log
-      - name: Simple Test - CoreMark
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci coremark 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/coremark.log
-      - name: System Test - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/linux.log
-      - name: Floating-point Test - povray
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/povray.log
-  emu-performance:
-    runs-on: bosc
-    continue-on-error: false
-    timeout-minutes: 900
-    name: EMU - Performance
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-      - name: set env
-        run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Build EMU
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3            \
-            --with-dramsim3 --threads 16
-      - name: SPEC06 Test - mcf
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/mcf.log
-      - name: SPEC06 Test - xalancbmk
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
-      - name: SPEC06 Test - gcc
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/gcc.log
-      - name: SPEC06 Test - namd
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/namd.log
-      - name: SPEC06 Test - milc
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/milc.log
-      - name: SPEC06 Test - lbm
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/lbm.log
-      - name: SPEC06 Test - gromacs
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/gromacs.log
-      - name: SPEC06 Test - wrf
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/wrf.log
-      - name: SPEC06 Test - astar
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/astar.log
+          rsync -av --exclude=nanhu_release/.git --exclude=nanhu_release/run \
+            --exclude=nanhu_release/parser.py --exclude=nanhu_release/get_flist_rtl.py \
+            $RELEASE_HOME .
+          python3 $GITHUB_WORKSPACE/scripts/parser.py --xs-home $GITHUB_WORKSPACE
+          cp build/XSTop.graphml rtl/XSTop.graphml
+          cp build/build/SimTop.v.conf rtl/XSTop.SimTop.v.conf
+          python3 $GITHUB_WORKSPACE/scripts/get_flist_rtl.py nanhu_release
+          mv rtl nanhu_release/rtl
+          tar -czf $XSTOP_RELEASE_HOME/release-${HEAD_SHA}.tar.gz nanhu_release
+          rm -rf nanhu_release
   emu-mc:
     runs-on: bosc
     continue-on-error: false
