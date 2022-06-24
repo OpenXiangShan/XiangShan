@@ -699,10 +699,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   when(release2cycle.valid){
     // If a load comes in that cycle, we can not judge if it has ld-ld violation
     // We replay that load inst from RS
-    io.loadViolationQuery.map(i => i.req.ready := 
-      !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
-    )
-    // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
+    io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
+    // io.loadViolationQuery.map(i => i.req.ready := 
+    //   !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+    // ) // For better perf, disabled because it is long to get paddr from dtlb
   }
 
   (0 until LoadQueueSize).map(i => {
