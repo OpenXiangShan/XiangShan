@@ -172,7 +172,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isFlushed = status.valid && status.robIdx.needFlush(io.redirect)
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     flushedVec(i) := isFlushed || (deqRespValid && deqRespSucc)
-    val realUpdateValid = updateValid(i) && !io.redirect.valid
+    val realUpdateValid = updateValid(i) && !statusNext.robIdx.needFlush(io.redirect)
     statusNext.valid := !flushedVec(i) && (realUpdateValid || status.valid)
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
 

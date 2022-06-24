@@ -262,15 +262,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
-  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
-  XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
+  val doEnqueue = VecInit(io.fromDispatch.map(_.fire))
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(0, true, false))
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := select.io.allocate(i).valid
     // for better timing, we update statusArray no matter there's a flush or not
-    statusArray.io.update(i).enable := io.fromDispatch(i).fire()
+    statusArray.io.update(i).enable := io.fromDispatch(i).fire
     statusArray.io.update(i).addr := select.io.allocate(i).bits
     statusArray.io.update(i).data.valid := true.B
     statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
