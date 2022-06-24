@@ -28,7 +28,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
 
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false, 0))
-  val headPtrOH = RegInit(0.U(size.W))
+  val headPtrOH = RegInit(1.U(size.W))
   XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
   val headPtrOHShift = CircularShift(headPtrOH)
   val headPtrOHVec = VecInit.tabulate(RenameWidth)(headPtrOHShift.left)

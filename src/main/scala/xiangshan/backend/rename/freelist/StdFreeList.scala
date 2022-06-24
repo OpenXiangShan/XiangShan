@@ -27,7 +27,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 32).U(PhyRegIdxWidth.W) )))
   val headPtr  = RegInit(FreeListPtr(false, 0))
-  val headPtrOH = RegInit(0.U(size.W))
+  val headPtrOH = RegInit(1.U(size.W))
   val headPtrOHShift = CircularShift(headPtrOH)
   val headPtrOHVec = VecInit.tabulate(RenameWidth)(headPtrOHShift.left)
   XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
