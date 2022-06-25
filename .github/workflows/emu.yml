@@ -43,7 +43,7 @@ jobs:
             $RELEASE_HOME .
           python3 $GITHUB_WORKSPACE/scripts/parser.py --xs-home $GITHUB_WORKSPACE
           cp build/XSTop.graphml rtl/XSTop.graphml
-          cp build/build/SimTop.v.conf rtl/XSTop.SimTop.v.conf
+          cp build/build/XSTop.v.conf rtl/XSTop.v.conf
           python3 $GITHUB_WORKSPACE/scripts/get_flist_rtl.py nanhu_release
           mv rtl nanhu_release/rtl
           tar -czf $XSTOP_RELEASE_HOME/release-${HEAD_SHA}.tar.gz nanhu_release
