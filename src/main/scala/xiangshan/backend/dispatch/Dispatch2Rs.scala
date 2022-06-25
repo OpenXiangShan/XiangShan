@@ -68,9 +68,9 @@ class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyMod
   val numInFire = PopCount(io.in.map(_.fire))
   val numStaFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StaExeUnitCfg)).map(_._1.fire))
   val numStdFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StdExeUnitCfg)).map(_._1.fire))
-  XSError(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
+  // XSError(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
   val numOutFire = PopCount(io.out.map(_.fire)) - numStdFire
-  XSError(numInFire =/= numOutFire, "in != out\n")
+  // XSError(numInFire =/= numOutFire, "in != out\n")
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire", PopCount(io.in.map(_.fire)))
