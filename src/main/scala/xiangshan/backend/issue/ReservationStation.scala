@@ -262,7 +262,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire))
+  val doEnqueue = VecInit(io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect)))
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(0, true, false))
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := select.io.allocate(i).valid
