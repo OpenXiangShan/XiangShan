@@ -19,6 +19,7 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "RELEASE_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           echo "RELEASE_HOME=/nfs/home/share/nanhu_release" >> $GITHUB_ENV
@@ -46,7 +47,7 @@ jobs:
           cp build/build/XSTop.v.conf rtl/XSTop.v.conf
           python3 $GITHUB_WORKSPACE/scripts/get_flist_rtl.py nanhu_release
           mv rtl nanhu_release/rtl
-          tar -czf $XSTOP_RELEASE_HOME/release-${HEAD_SHA}.tar.gz nanhu_release
+          tar -czf $XSTOP_RELEASE_HOME/release-${RELEASE_SHA}.tar.gz nanhu_release
           rm -rf nanhu_release
   emu-mc:
     runs-on: bosc
