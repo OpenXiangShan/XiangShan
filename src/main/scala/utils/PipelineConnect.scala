@@ -27,15 +27,7 @@ class PipelineConnectPipe[T <: Data](gen: T) extends Module {
     val isFlush = Input(Bool())
   })
 
-  val valid = RegInit(false.B)
-  val leftFire = io.in.valid && io.out.ready
-  when (io.rightOutFire) { valid := false.B }
-  when (leftFire) { valid := true.B }
-  when (io.isFlush) { valid := false.B }
-
-  io.in.ready := io.out.ready
-  io.out.bits := RegEnable(io.in.bits, leftFire)
-  io.out.valid := valid
+  PipelineConnect.connect(io.in, io.out, io.rightOutFire, io.isFlush, false.B)
 }
 
 class PipelineConnectBuffer[T <: Data, FlushT <: Data](gen: T, flushGen: FlushT, flushFunc: (T, FlushT) => Bool)
@@ -106,6 +98,24 @@ class PipelineConnectBufferWithExtraData[T <: Data, FlushT <: Data, ExtraT <: Da
 }
 
 object PipelineConnect {
+  def connect[T <: Data](
+    left: DecoupledIO[T],
+    right: DecoupledIO[T],
+    rightOutFire: Bool,
+    isFlush: Bool,
+    block: Bool
+  ): Unit = {
+    val valid = RegInit(false.B)
+    val leftFire = left.valid && right.ready && !block
+    when (rightOutFire) { valid := false.B }
+    when (leftFire) { valid := true.B }
+    when (isFlush) { valid := false.B }
+
+    left.ready := right.ready && !block
+    right.bits := RegEnable(left.bits, leftFire)
+    right.valid := valid
+  }
+
   def apply[T <: Data](
     left: DecoupledIO[T],
     right: DecoupledIO[T],
@@ -114,13 +124,19 @@ object PipelineConnect {
     block: Bool = false.B,
     moduleName: Option[String] = None
   ): Unit = {
-    val pipeline = Module(new PipelineConnectPipe(left.bits))
-    if(moduleName.nonEmpty) pipeline.suggestName(moduleName.get)
-    pipeline.io.in <> left
-    pipeline.io.rightOutFire := rightOutFire
-    pipeline.io.isFlush := isFlush
-    pipeline.io.out <> right
-    pipeline.io.out.ready := right.ready && !block
+    if (moduleName.isDefined) {
+      val pipeline = Module(new PipelineConnectPipe(left.bits))
+      pipeline.suggestName(moduleName.get)
+      pipeline.io.in <> left
+      pipeline.io.rightOutFire := rightOutFire
+      pipeline.io.isFlush := isFlush
+      pipeline.io.out <> right
+      pipeline.io.out.ready := right.ready && !block
+    }
+    else {
+      // do not use module here to please DCE
+      connect(left, right, rightOutFire, isFlush, block)
+    }
   }
 
   def apply[T <: Data, FlushT <: Data](
@@ -136,7 +152,6 @@ object PipelineConnect {
     pipe_buffer.io.out <> right
     pipe_buffer.io.flush := flush
   }
-
 
   def apply[T <: Data, FlushT <: Data, ExtraT <: Data](
     left: DecoupledIO[T],
@@ -161,7 +176,7 @@ object PipelineNext {
     isFlush: Bool
   ): DecoupledIO[T] = {
     val right = Wire(Decoupled(left.bits.cloneType))
-    PipelineConnect(left, right, rightOutFire, isFlush, moduleName = Some("pipeline"))
+    PipelineConnect(left, right, rightOutFire, isFlush)
     right
   }
 
