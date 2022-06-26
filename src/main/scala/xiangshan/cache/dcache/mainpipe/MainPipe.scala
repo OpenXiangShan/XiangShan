@@ -110,6 +110,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
 
+    val data_read_intend = Output(Bool())
     val data_read = DecoupledIO(new L1BankedDataReadLineReq)
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error = Input(Bool())
@@ -597,6 +598,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
+  io.data_read_intend := s1_valid && s1_need_data
   io.data_read.valid := s1_valid && s1_need_data && s2_ready
   io.data_read.bits.rmask := s1_banked_rmask
   io.data_read.bits.way_en := s1_way_en
