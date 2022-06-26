@@ -335,7 +335,7 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
       out.valid := in.fire
       out.bits := in.bits
-      if (config.hasFastUopOut) {
+      if (config.hasFastUopOut || config.hasLoadError) {
         out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
         out.bits.uop := RegNext(in.bits.uop)
       }

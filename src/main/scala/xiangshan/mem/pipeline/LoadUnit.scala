@@ -529,6 +529,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
 
+    val delayedLoadError = Output(Bool()) // load ecc error
+    // Note that io.delayedLoadError and io.lsq.delayedLoadError is different
+
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
@@ -650,6 +653,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.ldout.bits := Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits)
   io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
+
+  io.delayedLoadError := hitLoadOut.valid && load_s2.io.delayedLoadError
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
