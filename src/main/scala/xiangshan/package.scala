@@ -109,7 +109,7 @@ package object xiangshan {
       bku.litValue() -> "bku",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
-      fDivSqrt.litValue() -> "fdiv/fsqrt",
+      fDivSqrt.litValue() -> "fdiv_fsqrt",
       ldu.litValue() -> "load",
       stu.litValue() -> "store",
       mou.litValue() -> "mou"

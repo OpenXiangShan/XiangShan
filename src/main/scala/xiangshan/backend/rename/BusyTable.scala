@@ -49,9 +49,13 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   val tableAfterWb = table & (~wbMask).asUInt
   val tableAfterAlloc = tableAfterWb | allocMask
 
-  io.read.map(r => r.resp := !table(r.req))
+  io.read.foreach(r => r.resp := !table(r.req))
 
   table := tableAfterAlloc
+
+  val oddTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 1).map(_._1)
+  val evenTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 0).map(_._1)
+  val busyCount = RegNext(RegNext(PopCount(oddTable)) + RegNext(PopCount(evenTable)))
 
   XSDebug(p"table    : ${Binary(table)}\n")
   XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")
@@ -64,10 +68,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", (PopCount(table) < (NRPhyRegs.U/4.U))                                             ),
-    ("std_freelist_2_4_valid", (PopCount(table) > (NRPhyRegs.U/4.U)) & (PopCount(table) <= (NRPhyRegs.U/2.U))    ),
-    ("std_freelist_3_4_valid", (PopCount(table) > (NRPhyRegs.U/2.U)) & (PopCount(table) <= (NRPhyRegs.U*3.U/4.U))),
-    ("std_freelist_4_4_valid", (PopCount(table) > (NRPhyRegs.U*3.U/4.U))                                         )
+    ("std_freelist_1_4_valid", busyCount < (NRPhyRegs / 4).U                                      ),
+    ("std_freelist_2_4_valid", busyCount > (NRPhyRegs / 4).U && busyCount <= (NRPhyRegs / 2).U    ),
+    ("std_freelist_3_4_valid", busyCount > (NRPhyRegs / 2).U && busyCount <= (NRPhyRegs * 3 / 4).U),
+    ("std_freelist_4_4_valid", busyCount > (NRPhyRegs * 3 / 4).U                                  )
   )
   generatePerfEvent()
 }

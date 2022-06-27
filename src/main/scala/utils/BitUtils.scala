@@ -20,24 +20,46 @@ import chisel3._
 import chisel3.util._
 import scala.math.min
 
+class CircularShift(data: UInt) {
+  private def helper(step: Int, isLeft: Boolean): UInt = {
+    if (step == 0) {
+      data
+    }
+    else {
+      val splitIndex = if (isLeft) {
+        data.getWidth - (step % data.getWidth)
+      } else {
+        step % data.getWidth
+      }
+      Cat(data(splitIndex - 1, 0), data(data.getWidth - 1, splitIndex))
+    }
+  }
+  def left(step: Int): UInt = helper(step, true)
+  def right(step: Int): UInt = helper(step, false)
+}
+
+object CircularShift {
+  def apply(data: UInt): CircularShift = new CircularShift(data)
+}
+
 object WordShift {
-  def apply(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
+  def apply(data: UInt, wordIndex: UInt, step: Int): UInt = (data << (wordIndex * step.U)).asUInt
 }
 
 object MaskExpand {
- def apply(m: UInt) = Cat(m.asBools.map(Fill(8, _)).reverse)
+ def apply(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
 }
 
 object MaskData {
-  def apply(oldData: UInt, newData: UInt, fullmask: UInt) = {
+  def apply(oldData: UInt, newData: UInt, fullmask: UInt): UInt = {
     require(oldData.getWidth <= fullmask.getWidth, s"${oldData.getWidth} < ${fullmask.getWidth}")
     require(newData.getWidth <= fullmask.getWidth, s"${newData.getWidth} < ${fullmask.getWidth}")
-    (newData & fullmask) | (oldData & ~fullmask)
+    (newData & fullmask) | (oldData & (~fullmask).asUInt)
   }
 }
 
 object SignExt {
-  def apply(a: UInt, len: Int) = {
+  def apply(a: UInt, len: Int): UInt = {
     val aLen = a.getWidth
     val signBit = a(aLen-1)
     if (aLen >= len) a(len-1,0) else Cat(Fill(len - aLen, signBit), a)
@@ -45,7 +67,7 @@ object SignExt {
 }
 
 object ZeroExt {
-  def apply(a: UInt, len: Int) = {
+  def apply(a: UInt, len: Int): UInt = {
     val aLen = a.getWidth
     if (aLen >= len) a(len-1,0) else Cat(0.U((len - aLen).W), a)
   }
@@ -66,23 +88,23 @@ object Or {
   def rightOR(x: UInt, width: Integer, cap: Integer = 999999): UInt = {
     val stop = min(width, cap)
     def helper(s: Int, x: UInt): UInt =
-      if (s >= stop) x else helper(s+s, x | (x >> s))
+      if (s >= stop) x else helper(s+s, x | (x >> s).asUInt)
     helper(1, x)(width-1, 0)
   }
 }
 
 object OneHot {
-  def OH1ToOH(x: UInt): UInt = (x << 1 | 1.U) & ~Cat(0.U(1.W), x)
+  def OH1ToOH(x: UInt): UInt = ((x << 1).asUInt | 1.U) & (~Cat(0.U(1.W), x)).asUInt
   def OH1ToUInt(x: UInt): UInt = OHToUInt(OH1ToOH(x))
-  def UIntToOH1(x: UInt, width: Int): UInt = ~((-1).S(width.W).asUInt << x)(width-1, 0)
+  def UIntToOH1(x: UInt, width: Int): UInt = (~((-1).S(width.W).asUInt << x)(width-1, 0)).asUInt
   def UIntToOH1(x: UInt): UInt = UIntToOH1(x, (1 << x.getWidth) - 1)
   def checkOneHot(in: Bits): Unit = assert(PopCount(in) <= 1.U)
   def checkOneHot(in: Iterable[Bool]): Unit = assert(PopCount(in) <= 1.U)
 }
 
 object LowerMask {
-  def apply(a: UInt, len: Int) = {
-    ParallelOR((0 until len).map(i => a >> i.U))
+  def apply(a: UInt, len: Int): UInt = {
+    ParallelOR((0 until len).map(i => (a >> i).asUInt))
   }
   def apply(a: UInt): UInt = {
     apply(a, a.getWidth)
