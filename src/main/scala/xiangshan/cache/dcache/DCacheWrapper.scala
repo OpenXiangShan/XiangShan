@@ -638,8 +638,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   val replAccessReqs = ldu.map(_.io.replace_access) ++ Seq(
-    mainPipe.io.replace_access,
-    refillPipe.io.replace_access
+    mainPipe.io.replace_access
   )
   val touchWays = Seq.fill(replAccessReqs.size)(Wire(ValidIO(UInt(log2Up(nWays).W))))
   touchWays.zip(replAccessReqs).foreach {
