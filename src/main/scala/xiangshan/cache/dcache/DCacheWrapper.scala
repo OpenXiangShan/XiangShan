@@ -478,6 +478,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.write <> dataWriteArb.io.out
 
   bankedDataArray.io.readline <> mainPipe.io.data_read
+  bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error := bankedDataArray.io.readline_error
   mainPipe.io.data_resp := bankedDataArray.io.resp
 
@@ -503,7 +504,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.nack := false.B
 
     ldu(w).io.disable_ld_fast_wakeup :=
-      bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
+      bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
   //----------------------------------------
