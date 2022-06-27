@@ -188,6 +188,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     tagArray
   }
 
+  io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
+
   //Parity Decode
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
   for((tagArray,i) <- tagArrays.zipWithIndex){
@@ -291,8 +293,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
   }}
 
-  io.read.ready := !io.write.valid
-
   val port_0_read_0 = io.read.valid  && !io.read.bits.vSetIdx(0)(0)
   val port_0_read_1 = io.read.valid  &&  io.read.bits.vSetIdx(0)(0)
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
@@ -362,6 +362,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     
     codeArray
   }
+
+  io.read.ready := !io.write.valid && dataArrays.map(_.io.r.req.ready).reduce(_ && _) && codeArrays.map(_.io.r.req.ready).reduce(_ && _)
 
   //Parity Decode
   val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
