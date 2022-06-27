@@ -160,8 +160,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   // dtlb
-  val sfence = RegNext(io.sfence)
-  val tlbcsr = RegNext(io.tlbCsr)
+  val sfence = RegNext(RegNext(io.sfence))
+  val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
     val tlb_ld = Module(new TLB(1, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
