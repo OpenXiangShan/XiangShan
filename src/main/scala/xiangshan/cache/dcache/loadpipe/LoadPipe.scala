@@ -156,10 +156,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way
 
-  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_valid)
-  io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
-  io.replace_access.bits.way := RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way))
-
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
@@ -296,7 +292,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error)
-
+  
   // report tag / data / l2 error (with paddr) to bus error unit
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
   io.error.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
@@ -308,8 +304,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  // --------------------------------------------------------------------------------
+  // update plru, report error in s3
 
+  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid) && !s2_nack_no_mshr)
+  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+  io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way)))
+
+  // --------------------------------------------------------------------------------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {

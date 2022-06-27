@@ -51,7 +51,6 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
     val tag_write = DecoupledIO(new TagWriteReq)
     val store_resp = ValidIO(new DCacheLineResp)
     val release_wakeup = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
-    val replace_access = ValidIO(new ReplacementAccessBundle)
   })
 
   // Assume that write in refill pipe is always ready
@@ -98,8 +97,4 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
 
   io.release_wakeup.valid := refill_w_valid
   io.release_wakeup.bits := refill_w_req.miss_id
-
-  io.replace_access.valid := refill_w_valid
-  io.replace_access.bits.set := idx
-  io.replace_access.bits.way := OHToUInt(refill_w_req.way_en)
 }
