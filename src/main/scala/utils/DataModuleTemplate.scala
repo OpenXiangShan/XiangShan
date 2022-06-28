@@ -83,7 +83,64 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   }
 }
 
-class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, true)
+class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends Module {
+  val io = IO(new Bundle {
+    val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
+    val rdata = Vec(numRead,  Output(gen))
+    val wen   = Vec(numWrite, Input(Bool()))
+    val waddr = Vec(numWrite, Input(UInt(log2Ceil(numEntries).W)))
+    val wdata = Vec(numWrite, Input(gen))
+  })
+
+  val dataModule = Module(new NegedgeDataModuleTemplate(gen, numEntries, numRead, numWrite))
+
+  // delay one clock
+  val raddr = RegNext(io.raddr)
+  val wen = RegNext(io.wen)
+  val waddr = io.wen.zip(io.waddr).map(w => RegEnable(w._2, w._1))
+  val wdata = RegNext(io.wdata)
+
+  // input
+  dataModule.io.raddr := raddr
+  dataModule.io.wen := wen
+  dataModule.io.waddr := waddr
+  dataModule.io.wdata := wdata
+
+  // output
+  io.rdata := dataModule.io.rdata
+}
+
+class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends Module {
+  val io = IO(new Bundle {
+    val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
+    val rdata = Vec(numRead,  Output(gen))
+    val wen   = Vec(numWrite, Input(Bool()))
+    val waddr = Vec(numWrite, Input(UInt(log2Ceil(numEntries).W)))
+    val wdata = Vec(numWrite, Input(gen))
+  })
+
+  val data = Reg(Vec(numEntries, gen))
+
+  // read ports
+  for (i <- 0 until numRead) {
+    val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i))
+    when (VecInit(read_by).asUInt.orR) {
+      io.rdata(i) := Mux1H(read_by, io.wdata)
+    } .otherwise {
+      io.rdata(i) := data(io.raddr(i))
+    }
+  }
+
+  // write ports
+  for (j <- 0 until numEntries) {
+    val waddr_dec = io.waddr.map(a => UIntToOH(a))
+    val write_wen = io.wen.zip(waddr_dec).map(w => w._1 && w._2(j))
+    when (VecInit(write_wen).asUInt.orR) {
+      data(j) := Mux1H(write_wen, io.wdata)
+    }
+  }
+}
+
 class AsyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, false)
 
 class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int,
