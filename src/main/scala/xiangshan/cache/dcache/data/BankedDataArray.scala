@@ -258,9 +258,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(bank_result)
   val read_bank_error_delayed = Wire(Vec(DCacheBanks, Bool()))
   dontTouch(read_bank_error_delayed)
-  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
-    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid
-  ))
+  val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     rrl_bank_conflict(0) := io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
@@ -280,17 +278,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
   (0 until LoadPipelineWidth).foreach(i => {
     io.bank_conflict_fast(i) := rw_bank_conflict(i) || rrl_bank_conflict(i) ||
-      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
+      (if (i == 0) 0.B else rr_bank_conflict)
     io.bank_conflict_slow(i) := RegNext(io.bank_conflict_fast(i))
     io.disable_ld_fast_wakeup(i) := rw_bank_conflict(i) || rrl_bank_conflict_intend(i) ||
-      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
+      (if (i == 0) 0.B else rr_bank_conflict)
   })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
   XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict)
   XSPerfAccumulate("data_array_rrl_bank_conflict(0)", rrl_bank_conflict(0))
   XSPerfAccumulate("data_array_rrl_bank_conflict(1)", rrl_bank_conflict(1))
-  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict_0)
-  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict_1)
+  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict(0))
+  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict(1))
   XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid)
   XSPerfAccumulate("data_array_read_0", io.read(0).valid)
   XSPerfAccumulate("data_array_read_1", io.read(1).valid)

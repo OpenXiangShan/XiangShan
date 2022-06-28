@@ -5,7 +5,7 @@ on:
   push:
     branches: [ master, nanhu ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, nanhu ]
 
 jobs:
   generate-verilog:
