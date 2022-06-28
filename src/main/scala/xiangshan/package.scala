@@ -730,7 +730,8 @@ package object xiangshan {
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
-    replayInst = true
+    replayInst = true,
+    hasLoadError = true
   )
 
   val staCfg = FuConfig(

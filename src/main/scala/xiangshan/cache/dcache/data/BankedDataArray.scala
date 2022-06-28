@@ -49,7 +49,7 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
   // you can choose which bank to read to save power
   val ecc = Bits(eccBits.W)
   val raw_data = Bits(DCacheSRAMRowBits.W)
-  val error = Bool() // slow to generate, use it with care
+  val error_delayed = Bool() // 1 cycle later than data resp
 
   def asECCData() = {
     Cat(ecc, raw_data)
@@ -78,8 +78,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
-    val read_error = Output(Vec(LoadPipelineWidth, Bool()))
-    val readline_error = Output(Bool())
+    val read_error_delayed = Output(Vec(LoadPipelineWidth, Bool()))
+    val readline_error_delayed = Output(Bool())
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
@@ -255,8 +255,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // read each bank, get bank result
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   dontTouch(bank_result)
-  val read_bank_error = Wire(Vec(DCacheBanks, Bool()))
-  dontTouch(read_bank_error)
+  val read_bank_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  dontTouch(read_bank_error_delayed)
   val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
     bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid
   ))
@@ -327,23 +327,26 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
     )
 
+    val read_enable = bank_addr_matchs.asUInt.orR || readline_match
+
     // read raw data
     val data_bank = data_banks(bank_index)
-    data_bank.io.r.en := bank_addr_matchs.asUInt.orR || readline_match
+    data_bank.io.r.en := read_enable
     data_bank.io.r.way_en := bank_way_en
     data_bank.io.r.addr := bank_set_addr
     bank_result(bank_index).raw_data := data_bank.io.r.data
 
     // read ECC
     val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR || readline_match
+    ecc_bank.io.r.req.valid := read_enable
     ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
     bank_result(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
 
     // use ECC to check error
-    val data = bank_result(bank_index).asECCData()
-    bank_result(bank_index).error := dcacheParameters.dataCode.decode(data).error
-    read_bank_error(bank_index) := bank_result(bank_index).error
+    val ecc_data = bank_result(bank_index).asECCData()
+    val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
+    bank_result(bank_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
+    read_bank_error_delayed(bank_index) := bank_result(bank_index).error_delayed
   }
 
   // read result: expose banked read result 
@@ -352,13 +355,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    io.read_error(rport_index) := RegNext(io.read(rport_index).fire()) && 
-      read_bank_error(RegNext(bank_addrs(rport_index))) &&
-      !io.bank_conflict_slow(rport_index)
+    io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) && 
+      read_bank_error_delayed(RegNext(RegNext(bank_addrs(rport_index)))) &&
+      !RegNext(io.bank_conflict_slow(rport_index))
   })
   // readline port
-  io.readline_error := RegNext(io.readline.fire()) && 
-    VecInit((0 until DCacheBanks).map(i => io.resp(i).error)).asUInt().orR
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) && 
+    VecInit((0 until DCacheBanks).map(i => io.resp(i).error_delayed)).asUInt().orR
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)

@@ -32,8 +32,8 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val id = Input(UInt())
 
     // client requests
-    val req = Flipped(DecoupledIO(new DCacheWordReq ))
-    val resp = DecoupledIO(new DCacheWordResp)
+    val req = Flipped(DecoupledIO(new DCacheWordReq))
+    val resp = DecoupledIO(new DCacheWordRespWithError)
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
@@ -128,7 +128,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.miss   := false.B
     io.resp.bits.replay := false.B
     io.resp.bits.tag_error := false.B
-    io.resp.bits.error  := false.B
+    io.resp.bits.error := false.B
 
     when (io.resp.fire()) {
       state := s_invalid
@@ -137,7 +137,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 }
 
 class UncacheIO(implicit p: Parameters) extends DCacheBundle {
-  val lsq = Flipped(new DCacheWordIO)
+  val lsq = Flipped(new UncacheWordIO)
 }
 
 // convert DCacheIO to TileLink
@@ -165,7 +165,7 @@ class UncacheImp(outer: Uncache)
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val resp_arb = Module(new Arbiter(new DCacheWordResp, 1))
+  val resp_arb = Module(new Arbiter(new DCacheWordRespWithError, 1))
 
   val req  = io.lsq.req
   val resp = io.lsq.resp

@@ -25,7 +25,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
-
+import xiangshan.ExceptionNO._
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -87,6 +87,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
+    val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool()))
     val dcacheRequireReplay = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
@@ -95,7 +96,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val refill = Flipped(ValidIO(new Refill))
     val release = Flipped(ValidIO(new Release))
-    val uncache = new DCacheWordIO
+    val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
@@ -292,6 +293,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   for (i <- 0 until LoadPipelineWidth) {
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
+    val lastCycleLoadWbIndex = RegNext(loadWbIndex)
+    // update miss state in load s3
     if(!EnableFastForward){
       // dcacheRequireReplay will be used to update lq flag 1 cycle after for better timing
       //
@@ -299,12 +302,17 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       when(dcacheRequireReplay(i) && !refill_addr_hit(RegNext(io.loadIn(i).bits.paddr), io.refill.bits.addr)) {
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
-        miss(RegNext(loadWbIndex)) := false.B // disable refill listening
-        datavalid(RegNext(loadWbIndex)) := false.B // disable refill listening
-        assert(!datavalid(RegNext(loadWbIndex)))
+        miss(lastCycleLoadWbIndex) := false.B // disable refill listening
+        datavalid(lastCycleLoadWbIndex) := false.B // disable refill listening
+        assert(!datavalid(lastCycleLoadWbIndex))
       }
     }
+    // update load error state in load s3
+    when(RegNext(io.loadIn(i).fire()) && io.delayedLoadError(i)){
+      uop(lastCycleLoadWbIndex).cf.exceptionVec(loadAccessFault) := true.B
+    }
   }
+
 
   // Writeback up to 2 missed load insts to CDB
   //
