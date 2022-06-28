@@ -47,6 +47,7 @@ case class RSParams
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
   var isStore: Boolean = false,
+  var isStoreData: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
@@ -82,6 +83,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
       case StaExeUnitCfg => params.isStore = true
+      case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
       case _ =>
