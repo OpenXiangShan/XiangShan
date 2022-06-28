@@ -18,10 +18,10 @@ package xiangshan.backend.decode
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import xiangshan._
+import freechips.rocketchip.rocket.Instructions
 import utils._
+import xiangshan._
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {
@@ -89,7 +89,7 @@ class FusedAdduw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADDU_W)
+  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD_UW)
   override def lsrc2NeedZero: Boolean = true
 
   def fusionName: String = "slli32_srli32"

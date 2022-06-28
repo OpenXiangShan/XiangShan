@@ -29,7 +29,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
