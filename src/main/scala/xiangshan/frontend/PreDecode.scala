@@ -192,13 +192,17 @@ class CheckInfo extends Bundle {  // 8 bit
 }
 
 class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
-  //to Ibuffer write port (timing critical)
-  val fixedRange  = Vec(PredictWidth, Bool())
-  val fixedTaken  = Vec(PredictWidth, Bool())
-  //to Ftq write back port (not timing critical)
-  val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
-  val fixedMissPred = Vec(PredictWidth,  Bool())
-  val faultType   = Vec(PredictWidth, new CheckInfo)
+  //to Ibuffer write port  (stage 1)
+  val stage1Out = new Bundle{
+    val fixedRange  = Vec(PredictWidth, Bool())
+    val fixedTaken  = Vec(PredictWidth, Bool())
+  }
+  //to Ftq write back port (stage 2)
+  val stage2Out = new Bundle{
+    val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
+    val fixedMissPred = Vec(PredictWidth,  Bool())
+    val faultType   = Vec(PredictWidth, new CheckInfo) 
+  }
 }
 
 
@@ -220,6 +224,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
     * we first detecct remask fault and then use fixedRange to do second check
     **/
 
+  //Stage 1: detect remask fault
   /** first check: remask Fault */
   jalFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isJal && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
   retFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
@@ -228,28 +233,43 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   val needRemask       = ParallelOR(remaskFault)
   val fixedRange       = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
 
-  io.out.fixedRange := fixedRange.asTypeOf((Vec(PredictWidth, Bool())))
+  io.out.stage1Out.fixedRange := fixedRange.asTypeOf((Vec(PredictWidth, Bool())))
 
-  io.out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
+  io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
 
   /** second check: faulse prediction fault and target fault */
   notCFITaken  := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken })
   invalidTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && !instrValid(i)  && i.U === takenIdx  && predTaken })
 
-  /** target calculation  */
   val jumpTargets          = VecInit(pds.zipWithIndex.map{case(pd,i) => pc(i) + jumpOffset(i)})
-  targetFault      := VecInit(pds.zipWithIndex.map{case(pd,i) => fixedRange(i) && instrValid(i) && (pd.isJal || pd.isBr) && takenIdx === i.U && predTaken  && (predTarget =/= jumpTargets(i))})
-
   val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U ) ))
 
-  io.out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVec(i) , FaultType.jalFault ,
-                                                                             Mux(retFaultVec(i), FaultType.retFault ,
-                                                                             Mux(targetFault(i), FaultType.targetFault , 
-                                                                             Mux(notCFITaken(i) , FaultType.notCFIFault, 
-                                                                             Mux(invalidTaken(i), FaultType.invalidTaken,  FaultType.noFault)))))}
+  //Stage 2: detect target fault
+  /** target calculation: in the next stage  */
+  val fixedRangeNext = RegNext(fixedRange)
+  val instrValidNext = RegNext(instrValid)
+  val takenIdxNext   = RegNext(takenIdx)
+  val predTakenNext  = RegNext(predTaken)
+  val predTargetNext = RegNext(predTarget)
+  val jumpTargetsNext = RegNext(jumpTargets)
+  val seqTargetsNext = RegNext(seqTargets)
+  val pdsNext = RegNext(pds)
+  val jalFaultVecNext = RegNext(jalFaultVec)
+  val retFaultVecNext = RegNext(retFaultVec)
+  val notCFITakenNext = RegNext(notCFITaken)
+  val invalidTakenNext = RegNext(invalidTaken)
 
-  io.out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVec(i) || retFaultVec(i) || notCFITaken(i) || invalidTaken(i) || targetFault(i)}
-  io.out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i),  seqTargets(i) )}
+  targetFault      := VecInit(pdsNext.zipWithIndex.map{case(pd,i) => fixedRangeNext(i) && instrValidNext(i) && (pd.isJal || pd.isBr) && takenIdxNext === i.U && predTakenNext  && (predTargetNext =/= jumpTargetsNext(i))})
+
+
+  io.out.stage2Out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
+                                                                             Mux(retFaultVecNext(i), FaultType.retFault ,
+                                                                             Mux(targetFault(i), FaultType.targetFault , 
+                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault, 
+                                                                             Mux(invalidTakenNext(i), FaultType.invalidTaken,  FaultType.noFault)))))}
+
+  io.out.stage2Out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
+  io.out.stage2Out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i),  seqTargetsNext(i) )}
 
 }
 
