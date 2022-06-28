@@ -51,6 +51,7 @@ class SimTop(implicit p: Parameters) extends Module {
     rtcClock := ~rtcClock
   }
   soc.io.rtc_clock := rtcClock
+  soc.io.in_spare := DontCare
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2, l_soc.misc.l3FrontendAXI4Node.out.head._2))
   val simMMIO = Module(l_simMMIO.module)

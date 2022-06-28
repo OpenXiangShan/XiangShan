@@ -136,6 +136,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
+      val in_spare = Input(UInt(10.W))
+      val out_spare = Output(UInt(10.W))
     })
 
     val xsx_fscan = IO(new UltiscanExternalInterface)
@@ -169,6 +171,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2.foreach(_.module.io.reset := io.reset)
 
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
+    io.out_spare := DontCare
 
     dontTouch(hd2prf_in)
     dontTouch(hsuspsr_in)
