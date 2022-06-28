@@ -51,6 +51,8 @@ class VModule(object):
         self.submodule = dict()
 
     def add_line(self, line):
+        if "NegedgeDataModuleTemplate" in self.name and "@(posedge clock)" in line:
+            line = line.replace("posedge", "negedge")
         self.lines.append(line)
         if len(self.lines):
             io_match = self.io_re.match(line)
