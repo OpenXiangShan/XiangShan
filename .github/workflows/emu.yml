@@ -50,7 +50,7 @@ jobs:
           tar -czf $XSTOP_RELEASE_HOME/release-${RELEASE_SHA}.tar.gz nanhu_release
           rm -rf nanhu_release
 
-emu-basics:
+  emu-basics:
     runs-on: bosc
     continue-on-error: false
     timeout-minutes: 900
