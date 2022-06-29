@@ -17,13 +17,32 @@
 # Simple version of xiangshan python wrapper
 
 import argparse
+import json
 import os
 import random
+import signal
 import subprocess
 import sys
 import time
 
 import psutil
+
+
+def load_all_gcpt(gcpt_path, json_path):
+    all_gcpt = []
+    with open(json_path) as f:
+        data = json.load(f)
+    for benchspec in data:
+        for point in data[benchspec]:
+            weight = data[benchspec][point]
+            gcpt = os.path.join(gcpt_path, "_".join([benchspec, point, weight]))
+            bin_dir = os.path.join(gcpt, "0")
+            bin_file = list(os.listdir(bin_dir))
+            assert(len(bin_file) == 1)
+            bin_path = os.path.join(bin_dir, bin_file[0])
+            assert(os.path.isfile(bin_path))
+            all_gcpt.append(bin_path)
+    return all_gcpt
 
 
 class XSArgs(object):
@@ -160,6 +179,7 @@ class XSArgs(object):
 class XiangShan(object):
     def __init__(self, args):
         self.args = XSArgs(args)
+        self.timeout = args.timeout
 
     def show(self):
         self.args.show()
@@ -222,10 +242,16 @@ class XiangShan(object):
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
         start = time.time()
-        return_code = subprocess.call(cmd, shell=True, env=env)
-        end = time.time()
-        print(f"Elapsed time: {end - start} seconds")
-        return return_code
+        proc = subprocess.Popen(cmd, shell=True, env=env, preexec_fn=os.setsid)
+        try:
+            return_code = proc.wait(self.timeout)
+            end = time.time()
+            print(f"Elapsed time: {end - start} seconds")
+            return return_code
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            print(f"KeyboardInterrupt or TimeoutExpired.")
+            return 0
 
     def __get_ci_cputest(self, name=None):
         base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
@@ -298,7 +324,32 @@ class XiangShan(object):
             "wrf": "_1916220000000_.gz",
             "astar": "_122060000000_.gz"
         }
-        return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
+        if name in workloads:
+            return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
+        # select a random SPEC checkpoint
+        assert(name == "random")
+        all_cpt = [
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt"
+        ]
+        all_json = [
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json"
+        ]
+        assert(len(all_cpt) == len(all_json))
+        cpt_path, json_path = random.choice(list(zip(all_cpt, all_json)))
+        all_gcpt = load_all_gcpt(cpt_path, json_path)
+        return [random.choice(all_gcpt)]
 
     def run_ci(self, test):
         all_tests = {
@@ -343,6 +394,7 @@ if __name__ == "__main__":
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
     parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
+    parser.add_argument('--timeout', nargs='?', type=int, default=None, help='timeout (in seconds)')
     # environment variables
     parser.add_argument('--nemu', nargs='?', type=str, help='path to nemu')
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
@@ -364,7 +416,6 @@ if __name__ == "__main__":
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
-    # ci action head sha
 
     args = parser.parse_args()
 

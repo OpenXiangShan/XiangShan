@@ -49,6 +49,64 @@ jobs:
           mv rtl nanhu_release/rtl
           tar -czf $XSTOP_RELEASE_HOME/release-${RELEASE_SHA}.tar.gz nanhu_release
           rm -rf nanhu_release
+
+emu-basics:
+    runs-on: bosc
+    continue-on-error: false
+    timeout-minutes: 900
+    name: EMU - Basics
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
+          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
+      - name: Basic Test - cputest
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
+      - name: Basic Test - riscv-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
+      - name: Basic Test - misc-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci misc-tests 2> /dev/zero
+      - name: Basic Test - nodiff-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --no-diff --ci nodiff-tests 2> /dev/zero
+      - name: Random SPEC 0
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci random --timeout 3600 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/random_0.log
+      - name: Random SPEC 1
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci random --timeout 3600 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/random_1.log
+      - name: Random SPEC 2
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci random --timeout 3600 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/random_2.log
+      - name: Random SPEC 3
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci random --timeout 3600 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/random_3.log
+      - name: Uncache Fetch Test - copy and run
+        run: |
+          $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
+
   emu-mc:
     runs-on: bosc
     continue-on-error: false
@@ -82,4 +140,3 @@ jobs:
       - name: SMP Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp 2> /dev/zero
-
