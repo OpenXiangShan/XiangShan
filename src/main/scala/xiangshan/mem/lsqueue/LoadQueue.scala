@@ -109,9 +109,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth, "LqVaddr"))
   vaddrModule.io := DontCare
-  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
+  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth, "LqTrigger"))
   vaddrTriggerResultModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
@@ -248,7 +248,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
-      released(loadWbIndex) := release2cycle.valid && 
+      released(loadWbIndex) := release2cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release1cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
@@ -301,7 +301,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     if(!EnableFastForward){
       // dcacheRequireReplay will be used to update lq flag 1 cycle after for better timing
       //
-      // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate 
+      // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate
       when(dcacheRequireReplay(i)) {
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
@@ -663,7 +663,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   * When load arrives load_s1, it searches LoadQueue for younger load instructions
   * with the same load physical address. If younger load has been released (or observed),
   * the younger load needs to be re-execed.
-  * 
+  *
   * For now, if re-exec it found to be needed in load_s1, we mark the older load as replayInst,
   * the two loads will be replayed if the older load becomes the head of rob.
   *
@@ -697,7 +697,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })
 
   // "released" flag update
-  // 
+  //
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
 
@@ -710,20 +710,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   when(release2cycle.valid){
     // If a load comes in that cycle, we can not judge if it has ld-ld violation
     // We replay that load inst from RS
-    io.loadViolationQuery.map(i => i.req.ready := 
+    io.loadViolationQuery.map(i => i.req.ready :=
       !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
     )
     // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
   }
 
   (0 until LoadQueueSize).map(i => {
-    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
-      allocated(i) && 
+    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) &&
+      allocated(i) &&
       writebacked(i) &&
       release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
-      // its released flag still needs to be set as true if addr matches. 
+      // its released flag still needs to be set as true if addr matches.
       released(i) := true.B
     }
   })

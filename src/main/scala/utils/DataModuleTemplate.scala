@@ -83,7 +83,7 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   }
 }
 
-class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends Module {
+class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -92,7 +92,7 @@ class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, n
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val dataModule = Module(new NegedgeDataModuleTemplate(gen, numEntries, numRead, numWrite))
+  val dataModule = Module(new NegedgeDataModuleTemplate(gen, numEntries, numRead, numWrite, parentModule))
 
   // delay one clock
   val raddr = RegNext(io.raddr)
@@ -110,7 +110,7 @@ class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, n
   io.rdata := dataModule.io.rdata
 }
 
-class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends Module {
+class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -119,7 +119,8 @@ class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val data = Reg(Vec(numEntries, gen))
+  override def desiredName: String = s"NegedgeDataModule_${parentModule}_${numEntries}entry"
+  val data = Mem(numEntries, gen)
 
   // read ports
   for (i <- 0 until numRead) {

@@ -76,14 +76,16 @@ class SSIT(implicit p: Parameters) extends XSModule {
     Bool(),
     SSITSize,
     SSIT_READ_PORT_NUM,
-    SSIT_WRITE_PORT_NUM
+    SSIT_WRITE_PORT_NUM,
+    "SSITValid"
   ))
 
   val data_array = Module(new SyncDataModuleTemplate(
     new SSITDataEntry,
     SSITSize,
     SSIT_READ_PORT_NUM,
-    SSIT_WRITE_PORT_NUM
+    SSIT_WRITE_PORT_NUM,
+    "SSITData"
   ))
 
   // TODO: use SRAM or not?
