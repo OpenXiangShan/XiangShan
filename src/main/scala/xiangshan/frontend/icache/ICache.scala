@@ -278,7 +278,11 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
 
   def getECCFromEncUnit(encUnit: UInt) = {
     require(encUnit.getWidth == encDataUnitBits)
-    encUnit(encDataUnitBits - 1, dataCodeUnit)
+    if (encDataUnitBits == dataCodeUnit) {
+      0.U.asTypeOf(UInt(1.W))
+    } else {
+      encUnit(encDataUnitBits - 1, dataCodeUnit)
+    }
   }
 
   def getECCFromBlock(cacheblock: UInt) = {

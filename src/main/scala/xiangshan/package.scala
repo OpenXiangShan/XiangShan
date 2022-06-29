@@ -118,6 +118,7 @@ package object xiangshan {
 
   object FuOpType {
     def apply() = UInt(7.W)
+    def X = BitPat("b???????")
   }
 
   object CommitType {
@@ -729,7 +730,8 @@ package object xiangshan {
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
-    replayInst = true
+    replayInst = true,
+    hasLoadError = true
   )
 
   val staCfg = FuConfig(

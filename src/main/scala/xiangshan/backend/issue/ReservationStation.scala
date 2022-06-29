@@ -47,6 +47,7 @@ case class RSParams
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
   var isStore: Boolean = false,
+  var isStoreData: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
@@ -60,6 +61,7 @@ case class RSParams
   def needScheduledBit: Boolean = hasFeedback || delayedRf || hasMidState
   def needBalance: Boolean = exuCfg.get.needLoadBalance
   def numSelect: Int = numDeq + (if (oldestFirst._1) 1 else 0)
+  def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -81,6 +83,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
       case StaExeUnitCfg => params.isStore = true
+      case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
       case _ =>
@@ -256,15 +259,20 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
-  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
-  XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
+  val doEnqueue = Wire(Vec(params.numEnq, Bool()))
+  val enqNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
+  if (params.dropOnRedirect) {
+    doEnqueue := io.fromDispatch.map(_.fire && !io.redirect.valid)
+    XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqNotFlushed), 0.U))
+  }
+  else {
+    doEnqueue := enqNotFlushed
+  }
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(0, true, false))
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := select.io.allocate(i).valid
     // for better timing, we update statusArray no matter there's a flush or not
-    statusArray.io.update(i).enable := io.fromDispatch(i).fire()
+    statusArray.io.update(i).enable := io.fromDispatch(i).fire
     statusArray.io.update(i).addr := select.io.allocate(i).bits
     statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
     statusArray.io.update(i).data.blocked := params.checkWaitBit.B && io.fromDispatch(i).bits.cf.loadWaitBit

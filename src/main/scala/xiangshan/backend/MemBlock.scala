@@ -71,6 +71,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
+    val delayedLoadError = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -80,7 +81,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
-    val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
+    // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
@@ -124,9 +125,9 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
 
   val atomicsUnit = Module(new AtomicsUnit)
 
-  // Atom inst comes from sta / std, then its result 
+  // Atom inst comes from sta / std, then its result
   // will be writebacked using load writeback port
-  // 
+  //
   // However, atom exception will be writebacked to rob
   // using store writeback port
 
@@ -278,15 +279,21 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
 
     // Lsq to load unit's rs
 
-    // passdown to lsq
+    // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
+    // passdown to lsq (load s3)
+    lsq.io.dcacheRequireReplay(i) <> loadUnits(i).io.lsq.dcacheRequireReplay
+    lsq.io.delayedLoadError(i) <> loadUnits(i).io.delayedLoadError
+
+    // alter writeback exception info
+    io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
+
     // update mem dependency predictor
-    io.memPredUpdate(i) := DontCare
-    lsq.io.dcacheRequireReplay(i)    <> loadUnits(i).io.lsq.dcacheRequireReplay
+    // io.memPredUpdate(i) := DontCare
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
@@ -450,7 +457,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  // TODO: if dcache sbuffer resp needs to ne delayed 
+  // TODO: if dcache sbuffer resp needs to ne delayed
   // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
   // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 

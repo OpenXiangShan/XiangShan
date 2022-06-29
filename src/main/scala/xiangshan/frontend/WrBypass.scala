@@ -54,7 +54,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     }
   }
   val idx_tag_cam = Module(new CAMTemplate(new Idx_Tag, numEntries, 1))
-  val data_mem = Reg(Vec(numEntries, Vec(numWays, gen)))
+  val data_mem = Mem(numEntries, Vec(numWays, gen))
 
   val valids = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
 
@@ -69,7 +69,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   io.hit := hit
   for (i <- 0 until numWays) {
     io.hit_data(i).valid := Mux1H(hits_oh, valids)(i)
-    io.hit_data(i).bits  := data_mem(hit_idx)(i)
+    io.hit_data(i).bits  := data_mem.read(hit_idx)(i)
   }
 
   val full_mask = Fill(numWays, 1.U(1.W)).asTypeOf(Vec(numWays, Bool()))
@@ -78,11 +78,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   // write data on every request
   when (io.wen) {
     val data_write_idx = Mux(hit, hit_idx, enq_idx)
-    for (((m, d), i) <- update_way_mask.zip(io.write_data).zipWithIndex) {
-      when (m) {
-        data_mem(data_write_idx)(i) := d
-      }
-    }
+    data_mem.write(data_write_idx, io.write_data, update_way_mask)
   }
 
   // update valids

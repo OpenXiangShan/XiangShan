@@ -4,7 +4,6 @@ import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyRawModuleImp}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
@@ -44,7 +43,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = TLIdentityNode()
   val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(), BusErrorUnitParams(0x1f10010000L), new GenericLogicalTreeNode
+    new XSL1BusErrors(), BusErrorUnitParams(0x1f10010000L)
   ))
   val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)

@@ -272,11 +272,16 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
+  io.cpu_halt := ctrlBlock.io.cpu_halt
+
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
+
+  // memblock error exception writeback, 1 cycle after normal writeback
+  wb2Ctrl.io.delayedLoadError <> memBlock.io.delayedLoadError
 
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()

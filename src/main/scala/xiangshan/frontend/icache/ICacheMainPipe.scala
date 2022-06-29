@@ -310,10 +310,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
-  val s1_hit_data      =  VecInit(s1_data_cacheline.zipWithIndex.map { case(bank, i) =>
-    val port_hit_data = Mux1H(s1_tag_match_vec(i).asUInt, bank)
-    port_hit_data
-  })
 
   /** <PERF> replace victim way number */
 
@@ -653,8 +649,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
 
+  val s2_mmio_next       = RegNext(s2_mmio)
   val miss_all_fix       =  wait_state === wait_finish
-  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio)
+  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio_next)
   
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
@@ -667,7 +664,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     t_w(1).bits    := OHToUInt(s2_waymask(i))
   }
 
-  val s2_hit_datas    = RegEnable(next = s1_hit_data, enable = s1_fire)
+  //** use hit one-hot select data
+  val s2_hit_datas    = VecInit(s2_data_cacheline.zipWithIndex.map { case(bank, i) =>
+    val port_hit_data = Mux1H(s2_tag_match_vec(i).asUInt, bank)
+    port_hit_data
+  })
+
   val s2_datas        = Wire(Vec(2, UInt(blockBits.W)))
 
   s2_datas.zipWithIndex.map{case(bank,i) =>
@@ -685,7 +687,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i) || missSlot(i).m_corrupt
-    toIFU(i).bits.tlbExcp.mmio          := s2_mmio
+    toIFU(i).bits.tlbExcp.mmio          := s2_mmio_next
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){
       io.errors(i).valid            := true.B

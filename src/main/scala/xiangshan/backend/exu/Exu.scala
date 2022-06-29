@@ -71,6 +71,7 @@ case class ExuConfig
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
   val exceptionOut = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
+  val hasLoadError = fuConfigs.map(_.hasLoadError).reduce(_ || _)
   val flushPipe: Boolean = fuConfigs.map(_.flushPipe).reduce(_ ||_)
   val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
@@ -99,8 +100,12 @@ case class ExuConfig
   val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
   val needLoadBalance = hasUncertainlatency
 
+  def needWbPipeline(isFp: Boolean): Boolean = {
+    (isFp && readIntRf && writeFpRf) || (!isFp && readFpRf && writeIntRf)
+  }
+
   def canAccept(fuType: UInt): Bool = {
-    Cat(fuConfigs.map(_.fuType === fuType)).orR()
+    Cat(fuConfigs.map(_.fuType === fuType)).orR
   }
 }
 
