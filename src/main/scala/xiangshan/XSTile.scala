@@ -4,17 +4,17 @@ import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike}
-import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer, IntBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
-  val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
+  val ecc_error = Valid(UInt(soc.PAddrBits.W))
 }
 
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
@@ -63,8 +63,8 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
-  beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  mmio_port := TLBuffer() := mmio_xbar
+  beu.node := TLBuffer.chainNode(3) := mmio_xbar
+  mmio_port := TLBuffer.chainNode(3) := mmio_xbar
 
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
@@ -87,11 +87,18 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // public ports
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
-  val clint_int_sink = core.clint_int_sink
-  val plic_int_sink = core.plic_int_sink
-  val debug_int_sink = core.debug_int_sink
-  val beu_int_source = misc.beu.intNode
+  val clint_int_sink = IntIdentityNode()
+  val plic_int_sink = IntIdentityNode()
+  val debug_int_sink = IntIdentityNode()
+  val beu_int_source = IntIdentityNode()
   val core_reset_sink = BundleBridgeSink(Some(() => Bool()))
+
+  core.clint_int_sink :*= IntBuffer() :*= IntBuffer() :*= clint_int_sink
+  core.plic_int_sink :*= IntBuffer() :*= IntBuffer() :*= plic_int_sink
+  core.debug_int_sink :*= IntBuffer() :*= IntBuffer() :*= debug_int_sink
+  beu_int_source :*= IntBuffer() :*= IntBuffer() :*= misc.beu.intNode
+
+
 
   val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
     val buffer = LazyModule(new TLBuffer)
