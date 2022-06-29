@@ -310,9 +310,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     pma.module.io <> cacheable_check
 
     val freq = 100
-    val cnt = RegInit(freq.U)
+    val cnt = RegInit((freq - 1).U)
     val tick = cnt === 0.U
-    cnt := Mux(tick, freq.U, cnt - 1.U)
+    cnt := Mux(tick, (freq - 1).U, cnt - 1.U)
     clint.module.io.rtcTick := tick
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
