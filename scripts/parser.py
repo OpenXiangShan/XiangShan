@@ -47,9 +47,19 @@ class VModule(object):
         self.submodule = set()
 
     def add_line(self, line):
+        debug_rat = False
         if self.name.startswith("NegedgeDataModule_") and "@(posedge clock)" in line:
             line = line.replace("posedge", "negedge")
+        elif self.name == "RenameTable" or self.name == "RenameTable_1":
+            if line.strip().startswith("assign io_debug_rdata_"):
+                debug_rat = True
+                self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
+        if debug_rat:
+            self.lines.append("`else\n")
+            debug_rat_name = line.strip().split(" ")[1]
+            self.lines.append(f"  assign {debug_rat_name} = 0;\n")
+            self.lines.append("`endif\n")
         if len(self.lines):
             io_match = self.io_re.match(line)
             if io_match:
