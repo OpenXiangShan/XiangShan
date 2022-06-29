@@ -520,15 +520,21 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val h_not_hit :: h_false_hit :: h_hit :: Nil = Enum(3)
   val entry_hit_status = RegInit(VecInit(Seq.fill(FtqSize)(h_not_hit)))
 
-
-  when (bpu_in_fire) {
-    entry_fetch_status(bpu_in_resp_idx) := f_to_send
-    commitStateQueue(bpu_in_resp_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
-    cfiIndex_vec(bpu_in_resp_idx) := bpu_in_resp.cfiIndex
-    mispredict_vec(bpu_in_resp_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
-    update_target(bpu_in_resp_idx) := bpu_in_resp.getTarget
-    pred_stage(bpu_in_resp_idx) := bpu_in_stage
+  // modify registers one cycle later to cut critical path
+  val last_cycle_bpu_in = RegNext(bpu_in_fire)
+  val last_cycle_bpu_in_idx = RegNext(bpu_in_resp_idx)
+  val last_cycle_update_target = RegNext(bpu_in_resp.getTarget)
+  val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex)
+  val last_cycle_bpu_in_stage = RegNext(bpu_in_stage)
+  when (last_cycle_bpu_in) {
+    entry_fetch_status(last_cycle_bpu_in_idx) := f_to_send
+    commitStateQueue(last_cycle_bpu_in_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
+    cfiIndex_vec(last_cycle_bpu_in_idx) := last_cycle_cfiIndex
+    mispredict_vec(last_cycle_bpu_in_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
+    update_target(last_cycle_bpu_in_idx) := last_cycle_update_target
+    pred_stage(last_cycle_bpu_in_idx) := last_cycle_bpu_in_stage
   }
+
 
   bpuPtr := bpuPtr + enq_fire
   ifuPtr := ifuPtr + (io.toIfu.req.fire && allowToIfu)
@@ -566,7 +572,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   val bpu_in_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=bpu_in_fire)
   val bpu_in_bypass_ptr = RegNext(bpu_in_resp_ptr)
-  val last_cycle_bpu_in = RegNext(bpu_in_fire)
   val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
 
   // read pc and target
@@ -574,24 +579,31 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
-  io.toIfu.req.bits.nextStartAddr := update_target(ifuPtr.value)
-  io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
 
+  
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
-  val entry_is_to_send = WireInit(false.B)
+  val entry_is_to_send = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
+  val entry_next_addr = WireInit(update_target(ifuPtr.value))
+  val entry_ftq_offset = WireInit(cfiIndex_vec(ifuPtr.value))
 
+  
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf
     entry_is_to_send := true.B
+    entry_next_addr := last_cycle_update_target
+    entry_ftq_offset := last_cycle_cfiIndex
   }.elsewhen (last_cycle_to_ifu_fire) {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.last
-    entry_is_to_send := RegNext(entry_fetch_status((ifuPtr+1.U).value) === f_to_send)
+    entry_is_to_send := RegNext(entry_fetch_status((ifuPtr+1.U).value) === f_to_send) ||
+                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtr+1.U)) // reduce potential bubbles
   }.otherwise {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.init.last
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
   }
 
   io.toIfu.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
+  io.toIfu.req.bits.nextStartAddr := entry_next_addr
+  io.toIfu.req.bits.ftqOffset := entry_ftq_offset
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
 
   // when fall through is smaller in value than start address, there must be a false hit
@@ -1004,8 +1016,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       // XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
     }
 
-    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && entry_fetch_status(prefetchPtr.value) === f_to_send
-    io.toPrefetch.req.bits.target := update_target(prefetchPtr.value)
+
+    val prefetch_is_to_send = WireInit(entry_fetch_status(prefetchPtr.value) === f_to_send)
+    val prefetch_addr = WireInit(update_target(prefetchPtr.value))
+    
+    when (last_cycle_bpu_in && bpu_in_bypass_ptr === prefetchPtr) {
+      prefetch_is_to_send := true.B
+      prefetch_addr := last_cycle_update_target
+    }
+    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send
+    io.toPrefetch.req.bits.target := prefetch_addr
 
     when(redirectVec.map(r => r.valid).reduce(_||_)){
       val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
