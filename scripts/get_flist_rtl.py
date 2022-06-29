@@ -13,7 +13,7 @@ def create_file_list(dst_path, lst, prefix):
     for name in lst:
       dst.write(f"{prefix}{name}\n")
 
-phy_files = get_dir_files(sys.argv[1] + "/lib/regfile") + get_dir_files(sys.argv[1] + "/lib/sram/wrapper")
+phy_files = get_dir_files(sys.argv[1] + "/lib/sram/wrapper")
 raw_files = get_dir_files("./rtl/XSTop")
 rtl_files = []
 
@@ -24,4 +24,3 @@ for f in raw_files:
     print(f"{f} will be replaced!")
 
 create_file_list(sys.argv[1] + "/flist/flist_rtl.f", rtl_files, "../rtl/XSTop/")
-
