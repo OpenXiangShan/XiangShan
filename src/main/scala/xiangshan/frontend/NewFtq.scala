@@ -453,6 +453,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   allowToIfu := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
 
   val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
+  val ifuPtrPlus1 = RegInit(FtqPtr(false.B, 1.U))
   val validEntries = distanceBetween(bpuPtr, commPtr)
 
   // **********************************************************************
@@ -537,7 +538,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
   bpuPtr := bpuPtr + enq_fire
-  ifuPtr := ifuPtr + (io.toIfu.req.fire && allowToIfu)
+  when (io.toIfu.req.fire && allowToIfu) {
+    ifuPtr := ifuPtrPlus1
+    ifuPtrPlus1 := ifuPtrPlus1 + 1.U
+  }
 
   // only use ftb result to assign hit status
   when (bpu_s2_resp.valid) {
@@ -552,6 +556,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
     when (!isBefore(ifuPtr, bpu_s2_resp.ftq_idx)) {
       ifuPtr := bpu_s2_resp.ftq_idx
+      ifuPtrPlus1 := bpu_s2_resp.ftq_idx + 1.U
     }
   }
 
@@ -562,6 +567,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
     when (!isBefore(ifuPtr, bpu_s3_resp.ftq_idx)) {
       ifuPtr := bpu_s3_resp.ftq_idx
+      ifuPtrPlus1 := bpu_s3_resp.ftq_idx + 1.U
     }
   }
 
@@ -576,7 +582,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   // read pc and target
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
-  ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
+  ftq_pc_mem.io.raddr.init.last := ifuPtrPlus1.value
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
 
@@ -594,8 +600,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_ftq_offset := last_cycle_cfiIndex
   }.elsewhen (last_cycle_to_ifu_fire) {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.last
-    entry_is_to_send := RegNext(entry_fetch_status((ifuPtr+1.U).value) === f_to_send) ||
-                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtr+1.U)) // reduce potential bubbles
+    entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
+                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
   }.otherwise {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.init.last
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
@@ -880,6 +886,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     bpuPtr := next
     ifuPtr := next
     ifuWbPtr := next
+    ifuPtrPlus1 := idx + 2.U
     when (notIfu) {
       commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
         when(i.U > offset || i.U === offset && flushItSelf){
