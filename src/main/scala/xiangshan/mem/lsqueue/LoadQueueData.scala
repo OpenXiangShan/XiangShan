@@ -37,10 +37,10 @@ class LQDataEntry(implicit p: Parameters) extends XSBundle {
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
 
 // load queue paddr module
-// 
+//
 // It supports 3 cam sources:
-// * st-ld violation addr cam 
-// * data release addr cam 
+// * st-ld violation addr cam
+// * data release addr cam
 // * data refill addr cam
 class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
@@ -107,7 +107,7 @@ class LQMaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(8.W)))
-    // st-ld violation check wmask compare 
+    // st-ld violation check wmask compare
     val violationMdata = Input(Vec(StorePipelineWidth, UInt(8.W))) // input 8-bit wmask
     val violationMmask = Output(Vec(StorePipelineWidth, Vec(numEntries, Bool()))) // output wmask overlap vector
   })
@@ -126,7 +126,7 @@ class LQMaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     }
   }
 
-  // st-ld violation check wmask compare 
+  // st-ld violation check wmask compare
   for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
       io.violationMmask(i)(j) := (io.violationMdata(i) & data(j)).orR
@@ -142,7 +142,7 @@ class LQMaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
 }
 
 // SQDataModule is a wrapper of 8 bit MaskedSyncDataModuleTemplates
-// 
+//
 // It also contains:
 // * fwdMask, which is used to merge refill data and forwarded data
 // * word index extracted from paddr, which is used to select data from refill data (a cacheline)
@@ -151,7 +151,7 @@ class LQDataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     // sync read
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt(XLEN.W)))
-    
+
     // address indexed write
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
@@ -160,7 +160,7 @@ class LQDataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     val fwdMaskWdata = Input(Vec(numWrite, UInt(8.W)))
     // refillOffBits - wordOffBits bits in paddr need to be stored in LQDataModule for refilling
     val paddrWdata = Input(Vec(numWrite, UInt((PAddrBits).W)))
-    
+
     // masked write
     val mwmask = Input(Vec(numEntries, Bool()))
     val refillData = Input(UInt(l1BusDataWidth.W))
