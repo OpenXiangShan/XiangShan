@@ -45,7 +45,8 @@ class MaskedSyncDataModuleTemplate[T <: Data](
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(RegNext(io.raddr(i)))
+    val raddr_dec = RegNext(UIntToOH(io.raddr(i)))
+    io.rdata(i) := Mux1H(raddr_dec, data)
   }
 
   // masked read ports
@@ -53,27 +54,18 @@ class MaskedSyncDataModuleTemplate[T <: Data](
     io.mrdata(i) := Mux1H(RegNext(io.mrmask(i)), data)
   }
 
-  // write ports (with priorities)
-  for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
-      data(io.waddr(i)) := io.wdata(i)
-    }
-  }
-
-  // masked write
-  for (j <- 0 until numEntries) {
-    val wen = VecInit((0 until numMWrite).map(i => io.mwmask(i)(j))).asUInt.orR
-    when (wen) {
-      data(j) := VecInit((0 until numMWrite).map(i => {
-        Mux(io.mwmask(i)(j), io.mwdata(i), 0.U).asUInt
-      })).reduce(_ | _)
-    }
-  }
-
-  // DataModuleTemplate should not be used when there're any write conflicts
-  for (i <- 0 until numWrite) {
-    for (j <- i+1 until numWrite) {
-      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+  val waddr_dec = io.waddr.map(a => UIntToOH(a))
+  for (i <- 0 until numEntries) {
+    // write ports
+    val write_en_vec = io.wen.zip(waddr_dec).map(w => w._1 && w._2(i))
+    val write_en = VecInit(write_en_vec).asUInt.orR
+    val write_data = Mux1H(write_en_vec, io.wdata)
+    // masked write ports
+    val mwrite_en_vec = io.mwmask.map(_(i))
+    val mwrite_en = VecInit(mwrite_en_vec).asUInt.orR
+    val mwrite_data = Mux1H(mwrite_en_vec, io.mwdata)
+    when (write_en || mwrite_en) {
+      data(i) := Mux1H(Seq(write_en, mwrite_en), Seq(write_data, mwrite_data))
     }
   }
 }

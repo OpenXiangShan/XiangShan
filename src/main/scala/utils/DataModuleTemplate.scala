@@ -133,8 +133,8 @@ class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int
   }
 
   // write ports
+  val waddr_dec = io.waddr.map(a => UIntToOH(a))
   for (j <- 0 until numEntries) {
-    val waddr_dec = io.waddr.map(a => UIntToOH(a))
     val write_wen = io.wen.zip(waddr_dec).map(w => w._1 && w._2(j))
     when (VecInit(write_wen).asUInt.orR) {
       data(j) := Mux1H(write_wen, io.wdata)
