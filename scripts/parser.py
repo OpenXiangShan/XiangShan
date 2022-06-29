@@ -51,9 +51,23 @@ class VModule(object):
         self.submodule = dict()
 
     def add_line(self, line):
-        if self.name.startswith("NegedgeDataModule_") and "@(posedge clock)" in line:
+        debug_dontCare = False
+        if "NegedgeDataModule_" in self.name and "@(posedge clock)" in line:
             line = line.replace("posedge", "negedge")
+        elif "RenameTable" in self.name:
+            if line.strip().startswith("assign io_debug_rdata_"):
+                debug_dontCare = True
+        elif "SynRegfileSlice" in self.name:
+            if line.strip().startswith("assign io_debug_ports_"):
+                debug_dontCare = True
+        if debug_dontCare:
+            self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
+        if debug_dontCare:
+            self.lines.append("`else\n")
+            debug_dontCare_name = line.strip().split(" ")[1]
+            self.lines.append(f"  assign {debug_dontCare_name} = 0;\n")
+            self.lines.append("`endif\n")
         if len(self.lines):
             io_match = self.io_re.match(line)
             if io_match:

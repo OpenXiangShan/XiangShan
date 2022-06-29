@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyRawModuleImp}
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
@@ -64,8 +65,8 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
-  beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  mmio_port := TLBuffer() := mmio_xbar
+  beu.node := TLBuffer.chainNode(3) := mmio_xbar
+  mmio_port := TLBuffer.chainNode(3) := mmio_xbar
 
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
@@ -88,11 +89,18 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
   // public ports
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
-  val clint_int_sink = core.clint_int_sink
-  val plic_int_sink = core.plic_int_sink
-  val debug_int_sink = core.debug_int_sink
-  val beu_int_source = misc.beu.intNode
+  val clint_int_sink = IntIdentityNode()
+  val plic_int_sink = IntIdentityNode()
+  val debug_int_sink = IntIdentityNode()
+  val beu_int_source = IntIdentityNode()
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
+
+  core.clint_int_sink :*= IntBuffer() :*= IntBuffer() :*= clint_int_sink
+  core.plic_int_sink :*= IntBuffer() :*= IntBuffer() :*= plic_int_sink
+  core.debug_int_sink :*= IntBuffer() :*= IntBuffer() :*= debug_int_sink
+  beu_int_source :*= IntBuffer() :*= IntBuffer() :*= misc.beu.intNode
+
+
 
   val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
     val buffer = LazyModule(new TLBuffer)
