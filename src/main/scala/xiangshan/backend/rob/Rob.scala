@@ -359,7 +359,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * (1) read: commits/walk/exception
     * (2) write: write back from exe units
     */
-  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth, "Rob"))
+  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth, "Rob", concatData = true))
   val dispatchDataRead = dispatchData.io.rdata
 
   val exceptionGen = Module(new ExceptionGen)

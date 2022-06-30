@@ -83,7 +83,14 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   }
 }
 
-class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
+class SyncDataModuleTemplate[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  parentModule: String,
+  concatData: Boolean = false
+) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -92,13 +99,14 @@ class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, n
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val dataModule = Module(new NegedgeDataModuleTemplate(gen, numEntries, numRead, numWrite, parentModule))
+  val dataType = if (concatData) UInt(gen.getWidth.W) else gen
+  val dataModule = Module(new NegedgeDataModuleTemplate(dataType, numEntries, numRead, numWrite, parentModule))
 
   // delay one clock
   val raddr = RegNext(io.raddr)
   val wen = RegNext(io.wen)
   val waddr = io.wen.zip(io.waddr).map(w => RegEnable(w._2, w._1))
-  val wdata = RegNext(io.wdata)
+  val wdata = RegNext(VecInit(io.wdata.map(w => w.asTypeOf(dataType))))
 
   // input
   dataModule.io.raddr := raddr
@@ -107,7 +115,7 @@ class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, n
   dataModule.io.wdata := wdata
 
   // output
-  io.rdata := dataModule.io.rdata
+  io.rdata := dataModule.io.rdata.map(_.asTypeOf(gen))
 }
 
 class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
