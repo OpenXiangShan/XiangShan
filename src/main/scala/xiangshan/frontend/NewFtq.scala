@@ -926,7 +926,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
-  val may_have_stall_from_bpu = RegInit(false.B)
+  val may_have_stall_from_bpu = Wire(Bool())
+  val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
+  may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
   val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
@@ -967,7 +969,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
-  may_have_stall_from_bpu := can_commit_cfi.valid && !to_bpu_hit && !may_have_stall_from_bpu
+  switch (bpu_ftb_update_stall) {
+    is (0.U) {
+      when (can_commit_cfi.valid && !to_bpu_hit && canCommit) {
+        bpu_ftb_update_stall := 2.U // 2-cycle stall
+      }
+    }
+    is (2.U) {
+      bpu_ftb_update_stall := 1.U
+    }
+    is (1.U) {
+      bpu_ftb_update_stall := 0.U
+    }
+    is (3.U) {
+      XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+    }
+  }
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
