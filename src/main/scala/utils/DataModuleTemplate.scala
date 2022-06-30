@@ -133,15 +133,16 @@ class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int
   })
 
   override def desiredName: String = s"NegedgeDataModule_${parentModule}_${numEntries}entry"
-  val data = Mem(numEntries, gen)
+  val data = Reg(Vec(numEntries, gen))
 
   // read ports
   for (i <- 0 until numRead) {
     val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i))
+    val addr_dec = UIntToOH(io.raddr(i), numEntries)
     when (VecInit(read_by).asUInt.orR) {
       io.rdata(i) := Mux1H(read_by, io.wdata)
     } .otherwise {
-      io.rdata(i) := data(io.raddr(i))
+      io.rdata(i) := Mux1H(addr_dec, data)
     }
   }
 
