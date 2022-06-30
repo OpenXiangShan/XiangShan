@@ -295,9 +295,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       val update_write_data = Flipped(Valid(new FTBEntryWithTag))
       val update_write_way = Input(UInt(log2Ceil(numWays).W))
       val update_write_alloc = Input(Bool())
-
-      val try_to_write_way = Flipped(Valid(UInt(log2Ceil(numWays).W)))
-      val try_to_write_pc = Input(UInt(VAddrBits.W))
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
@@ -398,12 +395,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     ftb.io.w.apply(u_valid, u_data, u_idx, u_mask)
 
     // for replacer
-    write_set := Mux(u_valid, u_idx, ftbAddr.getIdx(io.try_to_write_pc))
-    write_way.valid := u_valid || io.try_to_write_way.valid
-    write_way.bits := Mux(u_valid,
-      Mux(io.update_write_alloc, allocWriteWay, io.update_write_way),
-      io.try_to_write_way.bits
-    )
+    write_set := u_idx
+    write_way.valid := u_valid
+    write_way.bits := Mux(io.update_write_alloc, allocWriteWay, io.update_write_way)
 
     // print hit entry info
     Mux1H(total_hits, ftb.io.r.resp.data).display(true.B)
@@ -481,11 +475,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.update_write_alloc := Mux(update_now, false.B,         RegNext(!ftbBank.io.update_hits.valid)) // use it one cycle later
   ftbBank.io.update_access := u_valid && !u_meta.hit
   ftbBank.io.s1_fire := io.s1_fire
-
-  // for replacer
-  ftbBank.io.try_to_write_way.valid := RegNext(io.update.valid) && u_meta.hit
-  ftbBank.io.try_to_write_way.bits := u_meta.writeWay
-  ftbBank.io.try_to_write_pc := update.pc
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
