@@ -106,7 +106,7 @@ class SyncDataModuleTemplate[T <: Data](
   val raddr = RegNext(io.raddr)
   val wen = RegNext(io.wen)
   val waddr = io.wen.zip(io.waddr).map(w => RegEnable(w._2, w._1))
-  val wdata = RegNext(VecInit(io.wdata.map(w => w.asTypeOf(dataType))))
+  val wdata = if (concatData) RegNext(VecInit(io.wdata.map(w => w.asTypeOf(dataType)))) else RegNext(io.wdata)
 
   // input
   dataModule.io.raddr := raddr
@@ -115,7 +115,12 @@ class SyncDataModuleTemplate[T <: Data](
   dataModule.io.wdata := wdata
 
   // output
-  io.rdata := dataModule.io.rdata.map(_.asTypeOf(gen))
+  if (concatData) {
+    io.rdata := dataModule.io.rdata.map(_.asTypeOf(gen))
+  }
+  else {
+    io.rdata := dataModule.io.rdata
+  }
 }
 
 class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {

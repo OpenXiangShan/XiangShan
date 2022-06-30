@@ -120,10 +120,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
-  val loadWaitBit = Bool() 
-  // If (loadWaitBit && loadWaitStrict), strict load wait is needed 
+  val loadWaitBit = Bool()
+  // If (loadWaitBit && loadWaitStrict), strict load wait is needed
   // load inst will not be executed until ALL former store addr calcuated
-  val loadWaitStrict = Bool() 
+  val loadWaitStrict = Bool()
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -331,7 +331,7 @@ class ExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isInterrupt = Bool()
 }
 
-class RobCommitInfo(implicit p: Parameters) extends XSBundle {
+class RobDispatchData(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
   val fpWen = Bool()
@@ -341,9 +341,23 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+}
 
+class RobCommitInfo(implicit p: Parameters) extends RobDispatchData {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+
+  def connectDispatchData(data: RobDispatchData) {
+    ldest := data.ldest
+    rfWen := data.rfWen
+    fpWen := data.fpWen
+    wflags := data.wflags
+    commitType := data.commitType
+    pdest := data.pdest
+    old_pdest := data.old_pdest
+    ftqIdx := data.ftqIdx
+    ftqOffset := data.ftqOffset
+  }
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
