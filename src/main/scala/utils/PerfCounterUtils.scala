@@ -196,20 +196,16 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
   val event_op_1 = io.hpm_event(49, 45)
   val event_op_2 = io.hpm_event(54, 50)
 
+  def combineEvents(cnt_1: UInt, cnt_2: UInt, optype: UInt): UInt = 
+    Mux(optype(0), cnt_1 & cnt_2,
+    Mux(optype(1), cnt_1 ^ cnt_2,
+    Mux(optype(2), cnt_1 + cnt_2,
+                   cnt_1 | cnt_2)))
 
-  val event_step_0 = Mux(event_op_0(0), events_incr_0.value & events_incr_1.value,
-                     Mux(event_op_0(1), events_incr_0.value ^ events_incr_1.value,
-                     Mux(event_op_0(2), events_incr_0.value + events_incr_1.value,
-                                        events_incr_0.value | events_incr_1.value)))
-  val event_step_1 = Mux(event_op_1(0), events_incr_2.value & events_incr_3.value,
-                     Mux(event_op_1(1), events_incr_2.value ^ events_incr_3.value,
-                     Mux(event_op_1(2), events_incr_2.value + events_incr_3.value,
-                                        events_incr_2.value | events_incr_3.value)))
-
-  val selected = Mux(event_op_2(0), event_step_0 & event_step_1,
-                 Mux(event_op_2(1), event_step_0 ^ event_step_1,
-                 Mux(event_op_2(2), event_step_0 + event_step_1,
-                                    event_step_0 | event_step_1)))
+  val event_step_0 = combineEvents(events_incr_0.value, events_incr_1.value, event_op_0)
+  val event_step_1 = combineEvents(events_incr_2.value, events_incr_3.value, event_op_1)
+  val selected = combineEvents(event_step_0, event_step_1, event_op_2)
+  
   val perfEvents = Seq(("selected", selected))
   generatePerfEvent()
 }
