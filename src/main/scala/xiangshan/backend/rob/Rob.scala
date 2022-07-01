@@ -76,8 +76,6 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 
-class RobDispatchData(implicit p: Parameters) extends RobCommitInfo
-
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
@@ -359,7 +357,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * (1) read: commits/walk/exception
     * (2) write: write back from exe units
     */
-  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth, "Rob"))
+  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth, "Rob", concatData = true))
   val dispatchDataRead = dispatchData.io.rdata
 
   val exceptionGen = Module(new ExceptionGen)
@@ -527,11 +525,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // extra space is used when rob has no enough space, but mispredict recovery needs such info to walk regmap
   require(RenameWidth <= CommitWidth)
-  val extraSpaceForMPR = Reg(Vec(RenameWidth, new RobDispatchData))
+  val extraSpaceForMPR = Reg(Vec(RenameWidth, new RobCommitInfo))
   val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
   when (io.enq.needAlloc.asUInt.orR && io.redirect.valid) {
     usedSpaceForMPR := io.enq.needAlloc
-    extraSpaceForMPR := dispatchData.io.wdata
+    extraSpaceForMPR.zip(dispatchData.io.wdata).map(d => d._1.connectDispatchData(d._2))
+    extraSpaceForMPR.zip(io.enq.req.map(_.bits)).foreach{ case (wdata, req) =>
+      wdata.pc := req.cf.pc
+    }
     XSDebug("rob full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", io.enq.needAlloc.asUInt)
   }
 
@@ -573,7 +574,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush && !hasWFI
-    io.commits.info(i)  := dispatchDataRead(i)
+    io.commits.info(i).connectDispatchData(dispatchDataRead(i))
+    io.commits.info(i).pc := debug_microOp(deqPtrVec(i).value).cf.pc
 
     when (state === s_walk) {
       io.commits.valid(i) := commit_v(i) && shouldWalkVec(i)
@@ -812,7 +814,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.old_pdest := req.old_pdest
     wdata.ftqIdx := req.cf.ftqPtr
     wdata.ftqOffset := req.cf.ftqOffset
-    wdata.pc := req.cf.pc
   }
   dispatchData.io.raddr := commitReadAddr_next
 
