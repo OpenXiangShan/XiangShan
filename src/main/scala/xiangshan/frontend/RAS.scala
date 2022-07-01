@@ -69,7 +69,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top = RegInit(RASEntry(0x80000000L.U, 0.U))
+    val top = Reg(new RASEntry())
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
     
     val wen = WireInit(false.B)
@@ -166,16 +166,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     io.sp := sp
     io.top := top
     
-    val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
-    val do_reset = RegInit(true.B)
-    when (do_reset) {
-      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
-    }
-    resetIdx := resetIdx + do_reset
-    when (resetIdx === (RasSize-1).U) {
-      do_reset := false.B
-    }
-
     debugIO.spec_push_entry := RASEntry(io.spec_new_addr, Mux(spec_alloc_new, 1.U, top.ctr + 1.U))
     debugIO.spec_alloc_new := spec_alloc_new
     debugIO.recover_push_entry := RASEntry(io.recover_new_addr, Mux(recover_alloc_new, 1.U, io.recover_top.ctr + 1.U))
