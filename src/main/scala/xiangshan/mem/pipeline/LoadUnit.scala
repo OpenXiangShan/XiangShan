@@ -590,9 +590,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedbackSlow.bits.hit := RegNext(load_s2.io.rsFeedback.bits).hit || 
     s3_refill_hit_load_paddr && s3_replay_for_mshrfull
 
-  // feedback bank conflict to rs
-  io.feedbackFast.bits := load_s1.io.rsFeedback.bits
-  io.feedbackFast.valid := load_s1.io.rsFeedback.valid
+  // feedback bank conflict / ld-vio check struct hazard to rs
+  io.feedbackFast.bits := RegNext(load_s1.io.rsFeedback.bits)
+  io.feedbackFast.valid := RegNext(load_s1.io.rsFeedback.valid && !load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
   // If replay is reported at load_s1, inst will be canceled (will not enter load_s2),
   // in that case:
   // * replay should not be reported twice
