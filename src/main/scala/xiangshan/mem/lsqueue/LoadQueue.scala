@@ -336,7 +336,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
+    // allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
+    allocated(i) && !writebacked(i) && datavalid(i) // query refilling will cause bad timing
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
