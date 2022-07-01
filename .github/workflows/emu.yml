@@ -105,6 +105,10 @@ jobs:
         run: |
           $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
+      - name: Uncache Fetch Test - recursion
+        run: |
+          $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/flash_recursion_test.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/flash_recursion.log
 
   emu-mc:
     runs-on: bosc
