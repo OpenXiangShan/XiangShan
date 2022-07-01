@@ -138,7 +138,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   io.write.ready := true.B
 
   // wrap data rows of 8 ways
-  class DataSRAMBank(parentName:String = "Unknown", index: Int) extends Module {
+  class DataSRAMBank(parentName:String = "Unknown",index:Int) extends Module {
     val io = IO(new Bundle() {
       val w = new Bundle() {
         val en = Input(Bool())
@@ -166,10 +166,10 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
         shouldReset = false,
         holdRead = false,
         singlePort = true,
-        parentName = parentName + s"dataBank${idx}_"
+        parentName = parentName + s"dataWay${idx}_"
       ))
     })
-
+    val (dataBankMbistPipelineSram,dataBankMbistPipelineRf,dataBankMbistPipelineSramRepair,dataBankMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcacheDataBank${index}")
     for (w <- 0 until DCacheWays) {
       val wen = io.w.en && io.w.way_en(w)
       data_bank(w).io.w.req.valid := wen
@@ -218,8 +218,7 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     }
   }
 
-  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(parentName = parentName ,i)))
-  val (dataBankMbistPipelineSram,dataBankMbistPipelineRf,dataBankMbistPipelineSramRepair,dataBankMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcacheDataBank")
+  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(parentName = parentName + s"dataBank${i}_",i)))
   val ecc_banks = List.tabulate(DCacheBanks)(idx => Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
