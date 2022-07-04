@@ -483,9 +483,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val csrevents = pfevent.io.hpmevent.slice(8,16)
 
   val perfinfo = IO(new Bundle(){
-    val perfEventsRs      = Input(Vec(NumRs, new PerfEvent))
-    val perfEventsEu0     = Input(Vec(6, new PerfEvent))
-    val perfEventsEu1     = Input(Vec(6, new PerfEvent))
+    val perfEventsRs      = Input(Vec(NumRs, new PerfInc))
+    val perfEventsEu0     = Input(Vec(6, new PerfInc))
+    val perfEventsEu1     = Input(Vec(6, new PerfInc))
   })
 
   val perfFromUnits = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerfEvents)
@@ -502,7 +502,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     }
   }
 
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfInc))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }

@@ -249,7 +249,7 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
-    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfInc))
     val beu_errors = Output(new XSL1BusErrors())
     val dfx_reset = Input(new DFTResetGen)
   })

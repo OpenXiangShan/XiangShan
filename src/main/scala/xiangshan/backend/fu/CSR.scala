@@ -67,10 +67,10 @@ class FpuCsrIO extends Bundle {
 
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
-  val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
-  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
-  val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
+  val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfInc)
+  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfInc)
+  val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfInc)
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfInc)
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -620,7 +620,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     perfEventscounten(i) := (perfEvents(i)(63,60) & priviledgeModeOH).orR
   }
 
-  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfInc))
   for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
     hpmEvents(i) := csrio.perf.perfEventsHc(i)
   }
