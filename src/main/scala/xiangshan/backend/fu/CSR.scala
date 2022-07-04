@@ -625,6 +625,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hpmEvents(i) := csrio.perf.perfEventsHc(i)
   }
 
+  // print perfEvents
+  val allPerfEvents = hpmEvents.map(x => (s"Hc", x.value))
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("CSR perfEvents Set", name, inc, i)
+    }
+  }
+
   val csrevents = perfEvents.slice(24, 29)
   val hpm_hc = HPerfMonitor(csrevents, hpmEvents)
   val mcountinhibit = RegInit(0.U(XLEN.W))
