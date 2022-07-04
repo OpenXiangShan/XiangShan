@@ -347,7 +347,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   s1_components_ready := predictors.io.s1_ready
   s1_ready := s1_fire || !s1_valid
-  s0_fire := !reset.asBool && s1_components_ready && s1_ready
+  s0_fire := RegNext(!reset.asBool) && s1_components_ready && s1_ready
   predictors.io.s0_fire := s0_fire
 
   s2_components_ready := predictors.io.s2_ready
