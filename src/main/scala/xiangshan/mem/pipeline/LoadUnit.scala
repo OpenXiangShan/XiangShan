@@ -596,9 +596,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // If replay is reported at load_s1, inst will be canceled (will not enter load_s2),
   // in that case:
   // * replay should not be reported twice
-  assert(!(RegNext(RegNext(io.feedbackFast.valid)) && io.feedbackSlow.valid))
+  assert(!(RegNext(io.feedbackFast.valid) && io.feedbackSlow.valid))
   // * io.fastUop.valid should not be reported
-  assert(!RegNext(io.feedbackFast.valid && io.fastUop.valid))
+  assert(!RegNext(io.feedbackFast.valid && RegNext(io.fastUop.valid)))
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
