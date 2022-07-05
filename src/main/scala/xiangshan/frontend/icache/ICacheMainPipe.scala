@@ -649,9 +649,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
 
-  val s2_mmio_next       = RegNext(s2_mmio)
+  val s2_mmio_state       = RegInit(false.B)
+  
+  when(s2_mmio_state && s2_fire) { s2_mmio_state :=  false.B }
+  .elsewhen(s2_mmio && !s2_mmio_state) { s2_mmio_state := true.B }
+
   val miss_all_fix       =  wait_state === wait_finish
-  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio_next)
+  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio_state)
   
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
@@ -687,7 +691,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i) || missSlot(i).m_corrupt
-    toIFU(i).bits.tlbExcp.mmio          := s2_mmio_next
+    toIFU(i).bits.tlbExcp.mmio          := s2_mmio_state
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){
       io.errors(i).valid            := true.B
