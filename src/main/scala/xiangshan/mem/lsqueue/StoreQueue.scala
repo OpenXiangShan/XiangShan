@@ -631,15 +631,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
+  val perfValidCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   val perfEvents = Seq(
-    ("mmioCycle      ", uncacheState =/= s_idle                                                                                                                             ),
-    ("mmioCnt        ", io.uncache.req.fire()                                                                                                                               ),
-    ("mmio_wb_success", io.mmioStout.fire()                                                                                                                                 ),
-    ("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready                                                                                                           ),
-    ("stq_1_4_valid  ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U))                                                                              ),
-    ("stq_2_4_valid  ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U))    ),
-    ("stq_3_4_valid  ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U))),
-    ("stq_4_4_valid  ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U))                                                                          ),
+    ("mmioCycle      ", uncacheState =/= s_idle),
+    ("mmioCnt        ", io.uncache.req.fire()),
+    ("mmio_wb_success", io.mmioStout.fire()),
+    ("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready),
+    ("stq_1_4_valid  ", (perfValidCount < (StoreQueueSize.U/4.U))),
+    ("stq_2_4_valid  ", (perfValidCount > (StoreQueueSize.U/4.U)) & (perfValidCount <= (StoreQueueSize.U/2.U))),
+    ("stq_3_4_valid  ", (perfValidCount > (StoreQueueSize.U/2.U)) & (perfValidCount <= (StoreQueueSize.U*3.U/4.U))),
+    ("stq_4_4_valid  ", (perfValidCount > (StoreQueueSize.U*3.U/4.U))),
   )
   generatePerfEvent()
 

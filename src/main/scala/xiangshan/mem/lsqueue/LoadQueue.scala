@@ -860,17 +860,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
+  val perfValidCount = RegNext(validCount)
+
   val perfEvents = Seq(
-    ("rollback         ", io.rollback.valid                                                               ),
-    ("mmioCycle        ", uncacheState =/= s_idle                                                         ),
-    ("mmio_Cnt         ", io.uncache.req.fire()                                                           ),
-    ("refill           ", io.refill.valid                                                                 ),
-    ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
-    ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
-    ("ltq_1_4_valid    ", (validCount < (LoadQueueSize.U/4.U))                                            ),
-    ("ltq_2_4_valid    ", (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))    ),
-    ("ltq_3_4_valid    ", (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))),
-    ("ltq_4_4_valid    ", (validCount > (LoadQueueSize.U*3.U/4.U))                                        )
+    ("rollback         ", io.rollback.valid),
+    ("mmioCycle        ", uncacheState =/= s_idle),
+    ("mmio_Cnt         ", io.uncache.req.fire()),
+    ("refill           ", io.dcache.valid),
+    ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))),
+    ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))),
+    ("ltq_1_4_valid    ", (perfValidCount < (LoadQueueSize.U/4.U))),
+    ("ltq_2_4_valid    ", (perfValidCount > (LoadQueueSize.U/4.U)) & (perfValidCount <= (LoadQueueSize.U/2.U))),
+    ("ltq_3_4_valid    ", (perfValidCount > (LoadQueueSize.U/2.U)) & (perfValidCount <= (LoadQueueSize.U*3.U/4.U))),
+    ("ltq_4_4_valid    ", (perfValidCount > (LoadQueueSize.U*3.U/4.U)))
   )
   generatePerfEvent()
 

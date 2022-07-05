@@ -679,10 +679,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val perfEvents = Seq(
     ("load_s0_in_fire         ", load_s0.io.in.fire()                                                                                                            ),
-    ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()                                                                            ),
     ("stall_dcache            ", load_s0.io.out.valid && load_s0.io.out.ready && !load_s0.io.dcacheReq.ready                                                     ),
-    ("addr_spec_success       ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) === load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
-    ("addr_spec_failed        ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) =/= load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
     ("load_s1_in_fire         ", load_s1.io.in.fire                                                                                                              ),
     ("load_s1_tlb_miss        ", load_s1.io.in.fire && load_s1.io.dtlbResp.bits.miss                                                                             ),
     ("load_s2_in_fire         ", load_s2.io.in.fire                                                                                                              ),
@@ -692,6 +689,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     ("load_s2_replay_cache    ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss),
   )
   generatePerfEvent()
+
+  // Will cause timing problem:
+  // ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()),
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
