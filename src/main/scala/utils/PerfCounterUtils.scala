@@ -158,14 +158,14 @@ object XSPerfPrint {
   }
 }
 
-class PerfInc extends Bundle {
+class PerfEvent extends Bundle {
   val value = UInt(6.W)
 }
 
 trait HasPerfEvents { this: RawModule =>
   val perfEvents: Seq[(String, UInt)]
 
-  lazy val io_perf: Vec[PerfInc] = IO(Output(Vec(perfEvents.length, new PerfInc)))
+  lazy val io_perf: Vec[PerfEvent] = IO(Output(Vec(perfEvents.length, new PerfEvent)))
   def generatePerfEvent(noRegNext: Option[Seq[Int]] = None): Unit = {
     for (((out, (name, counter)), i) <- io_perf.zip(perfEvents).zipWithIndex) {
       require(!name.contains("/"))
@@ -178,13 +178,13 @@ trait HasPerfEvents { this: RawModule =>
   def getPerfEvents: Seq[(String, UInt)] = {
     perfEvents.map(_._1).zip(io_perf).map(x => (x._1, x._2.value))
   }
-  def getPerf: Vec[PerfInc] = io_perf
+  def getPerf: Vec[PerfEvent] = io_perf
 }
 
 class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle {
-    val hpm_event   = Input(UInt(XLEN.W)) // mphmevnet
-    val events_sets = Input(Vec(numPCnt, new PerfInc))
+    val hpm_event   = Input(UInt(XLEN.W))
+    val events_sets = Input(Vec(numPCnt, new PerfEvent))
   })
 
   val events_incr_0 = io.events_sets(io.hpm_event( 9, 0))
@@ -196,8 +196,6 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
   val event_op_1 = io.hpm_event(49, 45)
   val event_op_2 = io.hpm_event(54, 50)
 
-  // TODO: the logic is not clear for events whose accumulation is not 1
-  // e.g., events_incr_0 = 5, events_incr_1 = 2, then what does cnt_1 & cnt_2 mean?
   def combineEvents(cnt_1: UInt, cnt_2: UInt, optype: UInt): UInt = 
     Mux(optype(0), cnt_1 & cnt_2,
     Mux(optype(1), cnt_1 ^ cnt_2,
@@ -215,7 +213,7 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
 class HPerfMonitor(numCSRPCnt: Int, numPCnt: Int)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle {
     val hpm_event   = Input(Vec(numCSRPCnt, UInt(XLEN.W)))
-    val events_sets = Input(Vec(numPCnt, new PerfInc))
+    val events_sets = Input(Vec(numPCnt, new PerfEvent))
   })
 
   val perfEvents = io.hpm_event.zipWithIndex.map{ case (hpm, i) =>
@@ -229,7 +227,7 @@ class HPerfMonitor(numCSRPCnt: Int, numPCnt: Int)(implicit p: Parameters) extend
 }
 
 object HPerfMonitor {
-  def apply(hpm_event: Seq[UInt], events_sets: Seq[PerfInc])(implicit p: Parameters): HPerfMonitor = {
+  def apply(hpm_event: Seq[UInt], events_sets: Seq[PerfEvent])(implicit p: Parameters): HPerfMonitor = {
     val hpm = Module(new HPerfMonitor(hpm_event.length, events_sets.length))
     hpm.io.hpm_event := hpm_event
     hpm.io.events_sets := events_sets

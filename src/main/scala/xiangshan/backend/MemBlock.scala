@@ -93,7 +93,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
-    val perfEventsPTW = Input(Vec(19, new PerfInc))
+    val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(2.W))
@@ -583,7 +583,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     }
   }
 
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfInc))
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }

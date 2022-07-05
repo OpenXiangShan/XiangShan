@@ -191,7 +191,7 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
     }
   }
 
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfInc))
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }
