@@ -273,7 +273,7 @@ def main(files):
     for m in out_modules:
         collection.dump_to_file(m, os.path.join(directory, m))
     for m in out_negedge_modules:
-        collection.dump_negedge_modules_to_file(m, os.path.join(directory, m))
+        collection.dump_negedge_modules_to_file(m, "nanhu_release")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
