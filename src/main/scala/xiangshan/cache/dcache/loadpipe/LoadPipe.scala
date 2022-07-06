@@ -164,9 +164,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // check ecc error
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => io.tag_resp(w)))
-  val s1_tag_error = dcacheParameters.tagCode.decode(s1_encTag).error // error reported by tag ecc check
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
-  val s1_error = s1_flag_error || s1_tag_error
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -200,6 +198,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
+  val s2_encTag = RegEnable(s1_encTag, s1_fire)
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -217,7 +216,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_instrtype = s2_req.instrtype
 
-  val s2_tag_error = RegEnable(s1_tag_error, s1_fire)
+  val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
