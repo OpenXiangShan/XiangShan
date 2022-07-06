@@ -49,6 +49,7 @@ class VModule(object):
         self.lines = []
         self.io = []
         self.submodule = dict()
+        self.instance = set()
 
     def add_line(self, line):
         debug_dontCare = False
@@ -78,6 +79,7 @@ class VModule(object):
                 this_submodule = submodule_match.group(1)
                 if this_submodule != "module":
                     self.add_submodule(this_submodule)
+                    self.add_instance(this_submodule, submodule_match.group(3))
 
     def add_lines(self, lines):
         for line in lines:
@@ -110,8 +112,14 @@ class VModule(object):
     def get_submodule(self):
         return self.submodule
 
+    def get_instance(self):
+        return self.instance
+    
     def add_submodule(self, name):
         self.submodule[name] = self.submodule.get(name, 0) + 1
+        
+    def add_instance(self, name, instance_name):
+        self.instance.add((name, instance_name))
 
     def add_submodules(self, names):
         for name in names:
@@ -164,6 +172,7 @@ class VModule(object):
 class VCollection(object):
     def __init__(self):
         self.modules = []
+        self.ancestors = []
 
     def load_modules(self, vfile):
         in_module = False
@@ -204,7 +213,7 @@ class VCollection(object):
         else:
             return self.modules
 
-    def get_module(self, name, with_submodule=False, try_prefix=None, ignore_modules=None):
+    def get_module(self, name, negedge_modules, prefix, with_submodule=False, try_prefix=None, ignore_modules=None):
         target = None
         for module in self.modules:
             if module.get_name() == name:
@@ -220,10 +229,14 @@ class VCollection(object):
             return target
         submodules = set()
         submodules.add(target)
-        for submodule in target.get_submodule():
+        for submodule, instance in target.get_instance():
             if ignore_modules is not None and submodule in ignore_modules:
                 continue
-            result = self.get_module(submodule, with_submodule=True, try_prefix=try_prefix, ignore_modules=ignore_modules)
+            self.ancestors.append(instance)
+            if prefix != None and submodule.startswith(prefix):
+                negedge_modules.append("/".join(self.ancestors))
+            result = self.get_module(submodule, negedge_modules, prefix, with_submodule=True, try_prefix=try_prefix, ignore_modules=ignore_modules)
+            self.ancestors.pop()
             if result is None:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
                 return None
@@ -232,7 +245,7 @@ class VCollection(object):
 
     def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None, ignore_modules=None):
         print("Dump module {} to {}...".format(name, output_dir))
-        modules = self.get_module(name, with_submodule, try_prefix=try_prefix, ignore_modules=ignore_modules)
+        modules = self.get_module(name, [], None, with_submodule, try_prefix=try_prefix, ignore_modules=ignore_modules)
         if modules is None:
             print("does not find module", name)
             return False
@@ -253,6 +266,29 @@ class VCollection(object):
                 for module in modules:
                     f.writelines(module.get_lines())
         return True
+    
+    def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True):
+        print("Dump negedge module {} to {}...".format(name, output_dir))
+        negedge_modules = []
+        self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule)
+        negedge_modules_sort = []
+        for negedge in negedge_modules:
+            re_degits = re.compile(r".*[0-9]$")  
+            if re_degits.match(negedge):
+                negedge_module, num = negedge.rsplit("_", 1)
+            else:
+                negedge_module, num = negedge, -1
+            negedge_modules_sort.append((negedge_module, int(num)))
+        negedge_modules_sort.sort(key = lambda x : (x[0], x[1]))
+        output_file = os.path.join(output_dir, "negedge_modules.txt")
+        with open(output_file, "w")as f:
+            f.write("set sregfile_list [list\n")
+            for negedge_module, num in negedge_modules_sort:
+                if num == -1:
+                    f.write("{}\n".format(negedge_module))
+                else:
+                    f.write("{}_{}\n".format(negedge_module, num))
+            f.write("]")
 
     def add_module(self, name, line):
         module = VModule(name)
@@ -296,6 +332,7 @@ def create_verilog(files, top_module, config, try_prefix=None, ignore_modules=No
     today = date.today()
     directory = f'{top_module}-Release-{config}-{today.strftime("%b-%d-%Y")}'
     success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix, ignore_modules=ignore_modules)
+    collection.dump_negedge_modules_to_file(top_module, os.path.join(directory, top_module))
     if not success:
         return None, None
     return collection, os.path.realpath(directory)
