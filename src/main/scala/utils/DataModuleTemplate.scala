@@ -71,7 +71,7 @@ class SyncDataModuleTemplate[T <: Data](
   override def desiredName: String = s"SyncDataModuleTemplate_${parentModule}_${numEntries}entry"
   val dataType = if (concatData) UInt(gen.getWidth.W) else gen
 
-  val maxBankEntries = 64
+  val maxBankEntries = if (numEntries >= 2 * 64) 64 else 16
   val numBanks = (numEntries + maxBankEntries - 1) / maxBankEntries
   def bankOffset(address: UInt): UInt = {
     if (numBanks > 1) address(log2Ceil(maxBankEntries) - 1, 0)

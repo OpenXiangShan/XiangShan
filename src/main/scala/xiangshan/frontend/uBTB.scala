@@ -57,7 +57,7 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
 class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p)
   with MicroBTBParams with HasPerfEvents
 {
-  
+
 
   class MicroBTBOutMeta extends XSBundle {
     val ftPred = UInt(ftPredBits.W)
@@ -91,12 +91,12 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, holdRead=true, singlePort=true, parentName = parentName + "ram_"))
     ram.io.r.req.valid := io.ren
     ram.io.r.req.bits.setIdx := io.ridx >> log2Ceil(ftPredFoldWidth)
-    
+
     val ram_rdata = ram.io.r.resp.data
     val ridx_reg = RegEnable(io.ridx, io.ren)
     val r_way = ridx_reg(log2Ceil(ftPredFoldWidth)-1, 0)
     io.rdata := ram_rdata(r_way)
-    
+
     val wdata = Mux1H(Seq(
       (doing_reset, reset_wdata),
       (!doing_reset && doing_decay, decay_wdata),
@@ -121,7 +121,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
   override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBOutMeta)).getWidth // TODO: ReadResp shouldn't save useless members
   require(UbtbGHRLength <= log2Ceil(UbtbSize))
-  
+
   def getIdx(pc: UInt) = pc(log2Ceil(numEntries)+instOffsetBits-1, instOffsetBits)
   def getFtPredIdx(pc: UInt) = {
     // require(pc.getWidth >= instOffsetBits + 2 * log2Ceil(ftPredSize))
@@ -134,8 +134,9 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   println(s"ubtb fh info ${fh_info}")
   def get_ghist_from_fh(afh: AllFoldedHistories) = afh.getHistWithInfo(fh_info)
 
-  val s0_data_ridx = getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
-  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=true,parentName = parentName + "dataMem_"))
+  val s0_data_ridx = Wire(UInt(log2Ceil(UbtbSize).W))
+  s0_data_ridx := getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
+  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=true, parentName = parentName + "dataMem_"))
   val fallThruPredRAM = Module(new FallThruPred)
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
@@ -148,13 +149,30 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val shouldNotFallThru = fallThruPredRAM.io.rdata.andR() // only when confident should we not fallThru
 
   val update_valid = Wire(Bool())
-  val lastCycleHasUpdate = RegNext(update_valid)
+  val pred_may_invalid_by_update = RegInit(false.B)
+  when (update_valid) {
+    pred_may_invalid_by_update := true.B
+  }.elsewhen (io.s1_fire) {
+    pred_may_invalid_by_update := false.B
+  }
+
 
 
 
   // io.out.resp
   val s1_data_ridx = RegEnable(s0_data_ridx, io.s0_fire)
-  val resp_valid = RegEnable(validArray(s0_data_ridx), io.s0_fire && !update_valid)
+  // only for timing purposes
+  def s0_select_bits = 3
+  def s1_select_bits = 5
+  require(1 << (s0_select_bits + s1_select_bits) == numEntries)
+  // val resp_valid = RegEnable(validArray(s0_data_ridx), io.s0_fire && !update_valid)
+  // select using highest bits of s0_ridx
+  val s0_selected_valid_bits = VecInit((0 until (1 << s1_select_bits)).map {i =>
+    validArray(Cat(s0_data_ridx(log2Ceil(UbtbSize)-1, log2Ceil(UbtbSize)-s0_select_bits), i.U(s1_select_bits.W)))
+  })
+  val s1_selected_valid_bits = RegEnable(s0_selected_valid_bits, io.s0_fire)
+  // select using the lower bits of s1_ridx
+  val resp_valid = s1_selected_valid_bits(s1_data_ridx(s1_select_bits-1,0))
 
 
   val outMeta = Wire(new MicroBTBOutMeta)
@@ -162,7 +180,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc)}\n")
 
   io.out.resp.s1.minimal_pred.fromMicroBTBEntry(
-    resp_valid && shouldNotFallThru && !lastCycleHasUpdate && io.ctrl.ubtb_enable,
+    resp_valid && shouldNotFallThru && !pred_may_invalid_by_update && io.ctrl.ubtb_enable,
     dataMem.io.r.resp.data(0), s1_pc
   ) // invalid when update
   io.out.resp.s1.is_minimal := true.B
@@ -214,8 +232,8 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   XSPerfAccumulate("ubtb_update_on_redirected_by_s2", u_valid && RegNext(update_redirected))
   XSPerfAccumulate("ubtb_update_eliminated", io.update.valid && !(update_mispred || update_redirected))
 
-  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire && lastCycleHasUpdate && shouldNotFallThru)
-  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire && !lastCycleHasUpdate && !shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire && pred_may_invalid_by_update && shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire && !pred_may_invalid_by_update && !shouldNotFallThru)
 
   XSPerfAccumulate("ubtb_update_ft_mispred", RegNext(io.update.valid) && u_ftMisPred)
   XSPerfAccumulate("ubtb_update_ft_pred_correct", RegNext(io.update.valid) && !u_ftMisPred)
