@@ -73,7 +73,7 @@ class VModule(object):
             if submodule_match:
                 this_submodule = submodule_match.group(1)
                 if this_submodule != "module":
-                    self.add_submodule(this_submodule)
+                    self.add_submodule(this_submodule, submodule_match.group(3))
 
     def get_name(self):
         return self.name
@@ -91,9 +91,9 @@ class VModule(object):
     def get_submodule(self):
         return self.submodule
 
-    def add_submodule(self, name):
+    def add_submodule(self, name, instance_name):
         # print(self.get_name(), "add submodule", name)
-        self.submodule.add(name)
+        self.submodule.add((name, instance_name))
 
     def add_submodules(self, names):
         # print(self.get_name(), "add submodules", names)
@@ -118,6 +118,7 @@ class VCollection(object):
 
     def __init__(self):
         self.modules = []
+        self.ancestors = []
 
     def load_modules(self, vfile):
         in_module = False
@@ -158,7 +159,7 @@ class VCollection(object):
         else:
             return self.modules
 
-    def get_module(self, name, with_submodule=False):
+    def get_module(self, name, negedge_modules, prefix, with_submodule=False):
         target = None
         for module in self.modules:
             if module.get_name() == name:
@@ -167,8 +168,12 @@ class VCollection(object):
             return target
         submodules = set()
         submodules.add(target)
-        for submodule in target.get_submodule():
-            result = self.get_module(submodule, with_submodule=True)
+        for submodule, instance_name in target.get_submodule():
+            self.ancestors.append(instance_name)
+            if prefix != None and submodule.startswith(prefix):
+                negedge_modules.append("/".join(self.ancestors))
+            result = self.get_module(submodule, negedge_modules, prefix, with_submodule=True)
+            self.ancestors.pop()
             if result is None:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
                 continue#return None
@@ -177,7 +182,7 @@ class VCollection(object):
 
     def dump_to_file(self, name, output_dir, with_submodule=True, split=True):
         print("Dump module {} to {}...".format(name, output_dir))
-        modules = self.get_module(name, with_submodule)
+        modules = self.get_module(name, [], None, with_submodule)
         if modules is None:
             print("does not find module", name)
             return False
@@ -197,6 +202,30 @@ class VCollection(object):
             with open(output_file, "w") as f:
                 for module in modules:
                     f.writelines(module.get_lines())
+                    
+    def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True):
+        print("Dump negedge module {} to {}...".format(name, output_dir))
+        negedge_modules = []
+        self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule)
+        negedge_modules_sort = []
+        for negedge in negedge_modules:
+            re_degits = re.compile(r".*[0-9]$")  
+            if re_degits.match(negedge):
+                negedge_module, num = negedge.rsplit("_", 1)
+            else:
+                negedge_module, num = negedge, -1
+            negedge_modules_sort.append((negedge_module, int(num)))
+        negedge_modules_sort.sort(key = lambda x : (x[0], x[1]))
+        output_file = os.path.join(output_dir, "negedge_modules.txt")
+        with open(output_file, "w")as f:
+            f.write("set sregfile_list [list\n")
+            for negedge_module, num in negedge_modules_sort:
+                if num == -1:
+                    f.write("{}\n".format(negedge_module))
+                else:
+                    f.write("{}_{}\n".format(negedge_module, num))
+            f.write("]")            
+        
 
     def add_module(self, name, line):
         module = VModule(name)
@@ -240,8 +269,11 @@ def main(files):
 
     directory = "rtl"
     out_modules = ["XSTop", "XSCore", "CtrlBlock", "ExuBlock", "ExuBlock_1", "MemBlock", "Frontend", "HuanCun", "HuanCun_2"]
+    out_negedge_modules = ["XSTop"]
     for m in out_modules:
         collection.dump_to_file(m, os.path.join(directory, m))
+    for m in out_negedge_modules:
+        collection.dump_negedge_modules_to_file(m, os.path.join(directory, m))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
