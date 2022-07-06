@@ -305,7 +305,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // update plru, report error in s3
 
-  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid) && !s2_nack_no_mshr)
+  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && !s2_nack_no_mshr)
   io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
   io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way)))
 
