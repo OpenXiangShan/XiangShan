@@ -39,9 +39,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     val stepBack = Input(UInt(log2Up(CommitWidth + 1).W))
   })
 
-  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size) {
-    def toOH: UInt = UIntToOH(value, size)
-  }
+  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
 
   object FreeListPtr {
     def apply(f: Boolean, v: Int): FreeListPtr = {
