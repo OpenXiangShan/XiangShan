@@ -27,7 +27,6 @@ import xiangshan.backend.exu.ExuConfig
 class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(numEntries.W))
   val data = Vec(numSrc, Output(UInt(dataBits.W)))
-
 }
 
 class DataArrayWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
@@ -35,14 +34,12 @@ class DataArrayWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: 
   val mask   = Vec(numSrc, Input(Bool()))
   val addr   = Input(UInt(numEntries.W))
   val data   = Vec(numSrc, Input(UInt(dataBits.W)))
-
 }
 
 class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
   val enable = Input(Bool())
   val addr   = Vec(numSrc, Input(UInt(numEntries.W)))
   val data   = Input(UInt(dataBits.W))
-
 }
 
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
@@ -51,7 +48,6 @@ class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
   val partialWrite = if (params.hasMidState) Vec(params.numDeq, new DataArrayWriteIO(params.numEntries, params.numSrc - 1, params.dataBits)) else null
-
 }
 
 class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
@@ -79,7 +75,7 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     dataModule.io.wdata := wdata
     for (i <- 0 until params.numEntries) {
       val w = VecInit(wen.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
-      assert(RegNext(PopCount(w) <= 1.U))
+      XSError(RegNext(PopCount(w) > 1.U), s"why not OH $i?")
       when(PopCount(w) > 1.U) {
         XSDebug("ERROR: RS DataArray write overlap!\n")
       }

@@ -67,11 +67,8 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
     val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
     val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
     val canOverride = Vec(params.numDeq, Input(Bool()))
-    val out = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
     val isOverrided = Vec(params.numDeq, Output(Bool()))
   })
-
-  io.out := io.in
 
   val oldestMatchVec = VecInit(io.in.map(i => i.valid && OHToUInt(i.bits) === OHToUInt(io.oldest.bits)))
   io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
@@ -81,15 +78,6 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
       VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
     } else false.B
     canDo && io.oldest.valid && !oldestMatchIn
-  }
-
-  for ((out, i) <- io.out.zipWithIndex) {
-    out.valid := io.in(i).valid || io.isOverrided(i)
-    when (io.isOverrided(i)) {
-      out.bits := io.oldest.bits
-    }
-
-    XSPerfAccumulate(s"oldest_override_$i", io.isOverrided(i))
   }
 }
 
@@ -138,14 +126,17 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
   })).asUInt
 
   io.out := (if (regOut) RegNext(nextBest) else nextBest)
-  XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= RegNext(nextBest), "age error\n")
+
+  val ageMatrix = VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt
+  val symmetricAge = RegNext(nextBest)
+  XSError(ageMatrix =/= symmetricAge, p"age error between ${Hexadecimal(ageMatrix)} and ${Hexadecimal(symmetricAge)}\n")
 }
 
 object AgeDetector {
   def apply(numEntries: Int, enq: Vec[UInt], deq: UInt, canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
     val age = Module(new AgeDetector(numEntries, enq.length, regOut = false))
-    age.io.enq := enq
-    age.io.deq := deq
+    age.io.enq := enq.map(_ & (~deq).asUInt)
+    age.io.deq := deq & (~enq.reduce(_ | _)).asUInt
     val out = Wire(Valid(UInt(deq.getWidth.W)))
     out.valid := (canIssue & age.io.out).orR
     out.bits := age.io.out
