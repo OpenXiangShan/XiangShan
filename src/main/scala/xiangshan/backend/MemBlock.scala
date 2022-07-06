@@ -124,9 +124,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val atomicsUnit = Module(new AtomicsUnit)
 
-  // Atom inst comes from sta / std, then its result 
+  // Atom inst comes from sta / std, then its result
   // will be writebacked using load writeback port
-  // 
+  //
   // However, atom exception will be writebacked to rob
   // using store writeback port
 
@@ -286,7 +286,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // alter writeback exception info
     io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
-    
+
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
 
@@ -452,7 +452,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  // TODO: if dcache sbuffer resp needs to ne delayed 
+  // TODO: if dcache sbuffer resp needs to ne delayed
   // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
   // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
@@ -571,8 +571,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     ("ldDeqCount", ldDeqCount),
     ("stDeqCount", stDeqCount),
   )
-  val allPerfEvents = memBlockPerfEvents ++ (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
-  val hpmEvents = allPerfEvents.map(_._2.asTypeOf(new PerfEvent)) ++ io.perfEventsPTW
-  val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
+
+  val perfFromUnits = (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
+  val perfFromIO    = io.perfEventsPTW.map(x => ("perfEventsPTW", x.value))
+  val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
+                          ("stDeqCount", stDeqCount))
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("MemBlock perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }
