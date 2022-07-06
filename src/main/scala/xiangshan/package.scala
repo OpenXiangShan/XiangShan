@@ -31,7 +31,8 @@ package object xiangshan {
     def imm = "b01".U
     def fp  = "b10".U
 
-    def DC = imm // Don't Care
+    def DC  = imm // Don't Care
+    def X   = BitPat("b??")
 
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
@@ -68,6 +69,8 @@ package object xiangshan {
     def ldu          = "b1100".U
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
+
+    def X            = BitPat("b????")
 
     def num = 14
 
@@ -499,6 +502,8 @@ package object xiangshan {
     def IMM_Z  = "b0101".U
     def INVALID_INSTR = "b0110".U
     def IMM_B6 = "b1000".U
+
+    def X      = BitPat("b????")
 
     def apply() = UInt(4.W)
   }
