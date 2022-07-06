@@ -213,7 +213,9 @@ class VCollection(object):
         else:
             return self.modules
 
-    def get_module(self, name, negedge_modules, prefix, with_submodule=False, try_prefix=None, ignore_modules=None):
+    def get_module(self, name, negedge_modules=None, negedge_prefix=None, with_submodule=False, try_prefix=None, ignore_modules=None):
+        if negedge_modules is None:
+            negedge_modules = []
         target = None
         for module in self.modules:
             if module.get_name() == name:
@@ -233,9 +235,15 @@ class VCollection(object):
             if ignore_modules is not None and submodule in ignore_modules:
                 continue
             self.ancestors.append(instance)
-            if prefix != None and submodule.startswith(prefix):
+            is_negedge_module = False
+            if negedge_prefix is not None:
+                if submodule.startswith(negedge_prefix):
+                    is_negedge_module = True
+                elif try_prefix is not None and submodule.startswith(try_prefix + negedge_prefix):
+                    is_negedge_module = True
+            if is_negedge_module:
                 negedge_modules.append("/".join(self.ancestors))
-            result = self.get_module(submodule, negedge_modules, prefix, with_submodule=True, try_prefix=try_prefix, ignore_modules=ignore_modules)
+            result = self.get_module(submodule, negedge_modules, negedge_prefix, with_submodule=True, try_prefix=try_prefix, ignore_modules=ignore_modules)
             self.ancestors.pop()
             if result is None:
                 print("Error: cannot find submodules of {} or the module itself".format(submodule))
@@ -245,7 +253,7 @@ class VCollection(object):
 
     def dump_to_file(self, name, output_dir, with_submodule=True, split=True, try_prefix=None, ignore_modules=None):
         print("Dump module {} to {}...".format(name, output_dir))
-        modules = self.get_module(name, [], None, with_submodule, try_prefix=try_prefix, ignore_modules=ignore_modules)
+        modules = self.get_module(name, with_submodule=with_submodule, try_prefix=try_prefix, ignore_modules=ignore_modules)
         if modules is None:
             print("does not find module", name)
             return False
@@ -267,10 +275,10 @@ class VCollection(object):
                     f.writelines(module.get_lines())
         return True
     
-    def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True):
+    def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True, try_prefix=None):
         print("Dump negedge module {} to {}...".format(name, output_dir))
         negedge_modules = []
-        self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule)
+        self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule=with_submodule, try_prefix=try_prefix)
         negedge_modules_sort = []
         for negedge in negedge_modules:
             re_degits = re.compile(r".*[0-9]$")  
@@ -332,7 +340,7 @@ def create_verilog(files, top_module, config, try_prefix=None, ignore_modules=No
     today = date.today()
     directory = f'{top_module}-Release-{config}-{today.strftime("%b-%d-%Y")}'
     success = collection.dump_to_file(top_module, os.path.join(directory, top_module), try_prefix=try_prefix, ignore_modules=ignore_modules)
-    collection.dump_negedge_modules_to_file(top_module, os.path.join(directory, top_module))
+    collection.dump_negedge_modules_to_file(top_module, directory, try_prefix=try_prefix)
     if not success:
         return None, None
     return collection, os.path.realpath(directory)
