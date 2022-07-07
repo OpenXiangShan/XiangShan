@@ -866,7 +866,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("rollback         ", io.rollback.valid),
     ("mmioCycle        ", uncacheState =/= s_idle),
     ("mmio_Cnt         ", io.uncache.req.fire()),
-    ("refill           ", io.dcache.valid),
+    ("refill           ", io.refill.valid),
     ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))),
     ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))),
     ("ltq_1_4_valid    ", (perfValidCount < (LoadQueueSize.U/4.U))),
