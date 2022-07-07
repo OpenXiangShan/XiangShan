@@ -272,6 +272,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
 
+  // memblock error exception writeback, 1 cycle after normal writeback
+  wb2Ctrl.io.delayedLoadError <> memBlock.io.delayedLoadError
+
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
 

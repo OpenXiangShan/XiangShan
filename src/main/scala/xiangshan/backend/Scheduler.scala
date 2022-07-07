@@ -287,6 +287,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   })
 
   val dispatch2 = outer.dispatch2.map(_.module)
+  dispatch2.foreach(_.io.redirect := io.redirect)
 
   // dirty code for ls dp
   dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {

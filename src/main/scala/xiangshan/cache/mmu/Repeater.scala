@@ -164,6 +164,12 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val tlb_req = WireInit(io.tlb.req)
   tlb_req.suggestName("tlb_req")
 
+  val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
+  val inflight_full = inflight_counter === Size.U
+  when (io.ptw.req(0).fire() =/= io.ptw.resp.fire()) {
+    inflight_counter := Mux(io.ptw.req(0).fire(), inflight_counter + 1.U, inflight_counter - 1.U)
+  }
+
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
   val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
     vi && io.ptw.resp.bits.entry.hit(pi, io.csr.satp.asid, true, true)}
@@ -225,7 +231,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
 
-  val issue_valid = v(issPtr) && !isEmptyIss
+  val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
   val issue_filtered = ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true)
   val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
   io.ptw.req(0).valid := issue_valid && !issue_filtered
@@ -273,7 +279,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   }
 
   counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)
-  assert(counter <= Size.U, "counter should be less than Size")
+  assert(counter <= Size.U, "counter should be no more than Size")
+  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire(), "when counter is 0, should not req")
     assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
@@ -291,16 +298,10 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     mayFullDeq := false.B
     mayFullIss := false.B
     counter := 0.U
+    inflight_counter := 0.U
   }
 
   // perf
-  val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
-  when (io.ptw.req(0).fire() =/= io.ptw.resp.fire()) {
-    inflight_counter := Mux(io.ptw.req(0).fire(), inflight_counter + 1.U, inflight_counter - 1.U)
-  }
-  when (flush) {
-    inflight_counter := 0.U
-  }
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
   XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire())

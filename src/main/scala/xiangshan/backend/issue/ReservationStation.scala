@@ -61,6 +61,7 @@ case class RSParams
   def needScheduledBit: Boolean = hasFeedback || delayedRf || hasMidState
   def needBalance: Boolean = exuCfg.get.needLoadBalance
   def numSelect: Int = numDeq + (if (oldestFirst._1) 1 else 0)
+  def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -221,8 +222,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }) else None
-  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, 
-    Flipped(new MemRSFeedbackIO) 
+  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq,
+    Flipped(new MemRSFeedbackIO)
   )) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr())
@@ -262,15 +263,20 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
-  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
-  XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
+  val doEnqueue = Wire(Vec(params.numEnq, Bool()))
+  val enqNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
+  if (params.dropOnRedirect) {
+    doEnqueue := io.fromDispatch.map(_.fire && !io.redirect.valid)
+    XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqNotFlushed), 0.U))
+  }
+  else {
+    doEnqueue := enqNotFlushed
+  }
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(0, true, false))
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := select.io.allocate(i).valid
     // for better timing, we update statusArray no matter there's a flush or not
-    statusArray.io.update(i).enable := io.fromDispatch(i).fire()
+    statusArray.io.update(i).enable := io.fromDispatch(i).fire
     statusArray.io.update(i).addr := select.io.allocate(i).bits
     statusArray.io.update(i).data.valid := true.B
     statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
@@ -764,4 +770,3 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   def size: Int = params.numEntries
 }
-

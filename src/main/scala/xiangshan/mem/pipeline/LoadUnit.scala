@@ -30,6 +30,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
+  val delayedLoadError = Output(Bool())
   val dcacheRequireReplay = Output(Bool())
   val forward = new PipeLoadForwardQueryIO
   val loadViolationQuery = new LoadViolationQueryIO
@@ -283,6 +284,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fullForward = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
     val dcache_kill = Output(Bool())
+    val delayedLoadError = Output(Bool())
     val loadViolationQueryResp = Flipped(Valid(new LoadViolationQueryResp))
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val sentFastUop = Input(Bool())
@@ -311,18 +313,21 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   } 
   val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR
 
-  // s2_exception_vec add exception caused by ecc error
+  // writeback access fault caused by ecc error / bus error
   //
-  // ecc data error is slow to generate, so we will not use it until the last moment
-  // (s2_exception_with_error_vec is the final output: io.out.bits.uop.cf.exceptionVec)
-  val s2_exception_with_error_vec = WireInit(s2_exception_vec)
+  // * ecc data error is slow to generate, so we will not use it until load stage 3
+  // * in load stage 3, an extra signal io.load_error will be used to 
+
   // now cache ecc error will raise an access fault
   // at the same time, error info (including error paddr) will be write to
   // an customized CSR "CACHE_ERROR"
-  s2_exception_with_error_vec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
-    io.dcacheResp.bits.error &&
-    io.csrCtrl.cache_error_enable
-  val debug_s2_exception_with_error = ExceptionNO.selectByFu(s2_exception_with_error_vec, lduCfg).asUInt.orR
+  if (EnableAccurateLoadError) {
+    io.delayedLoadError := io.dcacheResp.bits.error_delayed &&
+      io.csrCtrl.cache_error_enable && 
+      RegNext(io.out.valid)
+  } else {
+    io.delayedLoadError := false.B
+  }
 
   val actually_mmio = pmp.mmio
   val s2_uop = io.in.bits.uop
@@ -333,7 +338,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
   val s2_cache_tag_error = io.dcacheResp.bits.tag_error
-  val s2_cache_error = io.dcacheResp.bits.error
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   val s2_ldld_violation = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
@@ -412,7 +416,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits.uop.ctrl.replayInst := s2_need_replay_from_fetch
   io.out.bits.mmio := s2_mmio
   io.out.bits.uop.ctrl.flushPipe := s2_mmio && io.sentFastUop
-  io.out.bits.uop.cf.exceptionVec := s2_exception_with_error_vec
+  io.out.bits.uop.cf.exceptionVec := s2_exception_vec // cache error not included
 
   // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
@@ -525,6 +529,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
 
+    val delayedLoadError = Output(Bool()) // load ecc error
+    // Note that io.delayedLoadError and io.lsq.delayedLoadError is different
+
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
@@ -576,6 +583,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // actually load s3
   io.lsq.dcacheRequireReplay := load_s2.io.dcacheRequireReplay
+  io.lsq.delayedLoadError := load_s2.io.delayedLoadError
 
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
@@ -655,6 +663,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //   hitLoadOut.valid && load_s2.io.delayedLoadError
 
   // io.delayedLoadError := false.B
+
+  io.delayedLoadError := hitLoadOut.valid && load_s2.io.delayedLoadError
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 

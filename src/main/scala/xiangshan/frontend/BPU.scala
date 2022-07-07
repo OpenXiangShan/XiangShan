@@ -596,8 +596,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val redirect = do_redirect.bits
 
-  predictors.io.update := io.ftq_to_bpu.update
-  predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.histPtr)
+  predictors.io.update := RegNext(io.ftq_to_bpu.update)
+  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.histPtr))
   predictors.io.redirect := do_redirect
 
   // Redirect logic

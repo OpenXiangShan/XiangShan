@@ -72,7 +72,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
-    val uncache = new DCacheWordIO
+    val uncache = new UncacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())

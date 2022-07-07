@@ -22,6 +22,8 @@ import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
 
+import scala.math.min
+
 @chiselName
 class TLBFA(
   sameCycle: Boolean,
@@ -163,6 +165,10 @@ class TLBSA(
   require(!superPage, "super page should use reg/fa")
   require(!sameCycle, "sram needs next cycle")
 
+  // timing optimization to divide v select into two cycles.
+  val VPRE_SELECT = min(8, nSets)
+  val VPOST_SELECT = nSets / VPRE_SELECT
+
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
 
   io.r.req.map(_.ready := { if (sramSinglePort) !io.w.valid else true.B })
@@ -184,7 +190,9 @@ class TLBSA(
     val vpn_reg = RegEnable(vpn, req.fire())
 
     val ridx = get_set_idx(vpn, nSets)
-    val vidx = RegNext(Mux(req.fire(), v(ridx), VecInit(Seq.fill(nWays)(false.B))))
+    val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
+    val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
+    val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
     entries.io.r.req.valid := req.valid
     entries.io.r.req.bits.apply(setIdx = ridx)
 

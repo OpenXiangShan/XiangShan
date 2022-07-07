@@ -101,11 +101,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
 
+  val fusionValid = RegNext(VecInit(fusionDecoder.io.out.map(_.fire)))
+  val inFire = io.in.map(in => RegNext(in.valid && !in.ready))
   val perfEvents = Seq(
-    ("decoder_fused_instr          ", PopCount(fusionDecoder.io.out.map(_.fire))                                 ),
-    ("decoder_waitInstr            ", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready))),
-    ("decoder_stall_cycle          ", hasValid && !io.out(0).ready                                               ),
-    ("decoder_utilization          ", PopCount(io.in.map(_.valid))                                               ),
+    ("decoder_fused_instr", PopCount(fusionValid)       ),
+    ("decoder_waitInstr",   PopCount(inFire)            ),
+    ("decoder_stall_cycle", hasValid && !io.out(0).ready),
+    ("decoder_utilization", PopCount(io.in.map(_.valid))),
   )
   generatePerfEvent()
 }

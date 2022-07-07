@@ -40,7 +40,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
-    val read_error = Input(Bool())
+    val read_error_delayed = Input(Bool())
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
@@ -81,7 +81,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Tag read for new requests
   meta_read.idx := get_idx(io.lsu.req.bits.addr)
   meta_read.way_en := ~0.U(nWays.W)
-//  meta_read.tag := DontCare
+  // meta_read.tag := DontCare
 
   tag_read.idx := get_idx(io.lsu.req.bits.addr)
   tag_read.way_en := ~0.U(nWays.W)
@@ -89,6 +89,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
+  // --------------------------------------------------------------------------------
+  // read tag
+
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
@@ -98,6 +101,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // --------------------------------------------------------------------------------
   // stage 1
+  // --------------------------------------------------------------------------------
+  // tag match, read data
+
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
   // in stage 1, load unit gets the physical address
@@ -150,10 +156,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way
 
-  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_valid)
-  io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
-  io.replace_access.bits.way := RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way))
-
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
@@ -168,6 +170,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // --------------------------------------------------------------------------------
   // stage 2
+  // --------------------------------------------------------------------------------
+  // return data
+
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
@@ -175,6 +180,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   s2_ready := true.B
+
+  val s2_fire = s2_valid
 
   when (s1_fire) { s2_valid := !io.lsu.s1_kill }
   .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
@@ -212,8 +219,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_tag_error = RegEnable(s1_tag_error, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
-  val s2_data_error = io.read_error // banked_data_resp_word.error && !bank_conflict_slow
-  val s2_error = RegEnable(s1_error, s1_fire) || s2_data_error
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
 
@@ -254,8 +259,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss || io.bank_conflict_slow
   // load pipe need replay when there is a bank conflict
   resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
-  resp.bits.tag_error := s2_tag_error
-  resp.bits.error := s2_error && (s2_hit || s2_tag_error)
+  resp.bits.tag_error := s2_tag_error // report tag_error in load s2
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
 
@@ -272,18 +276,41 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
-  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
+  // --------------------------------------------------------------------------------
+  // stage 3
+  // --------------------------------------------------------------------------------
+  // report ecc error
+
+  val s3_valid = RegNext(s2_valid)
+  val s3_addr = RegEnable(s2_addr, s2_fire)
+  val s3_hit = RegEnable(s2_hit, s2_fire)
+
+  val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
+  val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
+  val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
+  val s3_error = s3_tag_error || s3_flag_error || s3_data_error
+
+  // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
+  resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error)
+  
   // report tag / data / l2 error (with paddr) to bus error unit
-  io.error.report_to_beu := RegNext((s2_tag_error || s2_data_error) && s2_valid)
-  io.error.paddr := RegNext(s2_addr)
-  io.error.source.tag := RegNext(s2_tag_error)
-  io.error.source.data := RegNext(s2_data_error)
-  io.error.source.l2 := RegNext(s2_flag_error)
+  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
+  io.error.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
+  io.error.paddr := s3_addr
+  io.error.source.tag := s3_tag_error
+  io.error.source.data := s3_data_error
+  io.error.source.l2 := s3_flag_error
   io.error.opType.load := true.B
   // report tag error / l2 corrupted to CACHE_ERROR csr
-  io.error.valid := RegNext(s2_error && s2_valid)
+  io.error.valid := s3_error && s3_valid
 
-  // -------
+  // update plru, report error in s3
+
+  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid) && !s2_nack_no_mshr)
+  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+  io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match, OHToUInt(s1_tag_match_way), io.replace_way.way)))
+
+  // --------------------------------------------------------------------------------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {

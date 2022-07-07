@@ -70,6 +70,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
+    val delayedLoadError = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -79,7 +80,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
-    val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
+    // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
@@ -160,8 +161,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   // dtlb
-  val sfence = RegNext(io.sfence)
-  val tlbcsr = RegNext(io.tlbCsr)
+  val sfence = RegNext(RegNext(io.sfence))
+  val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
     val tlb_ld = Module(new TLB(1, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
@@ -277,15 +278,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // Lsq to load unit's rs
 
-    // passdown to lsq
+    // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
+    // passdown to lsq (load s3)
+    lsq.io.dcacheRequireReplay(i) <> loadUnits(i).io.lsq.dcacheRequireReplay
+    lsq.io.delayedLoadError(i) <> loadUnits(i).io.delayedLoadError
+
+    // alter writeback exception info
+    io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
+    
     // update mem dependency predictor
-    io.memPredUpdate(i) := DontCare
-    lsq.io.dcacheRequireReplay(i)    <> loadUnits(i).io.lsq.dcacheRequireReplay
+    // io.memPredUpdate(i) := DontCare
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
