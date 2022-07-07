@@ -439,9 +439,6 @@ object CBODecode extends DecodeConstants {
  */
 object XSTrapDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
-  // calculate as ADDI => addi zero, a0, 0
-  // replace rs '?????' with '01010'(a0) in decode stage
-  def lsrc1 = "b01010".U // $a0
   val table: Array[(BitPat, List[BitPat])] = Array(
     TRAP    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, Y, N, Y, Y, Y, N, SelImm.IMM_I)
   )
@@ -632,11 +629,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
   when (cs.fuType === FuType.csr && isFrflags) {
     cs.blockBackward := false.B
-  }
-
-  // fix isXSTrap
-  when (cs.isXSTrap) {
-    cs.lsrc(0) := XSTrapDecode.lsrc1
   }
 
   //to selectout prefetch.r/prefetch.w
