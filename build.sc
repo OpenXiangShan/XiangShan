@@ -100,7 +100,7 @@ object rocketchip extends `rocket-chip`.common.CommonRocketChip {
       common.getVersion("chisel3")
     ) else Agg.empty[Dep]
     
-    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin"))
+    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
   }
 
   def hardfloatModule = hardfloatRocket
