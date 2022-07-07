@@ -79,6 +79,10 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
     } else false.B
     canDo && io.oldest.valid && !oldestMatchIn
   }
+
+  for (i <- io.isOverrided.indices) {
+    XSPerfAccumulate(s"oldest_override_$i", io.isOverrided(i))
+  }
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {

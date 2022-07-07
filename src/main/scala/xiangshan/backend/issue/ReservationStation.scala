@@ -256,8 +256,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s0_enqFlushed = Wire(Vec(params.numEnq, Bool()))
   val s0_enqWakeup = Wire(Vec(params.numEnq, Vec(params.numSrc, UInt(params.numWakeup.W))))
   val s0_enqDataCapture = Wire(Vec(params.numEnq, Vec(params.numSrc, UInt(params.numWakeup.W))))
+  val s0_fastWakeup = Wire(Vec(params.numEnq, Vec(params.numSrc, Vec(params.numFastWakeup, Bool()))))
   val s0_doEnqueue = Wire(Vec(params.numEnq, Bool()))
-
 
   // Allocation: uops from dispatch
   val validAfterAllocate = RegInit(0.U(params.numEntries.W))
@@ -270,10 +270,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     s0_enqFlushed(i) := (if (params.dropOnRedirect) io.redirect.valid else io.fromDispatch(i).bits.robIdx.needFlush(io.redirect))
     s0_doEnqueue(i) := io.fromDispatch(i).fire && !s0_enqFlushed(i)
     val wakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
+    val slowWakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
+    val fastWakeup = io.fastUopsIn.map(_.bits.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
     for (j <- 0 until params.numSrc) {
-      val (stateMatch, dataMatch) = wakeup.map(_(j)).unzip
-      s0_enqWakeup(i)(j) := VecInit(io.slowPorts.zip(stateMatch).map(x => x._1.valid && x._2)).asUInt
-      s0_enqDataCapture(i)(j) := VecInit(io.slowPorts.zip(dataMatch).map(x => x._1.valid && x._2)).asUInt
+      val (slowStateMatch, slowDataMatch) = slowWakeup.map(_(j)).unzip
+      s0_enqWakeup(i)(j) := VecInit(io.slowPorts.zip(slowStateMatch).map(x => x._1.valid && x._2)).asUInt
+      s0_enqDataCapture(i)(j) := VecInit(io.slowPorts.zip(slowDataMatch).map(x => x._1.valid && x._2)).asUInt
+      val (_, fastDataMatch) = fastWakeup.map(_(j)).unzip
+      s0_fastWakeup(i)(j) := io.fastUopsIn.zip(fastDataMatch).map(x => x._1.valid && x._2)
     }
   }
   io.numExist := PopCount(validAfterAllocate)
@@ -313,11 +317,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   /**
     * S1: read uop and data
     */
+  val s1_slowPorts = RegNext(io.slowPorts)
+  val s1_fastUops = RegNext(io.fastUopsIn)
   val s1_dispatchUops = Reg(Vec(params.numEnq, Valid(new MicroOp)))
   val s1_allocatePtrOH = RegNext(s0_allocatePtrOH)
   val s1_allocatePtr = RegNext(s0_allocatePtr)
   val s1_enqWakeup = RegNext(s0_enqWakeup)
   val s1_enqDataCapture = RegNext(s0_enqDataCapture)
+  val s1_fastWakeup = RegNext(s0_fastWakeup)
   val s1_in_selectPtr = RegNext(select.io.grant)
   val s1_in_selectPtrValid = s1_in_selectPtr.map(_.valid)
   val s1_in_selectPtrOH = s1_in_selectPtr.map(_.bits)
@@ -348,7 +355,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusUpdate.data.blocked := params.checkWaitBit.B && s1_dispatchUops(i).bits.cf.loadWaitBit
     statusUpdate.data.credit := Mux(waitForFpSource, 2.U, 0.U)
     for (j <- 0 until params.numSrc) {
-      statusUpdate.data.srcState(j) := s1_dispatchUops(i).bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR
+      statusUpdate.data.srcState(j) := s1_dispatchUops(i).bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR
     }
     statusUpdate.data.midState := false.B
     statusUpdate.data.psrc := s1_dispatchUops(i).bits.psrc.take(params.numSrc)
@@ -413,8 +420,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_is_first_issue = Wire(Vec(params.numDeq, Bool()))
   val s1_all_src_ready = Wire(Vec(params.numDeq, Bool()))
   for (i <- 0 until params.numDeq) {
-    XSPerfAccumulate(s"oldest_override_$i", s1_issue_oldest(i))
-
     val canBypass = s1_dispatchUops(i).valid && statusArray.io.update(i).data.canIssue
     s1_issue_dispatch(i) := canBypass && !s1_issue_oldest(i) && !s1_in_selectPtrValid(i)
 
@@ -634,10 +639,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // data: send to bypass network
     // TODO: these should be done outside RS
     if (params.numFastWakeup > 0) {
-      val targetFastWakeupMatch = Mux1H(s1_issuePtrOH(i).bits, fastWakeupMatch)
+      val isNormalIssue = s1_issue_oldest(i) || s1_in_selectPtrValid(i)
+      val normalIssuePtrOH = Mux(s1_issue_oldest(i), s1_in_oldestPtrOH.bits, s1_in_selectPtrOH(i))
+      val normalFastWakeupMatch = Mux1H(normalIssuePtrOH, fastWakeupMatch)
       val wakeupBypassMask = Wire(Vec(params.numFastWakeup, Vec(params.numSrc, Bool())))
       for (j <- 0 until params.numFastWakeup) {
-        wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_(j)))
+        for (k <- 0 until params.numSrc) {
+          wakeupBypassMask(j)(k) := Mux(isNormalIssue, normalFastWakeupMatch(k)(j), s1_fastWakeup(i)(k)(j))
+        }
       }
 
       val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
