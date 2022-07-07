@@ -193,30 +193,48 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
             else UInt(ppnLen.W)
   val perm = new TlbPermBundle
 
+  /** level usage:
+   *  !PageSuper: page is only normal, level is None, match all the tag
+   *  !PageNormal: page is only super, level is a Bool(), match high 9*2 parts
+   *  bits0  0: need mid 9bits
+   *         1: no need mid 9bits
+   *  PageSuper && PageNormal: page hold all the three type,
+   *  bits0  0: need low 9bits
+   *  bits1  0: need mid 9bits
+   */
+
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
 
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
     if (!pageSuper) asid_hit && drop_set_equal(vpn, tag, nSets)
-    else if (!pageNormal) asid_hit && MuxLookup(level.get, false.B, Seq(
-      0.U -> (tag(vpnnLen*2-1, vpnnLen) === vpn(vpnLen-1, vpnnLen*2)),
-      1.U -> (tag === vpn(vpnLen-1, vpnnLen)),
-    ))
-    else asid_hit && MuxLookup(level.get, false.B, Seq(
-      0.U -> (tag(vpnLen-1, vpnnLen*2) === vpn(vpnLen-1, vpnnLen*2)),
-      1.U -> (tag(vpnLen-1, vpnnLen) === vpn(vpnLen-1, vpnnLen)),
-      2.U -> drop_set_equal(tag, vpn, nSets) // if pageNormal is false, this will always be false
-    ))
+    else if (!pageNormal) {
+      val tag_match_hi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*3-1, vpnnLen*2)
+      val tag_match_mi = tag(vpnnLen-1, 0) === vpn(vpnnLen*2-1, vpnnLen)
+      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      asid_hit && tag_match
+    }
+    else {
+      val tmp_level = level.get
+      val tag_match_hi = tag(vpnnLen*3-1, vpnnLen*2) === vpn(vpnnLen*3-1, vpnnLen*2)
+      val tag_match_mi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*2-1, vpnnLen)
+      val tag_match_lo = tag(vpnnLen-1, 0) === vpn(vpnnLen-1, 0) // if pageNormal is false, this will always be false
+      val tag_match = tag_match_hi && (tmp_level(1) || tag_match_mi) && (tmp_level(0) || tag_match_lo)
+      asid_hit && tag_match
+    }
   }
 
   def apply(item: PtwResp, asid: UInt, pm: PMPConfig): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
-    this.level.map(_ := { if (pageNormal && pageSuper) inner_level
-                          else if (pageSuper) inner_level(0)
-                          else 0.U})
+    this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U, Seq(
+                                                        0.U -> 3.U,
+                                                        1.U -> 1.U,
+                                                        2.U -> 0.U ))
+                          else if (pageSuper) ~inner_level(0)
+                          else 0.U })
     this.ppn := { if (!pageNormal) item.entry.ppn(ppnLen-1, vpnnLen)
                   else item.entry.ppn }
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
@@ -236,19 +254,16 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   }
 
   def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
+    val inner_level = level.getOrElse(0.U)
     val ppn_res = if (!pageSuper) ppn
-    else if (!pageNormal) MuxLookup(level.get, 0.U, Seq(
-      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen*2-1, 0)),
-      1.U -> Cat(ppn, vpn(vpnnLen-1, 0))
-    ))
-    else MuxLookup(level.get, 0.U, Seq(
-      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
-      1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
-      2.U -> ppn
-    ))
+      else if (!pageNormal) Cat(ppn(ppnLen-vpnnLen-1, vpnnLen),
+        Mux(inner_level(0), vpn(vpnnLen*2-1, vpnnLen), ppn(vpnnLen-1,0)),
+        vpn(vpnnLen-1, 0))
+      else Cat(ppn(ppnLen-1, vpnnLen*2),
+        Mux(inner_level(1), vpn(vpnnLen*2-1, vpnnLen), ppn(vpnnLen*2-1, vpnnLen)),
+        Mux(inner_level(0), vpn(vpnnLen-1, 0), ppn(vpnnLen-1, 0)))
 
-    val static_part_length = ppn_res.getWidth - vpnnLen*2
-    if (saveLevel) Cat(ppn(ppn.getWidth-1, ppn.getWidth-static_part_length), RegEnable(ppn_res(vpnnLen*2-1, 0), valid))
+    if (saveLevel) Cat(ppn(ppn.getWidth-1, vpnnLen*2), RegEnable(ppn_res(vpnnLen*2-1, 0), valid))
     else ppn_res
   }
 
