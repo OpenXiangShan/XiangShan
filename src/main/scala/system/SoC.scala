@@ -30,7 +30,7 @@ import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
 import huancun.debug.TLLogger
-import huancun.utils.{DFTResetGen, ResetGen}
+import huancun.utils.{ClockSync3, DFTResetGen, ResetGen}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 
@@ -354,9 +354,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     // sync external interrupts
     require(plicSource.module.in.length == ext_intrs.getWidth)
     for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
-      val ext_intr_sync = RegInit(0.U(3.W))
-      ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
-      plic_in := ext_intr_sync(1) && !ext_intr_sync(2)
+      plic_in := ClockSync3(interrupt)
     }
 
     // positive edge sampling of the lower-speed rtc_clock
