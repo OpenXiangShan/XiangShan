@@ -65,7 +65,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     fl.io.walk := io.robCommits.isWalk
     // when isWalk, use stepBack to restore head pointer of free list
     // (if ME enabled, stepBack of intFreeList should be useless thus optimized out)
-    fl.io.stepBack := PopCount(io.robCommits.valid.zip(io.robCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
+    fl.io.stepBack := PopCount(io.robCommits.walkValid.zip(io.robCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
   }
   // walk has higher priority than allocation and thus we don't use isWalk here
   // only when both fp and int free list and dispatch1 has enough space can we do allocation

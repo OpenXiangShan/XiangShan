@@ -61,6 +61,8 @@ class CircularQueuePtr[T <: CircularQueuePtr[T]](val entries: Int) extends Bundl
   final def === (that_ptr: T): Bool = this.asUInt()===that_ptr.asUInt()
 
   final def =/= (that_ptr: T): Bool = this.asUInt()=/=that_ptr.asUInt()
+
+  def toOH: UInt = UIntToOH(value, entries)
 }
 
 trait HasCircularQueuePtrHelper {
