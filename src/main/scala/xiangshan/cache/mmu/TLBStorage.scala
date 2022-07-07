@@ -30,7 +30,6 @@ class TLBFA(
   ports: Int,
   nSets: Int,
   nWays: Int,
-  sramSinglePort: Boolean,
   saveLevel: Boolean = false,
   normalPage: Boolean,
   superPage: Boolean
@@ -158,12 +157,12 @@ class TLBSA(
   ports: Int,
   nSets: Int,
   nWays: Int,
-  sramSinglePort: Boolean,
   normalPage: Boolean,
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule {
   require(!superPage, "super page should use reg/fa")
-  require(!sameCycle, "sram needs next cycle")
+  require(!sameCycle, "syncDataModule needs next cycle")
+  require(nWays == 1, "nWays larger than 1 causes bad timing")
 
   // timing optimization to divide v select into two cycles.
   val VPRE_SELECT = min(8, nSets)
@@ -171,16 +170,11 @@ class TLBSA(
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
 
-  io.r.req.map(_.ready := { if (sramSinglePort) !io.w.valid else true.B })
+  io.r.req.map(_.ready :=  true.B)
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
 
   for (i <- 0 until ports) { // duplicate sram
-    val entries = Module(new SRAMTemplate(
-      new TlbEntry(normalPage, superPage),
-      set = nSets,
-      way = nWays,
-      singlePort = sramSinglePort
-    ))
+    val entries = Module(new SyncDataModuleTemplate(new TlbEntry(normalPage, superPage), nSets, ports, 1))
 
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -193,42 +187,33 @@ class TLBSA(
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
-    entries.io.r.req.valid := req.valid
-    entries.io.r.req.bits.apply(setIdx = ridx)
+    entries.io.raddr(i) := ridx
 
-    val data = entries.io.r.resp.data
-    val hitVec = VecInit(data.zip(vidx).map { case (e, vi) => e.hit(vpn_reg, io.csr.satp.asid, nSets) && vi })
-    resp.bits.hit := Cat(hitVec).orR && RegNext(req.ready, init = false.B)
-    if (nWays == 1) {
-      resp.bits.ppn := data(0).genPPN()(vpn_reg)
-      resp.bits.perm := data(0).perm
-    } else {
-      resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN()(vpn_reg)))
-      resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
-    }
+    val data = entries.io.rdata(i)
+    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && vidx(0)
+    resp.bits.hit := hit
+    resp.bits.ppn := data.genPPN()(vpn_reg)
+    resp.bits.perm := data.perm
     io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := {
-      if (sramSinglePort) RegNext(req.fire()) else RegNext(req.valid)
+      RegNext(req.valid)
     }
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
     resp.bits.perm.suggestName("perm")
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
-    access.touch_ways.valid := resp.valid && Cat(hitVec).orR
-    access.touch_ways.bits := OHToUInt(hitVec)
+    access.touch_ways.valid := resp.valid && hit
+    access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
 
-    entries.io.w.apply(
-      valid = io.w.valid || io.victim.in.valid,
-      setIdx = Mux(io.w.valid,
-        get_set_idx(io.w.bits.data.entry.tag, nSets),
-        get_set_idx(io.victim.in.bits.entry.tag, nSets)),
-      data = Mux(io.w.valid,
-        (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
-        io.victim.in.bits.entry),
-      waymask = UIntToOH(io.w.bits.wayIdx)
-    )
+    entries.io.wen(0) := io.w.valid || io.victim.in.valid
+    entries.io.waddr(0) := Mux(io.w.valid,
+      get_set_idx(io.w.bits.data.entry.tag, nSets),
+      get_set_idx(io.victim.in.bits.entry.tag, nSets))
+    entries.io.wdata(0) := Mux(io.w.valid,
+      (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
+      io.victim.in.bits.entry)
   }
 
   when (io.victim.in.valid) {
@@ -306,17 +291,16 @@ object TlbStorage {
     ports: Int,
     nSets: Int,
     nWays: Int,
-    sramSinglePort: Boolean,
     saveLevel: Boolean = false,
     normalPage: Boolean,
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, saveLevel, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }

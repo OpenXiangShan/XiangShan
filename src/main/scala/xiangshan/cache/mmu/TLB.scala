@@ -69,7 +69,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     ports = Width,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
-    sramSinglePort = sramSinglePort,
     saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
@@ -81,7 +80,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     ports = Width,
     nSets = q.superNSets,
     nWays = q.superNWays,
-    sramSinglePort = sramSinglePort,
     saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
@@ -110,6 +108,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   normalPage.csr <> io.csr
   superPage.csr <> io.csr
 
+  val refill_reg = RegNext(io.ptw.resp.valid)
   def TLBNormalRead(i: Int) = {
     val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
     val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
@@ -138,7 +137,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
-    val refill_reg = RegNext(io.ptw.resp.valid)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
@@ -239,10 +237,10 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   )
 
   // if sameCycle, just req.valid
-  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
+  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext
   // because sram is too slow and dtlb is too distant from dtlbRepeater
   for (i <- 0 until Width) {
-    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) && 
+    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) &&
       !RegNext(refill, init = false.B) &&
       param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
     io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
