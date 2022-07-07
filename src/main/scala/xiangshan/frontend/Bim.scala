@@ -33,7 +33,7 @@ trait BimParams extends HasXSParameter {
 class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils {
   val bimAddr = new TableAddr(log2Up(bimSize), 1)
 
-  val bim = Module(new SRAMTemplate(UInt(2.W), set = bimSize, way=numBr, shouldReset = false, holdRead = true))
+  val bim = Module(new SRAMTemplate(UInt(2.W), set = bimSize, way=numBr, shouldReset = false))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(bimSize).W))

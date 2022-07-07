@@ -73,7 +73,7 @@ class L1MetadataArray(parentName:String = "Unknown")(onReset: () => L1Metadata)(
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true,parentName = parentName + "tagArray_"))
+    shouldReset = false, singlePort = true,parentName = parentName + "tagArray_"))
 
   // tag write
   val wen = rst || io.write.valid

@@ -88,7 +88,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     val decay_idx = RegInit(0.U(log2Ceil(nRows).W))
     decay_idx := decay_idx + doing_decay
 
-    val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, holdRead=true, singlePort=true, parentName = parentName + "ram_"))
+    val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, singlePort=true, parentName = parentName + "ram_"))
     ram.io.r.req.valid := io.ren
     ram.io.r.req.bits.setIdx := io.ridx >> log2Ceil(ftPredFoldWidth)
 
@@ -136,7 +136,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
   val s0_data_ridx = Wire(UInt(log2Ceil(UbtbSize).W))
   s0_data_ridx := getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
-  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, holdRead=true, singlePort=true, parentName = parentName + "dataMem_"))
+  val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, singlePort=true, parentName = parentName + "dataMem_"))
   val fallThruPredRAM = Module(new FallThruPred)
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 

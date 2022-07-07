@@ -22,7 +22,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.mbist.MBISTPipeline
 import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
@@ -169,7 +168,6 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       set=nSets/2,
       way=nWays,
       shouldReset = true,
-      holdRead = true,
       singlePort = true,
       parentName = parentName + s"bank${bank}_"
     ))
@@ -324,7 +322,6 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       set=nSets/2,
       way=nWays,
       shouldReset = true,
-      holdRead = true,
       singlePort = true,
       parentName = parentName + s"dataArray${i}_"
     ))
@@ -351,7 +348,6 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       set=nSets/2,
       way=nWays,
       shouldReset = true,
-      holdRead = true,
       singlePort = true,
       parentName = parentName + s"codeArray${i}_"
     ))

@@ -59,10 +59,10 @@ class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DC
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true, parentName = parentName + "tagArray_"))
+    shouldReset = false, singlePort = true, parentName = parentName + "tagArray_"))
 
   val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true, parentName = parentName + "eccArray_"))
+    shouldReset = false, singlePort = true, parentName = parentName + "eccArray_"))
   val (dcachTagArrayMbistPipelineSram,dcachTagArrayMbistPipelineRf,dcachTagArrayMbistPipelineSramRepair,dcachTagArrayMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_dcachTagArray")
   val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen

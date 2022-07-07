@@ -218,7 +218,7 @@ class ITTageTable
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   val table_banks = (0 until nBanks).map(idx => {
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set = nRows / nBanks, width = bankFoldWidth, shouldReset = false, holdRead = true, singlePort = true, parentName = parentName + s"tabbleBank${idx}_" ))
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set = nRows / nBanks, width = bankFoldWidth, shouldReset = false, singlePort = true, parentName = parentName + s"tabbleBank${idx}_" ))
   })
 
   for (b <- 0 until nBanks) {

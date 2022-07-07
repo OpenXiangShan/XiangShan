@@ -148,7 +148,7 @@ class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends 
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true, parentName = parentName + "bt_"))
+  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, parentName = parentName + "bt_"))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -297,12 +297,12 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true,parentName = parentName + "us_"))
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, singlePort=true, parentName = parentName + "us_"))
   us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = (0 until nBanks).map(idx => {
-    Module(new FoldedSRAMTemplate(new TageEntry, set = bankSize, width = bankFoldWidth, way = numBr, shouldReset = false, holdRead = true, singlePort = true, parentName = parentName + s"tableBank${idx}_"))
+    Module(new FoldedSRAMTemplate(new TageEntry, set = bankSize, width = bankFoldWidth, way = numBr, shouldReset = false, singlePort = true, parentName = parentName + s"tableBank${idx}_"))
   })
 
 

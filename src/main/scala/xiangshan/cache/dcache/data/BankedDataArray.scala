@@ -164,7 +164,6 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
         set = DCacheSets,
         way = 1,
         shouldReset = false,
-        holdRead = false,
         singlePort = true,
         parentName = parentName + s"dataWay${idx}_"
       ))
@@ -224,7 +223,6 @@ class BankedDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     set = DCacheSets,
     way = DCacheWays,
     shouldReset = false,
-    holdRead = false,
     singlePort = true,
     parentName = parentName + s"eccBank${idx}_"
   )))
