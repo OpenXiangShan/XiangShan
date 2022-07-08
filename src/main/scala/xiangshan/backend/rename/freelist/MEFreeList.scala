@@ -33,8 +33,6 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
-  // may shift [0, CommitWidth] steps
-  val headPtrOHWalkVec = VecInit.tabulate(CommitWidth + 1)(headPtrOHShift.right) // TODO: temp workaround
   val tailPtr = RegInit(FreeListPtr(false, size - 1))
   val archHeadPtr = RegInit(FreeListPtr(false, 0))
   val archHeadPtrOH = RegInit(1.U(size.W))
@@ -42,10 +40,8 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   // may shift [0, CommitWidth] steps
   val archHeadPtrOHVec = VecInit.tabulate(CommitWidth + 1)(archHeadPtrOHShift.left)
 
-  val doRename = io.canAllocate && io.doAllocate && !io.redirect && !io.walk // TODO: may delete `!io.walk` when using new method?
-  val doCommit = !io.walk // TODO: may delete `!io.walk` when using new method?
-  val walkDelay = RegNext(io.walk, false.B) // TODO: temp workaround
-  val walkDealloc = RegNext(walkDelay, false.B) // TODO: temp workaround
+  val doRename = (io.canAllocate || io.walk) && io.doAllocate && !io.redirect
+  val doCommit = !io.walk
 
   /**
     * Allocation: from freelist (same as StdFreelist)
@@ -55,14 +51,6 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     // enqueue instr, is move elimination
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
   }
-  // update head pointer
-  val numAllocate = PopCount(io.allocateReq)
-  val headPtrNext = headPtr + numAllocate
-  val numWalkDealloc = PopCount(io.freeReq) // TODO: temp workaround
-  val walkHeadPtrNext = headPtr - numWalkDealloc // TODO: temp workaround
-  headPtr := Mux(walkDealloc, walkHeadPtrNext, Mux(doRename, headPtrNext, headPtr))
-  headPtrOH := Mux(walkDealloc, headPtrOHWalkVec(numWalkDealloc), Mux(doRename, headPtrOHVec(numAllocate), headPtrOH))
-
   // update arch head pointer
   val archAlloc = io.commit.commitValid zip io.commit.info map {
     case (valid, info) => valid && info.rfWen && !info.isMove && info.ldest =/= 0.U
@@ -76,11 +64,20 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   archHeadPtrOH := archHeadPtrOHNext
   XSError(archHeadPtr.toOH =/= archHeadPtrOH, p"wrong one-hot reg between archHeadPtr: $archHeadPtr and archHeadPtrOH: $archHeadPtrOH")
 
+  // update head pointer
+  val numAllocate = PopCount(io.allocateReq)
+  val headPtrNew   = headPtr + numAllocate
+  val headPtrOHNew = headPtrOHVec(numAllocate)
+  val headPtrNext   = Mux(doRename, headPtrNew, headPtr)
+  val headPtrOHNext = Mux(doRename, headPtrOHNew, headPtrOH)
+  headPtr   := Mux(io.redirect, archHeadPtrNext, headPtrNext)
+  headPtrOH := Mux(io.redirect, archHeadPtrOHNext, headPtrOHNext)
+
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
   for (i <- 0 until CommitWidth) {
-    when (io.freeReq(i) && !walkDealloc) { // TODO: temp workaround
+    when (io.freeReq(i)) {
       val freePtr = tailPtr + PopCount(io.freeReq.take(i))
       freeList(freePtr.value) := io.freePhyReg(i)
     }
@@ -93,11 +90,13 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
 
   // update tail pointer
   val tailPtrNext = tailPtr + PopCount(io.freeReq)
-  tailPtr := Mux(walkDealloc, tailPtr, tailPtrNext) // TODO: temp workaround
+  tailPtr := tailPtrNext
 
-  val freeRegCnt = Mux(doRename, distanceBetween(tailPtrNext, headPtrNext), distanceBetween(tailPtrNext, headPtr))
+  val freeRegCnt = Mux(io.redirect, distanceBetween(tailPtrNext, archHeadPtrNext),
+                   Mux(doRename,    distanceBetween(tailPtrNext, headPtrNew),
+                                    distanceBetween(tailPtrNext, headPtr)))
   val freeRegCntReg = RegNext(freeRegCnt)
-  io.canAllocate := freeRegCntReg >= RenameWidth.U && !walkDelay && !walkDealloc // TODO: temp workaround
+  io.canAllocate := freeRegCntReg >= RenameWidth.U
 
   val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
   val debugArchRAT = RegNext(RegNext(io.debug_rat, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))

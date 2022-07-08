@@ -387,6 +387,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   lfst.io.csrCtrl <> RegNext(io.csrCtrl)
   lfst.io.dispatch <> dispatch.io.lfst
 
+  rat.io.redirect := stage2Redirect.valid
   rat.io.robCommits := rob.io.commits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts

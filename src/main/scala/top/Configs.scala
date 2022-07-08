@@ -57,6 +57,7 @@ class MinimalConfig(n: Int = 1) extends Config(
       _.copy(
         DecodeWidth = 2,
         RenameWidth = 2,
+        CommitWidth = 2,
         FetchWidth = 4,
         IssQueSize = 8,
         NRPhyRegs = 64,
