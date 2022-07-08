@@ -341,6 +341,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     uop.valid := s0_valid
     when (s0_valid) {
       uop.bits := in.bits
+      uop.bits.debugInfo.enqRsTime := GTimer()
     }
   }
   // update status and payload array
@@ -377,7 +378,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     payloadWrite.enable := s1_dispatchUops(i).valid
     payloadWrite.addr := s1_allocatePtrOH(i)
     payloadWrite.data := s1_dispatchUops(i).bits
-    payloadWrite.data.debugInfo.enqRsTime := GTimer()
   }
 
   // Issue with priorities: (1) oldest uop; (2) selected uops; (3) dispatched uops.
