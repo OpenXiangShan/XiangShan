@@ -585,7 +585,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, refillPipe.io.req.valid)
+  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
 
   io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
