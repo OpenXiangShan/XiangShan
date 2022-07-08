@@ -122,11 +122,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // update cf according to waittable result
     uops(i).cf.loadWaitBit := io.waittable(i)
 
-    val inValid = io.in(i).valid
-
     // alloc a new phy reg
-    needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
-    needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
+    needFpDest(i) := io.in(i).valid && needDestReg(fp = true, io.in(i).bits)
+    needIntDest(i) := io.in(i).valid && needDestReg(fp = false, io.in(i).bits)
     fpFreeList.io.allocateReq(i) := needFpDest(i)
     intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
 

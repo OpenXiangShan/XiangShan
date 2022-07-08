@@ -19,17 +19,17 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion}
+import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.FtqRead
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
+import xiangshan.ExceptionNO._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
@@ -277,6 +277,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   val decode = Module(new DecodeStage)
+  val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
   val ssit = Module(new SSIT)
   val waittable = Module(new WaitTable)
@@ -409,14 +410,47 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // pipeline between decode and rename
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
+    // fusion decoder
+    val decodeHasException = io.frontend.cfVec(i).bits.exceptionVec(instrPageFault) || io.frontend.cfVec(i).bits.exceptionVec(instrAccessFault)
+    val disableFusion = decode.io.csrCtrl.singlestep
+    fusionDecoder.io.in(i).valid := io.frontend.cfVec(i).valid && !(decodeHasException || disableFusion)
+    fusionDecoder.io.in(i).bits := io.frontend.cfVec(i).bits.instr
+    if (i > 0) {
+      fusionDecoder.io.inReady(i - 1) := decode.io.out(i).ready
+    }
+
+    // Pipeline
+    val renamePipe = PipelineNext(decode.io.out(i), rename.io.in(i).ready,
       stage2Redirect.valid || pendingRedirect)
+    renamePipe.ready := rename.io.in(i).ready
+    rename.io.in(i).valid := renamePipe.valid && !fusionDecoder.io.clear(i)
+    rename.io.in(i).bits := renamePipe.bits
     rename.io.intReadPorts(i) := rat.io.intReadPorts(i).map(_.data)
     rename.io.fpReadPorts(i) := rat.io.fpReadPorts(i).map(_.data)
-    if (i < RenameWidth - 1) {
-      rename.io.fusionInfo(i) := RegEnable(decode.io.fusionInfo(i), decode.io.out(i).fire)
-    }
     rename.io.waittable(i) := RegEnable(waittable.io.rdata(i), decode.io.out(i).fire)
+
+    if (i < RenameWidth - 1) {
+      // fusion decoder sees the raw decode info
+      fusionDecoder.io.dec(i) := renamePipe.bits.ctrl
+      rename.io.fusionInfo(i) := fusionDecoder.io.info(i)
+
+      // update the first RenameWidth - 1 instructions
+      decode.io.fusion(i) := fusionDecoder.io.out(i).valid && rename.io.out(i).fire
+      when (fusionDecoder.io.out(i).valid) {
+        fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits.ctrl)
+        // TODO: remove this dirty code for ftq update
+        val sameFtqPtr = rename.io.in(i).bits.cf.ftqPtr.value === rename.io.in(i + 1).bits.cf.ftqPtr.value
+        val ftqOffset0 = rename.io.in(i).bits.cf.ftqOffset
+        val ftqOffset1 = rename.io.in(i + 1).bits.cf.ftqOffset
+        val ftqOffsetDiff = ftqOffset1 - ftqOffset0
+        val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
+        val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
+        val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
+        val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
+        rename.io.in(i).bits.ctrl.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
+        XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
+      }
+    }
   }
 
   rename.io.redirect <> stage2Redirect
