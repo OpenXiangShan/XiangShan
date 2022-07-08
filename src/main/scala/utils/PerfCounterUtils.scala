@@ -49,12 +49,12 @@ object XSPerfHistogram {
   // this function draws a histogram
   def apply
   (
-    perfName: String, 
-    perfCnt: UInt, 
-    enable: Bool, 
-    start: Int, 
-    stop: Int, 
-    step: Int, 
+    perfName: String,
+    perfCnt: UInt,
+    enable: Bool,
+    start: Int,
+    stop: Int,
+    step: Int,
     left_strict: Boolean = false,
     right_strict: Boolean = false
   )
@@ -82,12 +82,12 @@ object XSPerfHistogram {
         // if perfCnt < start, it will go to the first bin
         val leftOutOfRange = if(left_strict)
           false.B
-        else 
+        else
           perfCnt < start.U && i.U === 0.U
         // if perfCnt >= stop, it will go to the last bin
         val rightOutOfRange = if(right_strict)
           false.B
-        else 
+        else
           perfCnt >= stop.U && i.U === (nBins - 1).U
         val inc = inRange || leftOutOfRange || rightOutOfRange
 
@@ -196,7 +196,7 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
   val event_op_1 = RegNext(io.hpm_event(49, 45))
   val event_op_2 = RegNext(io.hpm_event(54, 50))
 
-  def combineEvents(cnt_1: UInt, cnt_2: UInt, optype: UInt): UInt = 
+  def combineEvents(cnt_1: UInt, cnt_2: UInt, optype: UInt): UInt =
     Mux(optype(0), cnt_1 & cnt_2,
     Mux(optype(1), cnt_1 ^ cnt_2,
     Mux(optype(2), cnt_1 + cnt_2,
@@ -210,7 +210,7 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
   val event_step_0_reg = RegNext(event_step_0)
   val event_step_1_reg = RegNext(event_step_1)
   val selected = combineEvents(event_step_0_reg, event_step_1_reg, event_op_2_reg)
-  
+
   val perfEvents = Seq(("selected", selected))
   generatePerfEvent()
 }

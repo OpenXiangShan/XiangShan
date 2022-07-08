@@ -488,7 +488,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
                         perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
                         perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
   val perfBlock     = Seq()
-  // let index = 0 be no event  
+  // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
 
   if (printEventCoding) {

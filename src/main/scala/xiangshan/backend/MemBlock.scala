@@ -581,9 +581,9 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val perfFromIO    = io.perfEventsPTW.map(x => ("perfEventsPTW", x.value))
   val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
                           ("stDeqCount", stDeqCount))
-  // let index = 0 be no event  
+  // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
-  
+
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
       println("MemBlock perfEvents Set", name, inc, i)

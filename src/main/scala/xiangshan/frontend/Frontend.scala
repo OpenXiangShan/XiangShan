@@ -182,9 +182,9 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
   val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEvents)
   val perfFromIO    = Seq()
   val perfBlock     = Seq()
-  // let index = 0 be no event  
+  // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
-  
+
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
       println("Frontend perfEvents Set", name, inc, i)
