@@ -20,12 +20,12 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xiangshan._
 import utils._
+import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.mem.{SqPtr, MemWaitUpdateReq}
-import xiangshan.backend.fu.fpu.{FMAMidResult, FMAMidResultIO}
+import xiangshan.backend.fu.fpu.FMAMidResultIO
+import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
 
@@ -236,7 +236,10 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 }
 
-class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule
+  with HasPerfEvents
+  with HasCircularQueuePtrHelper
+{
   val io = IO(new ReservationStationIO(params))
 
   val statusArray = Module(new StatusArray(params))
@@ -342,6 +345,18 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     when (s0_valid) {
       uop.bits := in.bits
       uop.bits.debugInfo.enqRsTime := GTimer()
+      // a temp fix for blocked. This will release the load wait for some instructions earlier.
+      // copied from status array
+      if (params.checkWaitBit) {
+        val blockNotReleased = isAfter(in.bits.sqIdx, io.checkwait.get.stIssuePtr)
+        val storeAddrWaitforIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
+          io.checkwait.get.memWaitUpdateReq.staIssue(i).valid &&
+            io.checkwait.get.memWaitUpdateReq.staIssue(i).bits.uop.robIdx.value === in.bits.cf.waitForRobIdx.value
+        })).asUInt.orR && !in.bits.cf.loadWaitStrict // is waiting for store addr ready
+        uop.bits.cf.loadWaitBit := in.bits.cf.loadWaitBit &&
+          !storeAddrWaitforIsIssuing &&
+          blockNotReleased
+      }
     }
   }
   // update status and payload array
