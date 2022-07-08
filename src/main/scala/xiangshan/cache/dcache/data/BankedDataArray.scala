@@ -273,12 +273,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend)
   }
-  val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
-  if (ReduceReadlineConflict) {
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.rmask(bank_addrs(i)))
-  } else {
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend)
-  }
 
   val rw_bank_conflict = VecInit(Seq.tabulate(LoadPipelineWidth)(io.read(_).valid && rwhazard))
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U

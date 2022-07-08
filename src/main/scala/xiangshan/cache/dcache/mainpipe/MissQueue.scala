@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import huancun.utils.FastArbiter
 
 class MissReq(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
