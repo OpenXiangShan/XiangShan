@@ -81,9 +81,11 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   })
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.fuWriteback))
 
+  val redirect = RegNextWithEnable(io.redirect)
+
   // IO for the scheduler
   scheduler.io.hartId := io.hartId
-  scheduler.io.redirect <> io.redirect
+  scheduler.io.redirect <> redirect
   scheduler.io.allocPregs <> io.allocPregs
   scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
@@ -101,7 +103,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   }
 
   // IO for the function units
-  fuBlock.io.redirect <> io.redirect
+  fuBlock.io.redirect <> redirect
   fuBlock.io.writeback <> io.fuWriteback
   fuBlock.io.extra <> io.fuExtra
 
@@ -134,7 +136,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     scheWb.valid := wb.valid
     scheWb.bits := wb.bits
     if (cfg.hasFastUopOut) {
-      val isFlushed = wb.bits.uop.robIdx.needFlush(io.redirect)
+      val isFlushed = wb.bits.uop.robIdx.needFlush(redirect)
       scheWb.valid := RegNext(wb.valid && !isFlushed)
       scheWb.bits.uop := RegNext(wb.bits.uop)
     }
@@ -164,7 +166,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
       wbOut.bits.uop := fastWakeup.bits
     }
     else {
-      val isFlushed = fastWakeup.bits.robIdx.needFlush(io.redirect)
+      val isFlushed = fastWakeup.bits.robIdx.needFlush(redirect)
       wbOut.valid := RegNext(fastWakeup.valid && !isFlushed)
       wbOut.bits.uop := RegNext(fastWakeup.bits)
     }
@@ -188,7 +190,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     require(wakeupIdx.length == wbIdx.length)
     for ((i, j) <- wakeupIdx.zip(wbIdx)) {
       val scheWb = scheduler.io.writeback(j)
-      val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(io.redirect)
+      val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(redirect)
       scheWb.valid := RegNext(scheduler.io.fastUopOut(i).valid && !isFlushed)
       scheWb.bits.uop := RegNext(scheduler.io.fastUopOut(i).bits)
     }
