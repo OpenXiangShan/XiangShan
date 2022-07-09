@@ -77,11 +77,10 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
     val oldestMatchIn = if (params.numDeq > 1) {
       VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
     } else false.B
-    canDo && io.oldest.valid && !oldestMatchIn
-  }
-
-  for (i <- io.isOverrided.indices) {
-    XSPerfAccumulate(s"oldest_override_$i", io.isOverrided(i))
+    val isOverrided = canDo && io.oldest.valid && !oldestMatchIn
+    XSPerfAccumulate(s"oldest_override_$i", isOverrided)
+    XSPerfAccumulate(s"oldest_same_as_selected_$i", oldestMatchIn)
+    isOverrided
   }
 }
 
