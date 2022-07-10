@@ -69,7 +69,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int,parentName:Stri
   val io = IO(new SCTableIO(ctrBits))
 
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=false, singlePort=false, parentName = parentName + "table_"))
+  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, singlePort=false, parentName = parentName + "table_"))
 
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)

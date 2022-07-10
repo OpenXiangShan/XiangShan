@@ -69,7 +69,7 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
 
     val stack = Reg(Vec(RasSize, new RASEntry))
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top = Reg(new RASEntry())
+    val top = RegInit(RASEntry(0x80000000L.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
 
     def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)

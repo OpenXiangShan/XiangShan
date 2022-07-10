@@ -302,7 +302,7 @@ class TageTable
 
 
   val table_banks = (0 until nBanks).map(idx => {
-    Module(new FoldedSRAMTemplate(new TageEntry, set = bankSize, width = bankFoldWidth, way = numBr, shouldReset = false, singlePort = true, parentName = parentName + s"tableBank${idx}_"))
+    Module(new FoldedSRAMTemplate(new TageEntry, set = bankSize, width = bankFoldWidth, way = numBr, shouldReset = true, singlePort = true, parentName = parentName + s"tableBank${idx}_"))
   })
 
 

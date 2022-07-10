@@ -295,7 +295,7 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = false, singlePort = true, parentName = parentName + "ftb_"))
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, singlePort = true, parentName = parentName + "ftb_"))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
