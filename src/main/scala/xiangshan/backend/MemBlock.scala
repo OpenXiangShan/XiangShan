@@ -101,6 +101,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
+  val redirect = RegNextWithEnable(io.redirect)
+
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
@@ -246,7 +248,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
-    loadUnits(i).io.redirect <> io.redirect
+    loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
@@ -329,12 +331,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.StuCnt) {
     val stu = storeUnits(i)
 
-    stdExeUnits(i).io.redirect <> io.redirect
+    stdExeUnits(i).io.redirect <> redirect
     stdExeUnits(i).io.fromInt <> io.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
-    stu.io.redirect     <> io.redirect
+    stu.io.redirect     <> redirect
     stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
     stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
@@ -433,7 +435,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Lsq
   lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.enqLsq
-  lsq.io.brqRedirect    <> io.redirect
+  lsq.io.brqRedirect    <> redirect
   io.memoryViolation    <> lsq.io.rollback
   lsq.io.uncache        <> uncache.io.lsq
   // delay dcache refill for 1 cycle for better timing
@@ -502,7 +504,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
   atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, stData(0).bits, stData(1).bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsfeedback(atomic_rs0).rsIdx, io.rsfeedback(atomic_rs1).rsIdx)
-  atomicsUnit.io.redirect <> io.redirect
+  atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support
   val amoTlb = dtlb_ld(0).requestor(0)
@@ -541,7 +543,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Exception address is used serveral cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
-  when (DelayN(io.redirect.valid, 10) && atomicsException) {
+  when (DelayN(redirect.valid, 10) && atomicsException) {
     atomicsException := false.B
   }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
     atomicsException := true.B
