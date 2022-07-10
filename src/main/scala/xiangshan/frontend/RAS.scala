@@ -135,6 +135,16 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
     io.sp := sp
     io.top := top
 
+    val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
+    val do_reset = RegInit(true.B)
+    when (do_reset) {
+      stack(resetIdx) := RASEntry(0.U, 0.U)
+    }
+    resetIdx := resetIdx + do_reset
+    when (resetIdx === (RasSize-1).U) {
+      do_reset := false.B
+    }
+
     debugIO.spec_push_entry := RASEntry(io.spec_new_addr, Mux(spec_alloc_new, 1.U, top.ctr + 1.U))
     debugIO.spec_alloc_new := spec_alloc_new
     debugIO.recover_push_entry := RASEntry(io.recover_new_addr, Mux(recover_alloc_new, 1.U, io.recover_top.ctr + 1.U))
