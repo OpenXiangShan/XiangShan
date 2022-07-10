@@ -84,7 +84,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // Since the update of headPtr should have a good timing,
   // we calculate the OH index here to optimize the freelist read timing.
   // may shift [0, RenameWidth] steps
-  val stepBackHeadPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.right)
+  val stepBackHeadPtrOHVec = VecInit.tabulate(CommitWidth + 1)(headPtrOHShift.right)
   val stepBackHeadPtrOH = stepBackHeadPtrOHVec(io.stepBack)
   headPtrOH := Mux(io.walk, stepBackHeadPtrOH,
     Mux(realDoAllocate, headPtrOHVec(numAllocate), headPtrOH))
