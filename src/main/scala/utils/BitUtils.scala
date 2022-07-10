@@ -18,6 +18,7 @@ package utils
 
 import chisel3._
 import chisel3.util._
+
 import scala.math.min
 
 class CircularShift(data: UInt) {
@@ -321,12 +322,31 @@ class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   }
 }
 
+class CenterSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  require(max_sel == 2, "only 2 is supported!")
+  val n_bits = bits.length
+  val half_index = (bits.length + 1) / 2
+  val firstHalf = new NaiveSelectOne(bits.take(half_index).reverse, 1)
+  val secondHalf = new NaiveSelectOne(bits.drop(half_index), 1)
+
+  def getNthOH(n: Int, need_balance: Boolean): (Bool, Vec[Bool]) = {
+    if (n == 1) {
+      val select = firstHalf.getNthOH(1)
+      (select._1, VecInit(select._2.reverse ++ Seq.fill(half_index)(false.B)))
+    } else {
+      val select = secondHalf.getNthOH(1)
+      (select._1, VecInit(Seq.fill(n_bits - half_index)(false.B) ++ select._2))
+    }
+  }
+}
+
 object SelectOne {
   def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = {
     policy.toLowerCase match {
       case "naive" => new NaiveSelectOne(bits, max_sel)
       case "circ" => new CircSelectOne(bits, max_sel)
       case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+      case "center" => new CenterSelectOne(bits, max_sel)
       case _ => throw new IllegalArgumentException(s"unknown select policy")
     }
   }
