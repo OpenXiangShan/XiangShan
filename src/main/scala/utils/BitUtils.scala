@@ -20,6 +20,20 @@ import chisel3._
 import chisel3.util._
 import scala.math.min
 
+object RegNextWithEnable {
+  def apply[T <: Data](data: Valid[T], hasInit: Boolean = true): Valid[T] = {
+    val next = Wire(data.cloneType)
+    if (hasInit) {
+      next.valid := RegNext(data.valid, false.B)
+    }
+    else {
+      next.valid := RegNext(data.valid)
+    }
+    next.bits := RegEnable(data.bits, data.valid)
+    next
+  }
+}
+
 class CircularShift(data: UInt) {
   private def helper(step: Int, isLeft: Boolean): UInt = {
     if (step == 0) {
