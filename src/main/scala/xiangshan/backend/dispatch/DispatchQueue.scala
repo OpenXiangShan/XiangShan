@@ -68,7 +68,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
 
   val isTrueEmpty = !VecInit(stateEntries.map(_ === s_valid)).asUInt.orR
   val canEnqueue = allowEnqueue
-  val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
    * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -87,7 +86,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val enqIndexOH = (0 until enqnum).map(i => tailPtrOHVec(PopCount(io.enq.needAlloc.take(i))))
   for (i <- 0 until size) {
     val validVec = io.enq.req.map(_.valid).zip(enqIndexOH).map{ case (v, oh) => v && oh(i) }
-    when (VecInit(validVec).asUInt.orR && canActualEnqueue) {
+    when (VecInit(validVec).asUInt.orR && canEnqueue) {
       data(i) := Mux1H(validVec, io.enq.req.map(_.bits))
       stateEntries(i) := s_valid
     }
