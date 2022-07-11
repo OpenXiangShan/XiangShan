@@ -326,17 +326,12 @@ class CenterSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   require(max_sel == 2, "only 2 is supported!")
   val n_bits = bits.length
   val half_index = (bits.length + 1) / 2
-  val firstHalf = new NaiveSelectOne(bits.take(half_index).reverse, 1)
-  val secondHalf = new NaiveSelectOne(bits.drop(half_index), 1)
+  def centerReverse(data: Seq[Bool]): Seq[Bool] = data.take(half_index).reverse ++ data.drop(half_index).reverse
+  val select = new CircSelectOne(centerReverse(bits), max_sel)
 
   def getNthOH(n: Int, need_balance: Boolean): (Bool, Vec[Bool]) = {
-    if (n == 1) {
-      val select = firstHalf.getNthOH(1)
-      (select._1, VecInit(select._2.reverse ++ Seq.fill(half_index)(false.B)))
-    } else {
-      val select = secondHalf.getNthOH(1)
-      (select._1, VecInit(Seq.fill(n_bits - half_index)(false.B) ++ select._2))
-    }
+    val selected = select.getNthOH(n)
+    (selected._1, VecInit(centerReverse(selected._2)))
   }
 }
 
