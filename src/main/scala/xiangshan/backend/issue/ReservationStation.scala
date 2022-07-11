@@ -59,7 +59,8 @@ case class RSParams
   def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
   def delayedRf: Boolean = exuCfg.get == StdExeUnitCfg
   def needScheduledBit: Boolean = hasFeedback || delayedRf || hasMidState
-  def needBalance: Boolean = exuCfg.get.needLoadBalance
+  // Load prefers the first index.
+  def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
   def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
 
