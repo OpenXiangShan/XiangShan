@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+import huancun.utils.FastArbiter
 import mem.{AddPipelineReg}
 
 import scala.math.max
@@ -190,6 +191,18 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     out: DecoupledIO[T],
     name: Option[String] = None): Unit = {
     val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    out <> arb.io.out
+  }
+
+  def fastArbiter[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
