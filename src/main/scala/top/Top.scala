@@ -157,6 +157,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val hduspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
 
     val L3_BISR = if (l3cacheOpt.nonEmpty) Some(IO(Vec(4,new BISRInputInterface))) else None
+    val bisr_mem_chain_select = if (l3cacheOpt.nonEmpty) Some(IO(Input(UInt(1.W)))) else None
 
     val dfx_reset = Some(xsx_fscan.toResetGen)
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, dfx_reset) }
@@ -249,6 +250,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       l3Module.hduspsr_in.get <> hduspsr_in
       l3Module.bisr.get.zip(L3_BISR.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
       l3Module.mbist_jtag.get.zip(l3_sram_mbist.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
+      l3Module.bisr_mem_chain_select.get := bisr_mem_chain_select.get
     }
     //MBIST Interface Implementation ends
 
