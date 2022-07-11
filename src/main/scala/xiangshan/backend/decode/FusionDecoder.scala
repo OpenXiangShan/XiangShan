@@ -533,7 +533,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedLogicZexth(pair)
     )
     val fire = io.in(i).valid && io.inReady(i)
-    val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, fire)
+    val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
     val fusionVec = RegEnable(VecInit(fusionList.map(_.isValid)), fire)
     val thisCleared = io.clear(i)
     out.valid := instrPairValid && !thisCleared && fusionVec.asUInt.orR
