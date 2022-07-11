@@ -72,6 +72,7 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def src2Type: Option[Int] = compareAndGet(getInstrSrc2Type)
   def lsrc2NeedZero: Boolean = false
   def lsrc2NeedMux: Boolean = false
+  def lsrc2MuxResult: UInt = Mux(destToRs1, instr2Rs2, instr2Rs1)
 
   def fusionName: String
 }
@@ -463,23 +464,46 @@ class FusionDecodeInfo extends Bundle {
   val rs2FromZero = Output(Bool())
 }
 
+class FusionDecodeReplace extends Bundle {
+  val fuType = Valid(FuType())
+  val fuOpType = Valid(FuOpType())
+  val lsrc2 = Valid(UInt(5.W))
+  val src2Type = Valid(SrcType())
+
+  def update(cs: CtrlSignals): Unit = {
+    when (fuType.valid) {
+      cs.fuType := fuType.bits
+    }
+    when (fuOpType.valid) {
+      cs.fuOpType := fuOpType.bits
+    }
+    when (lsrc2.valid) {
+      cs.lsrc(1) := lsrc2.bits
+    }
+    when (src2Type.valid) {
+      cs.srcType(1) := src2Type.bits
+    }
+  }
+}
+
 class FusionDecoder(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    // detect instruction fusions in these instructions
+    // T0: detect instruction fusions in these instructions
     val in = Vec(DecodeWidth, Flipped(ValidIO(UInt(32.W))))
-    val dec = Vec(DecodeWidth, Input(new CtrlSignals()))
-    // whether an instruction fusion is found
-    val out = Vec(DecodeWidth - 1, DecoupledIO(new CtrlSignals))
-    val info = Vec(DecodeWidth - 1, new FusionDecodeInfo)
-    // fused instruction needs to be cleared
+    val inReady = Vec(DecodeWidth - 1, Input(Bool())) // dropRight(1)
+    // T1: decode result
+    val dec = Vec(DecodeWidth - 1, Input(new CtrlSignals)) // dropRight(1)
+    // T1: whether an instruction fusion is found
+    val out = Vec(DecodeWidth - 1, ValidIO(new FusionDecodeReplace)) // dropRight(1)
+    val info = Vec(DecodeWidth - 1, new FusionDecodeInfo) // dropRight(1)
+    // T1: fused instruction needs to be cleared
     val clear = Vec(DecodeWidth, Output(Bool()))
   })
 
   io.clear.head := false.B
 
   val instrPairs = io.in.dropRight(1).zip(io.in.drop(1)).map(x => Seq(x._1, x._2))
-  val csPairs = io.dec.dropRight(1).zip(io.dec.drop(1)).map(x => Seq(x._1, x._2))
-  instrPairs.zip(csPairs).zip(io.out).zipWithIndex.foreach{ case (((pair, cs), out), i) =>
+  instrPairs.zip(io.dec).zip(io.out).zipWithIndex.foreach{ case (((pair, dec), out), i) =>
     val fusionList = Seq(
       new FusedAdduw(pair),
       new FusedZexth(pair),
@@ -508,26 +532,35 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedLogiclsb(pair),
       new FusedLogicZexth(pair)
     )
-    val pairValid = VecInit(pair.map(_.valid)).asUInt.andR
+    val fire = io.in(i).valid && io.inReady(i)
+    val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
+    val fusionVec = RegEnable(VecInit(fusionList.map(_.isValid)), fire)
     val thisCleared = io.clear(i)
-    val fusionVec = VecInit(fusionList.map(_.isValid))
-    out.valid := pairValid && !thisCleared && fusionVec.asUInt.orR
-    XSError(PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
-    out.bits := cs.head
-    def connectByInt(field: CtrlSignals => UInt, replace: Seq[Option[Int]]): Unit = {
+    out.valid := instrPairValid && !thisCleared && fusionVec.asUInt.orR
+    XSError(instrPairValid && PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
+    def connectByInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[Int]]): Unit = {
+      field(out.bits).valid := false.B
+      field(out.bits).bits := DontCare
       val replaceVec = fusionVec.zip(replace).filter(_._2.isDefined)
       if (replaceVec.nonEmpty) {
         // constant values are grouped together for better timing.
+        val replEnable = VecInit(replaceVec.map(_._1)).asUInt.orR
         val replTypes = replaceVec.map(_._2.get).distinct
-        val replEnable= replTypes.map(t => VecInit(replaceVec.filter(_._2.get == t).map(_._1)).asUInt.orR)
-        when (VecInit(replaceVec.map(_._1)).asUInt.orR) {
-          field(out.bits) := Mux1H(replEnable, replTypes.map(_.U))
-        }
+        val replSel = replTypes.map(t => VecInit(replaceVec.filter(_._2.get == t).map(_._1)).asUInt.orR)
+        field(out.bits).valid := replEnable
+        field(out.bits).bits := Mux1H(replSel, replTypes.map(_.U))
       }
     }
-    def connectByUIntFunc(field: CtrlSignals => UInt, replace: Seq[Option[UInt => UInt]]): Unit = {
-      val replaceVec = fusionVec.zip(replace).filter(_._2.isDefined).map(x => (x._1, x._2.get(field(cs.head))))
+    def connectByUIntFunc(
+      field: FusionDecodeReplace => Valid[UInt],
+      csField: CtrlSignals => UInt,
+      replace: Seq[Option[UInt => UInt]]
+    ): Unit = {
+      field(out.bits).valid := false.B
+      field(out.bits).bits := DontCare
+      val replaceVec = fusionVec.zip(replace).filter(_._2.isDefined).map(x => (x._1, x._2.get(csField(dec))))
       if (replaceVec.nonEmpty) {
+        val replEnable = VecInit(replaceVec.map(_._1)).asUInt.orR
         // constant values are grouped together for better timing.
         val constReplVec = replaceVec.filter(_._2.isLit).map(x => (x._1, x._2.litValue))
         val constReplTypes = constReplVec.map(_._2).distinct
@@ -535,30 +568,31 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
         val constReplResult = Mux1H(constReplEnable, constReplTypes.map(_.U))
         // non-constant values have to be processed naively.
         val noLitRepl = replaceVec.filterNot(_._2.isLit)
-        when (VecInit(replaceVec.map(_._1)).asUInt.orR) {
-          field(out.bits) := Mux(VecInit(noLitRepl.map(_._1)).asUInt.orR, Mux1H(noLitRepl), constReplResult)
-        }
+        field(out.bits).valid := replEnable
+        field(out.bits).bits := Mux(VecInit(noLitRepl.map(_._1)).asUInt.orR, Mux1H(noLitRepl), constReplResult)
       }
     }
-    connectByInt((x: CtrlSignals) => x.fuType, fusionList.map(_.fuType))
-    connectByUIntFunc((x: CtrlSignals) => x.fuOpType, fusionList.map(_.fuOpType))
-    connectByInt((x: CtrlSignals) => x.srcType(1), fusionList.map(_.src2Type))
+    connectByInt((x: FusionDecodeReplace) => x.fuType, fusionList.map(_.fuType))
+    connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: CtrlSignals) => x.fuOpType, fusionList.map(_.fuOpType))
+    connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR
     io.info(i).rs2FromZero := src2WithZero
-    io.info(i).rs2FromRs1 := src2WithMux && !fusionList.head.destToRs1
-    io.info(i).rs2FromRs2 := src2WithMux && fusionList.head.destToRs1
+    io.info(i).rs2FromRs1 := src2WithMux && !RegEnable(fusionList.head.destToRs1, fire)
+    io.info(i).rs2FromRs2 := src2WithMux && RegEnable(fusionList.head.destToRs1, fire)
+    out.bits.lsrc2.valid := src2WithMux || src2WithZero
     when (src2WithMux) {
-      out.bits.lsrc(1) := Mux(fusionList.head.destToRs1, fusionList.head.instr2Rs2, fusionList.head.instr2Rs1)
-    }.elsewhen (src2WithZero) {
-      out.bits.lsrc(1) := 0.U
+      out.bits.lsrc2.bits := RegEnable(fusionList.head.lsrc2MuxResult, fire)
+    }.otherwise {//elsewhen (src2WithZero) {
+      out.bits.lsrc2.bits := 0.U
     }
     // TODO: assume every instruction fusion clears the second instruction now
     io.clear(i + 1) := out.valid
+    val lastFire = RegNext(fire)
     fusionList.zip(fusionVec).foreach { case (f, v) =>
-      XSPerfAccumulate(s"case_${f.fusionName}_$i", pairValid && !thisCleared && v && out.ready)
+      XSPerfAccumulate(s"case_${f.fusionName}_$i", instrPairValid && !thisCleared && v && lastFire)
     }
-    XSPerfAccumulate(s"conflict_fusion_$i", pairValid && thisCleared && fusionVec.asUInt.orR && out.ready)
+    XSPerfAccumulate(s"conflict_fusion_$i", instrPairValid && thisCleared && fusionVec.asUInt.orR && lastFire)
   }
 
   XSPerfAccumulate("fused_instr", PopCount(io.out.map(_.fire)))

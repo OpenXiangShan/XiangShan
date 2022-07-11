@@ -75,7 +75,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
     val sel = VecInit(io.in.map(_.fire)).asUInt
     io.out.bits := Mux1H(RegNext(sel), dataVec)
     // uop comes at the same cycle with valid and only RegNext is needed.
-    io.out.bits.uop := RegNext(uop)
+    io.out.bits.uop := RegEnable(uop, ctrl_arb.io.out.valid)
   }
 }
 
@@ -156,6 +156,8 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
   })
 
+  val redirect = RegNextWithEnable(io.redirect)
+
   val exclusiveIn = outer.exclusivePorts.map(io.in(_))
   val sharedIn = outer.sharedPorts.map(io.in(_))
 
@@ -168,12 +170,12 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
       require(!hasFastUopOut || !outer.needRegNext(i))
       if (hasFastUopOut) {
         // When hasFastUopOut, only uop comes at the same cycle with valid.
-        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits.uop := RegNext(in.bits.uop)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits.uop := RegEnable(in.bits.uop, in.valid)
       }
       if (outer.needRegNext(i)) {
-        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits := RegNext(in.bits)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits := RegEnable(in.bits, in.valid)
       }
       in.ready := true.B
   }
@@ -190,7 +192,7 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
         val flushFunc = (o: ExuOutput, r: Valid[Redirect]) => o.uop.robIdx.needFlush(r)
         if (outer.cfgHasFast(i)) {
           val ctrl_pipe = Wire(io.in(i).cloneType)
-          val buffer = PipelineConnect(io.in(i), ctrl_pipe, flushFunc, io.redirect, io.in(i).bits, 1)
+          val buffer = PipelineConnect(io.in(i), ctrl_pipe, flushFunc, redirect, io.in(i).bits, 1)
           buffer.extra.in := io.in(i).bits
           val buffer_out = Wire(io.in(i).cloneType)
           ctrl_pipe.ready := buffer_out.ready
@@ -200,7 +202,7 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
           buffer_out
         }
         else {
-          PipelineNext(io.in(i), flushFunc, io.redirect)
+          PipelineNext(io.in(i), flushFunc, redirect)
         }
       }
       else io.in(i)
@@ -208,7 +210,7 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val hasFastUopOut = outer.hasFastUopOut(portIndex)
     val fastVec = outer.hasFastUopOutVec(portIndex)
     val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
-    arb.io.redirect <> io.redirect
+    arb.io.redirect <> redirect
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
@@ -357,13 +359,14 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
       val out = Vec(configs.length, ValidIO(new ExuOutput))
       val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool())) // Dirty fix of data ecc error timing
     })
+    val redirect = RegNextWithEnable(io.redirect)
 
     for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
       out.valid := in.fire
       out.bits := in.bits
       if (config.hasFastUopOut || config.hasLoadError) {
-        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits.uop := RegNext(in.bits.uop)
+        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits.uop := RegEnable(in.bits.uop, in.fire)
       }
     }
 
@@ -374,7 +377,7 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
       ){
         // overwrite load exception writeback
         out.bits.uop.cf.exceptionVec(loadAccessFault) := delayed_error ||
-          RegNext(in.bits.uop.cf.exceptionVec(loadAccessFault))
+          RegEnable(in.bits.uop.cf.exceptionVec(loadAccessFault), in.valid)
       }
     }
 

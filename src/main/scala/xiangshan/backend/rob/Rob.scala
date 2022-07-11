@@ -35,6 +35,7 @@ class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
     redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx))
   }
 
+  def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
 }
 
 object RobPtr {
