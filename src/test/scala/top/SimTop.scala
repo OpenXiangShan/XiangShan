@@ -115,7 +115,9 @@ class SimTop(implicit p: Parameters) extends Module {
   if (soc.l3_sram_mbist.isDefined) {
     soc.l3_sram_mbist.get := DontCare
   }
-  soc.bisr_mem_chain_select := DontCare
+  if (soc.bisr_mem_chain_select.isDefined) {
+    soc.bisr_mem_chain_select.get := DontCare
+  }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
     val timer = GTimer()
