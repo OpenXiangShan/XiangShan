@@ -59,7 +59,8 @@ class SyncDataModuleTemplate[T <: Data](
   numRead: Int,
   numWrite: Int,
   parentModule: String,
-  concatData: Boolean = false
+  concatData: Boolean = false,
+  perReadPortBypassEnable: Option[Seq[Boolean]] = None
 ) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
@@ -83,9 +84,13 @@ class SyncDataModuleTemplate[T <: Data](
     else 0.U
   }
 
+  // if use bypassEnable to control bypass of each port,
+  // then we should have a separate bit for each read port
+  perReadPortBypassEnable.map(en_vec => require(en_vec.length == numRead))
+
   val dataBanks = Seq.tabulate(numBanks)(i => {
     val bankEntries = if (i < numBanks - 1) maxBankEntries else numEntries - (i * maxBankEntries)
-    Module(new NegedgeDataModuleTemplate(dataType, bankEntries, numRead, numWrite, parentModule))
+    Module(new NegedgeDataModuleTemplate(dataType, bankEntries, numRead, numWrite, parentModule, perReadPortBypassEnable))
   })
 
   // delay one clock
@@ -110,7 +115,14 @@ class SyncDataModuleTemplate[T <: Data](
   }
 }
 
-class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
+class NegedgeDataModuleTemplate[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  parentModule: String,
+  perReadPortBypassEnable: Option[Seq[Boolean]] = None
+) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -122,9 +134,13 @@ class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int
   override def desiredName: String = s"NegedgeDataModule_${parentModule}_${numEntries}entry"
   val data = Reg(Vec(numEntries, gen))
 
+  // if use bypassEnable to control bypass of each port,
+  // then we should have a separate bit for each read port
+  perReadPortBypassEnable.map(en_vec => require(en_vec.length == numRead))
   // read ports
   for (i <- 0 until numRead) {
-    val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i))
+    val bypass_en = perReadPortBypassEnable.map(_(i)).getOrElse(true)
+    val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i) && bypass_en.B)
     val addr_dec = UIntToOH(io.raddr(i), numEntries)
     when (VecInit(read_by).asUInt.orR) {
       io.rdata(i) := Mux1H(read_by, io.wdata)
