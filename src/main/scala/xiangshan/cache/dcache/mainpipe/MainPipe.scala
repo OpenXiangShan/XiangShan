@@ -124,6 +124,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
+    val tag_write_intend = Output(new Bool())
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -684,6 +685,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_write.bits.idx := s3_idx
   io.tag_write.bits.way_en := s3_way_en
   io.tag_write.bits.tag := get_tag(s3_req.addr)
+
+  io.tag_write_intend := s3_req.miss && s3_valid
+  XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
+  XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
+
+  assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 
   io.data_write.valid := s3_valid && s3_update_data_cango && update_data
   io.data_write.bits.way_en := s3_way_en

@@ -459,13 +459,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // tag array
   require(tagArray.io.read.size == (ldu.size + 1))
+  val tag_write_intend = missQueue.io.refill_pipe_req.valid || mainPipe.io.tag_write_intend
+  assert(!RegNext(!tag_write_intend && tagArray.io.write.valid))
   ldu.zipWithIndex.foreach {
     case (ld, i) =>
       tagArray.io.read(i) <> ld.io.tag_read
       ld.io.tag_resp := tagArray.io.resp(i)
+      ld.io.tag_read.ready := !tag_write_intend
   }
   tagArray.io.read.last <> mainPipe.io.tag_read
   mainPipe.io.tag_resp := tagArray.io.resp.last
+
+  val fake_tag_read_conflict_this_cycle = PopCount(ldu.map(ld=> ld.io.tag_read.valid))
+  XSPerfAccumulate("fake_tag_read_conflict", fake_tag_read_conflict_this_cycle)
 
   val tag_write_arb = Module(new Arbiter(new TagWriteReq, 2))
   tag_write_arb.io.in(0) <> refillPipe.io.tag_write
