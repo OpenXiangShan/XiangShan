@@ -138,22 +138,24 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val allowEnqueue = Input(Bool())
     val hasBlockBackward = Input(Bool())
     val enq = Vec(RenameWidth, Input(Bool()))
-    val out = Output(new RobPtr)
+    val out = Output(Vec(RenameWidth, new RobPtr))
   })
 
-  val enqPtr = RegInit(0.U.asTypeOf(new RobPtr))
+  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(_.U.asTypeOf(new RobPtr)))
 
   // enqueue
   val canAccept = io.allowEnqueue && !io.hasBlockBackward
   val dispatchNum = Mux(canAccept, PopCount(io.enq), 0.U)
 
-  when (io.redirect.valid) {
-    enqPtr := io.redirect.bits.robIdx + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
-  }.otherwise {
-    enqPtr := enqPtr + dispatchNum
+  for ((ptr, i) <- enqPtrVec.zipWithIndex) {
+    when(io.redirect.valid) {
+      ptr := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx + i.U, io.redirect.bits.robIdx + (i + 1).U)
+    }.otherwise {
+      ptr := ptr + dispatchNum
+    }
   }
 
-  io.out := enqPtr
+  io.out := enqPtrVec
 
 }
 
@@ -348,14 +350,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
-  val enqPtr = Wire(new RobPtr)
+  val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val validCounter = RegInit(0.U(log2Ceil(RobSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
-  val enqPtrVec = VecInit((0 until RenameWidth).map(i => enqPtr + PopCount(io.enq.needAlloc.take(i))))
+  val enqPtr = enqPtrVec.head
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
 
@@ -410,21 +412,23 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     hasWFI := false.B
   }
 
+  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.needAlloc.take(i)))))
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
-  io.enq.resp      := enqPtrVec
+  io.enq.resp      := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(_.valid && io.enq.canAccept))
   val timer = GTimer()
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
     when (canEnqueue(i)) {
       val enqUop = io.enq.req(i).bits
+      val enqIndex = allocatePtrVec(i).value
       // store uop in data module and debug_microOp Vec
-      debug_microOp(enqPtrVec(i).value) := enqUop
-      debug_microOp(enqPtrVec(i).value).debugInfo.dispatchTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.enqRsTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.selectTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.issueTime := timer
-      debug_microOp(enqPtrVec(i).value).debugInfo.writebackTime := timer
+      debug_microOp(enqIndex) := enqUop
+      debug_microOp(enqIndex).debugInfo.dispatchTime := timer
+      debug_microOp(enqIndex).debugInfo.enqRsTime := timer
+      debug_microOp(enqIndex).debugInfo.selectTime := timer
+      debug_microOp(enqIndex).debugInfo.issueTime := timer
+      debug_microOp(enqIndex).debugInfo.writebackTime := timer
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -686,7 +690,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   enqPtrGenModule.io.allowEnqueue := allowEnqueue
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
   enqPtrGenModule.io.enq := VecInit(io.enq.req.map(_.valid))
-  enqPtr := enqPtrGenModule.io.out
+  enqPtrVec := enqPtrGenModule.io.out
 
   val thisCycleWalkCount = Mux(walkFinished, walkCounter, CommitWidth.U)
   // next walkPtrVec:
@@ -747,7 +751,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
-      valid(enqPtrVec(i).value) := true.B
+      valid(allocatePtrVec(i).value) := true.B
     }
   }
   // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
@@ -770,9 +774,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
       val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
       val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
-      writebacked(enqPtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
+      writebacked(allocatePtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
-      store_data_writebacked(enqPtrVec(i).value) := !isStu
+      store_data_writebacked(allocatePtrVec(i).value) := !isStu
     }
   }
   when (exceptionGen.io.out.valid) {
@@ -803,7 +807,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // enqueue logic set 6 flagBkup at most
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
-      flagBkup(enqPtrVec(i).value) := enqPtrVec(i).flag
+      flagBkup(allocatePtrVec(i).value) := allocatePtrVec(i).flag
     }
   }
 
@@ -819,7 +823,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // Thus, we don't allow load/store instructions to trigger an interrupt.
       // TODO: support non-MMIO load-store instructions to trigger interrupts
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.ctrl.commitType)
-      interrupt_safe(RegNext(enqPtrVec(i).value)) := RegNext(allow_interrupts)
+      interrupt_safe(RegNext(allocatePtrVec(i).value)) := RegNext(allow_interrupts)
     }
   }
 
@@ -831,7 +835,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     VecInit(walkPtrVec_next.map(_.value))
   )
   dispatchData.io.wen := canEnqueue
-  dispatchData.io.waddr := enqPtrVec.map(_.value)
+  dispatchData.io.waddr := allocatePtrVec.map(_.value)
   dispatchData.io.wdata.zip(io.enq.req.map(_.bits)).foreach{ case (wdata, req) =>
     wdata.ldest := req.ctrl.ldest
     wdata.rfWen := req.ctrl.rfWen
@@ -1042,8 +1046,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
-        dt_eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
-        dt_isRVC(enqPtrVec(i).value) := io.enq.req(i).bits.cf.pd.isRVC
+        dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+        dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.cf.pd.isRVC
       }
     }
     for (wb <- exuWriteback) {
@@ -1097,7 +1101,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val dt_isXSTrap = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
-        dt_isXSTrap(enqPtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
+        dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
       }
     }
     val trapVec = io.commits.valid.zip(deqPtrVec).map{ case (v, d) => state === s_idle && v && dt_isXSTrap(d.value) }
@@ -1118,7 +1122,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val dt_isXSTrap = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
-        dt_isXSTrap(enqPtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
+        dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
       }
     }
     val trapVec = io.commits.valid.zip(deqPtrVec).map{ case (v, d) => state === s_idle && v && dt_isXSTrap(d.value) }
