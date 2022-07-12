@@ -132,7 +132,7 @@ class Scheduler(
 )(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbHelper {
   val numDpPorts = dpPorts.length
   val dpExuConfigs = dpPorts.map(port => port.map(_._1).map(configs(_)._1))
-  def getDispatch2 = {
+  def getDispatch2: Seq[Dispatch2Rs] = {
     if (dpExuConfigs.length > exuParameters.AluCnt) {
       val intDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.take(exuParameters.AluCnt)))
       val lsDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.drop(exuParameters.AluCnt)))
@@ -233,6 +233,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   class SchedulerExtraIO extends XSBundle {
+    // feedback to dispatch
+    val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Output(Bool()))
     // feedback ports
     val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, Flipped(new MemRSFeedbackIO()(updatedP)))) else None
     // special ports for RS that needs to read from other schedulers
@@ -285,6 +287,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   val dispatch2 = outer.dispatch2.map(_.module)
   dispatch2.foreach(_.io.redirect := io.redirect)
+  io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
 
   // dirty code for ls dp
   dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
