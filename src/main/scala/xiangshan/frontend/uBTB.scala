@@ -27,8 +27,7 @@ import xiangshan.cache.mmu.CAMTemplate
 trait MicroBTBParams extends HasXSParameter with HasBPUParameter {
   val numEntries = UbtbSize
   val ftPredBits = 1
-  val ftPredSize = FtbSize
-  val ftPredFoldWidth = 8
+  val ftPredSize = UbtbSize
   val ftPredDecayPeriod = 2048 // each time decay an entire row
   def ubtbAddr = new TableAddr(log2Up(numEntries), 1)
 }
@@ -72,11 +71,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val widx = Input(UInt(log2Ceil(ftPredSize).W))
       val wdata = Input(UInt(ftPredBits.W))
     })
-    val nRows = ftPredSize / ftPredFoldWidth
+    val nRows = ftPredSize
 
     val doing_reset = RegInit(true.B)
     val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
-    val reset_wdata = WireInit(0.U.asTypeOf(Vec(ftPredFoldWidth, UInt(ftPredBits.W))))
+    val reset_wdata = WireInit(0.U(ftPredBits.W))
     reset_idx := reset_idx + doing_reset
     when (reset_idx === (nRows-1).U) { doing_reset := false.B }
 
@@ -87,29 +86,25 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val decay_idx = RegInit(0.U(log2Ceil(nRows).W))
     decay_idx := decay_idx + doing_decay
 
-    val ram = Module(new SRAMTemplate(UInt(ftPredBits.W), set=nRows, way=ftPredFoldWidth, shouldReset=false, holdRead=true, singlePort=true))
-    ram.io.r.req.valid := io.ren
-    ram.io.r.req.bits.setIdx := io.ridx >> log2Ceil(ftPredFoldWidth)
-    
-    val ram_rdata = ram.io.r.resp.data
-    val ridx_reg = RegEnable(io.ridx, io.ren)
-    val r_way = ridx_reg(log2Ceil(ftPredFoldWidth)-1, 0)
-    io.rdata := ram_rdata(r_way)
+    val data = RegInit(VecInit(Seq.tabulate(nRows)(i => 0.U(1.W))))
+    io.rdata := data(RegNext(io.ridx))
+
     
     val wdata = Mux1H(Seq(
       (doing_reset, reset_wdata),
       (!doing_reset && doing_decay, decay_wdata),
-      (!(doing_reset || doing_decay) && io.wen, VecInit((0 until ftPredFoldWidth).map(_=>io.wdata)))
+      (!(doing_reset || doing_decay) && io.wen, io.wdata)
     ))
     val widx = Mux1H(Seq(
       (doing_reset, reset_idx),
       (!doing_reset && doing_decay, decay_idx),
-      (!(doing_reset || doing_decay) && io.wen, io.widx >> log2Ceil(ftPredFoldWidth))
+      (!(doing_reset || doing_decay) && io.wen, io.widx)
     ))
-    val waymask = UIntToOH(io.widx(log2Ceil(ftPredFoldWidth)-1, 0)) | Fill(ftPredFoldWidth, (doing_reset || doing_decay).asTypeOf(UInt(1.W))).asUInt
     val ram_wen = io.wen || doing_decay || doing_reset
 
-    ram.io.w.apply(ram_wen, wdata, widx, waymask)
+    when (ram_wen) {
+      data(widx) := wdata
+    }
 
     XSPerfAccumulate("num_decays", doing_decay)
     XSPerfAccumulate("num_writes", io.wen)
