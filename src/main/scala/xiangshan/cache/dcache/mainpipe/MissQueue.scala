@@ -26,7 +26,6 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
-import huancun.utils.FastArbiter
 
 class MissReq(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -556,11 +555,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
   arbiter_with_pipereg(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
-  // arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
-  val replace_pipe_req_arb = Module(new FastArbiter(new MainPipeReq, cfg.nMissEntries))
-  replace_pipe_req_arb.io.in.zip(entries.map(_.io.replace_pipe_req)).foreach(a => a._1 <> a._2)
-  io.replace_pipe_req <> replace_pipe_req_arb.io.out
-  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
+
+  fastArbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
+
+  fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
