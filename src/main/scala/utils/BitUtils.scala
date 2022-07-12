@@ -230,6 +230,9 @@ object OnesMoreThan {
     else if (input.length < thres) {
       false.B
     }
+    else if (thres == 1) {
+      VecInit(input).asUInt.orR
+    }
     else {
       val tail = input.drop(1)
       input(0) && OnesMoreThan(tail, thres - 1) || OnesMoreThan(tail, thres)
