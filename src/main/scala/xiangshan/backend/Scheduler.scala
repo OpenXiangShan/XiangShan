@@ -414,8 +414,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     issueIdx += issueWidth
 
     if (rs.io.jump.isDefined) {
-      rs.io.jump.get.jumpPc := io.extra.jumpPc
-      rs.io.jump.get.jalr_target := io.extra.jalr_target
+      val lastJumpFire = VecInit(rs.io.fromDispatch.map(dp => RegNext(dp.fire && dp.bits.isJump))).asUInt.orR
+      rs.io.jump.get.jumpPc := RegEnable(io.extra.jumpPc, lastJumpFire)
+      rs.io.jump.get.jalr_target := RegEnable(io.extra.jalr_target, lastJumpFire)
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr

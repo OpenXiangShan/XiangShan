@@ -271,6 +271,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
     wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
   }
+  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
