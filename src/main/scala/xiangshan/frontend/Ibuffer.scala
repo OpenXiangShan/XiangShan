@@ -90,10 +90,10 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
-  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
+  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth))
 
-  val deqPtrVec = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
-  val deqPtrVecNext = Wire(Vec(DecodeWidth, new IbufPtr))
+  val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
+  val deqPtrVecNext = Wire(Vec(2 * DecodeWidth, new IbufPtr))
   deqPtrVec := deqPtrVecNext
   val deqPtr = deqPtrVec(0)
 
@@ -106,6 +106,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numEnq = Mux(io.in.fire, PopCount(io.in.bits.valid), 0.U)
   val numTryDeq = Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries)
   val numDeq = Mux(io.out.head.ready, numTryDeq, 0.U)
+  deqPtrVecNext := Mux(io.out.head.ready, VecInit(deqPtrVec.map(_ + numTryDeq)), deqPtrVec)
 
   val numAfterEnq = validEntries +& numEnq
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
@@ -115,10 +116,10 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   io.in.ready := allowEnq
 
   val enqOffset = Seq.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
+  val enqData = Seq.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
   for (i <- 0 until PredictWidth) {
-    val enqData = Wire(new IBufEntry).fromFetch(io.in.bits, i)
     ibuf.io.waddr(i) := enqPtrVec(enqOffset(i)).value
-    ibuf.io.wdata(i) := enqData
+    ibuf.io.wdata(i) := enqData(i)
     ibuf.io.wen(i)   := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
   }
 
@@ -131,11 +132,31 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     ((1 << DecodeWidth) - 1).U,
     UIntToMask(validEntries(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
   )
+  val deqData = Reg(Vec(DecodeWidth, new IBufEntry))
   for (i <- 0 until DecodeWidth) {
     io.out(i).valid := validVec(i)
+    // by default, all bits are from the data module (slow path)
     io.out(i).bits := ibuf.io.rdata(i).toCtrlFlow
+    // some critical bits are from the fast path
+    val fastData = deqData(i).toCtrlFlow
+    io.out(i).bits.instr := fastData.instr
+    io.out(i).bits.exceptionVec := fastData.exceptionVec
+    XSError(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
   }
-  deqPtrVecNext := Mux(io.out.head.ready, VecInit(deqPtrVec.map(_ + numTryDeq)), deqPtrVec)
+  val nextStepData = Wire(Vec(2 * DecodeWidth, new IBufEntry))
+  val ptrMatch = new QPtrMatchMatrix(deqPtrVec, enqPtrVec)
+  for (i <- 0 until 2 * DecodeWidth) {
+    val enqMatchVec = VecInit(ptrMatch(i))
+    val enqBypassEnVec = io.in.bits.valid.asBools.zip(enqOffset).map{ case (v, o) => v && enqMatchVec(o) }
+    val enqBypassEn = io.in.fire && VecInit(enqBypassEnVec).asUInt.orR
+    val enqBypassData = Mux1H(enqBypassEnVec, enqData)
+    val readData = if (i < DecodeWidth) deqData(i) else ibuf.io.rdata(i)
+    nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
+  }
+  val deqEnable_n = io.out.map(o => !o.fire) :+ true.B
+  for (i <- 0 until DecodeWidth) {
+    deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1))
+  }
   ibuf.io.raddr := VecInit(deqPtrVecNext.map(_.value))
 
   // Flush

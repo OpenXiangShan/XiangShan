@@ -110,3 +110,4 @@ class QPtrMatchMatrix[T <: CircularQueuePtr[T]](left: Seq[T], right: Seq[T]) {
   }
   def apply(leftIndex: Int): Seq[Bool] = right.indices.map(i => apply(leftIndex, i))
 }
+
