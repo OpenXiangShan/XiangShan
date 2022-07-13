@@ -253,6 +253,13 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this
   }
 
+  // 4KB is normal entry, 2MB/1GB is considered as super entry
+  def is_normalentry(): Bool = {
+    if (!pageSuper) { true.B }
+    else if (!pageNormal) { false.B }
+    else { level.get === 0.U }
+  }
+
   def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
     val inner_level = level.getOrElse(0.U)
     val ppn_res = if (!pageSuper) ppn
@@ -517,6 +524,11 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
   val prefetch = Bool()
   val v = Bool()
+
+  def is_normalentry(): Bool = {
+    if (!hasLevel) true.B
+    else level.get === 2.U
+  }
 
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
