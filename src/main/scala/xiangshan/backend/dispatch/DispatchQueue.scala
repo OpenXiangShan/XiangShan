@@ -45,7 +45,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum, "DispatchQueue"))
+  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, 2 * deqnum, enqnum, "DispatchQueue"))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
@@ -207,6 +207,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   // T: get the required read data
   for (i <- 0 until deqnum) {
     io.deq(i).bits := deqData(i)
+    // Some bits have bad timing in Dispatch but will not be used at Dispatch2
+    // They will use the slow path from data module
+    io.deq(i).bits.cf := dataModule.io.rdata(i).cf
+    io.deq(i).bits.ctrl.fpu := dataModule.io.rdata(i).ctrl.fpu
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := Mux1H(headPtrOHVec(i), stateEntries) === s_valid && !lastCycleMisprediction
   }
@@ -214,20 +218,20 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   // For data(i): (1) current output (deqnum - i); (2) next-step data (i + 1)
   // For the next-step data(i): (1) enqueue data (enqnum); (2) data from storage (1)
   val nextStepData = Wire(Vec(2 * deqnum, new MicroOp))
+  val ptrMatch = new QPtrMatchMatrix(headPtr, tailPtr)
   for (i <- 0 until 2 * deqnum) {
-    val enqBypassEnVec = VecInit(io.enq.needAlloc.zipWithIndex.map{ case (v, j) =>
-      v && dataModule.io.waddr(j) === headPtr(i).value
-    })
-    val enqBypassEn = io.enq.canAccept && enqBypassEnVec.asUInt.orR
+    val enqMatchVec = VecInit(ptrMatch(i))
+    val enqBypassEnVec = io.enq.needAlloc.zip(enqOffset).map{ case (v, o) => v && enqMatchVec(o) }
+    val enqBypassEn = io.enq.canAccept && VecInit(enqBypassEnVec).asUInt.orR
     val enqBypassData = Mux1H(enqBypassEnVec, io.enq.req.map(_.bits))
-    val readData = if (i < deqnum) deqData(i) else dataModule.io.rdata(i - deqnum)
+    val readData = if (i < deqnum) deqData(i) else dataModule.io.rdata(i)
     nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
   }
   when (!io.redirect.valid) {
     deqData := (0 until deqnum).map(i => ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1)))
   }
   // T-2: read data from storage: next
-  dataModule.io.raddr := headPtrNext.drop(deqnum).map(_.value)
+  dataModule.io.raddr := headPtrNext.map(_.value)
 
   // debug: dump dispatch queue states
   XSDebug(p"head: ${headPtr(0)}, tail: ${tailPtr(0)}\n")
