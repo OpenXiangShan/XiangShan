@@ -216,7 +216,7 @@ object GetRemBits {
 object XORFold {
   def apply(input: UInt, resWidth: Int): UInt = {
     require(resWidth > 0)
-    val fold_range = input.getWidth / resWidth
+    val fold_range = (input.getWidth + resWidth - 1) / resWidth
     val value = ZeroExt(input, fold_range * resWidth)
     ParallelXOR((0 until fold_range).map(i => value(i*resWidth+resWidth-1, i*resWidth)))
   }
@@ -229,6 +229,9 @@ object OnesMoreThan {
     }
     else if (input.length < thres) {
       false.B
+    }
+    else if (thres == 1) {
+      VecInit(input).asUInt.orR
     }
     else {
       val tail = input.drop(1)
