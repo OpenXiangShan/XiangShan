@@ -119,7 +119,7 @@ class TLBFA(
   }
 
   val victim_idx = io.w.bits.wayIdx
-  io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).level.getOrElse(3.U) === 2.U
+  io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).is_normalentry()
   io.victim.out.bits.entry := ns_to_n(entries(victim_idx))
 
   def ns_to_n(ns: TlbEntry): TlbEntry = {
@@ -246,6 +246,7 @@ class TLBSA(
   }
 
   io.victim.out := DontCare
+  io.victim.out.valid := false.B
 
   XSPerfAccumulate(s"access", io.r.req.map(_.valid.asUInt()).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
