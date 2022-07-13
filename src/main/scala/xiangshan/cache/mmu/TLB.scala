@@ -232,7 +232,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
-    else refill && ptw_resp.entry.is_normalentry()},
+    else refill && !ptw_resp.entry.is_normalentry()},
     wayIdx = super_refill_idx,
     data = ptw_resp,
     data_replenish = io.ptw_replenish
