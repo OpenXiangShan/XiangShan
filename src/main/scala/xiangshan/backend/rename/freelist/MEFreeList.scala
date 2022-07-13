@@ -25,8 +25,8 @@ import utils._
 
 class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
   val freeList = RegInit(VecInit(
-    // originally {32, 33, ..., size - 1} are free. Register 0-31 are mapped to x0-x31.
-    Seq.tabulate(size - 32)(i => (i + 32).U(PhyRegIdxWidth.W)) ++ Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+    // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0-x31.
+    Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
 
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false, 0))
@@ -35,7 +35,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
-  val tailPtr = RegInit(FreeListPtr(false, size - 32))
+  val tailPtr = RegInit(FreeListPtr(false, size - 1))
 
   val doRename = io.canAllocate && io.doAllocate && !io.redirect && !io.walk
 

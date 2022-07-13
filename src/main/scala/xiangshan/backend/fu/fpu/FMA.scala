@@ -128,7 +128,7 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   val stages = FPU.ftypes.zipWithIndex.map{
     case (t, i) =>
       val s1 = Module(new FCMA_ADD_s1(t.expWidth, 2*t.precision, t.precision))
-      val s2 = Module(new FCMA_ADD_s2(t.expWidth, t.precision))
+      val s2 = Module(new FCMA_ADD_s2(t.expWidth, 2*t.precision, t.precision))
       val in1 = Mux(fma,
         mulProd(i).fp_prod.asUInt,
         Cat(src1(t.len - 1, 0), 0.U(t.precision.W))

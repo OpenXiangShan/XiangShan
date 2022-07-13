@@ -112,6 +112,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
 
   // update srcState when enqueue, wakeup
   // For better timing, we use different conditions for data write and srcState update
+  // srcInfo: (psrc, srcType)
   def wakeupMatch(srcInfo: (UInt, UInt)): (Bool, UInt) = {
     val (stateMatchVec, dataMatchVec) = io.wakeup.map(w => {
       val (stateMatch, dataMatch) = w.bits.wakeup(Seq(srcInfo), params.exuCfg.get).head

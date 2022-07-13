@@ -43,6 +43,7 @@ class VModule(object):
     module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
+    array_ext_line_re = re.compile(r'^  array_(\d*)_ext array_(\d*)_ext.*$')
 
     def __init__(self, name):
         self.name = name
@@ -61,6 +62,18 @@ class VModule(object):
         elif "SynRegfileSlice" in self.name:
             if line.strip().startswith("assign io_debug_ports_"):
                 debug_dontCare = True
+        
+        array_ext_match = self.array_ext_line_re.match(line)
+        if (array_ext_match):
+            print('array_ext match line ', line)
+            idx = int(array_ext_match.group(1))
+            # this is ugly
+            # sram with idx 4 is eliminated, so those with idx >= 4 should use idx + 1
+            if idx >= 4:
+                new_line = re.sub(r'\d+', str(idx + 1), line)
+                print(line, '->', new_line)
+                line = new_line
+        
         if debug_dontCare:
             self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)

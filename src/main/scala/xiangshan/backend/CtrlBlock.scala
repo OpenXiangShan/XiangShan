@@ -23,13 +23,15 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
-import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
+import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.FtqRead
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
+import xiangshan.backend.exu.ExuConfig
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
@@ -196,7 +198,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // }
 }
 
-class CtrlBlock(implicit p: Parameters) extends LazyModule
+class CtrlBlock(dpExuConfigs: Seq[Seq[Seq[ExuConfig]]])(implicit p: Parameters) extends LazyModule
   with HasWritebackSink with HasWritebackSource {
   val rob = LazyModule(new Rob)
 
@@ -205,6 +207,8 @@ class CtrlBlock(implicit p: Parameters) extends LazyModule
     super.addWritebackSink(source, index)
   }
 
+  // duplicated dispatch2 here to avoid cross-module timing path loop.
+  val dispatch2 = dpExuConfigs.map(c => LazyModule(new Dispatch2Rs(c)))
   lazy val module = new CtrlBlockImp(this)
 
   override lazy val writebackSourceParams: Seq[WritebackSourceParams] = {
@@ -232,8 +236,14 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val hartId = Input(UInt(8.W))
     val cpu_halt = Output(Bool())
     val frontend = Flipped(new FrontendToCtrlIO)
+    // to exu blocks
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
+    val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Input(Bool()))
+    val enqLsq = Flipped(new LsqEnqIO)
+    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    val sqDeq = Input(UInt(2.W))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -477,13 +487,43 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   fpDq.io.redirect := redirectForExu
   lsDq.io.redirect := redirectForExu
 
-  io.dispatch <> intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
+  val dpqOut = intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
+  io.dispatch <> dpqOut
+
+  for (dp2 <- outer.dispatch2.map(_.module.io)) {
+    dp2.redirect := redirectForExu
+    if (dp2.readFpState.isDefined) {
+      dp2.readFpState.get := DontCare
+    }
+    if (dp2.readIntState.isDefined) {
+      dp2.readIntState.get := DontCare
+    }
+    if (dp2.enqLsq.isDefined) {
+      val lsqCtrl = Module(new LsqEnqCtrl)
+      lsqCtrl.io.redirect <> redirectForExu
+      lsqCtrl.io.enq <> dp2.enqLsq.get
+      lsqCtrl.io.lcommit := rob.io.lsq.lcommit
+      lsqCtrl.io.scommit := io.sqDeq
+      lsqCtrl.io.lqCancelCnt := io.lqCancelCnt
+      lsqCtrl.io.sqCancelCnt := io.sqCancelCnt
+      io.enqLsq <> lsqCtrl.io.enqLsq
+    }
+  }
+  for ((dp2In, i) <- outer.dispatch2.flatMap(_.module.io.in).zipWithIndex) {
+    dp2In.valid := dpqOut(i).valid
+    dp2In.bits := dpqOut(i).bits
+    // override ready here to avoid cross-module loop path
+    dpqOut(i).ready := dp2In.ready
+  }
+  for ((dp2Out, i) <- outer.dispatch2.flatMap(_.module.io.out).zipWithIndex) {
+    dp2Out.ready := io.rsReady(i)
+  }
 
   val pingpong = RegInit(false.B)
   pingpong := !pingpong
   val jumpInst = Mux(pingpong && (exuParameters.AluCnt > 2).B, io.dispatch(2).bits, io.dispatch(0).bits)
   val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
-  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset).asUInt
   val jumpTargetRead = io.frontend.fromFtq.target_read
   io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 

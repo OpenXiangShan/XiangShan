@@ -228,14 +228,14 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
   val refill = ptw_resp_v && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
-    else refill && ptw_resp.entry.level.get === 2.U },
+    else refill && ptw_resp.entry.is_normalentry()},
     wayIdx = normal_refill_idx,
     data = ptw_resp,
     data_replenish = io.ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
-    else refill && ptw_resp.entry.level.get =/= 2.U },
+    else refill && !ptw_resp.entry.is_normalentry()},
     wayIdx = super_refill_idx,
     data = ptw_resp,
     data_replenish = io.ptw_replenish

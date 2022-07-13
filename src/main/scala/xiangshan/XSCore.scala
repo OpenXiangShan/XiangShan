@@ -230,7 +230,8 @@ abstract class XSCoreBase(parentName:String = "Unknown")(implicit p: config.Para
 
   val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
   wb2Ctrl.addWritebackSink(exuBlocks :+ memBlock)
-  val ctrlBlock = LazyModule(new CtrlBlock)
+  val dpExuConfigs = exuBlocks.flatMap(_.scheduler.dispatch2.map(_.configs))
+  val ctrlBlock = LazyModule(new CtrlBlock(dpExuConfigs))
   val writebackSources = Seq(Seq(wb2Ctrl), Seq(wbArbiter))
   writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 }
@@ -324,6 +325,11 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
+  ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
+  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
+  ctrlBlock.io.sqDeq := memBlock.io.sqDeq
+  ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
+  ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
   exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get

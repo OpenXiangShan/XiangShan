@@ -631,21 +631,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     cs.blockBackward := false.B
   }
 
-  //to selectout prefetch.r/prefetch.w
-  val isORI = BitPat("b?????????????????110?????0010011") === ctrl_flow.instr
-  when(isORI && io.csrCtrl.soft_prefetch_enable) {
-    // TODO: add CSR based Zicbop config
-    when(cs.ldest === 0.U) {
-      cs.selImm := SelImm.IMM_S
-      cs.fuType := FuType.ldu
-      when(cs.lsrc(1) === "b00001".U) {
-        cs.fuOpType := LSUOpType.prefetch_r
-      }.otherwise {
-        cs.fuOpType := LSUOpType.prefetch_w
-      }
-    }
-  }
-
   cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
     x => {
       val minBits = x._2.minBitsFromInstr(ctrl_flow.instr)
@@ -655,17 +640,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   cf_ctrl.ctrl := cs
-
-  // TODO: do we still need this?
-  // fix ret and call
-//  when (cs.fuType === FuType.jmp) {
-//    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
-//    when (isLink(cs.ldest) && cs.fuOpType === JumpOpType.jal) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
-//    when (cs.fuOpType === JumpOpType.jalr) {
-//      when (isLink(cs.lsrc(0))) { cf_ctrl.ctrl.fuOpType := JumpOpType.ret  }
-//      when (isLink(cs.ldest)) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
-//    }
-//  }
 
   io.deq.cf_ctrl := cf_ctrl
 

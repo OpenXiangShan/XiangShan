@@ -190,6 +190,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   }
 
   def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
+  def isSoftPrefetch: Bool = {
+    fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+  }
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -271,6 +274,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
     wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
   }
+  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {

@@ -36,7 +36,7 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
   // recording referenced times of each physical registers
   // refCounter: increase at rename; decrease at walk/commit
   // Originally 0-31 registers have counters of ones.
-  val refCounter = RegInit(VecInit(Seq.fill(32)(1.U(IntRefCounterWidth.W)) ++ Seq.fill(size - 32)(0.U(IntRefCounterWidth.W))))
+  val refCounter = RegInit(VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
   val refCounterInc = WireInit(refCounter)
   val refCounterDec = WireInit(refCounter)
   val refCounterNext = WireInit(refCounter)

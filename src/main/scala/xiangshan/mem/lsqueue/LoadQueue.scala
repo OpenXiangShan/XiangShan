@@ -681,16 +681,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val xorMask = lqIdxMask ^ enqMask
     val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === enqPtrExt(0).flag
     val ldToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
-    val ldld_violation_mask = WireInit(VecInit((0 until LoadQueueSize).map(j => {
-      dataModule.io.release_violation(i).match_mask(j) && // addr match
+    val ldld_violation_mask_gen_1 = WireInit(VecInit((0 until LoadQueueSize).map(j => {
       ldToEnqPtrMask(j) && // the load is younger than current load
       allocated(j) && // entry is valid
       released(j) && // cacheline is released
       (datavalid(j) || miss(j)) // paddr is valid
     })))
+    val ldld_violation_mask_gen_2 = WireInit(VecInit((0 until LoadQueueSize).map(j => {
+      dataModule.io.release_violation(i).match_mask(j)// addr match
+      // addr match result is slow to generate, we RegNext() it
+    })))
+    val ldld_violation_mask = RegNext(ldld_violation_mask_gen_1).asUInt & RegNext(ldld_violation_mask_gen_2).asUInt
     dontTouch(ldld_violation_mask)
     ldld_violation_mask.suggestName("ldldViolationMask_" + i)
-    io.loadViolationQuery(i).resp.bits.have_violation := RegNext(ldld_violation_mask.asUInt.orR)
+    io.loadViolationQuery(i).resp.bits.have_violation := ldld_violation_mask.orR
   })
 
   // "released" flag update
