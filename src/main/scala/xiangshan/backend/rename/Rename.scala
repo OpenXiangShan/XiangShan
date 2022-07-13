@@ -158,8 +158,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
+    // dirty code for fence. The lsrc is passed by imm.
     when (io.out(i).bits.ctrl.fuType === FuType.fence) {
       io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
+    }
+    // dirty code for SoftPrefetch (prefetch.r/prefetch.w)
+    when (io.in(i).bits.ctrl.isSoftPrefetch) {
+      io.out(i).bits.ctrl.fuType := FuType.ldu
+      io.out(i).bits.ctrl.fuOpType := Mux(io.in(i).bits.ctrl.lsrc(1) === 1.U, LSUOpType.prefetch_r, LSUOpType.prefetch_w)
+      io.out(i).bits.ctrl.selImm := SelImm.IMM_S
+      io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.imm(io.in(i).bits.ctrl.imm.getWidth - 1, 5), 0.U(5.W))
     }
 
     // write speculative rename table
@@ -222,7 +230,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // For fused-lui-load, load.src(0) is replaced by the imm.
     val last_is_lui = io.in(i - 1).bits.ctrl.selImm === SelImm.IMM_U && io.in(i - 1).bits.ctrl.srcType(0) =/= SrcType.pc
-    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu && !LSUOpType.isPrefetch(io.in(i).bits.ctrl.fuOpType)
+    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu
     val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
     val fused_lui_load = last_is_lui && this_is_load && lui_to_load
     when (fused_lui_load) {
@@ -318,8 +326,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
-  XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
-  val is_fused_lui_load = io.out.map(o => o.fire() && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
+  XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire && out.bits.ctrl.isMove)))
+  val is_fused_lui_load = io.out.map(o => o.fire && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   
