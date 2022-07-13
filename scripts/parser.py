@@ -43,7 +43,6 @@ class VModule(object):
     module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
-    array_ext_line_re = re.compile(r'^  array_(\d*)_ext array_(\d*)_ext.*$')
 
     def __init__(self, name):
         self.name = name
@@ -62,18 +61,6 @@ class VModule(object):
         elif "SynRegfileSlice" in self.name:
             if line.strip().startswith("assign io_debug_ports_"):
                 debug_dontCare = True
-        
-        array_ext_match = self.array_ext_line_re.match(line)
-        if (array_ext_match):
-            print('array_ext match line ', line)
-            idx = int(array_ext_match.group(1))
-            # this is ugly
-            # sram with idx 4 is eliminated, so those with idx >= 4 should use idx + 1
-            if idx >= 4:
-                new_line = re.sub(r'\d+', str(idx + 1), line)
-                print(line, '->', new_line)
-                line = new_line
-        
         if debug_dontCare:
             self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
@@ -392,7 +379,7 @@ def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
 
 
 class SRAMConfiguration(object):
-    ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
+    ARRAY_NAME = "sram_array_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
 
     SINGLE_PORT = 0
     SINGLE_PORT_MASK = 1
@@ -565,7 +552,7 @@ def generate_sram_conf(collection, module_prefix, out_dir):
     sram_conf = []
     sram_array_name = module_prefix + SRAMConfiguration.ARRAY_NAME
     modules = collection.get_all_modules(match=sram_array_name)
-    for module in sorted(modules, key=lambda m: int(m.get_name().replace(module_prefix, "").split("_")[2])):
+    for module in modules:
         conf = SRAMConfiguration()
         conf.from_module_name(module.get_name()[len(module_prefix):])
         sram_conf.append(conf)
