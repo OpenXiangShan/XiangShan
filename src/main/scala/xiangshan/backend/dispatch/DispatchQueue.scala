@@ -45,7 +45,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
+  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum, "DispatchQueue"))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
