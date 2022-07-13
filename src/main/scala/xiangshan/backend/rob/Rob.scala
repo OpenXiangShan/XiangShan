@@ -661,11 +661,21 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * (3) walk: when walking comes to the end, switch to s_walk
     * (4) s_extrawalk to s_walk
     */
+  // state === s_idle: don't change when walk_no_need
+  // state === s_walk: don't change when walk_no_need && walkFinished
+  // state === s_extrawalk: always continue to walk (because it's not possible for walk_no_need)
+  val zeroWalkDistance = enqPtr - 1.U === io.redirect.bits.robIdx && !io.redirect.bits.flushItself()
+  val noNeedToWalk = zeroWalkDistance && (state === s_idle || (state === s_walk && walkFinished))
+  // update the state depending on whether there is a redirect
   val state_next = Mux(io.redirect.valid,
-    Mux(io.enq.needAlloc.asUInt.orR, s_extrawalk, s_walk),
+    Mux(io.enq.needAlloc.asUInt.orR,
+      s_extrawalk,
+      Mux(noNeedToWalk, s_idle, s_walk)
+    ),
     Mux(state === s_walk && walkFinished,
       s_idle,
       Mux(state === s_extrawalk,
+        // if no more walk, switch to s_idle
         Mux(walkCounter === 0.U, s_idle, s_walk),
         state
       )
