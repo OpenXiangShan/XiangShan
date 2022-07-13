@@ -90,9 +90,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val intrBitSetReg = Input(Bool())
     val hasNoSpecExec = Input(Bool())
     val interrupt_safe = Input(Bool())
-    val misPredBlock = Input(Bool())
-    val isReplaying = Input(Bool())
-    val hasWFI = Input(Bool())
+    val blockCommit = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RobPtr))
     val next_out = Vec(CommitWidth, Output(new RobPtr))
@@ -109,7 +107,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.robIdx, deqPtrVec.last)
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying && !io.hasWFI))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg or there're possible exceptions in these instructions,
   // only one instruction is allowed to commit
@@ -117,7 +115,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   val commitCnt = Mux(allowOnlyOne, canCommit(0), normalCommitCnt)
 
   val commitDeqPtrVec = VecInit(deqPtrVec.map(_ + commitCnt))
-  val deqPtrVec_next = Mux(io.state === 0.U && !redirectOutValid, commitDeqPtrVec, deqPtrVec)
+  val deqPtrVec_next = Mux(io.state === 0.U && !redirectOutValid && !io.blockCommit, commitDeqPtrVec, deqPtrVec)
 
   deqPtrVec := deqPtrVec_next
 
@@ -583,9 +581,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
+  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
 
   io.commits.isWalk := state =/= s_idle
-  io.commits.isCommit := state === s_idle && !misPredBlock && !isReplaying && !lastCycleFlush && !hasWFI
+  io.commits.isCommit := state === s_idle && !blockCommit
   val walk_v = VecInit(walkPtrVec.map(ptr => valid(ptr.value)))
   val commit_v = VecInit(deqPtrVec.map(ptr => valid(ptr.value)))
   // store will be commited iff both sta & std have been writebacked
@@ -694,9 +693,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
-  deqPtrGenModule.io.misPredBlock := misPredBlock
-  deqPtrGenModule.io.isReplaying := isReplaying
-  deqPtrGenModule.io.hasWFI := hasWFI
+  deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 
