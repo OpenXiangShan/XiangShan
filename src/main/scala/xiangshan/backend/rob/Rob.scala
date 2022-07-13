@@ -906,12 +906,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   fflagsDataRead := fflagsDataModule.io.rdata
 
 
-  val instrCnt = RegInit(0.U(64.W))
-  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => v && CommitType.isFused(i.commitType) })
-  val trueCommitCnt = commitCnt +& fuseCommitCnt
-  val retireCounter = Mux(io.commits.isCommit, trueCommitCnt, 0.U)
-  instrCnt := instrCnt + retireCounter
-  io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
+  val instrCntReg = RegInit(0.U(64.W))
+  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
+  val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
+  val retireCounter = Mux(RegNext(io.commits.isCommit), trueCommitCnt, 0.U)
+  val instrCnt = instrCntReg + retireCounter
+  instrCntReg := instrCnt
+  io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
 
   /**
@@ -1009,9 +1010,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata(i) := debug_exuData(idx)
     wpc(i) := SignExt(commitDebugUop(i).cf.pc, XLEN)
   }
-  val retireCounterFix = Mux(io.exception.valid, 1.U, retireCounter)
-  val retirePCFix = SignExt(Mux(io.exception.valid, io.exception.bits.uop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
-  val retireInstFix = Mux(io.exception.valid, io.exception.bits.uop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
 
   if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
