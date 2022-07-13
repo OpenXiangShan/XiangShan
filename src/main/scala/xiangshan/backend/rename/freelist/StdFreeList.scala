@@ -32,7 +32,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
   XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val fakeTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
+  val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
   val tailPtrOHReg = RegInit(0.U(size.W))
 
@@ -41,21 +41,20 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   //
   val freeReqReg = RegNext(io.freeReq)
   for (i <- 0 until CommitWidth) {
-    val offset = if (i == 0) 0.U else PopCount(io.freeReq.take(i))
-    val ptr = tailPtr + offset
-    val idx = ptr.value
+    val offset = if (i == 0) 0.U else PopCount(freeReqReg.take(i))
+    val enqPtr = lastTailPtr + offset
 
     // Why RegNext: for better timing
     // Why we can RegNext: these free registers won't be used in the next cycle,
     // since we set canAllocate only when the current free regs > RenameWidth.
     when (freeReqReg(i)) {
-      freeList(RegNext(idx)) := RegNext(io.freePhyReg(i))
+      freeList(enqPtr.value) := RegNext(io.freePhyReg(i))
     }
     XSDebug(io.freeReq(i), p"req#$i free physical reg: ${io.freePhyReg(i)}\n")
   }
 
-  tailPtr := fakeTailPtr + PopCount(freeReqReg)
-  fakeTailPtr := tailPtr
+  tailPtr := lastTailPtr + PopCount(freeReqReg)
+  lastTailPtr := tailPtr
 
   //
   // allocate new physical registers for instructions at rename stage
@@ -84,7 +83,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // Since the update of headPtr should have a good timing,
   // we calculate the OH index here to optimize the freelist read timing.
   // may shift [0, RenameWidth] steps
-  val stepBackHeadPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.right)
+  val stepBackHeadPtrOHVec = VecInit.tabulate(CommitWidth + 1)(headPtrOHShift.right)
   val stepBackHeadPtrOH = stepBackHeadPtrOHVec(io.stepBack)
   headPtrOH := Mux(io.walk, stepBackHeadPtrOH,
     Mux(realDoAllocate, headPtrOHVec(numAllocate), headPtrOH))

@@ -45,13 +45,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val data = Reg(Vec(size, new MicroOp))
+  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
+  val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
   class DispatchQueuePtr extends CircularQueuePtr[DispatchQueuePtr](size)
 
   // head: first valid entry (dispatched entry)
-  val headPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new DispatchQueuePtr))))
+  val headPtr = RegInit(VecInit((0 until 2 * deqnum).map(_.U.asTypeOf(new DispatchQueuePtr))))
+  val headPtrNext = Wire(Vec(2 * deqnum, new DispatchQueuePtr))
   val headPtrMask = UIntToMask(headPtr(0).value, size)
   val headPtrOH = RegInit(1.U(size.W))
   val headPtrOHShift = CircularShift(headPtrOH)
@@ -68,7 +70,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
 
   val isTrueEmpty = !VecInit(stateEntries.map(_ === s_valid)).asUInt.orR
   val canEnqueue = allowEnqueue
-  val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
    * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -84,13 +85,19 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
    */
   // enqueue: from s_invalid to s_valid
   io.enq.canAccept := canEnqueue
-  val enqIndexOH = (0 until enqnum).map(i => tailPtrOHVec(PopCount(io.enq.needAlloc.take(i))))
+  val enqOffset = (0 until enqnum).map(i => PopCount(io.enq.needAlloc.take(i)))
+  val enqIndexOH = (0 until enqnum).map(i => tailPtrOHVec(enqOffset(i)))
   for (i <- 0 until size) {
     val validVec = io.enq.req.map(_.valid).zip(enqIndexOH).map{ case (v, oh) => v && oh(i) }
-    when (VecInit(validVec).asUInt.orR && canActualEnqueue) {
-      data(i) := Mux1H(validVec, io.enq.req.map(_.bits))
+    when (VecInit(validVec).asUInt.orR && canEnqueue) {
+      robIdxEntries(i) := Mux1H(validVec, io.enq.req.map(_.bits.robIdx))
       stateEntries(i) := s_valid
     }
+  }
+  for (i <- 0 until enqnum) {
+    dataModule.io.wen(i) := canEnqueue && io.enq.req(i).valid
+    dataModule.io.waddr(i) := tailPtr(enqOffset(i)).value
+    dataModule.io.wdata(i) := io.enq.req(i).bits
   }
 
   // dequeue: from s_valid to s_dispatched
@@ -104,14 +111,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && data(i).robIdx.needFlush(io.redirect)
+    needCancel(i) := stateEntries(i) =/= s_invalid && robIdxEntries(i).needFlush(io.redirect)
 
     when(needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(data(i).cf.pc)}) " +
-      p"robIndex ${data(i).robIdx} " +
+    XSInfo(needCancel(i), p"valid entry($i): robIndex ${robIdxEntries(i)} " +
       p"cancelled with redirect robIndex 0x${Hexadecimal(io.redirect.bits.robIdx.asUInt)}\n")
   }
 
@@ -124,21 +130,28 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
 
   // dequeue
   val currentValidCounter = distanceBetween(tailPtr(0), headPtr(0))
-  val numDeqTry = Mux(currentValidCounter > deqnum.U, deqnum.U, currentValidCounter)
-  val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map { case (deq, i) =>
+  val numDeqTryMask = Mux(currentValidCounter >= deqnum.U,
+    // all deq are valid
+    (1 << deqnum).U,
+    // only the valid bits are set
+    UIntToOH(currentValidCounter, deqnum)
+  )
+  val deqEnable_n = io.deq.zipWithIndex.map { case (deq, i) =>
     // For dequeue, the first entry should never be s_invalid
     // Otherwise, there should be a redirect and tail walks back
     // in this case, we set numDeq to 0
-    !deq.fire && (if (i == 0) true.B else stateEntries(headPtr(i).value) =/= s_invalid)
-  } :+ true.B)
-  val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
+    if (i == 0) !deq.fire || numDeqTryMask(i)
+    // When the state is s_invalid, we set deqEnable_n to false.B because
+    // the entry may leave earlier and require to move forward the deqPtr.
+    else (!deq.fire && stateEntries(headPtr(i).value) =/= s_invalid) || numDeqTryMask(i)
+  } :+ true.B
+  val numDeq = PriorityEncoder(deqEnable_n)
   // agreement with reservation station: don't dequeue when redirect.valid
-  val nextHeadPtr = Wire(Vec(deqnum, new DispatchQueuePtr))
-  for (i <- 0 until deqnum) {
-    nextHeadPtr(i) := Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq)
-    headPtr(i) := nextHeadPtr(i)
+  for (i <- 0 until 2 * deqnum) {
+    headPtrNext(i) := Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq)
   }
-  headPtrOH := Mux(io.redirect.valid, headPtrOH, headPtrOHVec(numDeq))
+  headPtr := headPtrNext
+  headPtrOH := Mux(io.redirect.valid, headPtrOH, ParallelPriorityMux(deqEnable_n, headPtrOHVec))
   XSError(headPtrOH =/= headPtr.head.toOH, p"head: $headPtrOH != UIntToOH(${headPtr.head})")
 
   // For branch mis-prediction or memory violation replay,
@@ -187,13 +200,34 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
 
   /**
-   * Part 3: set output and input
+   * Part 3: set output valid and data bits
    */
+  val deqData = Reg(Vec(deqnum, new MicroOp))
+  // How to pipeline the data read:
+  // T: get the required read data
   for (i <- 0 until deqnum) {
-    io.deq(i).bits := Mux1H(headPtrOHVec(i), data)
+    io.deq(i).bits := deqData(i)
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := Mux1H(headPtrOHVec(i), stateEntries) === s_valid && !lastCycleMisprediction
   }
+  // T-1: select data from the following (deqnum + 1 + numEnq) sources with priority
+  // For data(i): (1) current output (deqnum - i); (2) next-step data (i + 1)
+  // For the next-step data(i): (1) enqueue data (enqnum); (2) data from storage (1)
+  val nextStepData = Wire(Vec(2 * deqnum, new MicroOp))
+  for (i <- 0 until 2 * deqnum) {
+    val enqBypassEnVec = VecInit(io.enq.needAlloc.zipWithIndex.map{ case (v, j) =>
+      v && dataModule.io.waddr(j) === headPtr(i).value
+    })
+    val enqBypassEn = io.enq.canAccept && enqBypassEnVec.asUInt.orR
+    val enqBypassData = Mux1H(enqBypassEnVec, io.enq.req.map(_.bits))
+    val readData = if (i < deqnum) deqData(i) else dataModule.io.rdata(i - deqnum)
+    nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
+  }
+  when (!io.redirect.valid) {
+    deqData := (0 until deqnum).map(i => ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1)))
+  }
+  // T-2: read data from storage: next
+  dataModule.io.raddr := headPtrNext.drop(deqnum).map(_.value)
 
   // debug: dump dispatch queue states
   XSDebug(p"head: ${headPtr(0)}, tail: ${tailPtr(0)}\n")

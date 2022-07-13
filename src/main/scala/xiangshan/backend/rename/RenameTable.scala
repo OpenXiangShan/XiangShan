@@ -35,7 +35,7 @@ class RatWritePort(implicit p: Parameters) extends XSBundle {
 }
 
 class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
+  val io = IO(new Bundle {
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
@@ -43,10 +43,11 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   })
 
   // speculative rename table
-  val spec_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
+  val rename_table_init = VecInit.tabulate(32)(i => (if (float) i else 0).U(PhyRegIdxWidth.W))
+  val spec_table = RegInit(rename_table_init)
   val spec_table_next = WireInit(spec_table)
   // arch state rename table
-  val arch_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
+  val arch_table = RegInit(rename_table_init)
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.

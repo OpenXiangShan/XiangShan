@@ -33,7 +33,7 @@ object ParallelOperation {
 
 object ParallelOR {
   def apply[T <: Data](xs: Seq[T]): T = {
-    ParallelOperation(xs, (a: T, b: T) => (a.asUInt() | b.asUInt()).asTypeOf(xs.head))
+    ParallelOperation(xs, (a: T, b: T) => (a.asUInt | b.asUInt).asTypeOf(xs.head))
   }
 }
 
@@ -44,7 +44,7 @@ object ParallelORR {
 
 object ParallelAND {
   def apply[T <: Data](xs: Seq[T]): T = {
-    ParallelOperation(xs, (a: T, b:T) => (a.asUInt() & b.asUInt()).asTypeOf(xs.head))
+    ParallelOperation(xs, (a: T, b:T) => (a.asUInt & b.asUInt).asTypeOf(xs.head))
   }
 }
 
@@ -55,15 +55,16 @@ object ParallelANDR {
 
 object ParallelXOR {
   def apply[T <: Data](xs: Seq[T]): T = {
-    ParallelOperation(xs, (a: T, b:T) => (a.asUInt() ^ b.asUInt()).asTypeOf(xs.head))
+    ParallelOperation(xs, (a: T, b:T) => (a.asUInt ^ b.asUInt).asTypeOf(xs.head))
   }
 }
 
 object ParallelMux {
   def apply[T<:Data](in: Seq[(Bool, T)]): T = {
-    val xs = in map { case (cond, x) => (Fill(x.getWidth, cond) & x.asUInt()).asTypeOf(in.head._2) }
+    val xs = in map { case (cond, x) => Mux(cond, x, 0.U.asTypeOf(x.cloneType)) }
     ParallelOR(xs)
   }
+  def apply[T <: Data](sel: Seq[Bool], in: Seq[T]): T = apply(sel.zip(in))
 }
 
 object ParallelLookUp {
@@ -74,13 +75,13 @@ object ParallelLookUp {
 
 object ParallelMax {
   def apply[T <: Data](xs: Seq[T]): T = {
-    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() > b.asUInt(),a, b).asTypeOf(xs.head))
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt > b.asUInt,a, b).asTypeOf(xs.head))
   }
 }
 
 object ParallelMin {
   def apply[T <: Data](xs: Seq[T]): T = {
-    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() < b.asUInt(),a, b).asTypeOf(xs.head))
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt < b.asUInt,a, b).asTypeOf(xs.head))
   }
 }
 

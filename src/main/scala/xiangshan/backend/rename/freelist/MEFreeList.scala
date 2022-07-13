@@ -33,7 +33,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
-  val tailPtr = RegInit(FreeListPtr(false, size - 32))
+  val tailPtr = RegInit(FreeListPtr(false, size - 1))
 
   val doRename = io.canAllocate && io.doAllocate && !io.redirect && !io.walk
 
@@ -62,8 +62,8 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     }
   }
   when (reset.asBool) {
-    for (i <- 0 until size - 32) {
-      freeList(i) := (i + 32).U
+    for (i <- 0 until size - 1) {
+      freeList(i) := (i + 1).U
     }
   }
 
