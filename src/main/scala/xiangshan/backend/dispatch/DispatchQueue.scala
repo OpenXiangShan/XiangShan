@@ -220,10 +220,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   // For the next-step data(i): (1) enqueue data (enqnum); (2) data from storage (1)
   val nextStepData = Wire(Vec(2 * deqnum, new MicroOp))
   for (i <- 0 until 2 * deqnum) {
-    val enqBypassEnVec = VecInit(io.enq.needAlloc.zipWithIndex.map{ case (v, j) =>
-      v && fastDataModule.io.waddr(j) === headPtr(i).value
-    })
-    val enqBypassEn = io.enq.canAccept && enqBypassEnVec.asUInt.orR
+    val ptrMatch = VecInit(tailPtr.map(_.value === headPtr(i).value))
+    val enqBypassEnVec = io.enq.needAlloc.zip(enqOffset).map{ case (v, o) => v && ptrMatch(o) }
+    val enqBypassEn = io.enq.canAccept && VecInit(enqBypassEnVec).asUInt.orR
     val enqBypassData = Mux1H(enqBypassEnVec, io.enq.req.map(_.bits))
     val readData = if (i < deqnum) deqData(i) else fastDataModule.io.rdata(i - deqnum)
     nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
