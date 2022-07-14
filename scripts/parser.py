@@ -541,7 +541,7 @@ class SRAMConfiguration(object):
             if self.mask_width() > 1:
                 func_ports["WM"] = "W0_mask"
         if self.width > 256:
-            func_ports["MBIST_SELECTDOH"] = "mbist_selectedOH"
+            func_ports["MBIST_SELECTEDOH"] = "mbist_selectedOH"
         verilog_lines = []
         verilog_lines.append(f"  {wrapper_module} {wrapper_instance} (\n")
         connected_pins = []
