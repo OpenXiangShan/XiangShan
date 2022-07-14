@@ -213,6 +213,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             isSRAM = true,
             1
           )))
+          responseMbistPipeline.genCSV(intf.get.info)
           intf.get.extra := DontCare
           intf.get.clock := childClock
           intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
@@ -238,6 +239,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             isSRAM = false,
             1
           )))
+          responseMbistPipeline.genCSV(intf.get.info)
           intf.get.extra := DontCare
           intf.get.clock := childClock
           intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
@@ -262,6 +264,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         isSRAM = true,
         1
       ))
+      core.module.coreMbistPipelineSram.get.genCSV(mbistInterfaceCoreSRAM.info)
       mbistInterfaceCoreSRAM.extra := DontCare
       mbistInterfaceCoreSRAM.clock := childClock
       mbistInterfaceCoreSRAM.toPipeline.head <> core.module.mbist_sram
@@ -278,6 +281,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         isSRAM = false,
         1
       ))
+      core.module.coreMbistPipelineRf.get.genCSV(mbistInterfaceCoreRF.info)
       mbistInterfaceCoreRF.extra := DontCare
       mbistInterfaceCoreRF.clock := childClock
       mbistInterfaceCoreRF.toPipeline.head <> core.module.mbist_rf
