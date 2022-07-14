@@ -332,7 +332,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
   // Thus, we make all flush reasons to behave the same as exceptions for frontend.
   for (i <- 0 until CommitWidth) {
-    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit
+    // why flushOut: instructions with flushPipe are not commited to frontend
+    // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
+    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !rob.io.flushOut.valid
     io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
@@ -365,7 +367,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.frontend.toFtq.for_redirect_gen.flushRedirect.bits := frontendFlushBits
 
   io.frontend.toFtq.for_redirect_gen.frontendFlushTarget := RegNext(flushTarget)
-  
+
 
   val pendingRedirect = RegInit(false.B)
   when (stage2Redirect.valid) {
