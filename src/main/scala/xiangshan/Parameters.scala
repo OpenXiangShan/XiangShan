@@ -188,7 +188,7 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
@@ -200,7 +200,7 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
@@ -350,7 +350,7 @@ trait HasXSParameter {
     }.reduce(_++_) ++
       Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
     ).toList
-  
+
 
 
   val CacheLineSize = coreParams.CacheLineSize
@@ -408,7 +408,7 @@ trait HasXSParameter {
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
-  // for constrained LR/SC loop 
+  // for constrained LR/SC loop
   val LRSCCycles = 64
   // for lr storm
   val LRSCBackOff = 8

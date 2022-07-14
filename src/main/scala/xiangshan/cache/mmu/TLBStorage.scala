@@ -172,10 +172,9 @@ class TLBSA(
 
   io.r.req.map(_.ready :=  true.B)
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
+  val entries = Module(new SyncDataModuleTemplate(new TlbEntry(normalPage, superPage), nSets, ports, 1, "l1tlb_sa"))
 
   for (i <- 0 until ports) { // duplicate sram
-    val entries = Module(new SyncDataModuleTemplate(new TlbEntry(normalPage, superPage), nSets, ports, 1, "l1tlb_sa"))
-
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
@@ -196,9 +195,7 @@ class TLBSA(
     resp.bits.perm := data.perm
     io.r.resp_hit_sameCycle(i) := DontCare
 
-    resp.valid := {
-      RegNext(req.valid)
-    }
+    resp.valid := { RegNext(req.valid) }
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
     resp.bits.perm.suggestName("perm")
@@ -206,15 +203,15 @@ class TLBSA(
     access.sets := get_set_idx(vpn_reg, nSets) // no use
     access.touch_ways.valid := resp.valid && hit
     access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
-
-    entries.io.wen(0) := io.w.valid || io.victim.in.valid
-    entries.io.waddr(0) := Mux(io.w.valid,
-      get_set_idx(io.w.bits.data.entry.tag, nSets),
-      get_set_idx(io.victim.in.bits.entry.tag, nSets))
-    entries.io.wdata(0) := Mux(io.w.valid,
-      (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
-      io.victim.in.bits.entry)
   }
+
+  entries.io.wen(0) := io.w.valid || io.victim.in.valid
+  entries.io.waddr(0) := Mux(io.w.valid,
+    get_set_idx(io.w.bits.data.entry.tag, nSets),
+    get_set_idx(io.victim.in.bits.entry.tag, nSets))
+  entries.io.wdata(0) := Mux(io.w.valid,
+    (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
+    io.victim.in.bits.entry)
 
   when (io.victim.in.valid) {
     v(get_set_idx(io.victim.in.bits.entry.tag, nSets))(io.w.bits.wayIdx) := true.B
