@@ -334,11 +334,11 @@ class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) exte
   val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
 
   def apply_sep(in: Seq[ReplaceIO], vpn: UInt): Unit = {
-    for (i <- 0 until Width) {
-      this.access(i) := in(i).access(0)
-      this.chosen_set := get_set_idx(vpn, nSets)
-      in(i).refillIdx := this.refillIdx
+    for ((ac_rep, ac_tlb) <- access.zip(in.map(a => a.access.map(b => b)).flatten)) {
+      ac_rep := ac_tlb
     }
+    this.chosen_set := get_set_idx(vpn, nSets)
+    in.map(a => a.refillIdx := this.refillIdx)
   }
 }
 
