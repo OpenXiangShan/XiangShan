@@ -528,13 +528,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
-  XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
+  XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
 
+  val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
+  val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))
   val schedulerPerf = Seq(
-    ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))),
-    ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))  )
+    ("sche_allocate_fire", PopCount(lastCycleAllocate)),
+    ("sche_issue_fire",    PopCount(lastCycleIssue)   )
   )
   val intBtPerf = if (intBusyTable.isDefined) intBusyTable.get.getPerfEvents else Seq()
   val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()
