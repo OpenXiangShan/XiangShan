@@ -143,7 +143,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       XSDebug(updatedUop(i).cf.trigger.getHitFrontend, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     }
-    if (env.EnableDifftest) {
+    if (false && env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
       if(i == 0){
