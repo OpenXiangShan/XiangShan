@@ -171,7 +171,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
-    val fastUopKill = Output(Bool())
     val dcacheBankConflict = Input(Bool())
     val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
@@ -194,12 +193,9 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   io.dtlbResp.ready := true.B
 
-  // TOOD: PMA check
   io.dcachePAddr := s1_paddr
   //io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
   io.dcacheKill := s1_tlb_miss || s1_exception
-  io.fastUopKill := io.dtlbResp.bits.fast_miss || s1_exception
-
   // load forward query datapath
   io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
   io.sbuffer.vaddr := io.in.bits.vaddr
@@ -594,15 +590,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedbackSlow.bits.hit := RegNext(load_s2.io.rsFeedback.bits).hit || 
     s3_refill_hit_load_paddr && s3_replay_for_mshrfull
 
-  // feedback bank conflict to rs
-  io.feedbackFast.bits := load_s1.io.rsFeedback.bits
-  io.feedbackFast.valid := load_s1.io.rsFeedback.valid
+  // feedback bank conflict / ld-vio check struct hazard to rs
+  io.feedbackFast.bits := RegNext(load_s1.io.rsFeedback.bits)
+  io.feedbackFast.valid := RegNext(load_s1.io.rsFeedback.valid && !load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
   // If replay is reported at load_s1, inst will be canceled (will not enter load_s2),
   // in that case:
   // * replay should not be reported twice
-  assert(!(RegNext(RegNext(io.feedbackFast.valid)) && io.feedbackSlow.valid))
+  assert(!(RegNext(io.feedbackFast.valid) && io.feedbackSlow.valid))
   // * io.fastUop.valid should not be reported
-  assert(!RegNext(RegNext(io.feedbackFast.valid) && io.fastUop.valid))
+  assert(!RegNext(io.feedbackFast.valid && io.fastUop.valid))
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
@@ -617,7 +613,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.dcache.s1_hit_way.orR && // dcache hit
     !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
     load_s1.io.in.valid && // valid laod request
-    !load_s1.io.fastUopKill && // not mmio or tlb miss
+    !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
     !io.lsq.forward.dataInvalidFast && // forward failed
     !load_s1.io.needLdVioCheckRedo // load-load violation check: load paddr cam struct hazard
   ) && !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
@@ -693,10 +689,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val perfEvents = Seq(
     ("load_s0_in_fire         ", load_s0.io.in.fire()                                                                                                            ),
-    ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()                                                                            ),
     ("stall_dcache            ", load_s0.io.out.valid && load_s0.io.out.ready && !load_s0.io.dcacheReq.ready                                                     ),
-    ("addr_spec_success       ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) === load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
-    ("addr_spec_failed        ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) =/= load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
     ("load_s1_in_fire         ", load_s1.io.in.fire                                                                                                              ),
     ("load_s1_tlb_miss        ", load_s1.io.in.fire && load_s1.io.dtlbResp.bits.miss                                                                             ),
     ("load_s2_in_fire         ", load_s2.io.in.fire                                                                                                              ),
@@ -706,6 +699,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     ("load_s2_replay_cache    ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss),
   )
   generatePerfEvent()
+
+  // Will cause timing problem:
+  // ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()),
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
