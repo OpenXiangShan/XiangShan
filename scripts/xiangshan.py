@@ -17,14 +17,32 @@
 # Simple version of xiangshan python wrapper
 
 import argparse
+import json
 import os
 import random
+import signal
 import subprocess
 import sys
 import time
 
 import psutil
 
+
+def load_all_gcpt(gcpt_path, json_path):
+    all_gcpt = []
+    with open(json_path) as f:
+        data = json.load(f)
+    for benchspec in data:
+        for point in data[benchspec]:
+            weight = data[benchspec][point]
+            gcpt = os.path.join(gcpt_path, "_".join([benchspec, point, weight]))
+            bin_dir = os.path.join(gcpt, "0")
+            bin_file = list(os.listdir(bin_dir))
+            assert(len(bin_file) == 1)
+            bin_path = os.path.join(bin_dir, bin_file[0])
+            assert(os.path.isfile(bin_path))
+            all_gcpt.append(bin_path)
+    return all_gcpt
 
 class XSArgs(object):
     script_path = os.path.realpath(__file__)
@@ -56,13 +74,17 @@ class XSArgs(object):
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
-        self.trace = 1 if args.trace or not args.disable_fork  else None
+        self.is_spike = "spike" if args.spike else None
+        self.trace = 1 if args.trace or not args.disable_fork else None
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
+        self.ram_size = args.ram_size
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
         self.diff = args.diff
+        if args.spike and "nemu" in args.diff:
+            self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
         # wave dump path
@@ -77,7 +99,8 @@ class XSArgs(object):
             "NEMU_HOME"    : self.nemu_home,
             "WAVE_HOME"    : self.wave_home,
             "AM_HOME"      : self.am_home,
-            "DRAMSIM3_HOME": self.dramsim3_home
+            "DRAMSIM3_HOME": self.dramsim3_home,
+            "MODULEPATH": "/usr/share/Modules/modulefiles:/etc/modulefiles"
         }
         return all_env
 
@@ -95,6 +118,7 @@ class XSArgs(object):
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
             (self.is_release,    "RELEASE"),
+            (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES")
@@ -106,7 +130,8 @@ class XSArgs(object):
         emu_args = [
             (self.max_instr, "max-instr"),
             (self.diff,      "diff"),
-            (self.seed,      "seed")
+            (self.seed,      "seed"),
+            (self.ram_size,  "ram-size"),
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
         return args
@@ -160,6 +185,7 @@ class XSArgs(object):
 class XiangShan(object):
     def __init__(self, args):
         self.args = XSArgs(args)
+        self.timeout = args.timeout
 
     def show(self):
         self.args.show()
@@ -178,12 +204,33 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME verilog SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
+    def generate_sim_verilog(self):
+        print("Generating XiangShan sim-verilog with the following configurations:")
+        self.show()
+        sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
+        make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME sim-verilog SIM_ARGS="{sim_args}" {make_args}')
+        return return_code
+
     def build_emu(self):
         print("Building XiangShan emu with the following configurations:")
         self.show()
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
+        return return_code
+
+    def build_simv(self):
+        print("Building XiangShan simv with the following configurations")
+        self.show()
+        make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
+        # TODO: make the following commands grouped as unseen scripts
+        return_code = self.__exec_cmd(f'\
+            eval `/usr/bin/modulecmd zsh load license`;\
+            eval `/usr/bin/modulecmd zsh load synopsys/vcs/Q-2020.03-SP2`;\
+            eval `/usr/bin/modulecmd zsh load synopsys/verdi/S-2021.09-SP1`;\
+            VERDI_HOME=/nfs/tools/synopsys/verdi/S-2021.09-SP1 \
+            make -C $NOOP_HOME simv {make_args} CONSIDER_FSDB=1')  # set CONSIDER_FSDB for compatibility
         return return_code
 
     def run_emu(self, workload):
@@ -200,12 +247,23 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
         return return_code
 
+    def run_simv(self, workload):
+        print("Running XiangShan simv with the following configurations:")
+        self.show()
+        diff_args = "$NOOP_HOME/"+ args.diff
+        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv +workload={workload} +diff={diff_args}')
+        return return_code
+
     def run(self, args):
         if args.ci is not None:
             return self.run_ci(args.ci)
+        if args.ci_vcs is not None:
+            return self.run_ci_vcs(args.ci_vcs)
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
+            (args.vcs_gen, lambda _ : self.generate_sim_verilog()),
             (args.build, lambda _ : self.build_emu()),
+            (args.vcs_build, lambda _ : self.build_simv()),
             (args.workload, lambda args: self.run_emu(args.workload)),
             (args.clean, lambda _ : self.make_clean())
         ]
@@ -222,10 +280,16 @@ class XiangShan(object):
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
         start = time.time()
-        return_code = subprocess.call(cmd, shell=True, env=env)
-        end = time.time()
-        print(f"Elapsed time: {end - start} seconds")
-        return return_code
+        proc = subprocess.Popen(cmd, shell=True, env=env, preexec_fn=os.setsid)
+        try:
+            return_code = proc.wait(self.timeout)
+            end = time.time()
+            print(f"Elapsed time: {end - start} seconds")
+            return return_code
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            print(f"KeyboardInterrupt or TimeoutExpired.")
+            return 0
 
     def __get_ci_cputest(self, name=None):
         base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
@@ -298,7 +362,34 @@ class XiangShan(object):
             "wrf": "_1916220000000_.gz",
             "astar": "_122060000000_.gz"
         }
-        return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
+        if name in workloads:
+            return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
+        # select a random SPEC checkpoint
+        assert(name == "random")
+        all_cpt = [
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt"
+        ]
+        all_json = [
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json",
+            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/simpoint_summary.json"
+        ]
+        assert(len(all_cpt) == len(all_json))
+        cpt_path, json_path = random.choice(list(zip(all_cpt, all_json)))
+        all_gcpt = load_all_gcpt(cpt_path, json_path)
+        return [random.choice(all_gcpt)]
 
     def run_ci(self, test):
         all_tests = {
@@ -322,10 +413,32 @@ class XiangShan(object):
                 return ret
         return 0
 
+    def run_ci_vcs(self, test):
+        all_tests = {
+            "cputest": self.__get_ci_cputest,
+            "riscv-tests": self.__get_ci_rvtest,
+            "misc-tests": self.__get_ci_misc,
+            "mc-tests": self.__get_ci_mc,
+            "nodiff-tests": self.__get_ci_nodiff,
+            "microbench": self.__am_apps_path,
+            "coremark": self.__am_apps_path
+        }
+        for target in all_tests.get(test, self.__get_ci_workloads)(test):
+            print(target)
+            ret = self.run_simv(target)
+            if ret:
+                if self.args.default_wave_home != self.args.wave_home:
+                    print("copy wave file to " + self.args.wave_home)
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                return ret
+        return 0
+
 def get_free_cores(n):
     while True:
         # To avoid potential conflicts, we allow CI to use SMT.
-        num_logical_core = psutil.cpu_count(logical=True)
+        num_logical_core = psutil.cpu_count(logical=False)
         core_usage = psutil.cpu_percent(interval=1, percpu=True)
         num_window = num_logical_core // n
         for i in range(num_window):
@@ -341,8 +454,12 @@ if __name__ == "__main__":
     # actions
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
+    parser.add_argument('--vcs-gen', action='store_true', help='generate XS sim verilog for vcs')
+    parser.add_argument('--vcs-build', action='store_true', help='build XS simv')
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
+    parser.add_argument('--ci-vcs', nargs='?', type=str, const="", help='run CI tests on simv')
     parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
+    parser.add_argument('--timeout', nargs='?', type=int, default=None, help='timeout (in seconds)')
     # environment variables
     parser.add_argument('--nemu', nargs='?', type=str, help='path to nemu')
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
@@ -354,6 +471,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-cores', type=int, help='number of cores')
     # makefile arguments
     parser.add_argument('--release', action='store_true', help='enable release')
+    parser.add_argument('--spike', action='store_true', help='enable spike diff')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
@@ -364,7 +482,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
-    # ci action head sha
+    parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
 
     args = parser.parse_args()
 

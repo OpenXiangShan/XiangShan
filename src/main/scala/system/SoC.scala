@@ -293,16 +293,27 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
+    val rtc_clock = IO(Input(Bool()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
 
-    val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
-    val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
-    ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
-    plicSource.module.in := ext_intrs_wire.asBools
+
+    // sync external interrupts
+    require(plicSource.module.in.length == ext_intrs.getWidth)
+    for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
+      val ext_intr_sync = RegInit(0.U(3.W))
+      ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
+      plic_in := ext_intr_sync(1) && !ext_intr_sync(2)
+    }
+
     pma.module.io <> cacheable_check
+
+    // positive edge sampling of the lower-speed rtc_clock
+    val rtcTick = RegInit(0.U(3.W))
+    rtcTick := Cat(rtcTick(1, 0), rtc_clock)
+    clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
 
     val freq = 100
     val cnt = RegInit(freq.U)

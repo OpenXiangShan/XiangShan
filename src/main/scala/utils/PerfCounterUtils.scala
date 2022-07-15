@@ -22,8 +22,22 @@ import chisel3.util._
 import xiangshan.DebugOptionsKey
 import xiangshan._
 
-object XSPerfAccumulate {
+trait HasRegularPerfName {
+  def judgeName(perfName: String) = {
+    val regular = """(\w+)""".r
+    perfName match {
+      case regular(_) => true
+      case _ => {
+        println("PerfName " + perfName + " is not '\\w+' regular")
+        require(false)
+      }
+    }
+  }
+}
+
+object XSPerfAccumulate extends HasRegularPerfName {
   def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -44,7 +58,7 @@ object XSPerfAccumulate {
   }
 }
 
-object XSPerfHistogram {
+object XSPerfHistogram extends HasRegularPerfName {
   // instead of simply accumulating counters
   // this function draws a histogram
   def apply
@@ -59,6 +73,7 @@ object XSPerfHistogram {
     right_strict: Boolean = false
   )
   (implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -105,8 +120,9 @@ object XSPerfHistogram {
     }
   }
 }
-object XSPerfMax {
+object XSPerfMax extends HasRegularPerfName {
   def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit p: Parameters) = {
+    judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -187,14 +203,14 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
     val events_sets = Input(Vec(numPCnt, new PerfEvent))
   })
 
-  val events_incr_0 = io.events_sets(io.hpm_event( 9, 0))
-  val events_incr_1 = io.events_sets(io.hpm_event(19, 10))
-  val events_incr_2 = io.events_sets(io.hpm_event(29, 20))
-  val events_incr_3 = io.events_sets(io.hpm_event(39, 30))
+  val events_incr_0 = RegNext(io.events_sets(io.hpm_event( 9,  0)))
+  val events_incr_1 = RegNext(io.events_sets(io.hpm_event(19, 10)))
+  val events_incr_2 = RegNext(io.events_sets(io.hpm_event(29, 20)))
+  val events_incr_3 = RegNext(io.events_sets(io.hpm_event(39, 30)))
 
-  val event_op_0 = io.hpm_event(44, 40)
-  val event_op_1 = io.hpm_event(49, 45)
-  val event_op_2 = io.hpm_event(54, 50)
+  val event_op_0 = RegNext(io.hpm_event(44, 40))
+  val event_op_1 = RegNext(io.hpm_event(49, 45))
+  val event_op_2 = RegNext(io.hpm_event(54, 50))
 
 
   val event_step_0 = Mux(event_op_0(0), events_incr_3.value & events_incr_2.value,
@@ -206,10 +222,14 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
                      Mux(event_op_1(2), events_incr_1.value + events_incr_0.value,
                                         events_incr_1.value | events_incr_0.value)))
 
-  val selected = Mux(event_op_1(0), event_step_0 & event_step_1,
-                 Mux(event_op_1(1), event_step_0 ^ event_step_1,
-                 Mux(event_op_1(2), event_step_0 + event_step_1,
-                                    event_step_0 | event_step_1)))
+  val event_op_1_reg = RegNext(event_op_1)
+  val event_step_0_reg = RegNext(event_step_0)
+  val event_step_1_reg = RegNext(event_step_1)
+  val selected = Mux(event_op_1_reg(0), event_step_0_reg & event_step_1_reg,
+                 Mux(event_op_1_reg(1), event_step_0_reg ^ event_step_1_reg,
+                 Mux(event_op_1_reg(2), event_step_0_reg + event_step_1_reg,
+                   event_step_0_reg | event_step_1_reg)))
+
   val perfEvents = Seq(("selected", selected))
   generatePerfEvent()
 }

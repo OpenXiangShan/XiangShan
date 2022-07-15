@@ -62,17 +62,18 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
+    val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool()))
     val dcacheRequireReplay = Vec(LoadPipelineWidth, Input(Bool()))
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr))
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
     val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect))
-    val dcache = Flipped(ValidIO(new Refill))
+    val refill = Flipped(ValidIO(new Refill))
     val release = Flipped(ValidIO(new Release))
-    val uncache = new DCacheWordIO
+    val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr)
@@ -80,7 +81,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val lqFull = Output(Bool())
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(2.W))
+    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
@@ -116,11 +117,12 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.loadDataForwarded <> io.loadDataForwarded
+  loadQueue.io.delayedLoadError <> io.delayedLoadError
   loadQueue.io.dcacheRequireReplay <> io.dcacheRequireReplay
   loadQueue.io.ldout <> io.ldout
   loadQueue.io.rob <> io.rob
   loadQueue.io.rollback <> io.rollback
-  loadQueue.io.dcache <> io.dcache
+  loadQueue.io.refill <> io.refill
   loadQueue.io.release <> io.release
   loadQueue.io.trigger <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
@@ -210,7 +212,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     val enq = new LsqEnqIO
     // from rob
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    // from `memBlock.io.sqDeq`
+    val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     // from/tp lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))

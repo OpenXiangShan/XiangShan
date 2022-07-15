@@ -31,7 +31,8 @@ package object xiangshan {
     def imm = "b01".U
     def fp  = "b10".U
 
-    def DC = imm // Don't Care
+    def DC  = imm // Don't Care
+    def X   = BitPat("b??")
 
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
@@ -68,6 +69,8 @@ package object xiangshan {
     def ldu          = "b1100".U
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
+
+    def X            = BitPat("b????")
 
     def num = 14
 
@@ -109,7 +112,7 @@ package object xiangshan {
       bku.litValue() -> "bku",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
-      fDivSqrt.litValue() -> "fdiv/fsqrt",
+      fDivSqrt.litValue() -> "fdiv_fsqrt",
       ldu.litValue() -> "load",
       stu.litValue() -> "store",
       mou.litValue() -> "mou"
@@ -118,6 +121,7 @@ package object xiangshan {
 
   object FuOpType {
     def apply() = UInt(7.W)
+    def X = BitPat("b???????")
   }
 
   object CommitType {
@@ -190,9 +194,11 @@ package object xiangshan {
     def wrt  = "b001".U
     def set  = "b010".U
     def clr  = "b011".U
+    def wfi  = "b100".U
     def wrti = "b101".U
     def seti = "b110".U
     def clri = "b111".U
+    def needAccess(op: UInt): Bool = op(1, 0) =/= 0.U
   }
 
   // jump
@@ -497,6 +503,8 @@ package object xiangshan {
     def INVALID_INSTR = "b0110".U
     def IMM_B6 = "b1000".U
 
+    def X      = BitPat("b????")
+
     def apply() = UInt(4.W)
   }
 
@@ -728,7 +736,8 @@ package object xiangshan {
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
-    replayInst = true
+    replayInst = true,
+    hasLoadError = true
   )
 
   val staCfg = FuConfig(

@@ -25,9 +25,10 @@ import $file.`rocket-chip`.hardfloat.build
 
 object ivys {
   val sv = "2.12.13"
-  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0-RC1"
-  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0-RC1"
+  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0"
+  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
   val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
+  val chiselCirct = ivy"com.sifive::chisel-circt:0.4.0"
   val scalatest = ivy"org.scalatest::scalatest:3.2.2"
   val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
 }
@@ -45,7 +46,7 @@ trait XSModule extends ScalaModule with PublishModule {
 
   override def scalacOptions = Seq("-Xsource:2.11")
 
-  override def ivyDeps = if(chiselOpt.isEmpty) Agg(ivys.chisel3) else Agg.empty[Dep]
+  override def ivyDeps = (if(chiselOpt.isEmpty) Agg(ivys.chisel3) else Agg.empty[Dep]) ++ Agg(ivys.chiselCirct)
 
   override def moduleDeps = Seq() ++ chiselOpt
 
@@ -98,6 +99,8 @@ object rocketchip extends `rocket-chip`.common.CommonRocketChip {
     def chisel3IvyDeps = if(chisel3Module.isEmpty) Agg(
       common.getVersion("chisel3")
     ) else Agg.empty[Dep]
+    
+    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
   }
 
   def hardfloatModule = hardfloatRocket

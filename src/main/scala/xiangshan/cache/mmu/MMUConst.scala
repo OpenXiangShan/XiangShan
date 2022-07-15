@@ -69,6 +69,8 @@ case class L2TLBParameters
   // miss queue, add more entries than 'must require'
   // 0 for easier bug trigger, please set as big as u can, 8 maybe
   missqueueExtendSize: Int = 0,
+  // llptw
+  llptwsize: Int = 6,
   // way size
   blockBytes: Int = 64,
   // prefetch
@@ -197,9 +199,9 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // miss queue
   val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
   val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
-  val MemReqWidth = MSHRSize + 1
-  val FsmReqID = MSHRSize
-  val bMemID = log2Up(MSHRSize + 1)
+  val MemReqWidth = l2tlbParams.llptwsize + 1
+  val FsmReqID = l2tlbParams.llptwsize
+  val bMemID = log2Up(MemReqWidth)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)

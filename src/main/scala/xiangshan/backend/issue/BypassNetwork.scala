@@ -27,8 +27,6 @@ class BypassInfo(numWays: Int, dataBits: Int) extends Bundle {
   val valid = Vec(numWays, Bool())
   val data = UInt(dataBits.W)
 
-  override def cloneType: BypassInfo.this.type =
-    new BypassInfo(numWays, dataBits).asInstanceOf[this.type]
 }
 
 class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundle {
@@ -37,8 +35,6 @@ class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundl
   val target = Vec(numWays, Output(UInt(dataBits.W)))
   val bypass = Vec(numBypass, Input(new BypassInfo(numWays, dataBits)))
 
-  override def cloneType: BypassNetworkIO.this.type =
-    new BypassNetworkIO(numWays, numBypass, dataBits).asInstanceOf[this.type]
 }
 
 class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)

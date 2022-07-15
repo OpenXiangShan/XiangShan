@@ -358,7 +358,6 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
     apply(addr, lgMaxSize.U, TlbCmd.read)
   }
 
-  override def cloneType = (new PMPReqBundle(lgMaxSize)).asInstanceOf[this.type]
 }
 
 class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
@@ -426,7 +425,7 @@ trait PMPCheckMethod extends PMPConst {
     cfg_vec(num) := pmpDefault
 
     if (leaveHitMux) {
-      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+      ParallelPriorityMux(match_vec.map(RegEnable(_, false.B, valid)), RegEnable(cfg_vec, valid))
     } else {
       ParallelPriorityMux(match_vec, cfg_vec)
     }
@@ -466,7 +465,6 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     req_apply(valid, addr)
     resp
   }
-  override def cloneType: this.type = (new PMPCheckIO(lgMaxSize)).asInstanceOf[this.type]
 }
 
 class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
@@ -490,7 +488,6 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     req_apply(valid, addr)
     resp
   }
-  override def cloneType: this.type = (new PMPCheckv2IO(lgMaxSize)).asInstanceOf[this.type]
 }
 
 @chiselName

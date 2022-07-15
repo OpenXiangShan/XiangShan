@@ -24,7 +24,7 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.{GlobalHistory, ShiftingGlobalHistory, CircularGlobalHistory, AllFoldedHistories}
+import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
@@ -37,6 +37,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -46,7 +47,6 @@ class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
   val bits = gen.cloneType.asInstanceOf[T]
 
-  override def cloneType = new ValidUndirectioned(gen).asInstanceOf[this.type]
 }
 
 object ValidUndirectioned {
@@ -113,7 +113,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
-  val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
@@ -164,7 +163,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-  val isRVF = Bool()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
@@ -176,7 +174,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -188,6 +186,11 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def decode(bit: List[BitPat]): CtrlSignals = {
     allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
     this
+  }
+
+  def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
+  def isSoftPrefetch: Bool = {
+    fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
 }
 
@@ -227,16 +230,17 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
-    isFp match {
-      case false => ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U && (srcState(index) === SrcState.rdy || ignoreState.B)
-      case _ => ctrl.srcType(index) === SrcType.fp && (srcState(index) === SrcState.rdy || ignoreState.B)
+    val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
+    val readReg = if (isFp) {
+      ctrl.srcType(index) === SrcType.fp
+    } else {
+      ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U
     }
+    readReg && stateReady
   }
   def srcIsReady: Vec[Bool] = {
     VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcOrImm(t) || s === SrcState.rdy })
   }
-  def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
-  def doWriteFpRf: Bool = ctrl.fpWen
   def clearExceptions(
     exceptionBits: Seq[Int] = Seq(),
     flushPipe: Boolean = false,
@@ -247,10 +251,36 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+  // Assume only the LUI instruction is decoded with IMM_U in ALU.
+  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
+  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
+  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+    successor.map{ case (src, srcType) =>
+      val pdestMatch = pdest === src
+      // For state: no need to check whether src is x0/imm/pc because they are always ready.
+      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
+      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
+      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
+      val bothStateMatch = Mux(SrcType.regIsFp(srcType), fpMatch, rfStateMatch)
+      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
+      // For data: types are matched and int pdest is not $zero.
+      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
+      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
+      (stateCond, dataCond)
+    }
+  }
+  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
+  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
+  }
+  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
-class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
+class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
+}
+
+class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
   val flag = UInt(1.W)
 }
 
@@ -292,13 +322,11 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
-class ExuInput(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
   val src = Vec(3, UInt(XLEN.W))
 }
 
-class ExuOutput(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExuOutput(implicit p: Parameters) extends XSBundleWithMicroOp {
   val data = UInt(XLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
@@ -323,8 +351,7 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class ExceptionInfo(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
   val isInterrupt = Bool()
 }
 
@@ -344,13 +371,17 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Output(Bool())
+  val commitValid = Vec(CommitWidth, Output(Bool()))
+
   val isWalk = Output(Bool())
-  val valid = Vec(CommitWidth, Output(Bool()))
+  // valid bits optimized for walk
+  val walkValid = Vec(CommitWidth, Output(Bool()))
+
   val info = Vec(CommitWidth, Output(new RobCommitInfo))
 
-  def hasWalkInstr = isWalk && valid.asUInt.orR
-
-  def hasCommitInstr = !isWalk && valid.asUInt.orR
+  def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
+  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
@@ -476,7 +507,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
-  // CSR has been writen by csr inst, copies of csr should be updated
+  // CSR has been written by csr inst, copies of csr should be updated
   val w = ValidIO(new Bundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))

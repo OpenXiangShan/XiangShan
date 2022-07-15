@@ -147,10 +147,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegEnable(next = port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(port_0_read_0, io.read.fire())
+  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire())
+  val port_1_read_1_reg = RegEnable(port_1_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -187,6 +187,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
     tagArray
   }
+
+  io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
   //Parity Decode
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
@@ -273,7 +275,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   def getECCFromEncUnit(encUnit: UInt) = {
     require(encUnit.getWidth == encDataUnitBits)
-    encUnit(encDataUnitBits - 1, dataCodeUnit)
+    if (encDataUnitBits == dataCodeUnit) {
+      0.U.asTypeOf(UInt(1.W))
+    } else {
+      encUnit(encDataUnitBits - 1, dataCodeUnit)
+    }
   }
 
   def getECCFromBlock(cacheblock: UInt) = {
@@ -291,15 +297,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
   }}
 
-  io.read.ready := !io.write.valid
-
   val port_0_read_0 = io.read.valid  && !io.read.bits.vSetIdx(0)(0)
   val port_0_read_1 = io.read.valid  &&  io.read.bits.vSetIdx(0)(0)
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -362,6 +366,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
     codeArray
   }
+
+  io.read.ready := !io.write.valid && dataArrays.map(_.io.r.req.ready).reduce(_ && _) && codeArrays.map(_.io.r.req.ready).reduce(_ && _)
 
   //Parity Decode
   val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
@@ -433,6 +439,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
+  val hartId = Input(UInt(8.W))
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
@@ -566,7 +573,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
-
+  missUnit.io.hartId       := io.hartId
   prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
 
   bus.b.ready := false.B
@@ -677,5 +684,4 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
-
 }

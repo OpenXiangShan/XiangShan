@@ -128,7 +128,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           superNWays = 4,
           normalAsVictim = true,
           partialStaticPMP = true,
-          outReplace = true
+          outReplace = false
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
@@ -139,7 +139,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalAsVictim = true,
           superNWays = 4,
           partialStaticPMP = true,
-          outReplace = true
+          outReplace = false
         ),
         btlbParameters = TLBParameters(
           name = "btlb",

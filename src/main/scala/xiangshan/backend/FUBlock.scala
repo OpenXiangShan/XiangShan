@@ -31,7 +31,6 @@ class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends X
   val fast = Vec(numFast, Flipped(ValidIO(new ExuOutput))) //one cycle later than fastUops
   val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
 
-  override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
 }
 
 class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSBundle {
@@ -45,8 +44,6 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
   val fenceio = if (hasFence) Some(new FenceIO) else None
   val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
 
-  override def cloneType: FUBlockExtraIO.this.type =
-    new FUBlockExtraIO(configs).asInstanceOf[this.type]
 }
 
 class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {

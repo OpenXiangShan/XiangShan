@@ -4,7 +4,6 @@ import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
@@ -12,7 +11,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utils.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
@@ -43,7 +42,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = TLIdentityNode()
   val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(), BusErrorUnitParams(0x38010000), new GenericLogicalTreeNode
+    new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
   ))
   val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
@@ -127,6 +126,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
+      val reset_vector = Input(UInt(PAddrBits.W))
+      val cpu_halt = Output(Bool())
     })
 
     dontTouch(io.hartId)
@@ -134,6 +135,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val core_soft_rst = core_reset_sink.in.head._1
 
     core.module.io.hartId := io.hartId
+    core.module.io.reset_vector := DelayN(io.reset_vector, 5)
+    io.cpu_halt := core.module.io.cpu_halt
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }

@@ -24,20 +24,11 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
-import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
-import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -140,7 +131,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
+      val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
+      val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -155,6 +149,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
+    misc.module.rtc_clock := io.rtc_clock
     misc.module.pll0_lock := io.pll0_lock
     misc.module.cacheable_check <> io.cacheable_check
 
@@ -162,6 +157,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+      io.riscv_halt(i) := core.module.io.cpu_halt
+      core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
@@ -201,13 +198,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        soc.module
-      })
-    ))
+    Generator.execute(firrtlOpts, soc.module, firrtlComplier)
     ElaborationArtefacts.files.foreach{ case (extension, contents) =>
       writeOutputFile("./build", s"XSTop.${extension}", contents())
     }

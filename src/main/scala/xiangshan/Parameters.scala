@@ -161,12 +161,13 @@ case class XSCoreParameters
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
-  EnableLoadToLoadForward: Boolean = false,
+  EnsbufferWidth: Int = 2,
+  EnableLoadToLoadForward: Boolean = true,
   EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  RefillSize: Int = 512,
+  EnableAccurateLoadError: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
@@ -185,7 +186,7 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
@@ -197,7 +198,7 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
@@ -377,12 +378,13 @@ trait HasXSParameter {
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
+  val EnsbufferWidth = coreParams.EnsbufferWidth
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val RefillSize = coreParams.RefillSize
+  val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
@@ -396,7 +398,7 @@ trait HasXSParameter {
   val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
               (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
               (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2)
+              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)

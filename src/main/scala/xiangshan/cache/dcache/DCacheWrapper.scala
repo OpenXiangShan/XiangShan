@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+import huancun.utils.FastArbiter
 import mem.{AddPipelineReg}
 
 import scala.math.max
@@ -157,6 +158,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
+  def refill_addr_hit(a: UInt, b: UInt): Bool = {
+    a(PAddrBits-1, DCacheIndexOffset) === b(PAddrBits-1, DCacheIndexOffset)
+  }
+
   def arbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
@@ -186,6 +191,18 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     out: DecoupledIO[T],
     name: Option[String] = None): Unit = {
     val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    out <> arb.io.out
+  }
+
+  def fastArbiter[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
@@ -253,7 +270,7 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val wline = Bool()
 }
 
-class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
+class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
@@ -264,11 +281,21 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val replay = Bool()
   // data has been corrupted
   val tag_error = Bool() // tag error
-  val error = Bool() // all kinds of errors, include tag error
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
+}
+
+class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
+{
+  // 1 cycle after data resp
+  val error_delayed = Bool() // all kinds of errors, include tag error
+}
+
+class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
+{
+  val error = Bool() // all kinds of errors, include tag error
 }
 
 class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
@@ -313,10 +340,16 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
-class DCacheWordIOWithVaddr(implicit p: Parameters) extends DCacheBundle
+class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheWordReq)
+  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+}
+
+class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReqWithVaddr)
-  val resp = Flipped(DecoupledIO(new DCacheWordResp))
+  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
 }
 
 // used by load unit
@@ -355,7 +388,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
-  val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
+  val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
 }
 
@@ -407,8 +440,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
-  val metaArray = Module(new AsynchronousMetaArray(readPorts = 3, writePorts = 2))
-  val errorArray = Module(new ErrorArray(readPorts = 3, writePorts = 2)) // TODO: add it to meta array
+  val metaArray = Module(new AsynchronousMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
+  val errorArray = Module(new ErrorArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // TODO: add it to meta array
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
@@ -426,7 +459,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error 
-  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
+  io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
 
   //----------------------------------------
   // meta array
@@ -478,12 +511,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.write <> dataWriteArb.io.out
 
   bankedDataArray.io.readline <> mainPipe.io.data_read
-  mainPipe.io.readline_error := bankedDataArray.io.readline_error
+  bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
+  mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
   mainPipe.io.data_resp := bankedDataArray.io.resp
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
-    bankedDataArray.io.read_error(i) <> ldu(i).io.read_error
+    bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.resp
 
@@ -503,7 +537,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.nack := false.B
 
     ldu(w).io.disable_ld_fast_wakeup :=
-      bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
+      bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
   //----------------------------------------
@@ -555,7 +589,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, refillPipe.io.req.valid)
+  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
 
   io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
@@ -633,8 +667,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   val replAccessReqs = ldu.map(_.io.replace_access) ++ Seq(
-    mainPipe.io.replace_access,
-    refillPipe.io.replace_access
+    mainPipe.io.replace_access
   )
   val touchWays = Seq.fill(replAccessReqs.size)(Wire(ValidIO(UInt(log2Up(nWays).W))))
   touchWays.zip(replAccessReqs).foreach {

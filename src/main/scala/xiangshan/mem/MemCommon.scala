@@ -48,13 +48,12 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
+class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
-  val uop = new MicroOp
   val wlineflag = Bool() // store write the whole cache line
 
   val miss = Bool()
@@ -73,11 +72,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val isFirstIssue = Bool()
 }
 
-class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
+class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val uop = Output(new MicroOp) // for replay
+  override val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
@@ -122,9 +121,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
 
-class LoadViolationQueryReq(implicit p: Parameters) extends XSBundle {
+class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
   val paddr = UInt(PAddrBits.W)
-  val uop = new MicroOp // provide lqIdx
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {

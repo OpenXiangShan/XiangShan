@@ -548,7 +548,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
     VecInit(Seq.fill(numBr)(
-      VecInit(Seq.fill(USE_ALT_ON_NA_WIDTH)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
+      VecInit(Seq.fill(NUM_USE_ALT_ON_NA)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
     ))
   )
 
@@ -558,11 +558,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_resps = VecInit(tables.map(_.io.resps))
 
   //val s1_bim = io.in.bits.resp_in(0).s1.full_pred
-  // val s2_bim = RegEnable(s1_bim, enable=io.s1_fire)
+  // val s2_bim = RegEnable(s1_bim, io.s1_fire)
 
   val debug_pc_s0 = s0_pc
-  val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
+  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
 
   val s1_provideds        = Wire(Vec(numBr, Bool()))
   val s1_providers        = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
@@ -737,7 +737,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       when (updateProvided) {
         updateMask(i)(updateProvider) := true.B
         updateUMask(i)(updateProvider) := updateAltDiffers
-        updateU(i)(updateProvider) := !updateMispred
+        updateU(i)(updateProvider) := updateProviderCorrect
         updateTakens(i)(updateProvider) := updateTaken
         updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
         updateAlloc(i)(updateProvider) := false.B

@@ -26,6 +26,18 @@ SIMTOP  = top.SimTop
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
+MFC ?= 0
+
+FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
+SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
+
+# select firrtl compiler
+ifeq ($(MFC),1)
+override FC_ARGS = --mfc
+override FPGA_MEM_ARGS =
+override SIM_MEM_ARGS =
+endif
+
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -47,19 +59,28 @@ endif
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -a -o $(TIMELOG)
 
+SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
+
+# add comments to 'firrtl_black_box_resource_files'
+AWK_CMD = gawk -i inplace 'BEGIN{f=0} /FILE "firrtl_black_box_resource_files.f"/{f=1} !f{print $$0} f{print "//", $$0}'
+
+
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i XiangShan.test.runMain $(SIMTOP) --help
+	mill -i XiangShan.runMain $(FPGATOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                      \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
-		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
-		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
-		$(RELEASE_ARGS)
-	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+	$(TIME_CMD) mill -i XiangShan.runMain $(FPGATOP) -td $(@D)  \
+		--config $(CONFIG)                                        \
+		$(FPGA_MEM_ARGS)                                          \
+		--num-cores $(NUM_CORES)                                  \
+		$(RELEASE_ARGS) $(FC_ARGS)
+	$(SED_CMD) $@
+ifeq ($(MFC),1)
+	$(AWK_CMD) $@
+endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -76,11 +97,15 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
-		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf  \
-		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
-		$(SIM_ARGS)
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)  \
+		--config $(CONFIG)                                            \
+		$(SIM_MEM_ARGS)                                               \
+		--num-cores $(NUM_CORES)                                      \
+		$(SIM_ARGS) $(FC_ARGS)
+	$(SED_CMD) $@
+ifeq ($(MFC),1)
+	$(AWK_CMD) $@
+endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -121,4 +146,3 @@ simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
-

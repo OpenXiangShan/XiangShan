@@ -94,7 +94,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
   val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
-  val s1_idx = RegEnable(s0_idx, enable=io.req.valid)
+  val s1_idx = RegEnable(s0_idx, io.req.valid)
 
   val s1_pc = RegEnable(io.req.bits.pc, io.req.fire())
   val s1_unhashed_idx = s1_pc >> instOffsetBits
@@ -277,7 +277,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire)
       val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire))
       val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
-      val s2_sumAboveThresholds = aboveThreshold(s2_scTableSums(w), s2_tagePrvdCtrCentered, useThresholds(w))
+      val s2_sumAboveThresholds = VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
       val s2_scResps = VecInit(RegEnable(s1_scResps, io.s1_fire).map(_.ctrs(w)))

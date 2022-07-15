@@ -87,8 +87,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** Prefetch Stage 0: req from Ftq */
   val p0_valid  =   fromFtq.req.valid
-  val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, PAddrBits)
+  val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, VAddrBits)
   p0_fire   :=   p0_valid && p1_ready && toITLB.fire() && !fromITLB.bits.miss && toIMeta.ready && enableBit
+  //discard req when source not ready
+  // p0_discard := p0_valid && ((toITLB.fire() && fromITLB.bits.miss) || !toIMeta.ready || !enableBit)
 
   toIMeta.valid     := p0_valid
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
@@ -109,12 +111,12 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   fromITLB.ready := true.B
 
-  fromFtq.req.ready :=  (!enableBit || (enableBit && p3_ready)) && GTimer() > 500.U
+  fromFtq.req.ready :=  true.B //(!enableBit || (enableBit && p3_ready)) && toIMeta.ready //&& GTimer() > 500.U
 
   /** Prefetch Stage 1: cache probe filter */
   val p1_valid =  generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p1_vaddr   =  RegEnable(next = p0_vaddr,    enable=p0_fire)
+  val p1_vaddr   =  RegEnable(p0_vaddr,    p0_fire)
 
   //tlb resp
   val tlb_resp_valid = RegInit(false.B)
@@ -151,9 +153,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_pmp_fire = p2_valid
   val pmpExcpAF = fromPMP.instr
 
-  val p2_paddr     = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
-  val p2_except_pf = RegEnable(next =tlb_resp_pf, enable = p1_fire)
-  val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(next = tlb_resp_af, enable = p1_fire)
+  val p2_paddr     = RegEnable(tlb_resp_paddr,  p1_fire)
+  val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
+  val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(tlb_resp_af, p1_fire)
   val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
 
   /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
@@ -174,12 +176,12 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p3_paddr = RegEnable(next = p2_paddr,  enable = p2_fire)
-  val p3_check_in_mshr = RegEnable(next = p2_check_in_mshr,  enable = p2_fire)
+  val p3_paddr = RegEnable(p2_paddr,  p2_fire)
+  val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
 
-  p3_discard := p3_hit_dir || p3_check_in_mshr
+  p3_discard := p3_hit_dir || p3_check_in_mshr || (p3_valid && enableBit && !toMissUnit.enqReq.ready)
 
   toMissUnit.enqReq.valid             := p3_valid && enableBit && !p3_discard
   toMissUnit.enqReq.bits.paddr        := p3_paddr

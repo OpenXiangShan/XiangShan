@@ -52,11 +52,12 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 
-class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) with HasXSParameter {
   val numIntStateRead = outer.numIntStateRead
   val numFpStateRead = outer.numFpStateRead
 
   val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
     val in = Flipped(Vec(outer.numIn, DecoupledIO(new MicroOp)))
     val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
     val readFpState = if (numFpStateRead > 0) Some(Vec(numFpStateRead, Flipped(new BusyTableReadIO))) else None
@@ -64,12 +65,12 @@ class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyMod
     val enqLsq = if (outer.hasLoadStore) Some(Flipped(new LsqEnqIO)) else None
   })
 
-  val numInFire = PopCount(io.in.map(_.fire()))
-  val numStaFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StaExeUnitCfg)).map(_._1.fire()))
-  val numStdFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StdExeUnitCfg)).map(_._1.fire()))
-  XSError(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
-  val numOutFire = PopCount(io.out.map(_.fire())) - numStdFire
-  XSError(numInFire =/= numOutFire, "in != out\n")
+  val numInFire = PopCount(io.in.map(_.fire))
+  val numStaFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StaExeUnitCfg)).map(_._1.fire))
+  val numStdFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StdExeUnitCfg)).map(_._1.fire))
+  // XSError(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
+  val numOutFire = PopCount(io.out.map(_.fire)) - numStdFire
+  // XSError(numInFire =/= numOutFire, "in != out\n")
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire", PopCount(io.in.map(_.fire)))
@@ -171,6 +172,7 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
 }
 
 class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends Dispatch2RsImp(outer) {
+  require(LoadPipelineWidth == StorePipelineWidth)
   // in: to deal with lsq
   // in.valid: can leave dispatch queue (not blocked by lsq)
   // in.ready: can enter rs
@@ -178,9 +180,10 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
   in.foreach(_.ready := false.B)
   io.in.zip(in).foreach(x => x._1.ready := x._2.ready)
 
+  // add one pipeline before out
+  val s0_out = Wire(io.out.cloneType)
   // dirty code for lsq enq
-  val is_blocked = Wire(Vec(io.in.length, Bool()))
-  is_blocked.foreach(_ := false.B)
+  val is_blocked = WireDefault(VecInit(Seq.fill(io.in.length)(false.B)))
   if (io.enqLsq.isDefined) {
     val enqLsq = io.enqLsq.get
     val fuType = io.in.map(_.bits.ctrl.fuType)
@@ -188,28 +191,27 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val isStore = fuType.map(f => FuType.isStoreExu(f))
     val isAMO = fuType.map(f => FuType.isAMO(f))
 
-    def isBlocked(index: Int): Bool = {
-      if (index >= 2) {
-        val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
-        val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
-        val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
-        Mux(isStore(index), VecInit(foundStore).asUInt.orR, VecInit(foundLoad).asUInt.orR) || isBlocked(index - 1)
-      }
-      else {
-        false.B
-      }
-    }
+    val isLoadArrays = Seq.tabulate(io.in.length)(Seq.tabulate(_)(i => io.in(i).valid && !isStore(i)))
+    val isStoreArrays = Seq.tabulate(io.in.length)(Seq.tabulate(_)(i => io.in(i).valid && isStore(i)))
+    val blockLoads = isLoadArrays.map(PopCount(_) >= LoadPipelineWidth.U)
+    val blockStores = isStoreArrays.map(PopCount(_) >= StorePipelineWidth.U)
+
     for (i <- io.in.indices) {
-      is_blocked(i) := isBlocked(i)
+      is_blocked(i) := (
+        if (i >= LoadPipelineWidth) Mux(isStore(i), blockStores(i), blockLoads(i)) || is_blocked(i - 1)
+        else false.B
+      )
       in(i).valid := io.in(i).valid && !is_blocked(i)
       io.in(i).ready := in(i).ready && !is_blocked(i)
 
-      enqLsq.needAlloc(i) := Mux(io.in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
-      enqLsq.req(i).bits := io.in(i).bits
-      in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
-      in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
+      if (i < enqLsq.req.length) {
+        enqLsq.needAlloc(i) := Mux(io.in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
+        enqLsq.req(i).bits := io.in(i).bits
+        in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
+        in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
 
-      enqLsq.req(i).valid := in(i).valid && VecInit(io.out.map(_.ready)).asUInt.andR
+        enqLsq.req(i).valid := in(i).valid && VecInit(s0_out.map(_.ready)).asUInt.andR
+      }
     }
   }
 
@@ -220,24 +222,49 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val select = SelectOne("naive", canAccept, numOfThisExu)
     for ((idx, j) <- outIndices.zipWithIndex) {
       val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      io.out(idx).valid := selectValid && !Mux1H(selectIdxOH, is_blocked)
-      io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
+      s0_out(idx).valid := selectValid && !Mux1H(selectIdxOH, is_blocked)
+      s0_out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
-        val sta = io.out(idx - 2)
-        sta.valid := io.out(idx).valid
-        io.out(idx).bits.ctrl.srcType(0) := io.out(idx).bits.ctrl.srcType(1)
-        io.out(idx).bits.psrc(0) := io.out(idx).bits.psrc(1)
-        XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !io.out(idx).ready))
-        XSPerfAccumulate(s"sta_rs_not_ready_$idx", selectValid && !sta.ready && io.out(idx).ready)
-        XSPerfAccumulate(s"std_rs_not_ready_$idx", selectValid && sta.ready && !io.out(idx).ready)
+        val sta = s0_out(idx - StorePipelineWidth)
+        sta.valid := s0_out(idx).valid
+        s0_out(idx).bits.ctrl.srcType(0) := s0_out(idx).bits.ctrl.srcType(1)
+        s0_out(idx).bits.psrc(0) := s0_out(idx).bits.psrc(1)
+        XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !s0_out(idx).ready))
+        XSPerfAccumulate(s"sta_rs_not_ready_$idx", selectValid && !sta.ready && s0_out(idx).ready)
+        XSPerfAccumulate(s"std_rs_not_ready_$idx", selectValid && sta.ready && !s0_out(idx).ready)
       }
       else {
-        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready }}
+        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := s0_out(idx).ready }}
       }
     }
   }
 
+  // dispatch is allowed when lsq and rs can accept all the instructions
+  // TODO: better algorithm here?
+  if (io.enqLsq.isDefined) {
+    when (!VecInit(s0_out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
+      in.foreach(_.ready := false.B)
+      s0_out.foreach(_.valid := false.B)
+    }
+  }
+
+  // agreement with dispatch queue: don't enqueue when io.redirect.valid
+  when (io.redirect.valid) {
+    s0_out.foreach(_.valid := false.B)
+  }
+
+  // Note: the dispatch queue must not dequeue when io.redirect.valid
+  val s1_rightFire = Wire(Vec(s0_out.length, Bool()))
+  val s1_flush = Wire(Vec(s0_out.length, Bool()))
+  val s1_out = io.out.indices.map(i => PipelineNext(s0_out(i), s1_rightFire(i), s1_flush(i)))
+  for (i <- io.out.indices) {
+    io.out(i).valid := s1_out(i).valid
+    io.out(i).bits := s1_out(i).bits
+    s1_out(i).ready := !s1_out(i).valid || io.out(i).ready
+    s1_rightFire(i) := io.out(i).ready
+    s1_flush(i) := s1_out(i).valid && s1_out(i).bits.robIdx.needFlush(io.redirect)
+  }
   if (io.readIntState.isDefined) {
     val stateReadReq = io.out.zip(outer.numIntSrc).flatMap(x => x._1.bits.psrc.take(x._2))
     io.readIntState.get.map(_.req).zip(stateReadReq).foreach(x => x._1 := x._2)
@@ -259,12 +286,4 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     }
   }
 
-  // dispatch is allowed when lsq and rs can accept all the instructions
-  // TODO: better algorithm here?
-  if (io.enqLsq.isDefined) {
-    when (!VecInit(io.out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
-      in.foreach(_.ready := false.B)
-      io.out.foreach(_.valid := false.B)
-    }
-  }
 }

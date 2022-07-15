@@ -25,20 +25,18 @@ import utils._
 import xiangshan.cache._
 import difftest._
 
-class DatamoduleResultBufferIO[T <: Data](gen: T) extends Bundle
+class DatamoduleResultBufferIO[T <: Data](gen: T)(implicit p: Parameters) extends XSBundle
 {
   // val flush = Input(Bool())
-  val enq = Vec(2, Flipped(DecoupledIO(gen)))
-  val deq = Vec(2, DecoupledIO(gen))
+  val enq = Vec(EnsbufferWidth, Flipped(DecoupledIO(gen)))
+  val deq = Vec(EnsbufferWidth, DecoupledIO(gen))
 
-  override def cloneType: DatamoduleResultBufferIO.this.type =
-    new DatamoduleResultBufferIO[T](gen).asInstanceOf[this.type]
 }
 
 class DatamoduleResultBuffer[T <: Data]
 (
   gen: T,
-) extends Module {
+)(implicit p: Parameters) extends XSModule {
 
   val genType = if (compileOptions.declaredTypeMustBeUnbound) {
     requireIsChiselType(gen)
@@ -53,88 +51,48 @@ class DatamoduleResultBuffer[T <: Data]
 
   val io = IO(new DatamoduleResultBufferIO[T](gen))
 
-  val data = Reg(Vec(2, genType))
-  val valids = RegInit(VecInit(Seq.fill(2)(false.B)))
-  val enq_flag = RegInit(false.B) // head is entry 0
-  val deq_flag = RegInit(false.B) // tail is entry 0
+  val data = Reg(Vec(EnsbufferWidth, genType))
+  val valids = RegInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+  val enq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // head is entry 0
+  val deq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // tail is entry 0
 
-  val entry_allowin = Wire(Vec(2, Bool()))
+  val entry_allowin = Wire(Vec(EnsbufferWidth, Bool()))
 
-  io.deq(0).valid := Mux(deq_flag,
-    valids(1),
-    valids(0)
-  )
-  io.deq(1).valid := Mux(deq_flag,
-    valids(0),
-    valids(1)
-  ) && io.deq(0).valid
+  (0 until EnsbufferWidth).foreach(index => {
+    io.deq(index).valid := valids(deq_flag + index.U) && (if (index == 0) 1.B else io.deq(index - 1).valid)
+    io.deq(index).bits := data(deq_flag + index.U)
+  })
 
-  io.deq(0).bits := Mux(deq_flag,
-    data(1),
-    data(0)
-  )
-  io.deq(1).bits := Mux(deq_flag,
-    data(0),
-    data(1)
+  (1 until EnsbufferWidth).foreach(i => {
+    assert(!(io.deq(i).valid && !io.deq(i - 1).valid))
+    assert(!(io.deq(i).ready && !io.deq(i - 1).ready))
+  })
+
+  (0 until EnsbufferWidth).foreach(
+    index => entry_allowin(index) := !valids(index) || (0 until EnsbufferWidth).map(i => io.deq(i).fire && deq_flag + i.U === index.U).reduce(_ || _)
   )
 
-  assert(!(io.deq(1).valid && !io.deq(0).valid))
-  assert(!(io.deq(1).ready && !io.deq(0).ready))
-
-  entry_allowin(0) := !valids(0) ||
-    io.deq(0).fire() && !deq_flag ||
-    io.deq(1).fire() && deq_flag
-  entry_allowin(1) := !valids(1) ||
-    io.deq(0).fire() && deq_flag ||
-    io.deq(1).fire() && !deq_flag
-
-  io.enq(0).ready := Mux(enq_flag,
-    entry_allowin(1),
-    entry_allowin(0)
+  (0 until EnsbufferWidth).foreach(
+    index => io.enq(index).ready := entry_allowin(enq_flag + index.U) && (if (index == 0) 1.B else io.enq(index - 1).ready)
   )
-  io.enq(1).ready := Mux(enq_flag,
-    entry_allowin(0),
-    entry_allowin(1)
-  ) && io.enq(0).ready
 
-  assert(!(io.enq(1).ready && !io.enq(0).ready))
-  assert(!(io.enq(1).valid && !io.enq(0).valid))
+  (1 until EnsbufferWidth).foreach(i => {
+    assert(!(io.enq(i).ready && !io.enq(i - 1).ready))
+    assert(!(io.enq(i).valid && !io.enq(i - 1).valid))
+  })
 
-  when(io.deq(0).fire()){
-    when(deq_flag){
-      valids(1) := false.B
-    }.otherwise{
-      valids(0) := false.B
+  (0 until EnsbufferWidth).foreach(index => 
+    when(io.deq(index).fire) {
+      valids(deq_flag + index.U) := 0.B
+      if (EnsbufferWidth > 1) deq_flag := deq_flag + index.U + 1.U
     }
-    deq_flag := ~deq_flag
-  }
-  when(io.deq(1).fire()){
-    when(deq_flag){
-      valids(0) := false.B
-    }.otherwise{
-      valids(1) := false.B
-    }
-    deq_flag := deq_flag
-  }
+  )
 
-  when(io.enq(0).fire()){
-    when(enq_flag){
-      valids(1) := true.B
-      data(1) := io.enq(0).bits
-    }.otherwise{
-      valids(0) := true.B
-      data(0) := io.enq(0).bits
+  (0 until EnsbufferWidth).foreach(index =>
+    when(io.enq(index).fire) {
+      valids(enq_flag + index.U) := 1.B
+      data(enq_flag + index.U) := io.enq(index).bits
+      if (EnsbufferWidth > 1) enq_flag := enq_flag + index.U + 1.U
     }
-    enq_flag := ~enq_flag
-  }
-  when(io.enq(1).fire()){
-    when(enq_flag){
-      valids(0) := true.B
-      data(0) := io.enq(1).bits
-    }.otherwise{
-      valids(1) := true.B
-      data(1) := io.enq(1).bits
-    }
-    enq_flag := enq_flag
-  }
+  )
 }

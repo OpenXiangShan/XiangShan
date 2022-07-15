@@ -132,7 +132,7 @@ class Scheduler(
 )(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbHelper {
   val numDpPorts = dpPorts.length
   val dpExuConfigs = dpPorts.map(port => port.map(_._1).map(configs(_)._1))
-  def getDispatch2 = {
+  def getDispatch2: Seq[Dispatch2Rs] = {
     if (dpExuConfigs.length > exuParameters.AluCnt) {
       val intDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.take(exuParameters.AluCnt)))
       val lsDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.drop(exuParameters.AluCnt)))
@@ -178,9 +178,12 @@ class Scheduler(
   val numIssuePorts = configs.map(_._2).sum
   val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
   val memRsEntries = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
+  val memRsNum = reservationStations.filter(_.params.hasFeedback == true).map(_.numRS)
   val getMemRsEntries = {
     require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
-    if (memRsEntries.isEmpty) 0 else memRsEntries.max
+    require(memRsNum.isEmpty || memRsNum.max == memRsNum.min, "different num not supported")
+    require(memRsNum.isEmpty || memRsNum.min != 0, "at least 1 memRs required")
+    if (memRsEntries.isEmpty) 0 else (memRsEntries.max / memRsNum.max)
   }
   val numSTDPorts = reservationStations.filter(_.params.exuCfg.get == StdExeUnitCfg).map(_.params.numDeq).sum
 
@@ -233,6 +236,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   class SchedulerExtraIO extends XSBundle {
+    // feedback to dispatch
+    val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Output(Bool()))
     // feedback ports
     val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, Flipped(new MemRSFeedbackIO()(updatedP)))) else None
     // special ports for RS that needs to read from other schedulers
@@ -252,7 +257,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // special ports for load / store rs
     val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
@@ -261,8 +266,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
 
-    override def cloneType: SchedulerExtraIO.this.type =
-      new SchedulerExtraIO().asInstanceOf[this.type]
   }
 
   val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
@@ -286,6 +289,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   })
 
   val dispatch2 = outer.dispatch2.map(_.module)
+  dispatch2.foreach(_.io.redirect := io.redirect)
+  io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
 
   // dirty code for ls dp
   dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
@@ -412,8 +417,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     issueIdx += issueWidth
 
     if (rs.io.jump.isDefined) {
-      rs.io.jump.get.jumpPc := io.extra.jumpPc
-      rs.io.jump.get.jalr_target := io.extra.jalr_target
+      val lastJumpFire = VecInit(rs.io.fromDispatch.map(dp => RegNext(dp.fire && dp.bits.isJump))).asUInt.orR
+      rs.io.jump.get.jumpPc := RegEnable(io.extra.jumpPc, lastJumpFire)
+      rs.io.jump.get.jalr_target := RegEnable(io.extra.jalr_target, lastJumpFire)
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr

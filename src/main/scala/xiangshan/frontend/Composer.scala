@@ -31,6 +31,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
   var metas = 0.U(1.W)
   var meta_sz = 0
   for (c <- components) {
+    c.io.reset_vector        := io.reset_vector
     c.io.in.valid            := io.in.valid
     c.io.in.bits.s0_pc       := io.in.bits.s0_pc
     c.io.in.bits.folded_hist := io.in.bits.folded_hist

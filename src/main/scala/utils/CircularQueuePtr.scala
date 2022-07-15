@@ -61,6 +61,8 @@ class CircularQueuePtr[T <: CircularQueuePtr[T]](val entries: Int) extends Bundl
   final def === (that_ptr: T): Bool = this.asUInt()===that_ptr.asUInt()
 
   final def =/= (that_ptr: T): Bool = this.asUInt()=/=that_ptr.asUInt()
+
+  def toOH: UInt = UIntToOH(value, entries)
 }
 
 trait HasCircularQueuePtrHelper {
@@ -92,3 +94,20 @@ trait HasCircularQueuePtrHelper {
     differentFlag ^ compare
   }
 }
+
+// Should only be used when left and right are continuous pointers.
+class QPtrMatchMatrix[T <: CircularQueuePtr[T]](left: Seq[T], right: Seq[T]) {
+  val matrix = left.map(l => right.map(_.value === l.value))
+
+  def apply(leftIndex: Int, rightIndex: Int): Bool = {
+    require(leftIndex < left.length && rightIndex < right.length)
+    if (leftIndex == 0 || rightIndex == 0) {
+      matrix(leftIndex)(rightIndex)
+    }
+    else {
+      apply(leftIndex - 1, rightIndex - 1)
+    }
+  }
+  def apply(leftIndex: Int): Seq[Bool] = right.indices.map(i => apply(leftIndex, i))
+}
+

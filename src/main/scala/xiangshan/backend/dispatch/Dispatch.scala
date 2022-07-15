@@ -119,6 +119,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }.otherwise {
       XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
     }
+    // For the LUI instruction: psrc(0) is from register file and should always be zero.
+    when (io.fromRename(i).bits.isLUI) {
+      updatedUop(i).psrc(0) := 0.U
+    }
 
     io.lfst.req(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
@@ -149,45 +153,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
           io.fromRename(i).fire()
         ))
       }
-
-      val runahead = Module(new DifftestRunaheadEvent)
-      runahead.io.clock         := clock
-      runahead.io.coreid        := io.hartId
-      runahead.io.index         := i.U
-      runahead.io.valid         := io.fromRename(i).fire()
-      runahead.io.branch        := isBranch(i) // setup checkpoint for branch
-      runahead.io.may_replay    := isLs(i) && !isStore(i) // setup checkpoint for load, as load may replay
-      runahead.io.pc            := updatedUop(i).cf.pc
-      runahead.io.checkpoint_id := debug_runahead_checkpoint_id 
-
-      // when(runahead.io.valid){
-      //   printf("XS runahead " + i + " : %d: pc %x branch %x cpid %x\n",
-      //     GTimer(),
-      //     runahead.io.pc,
-      //     runahead.io.branch,
-      //     runahead.io.checkpoint_id
-      //   );
-      // }
-
-      val mempred_check = Module(new DifftestRunaheadMemdepPred)
-      mempred_check.io.clock     := clock
-      mempred_check.io.coreid    := io.hartId
-      mempred_check.io.index     := i.U
-      mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
-      mempred_check.io.is_load   := !isStore(i) && isLs(i)
-      mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
-      mempred_check.io.pc        := updatedUop(i).cf.pc 
-
-      when(RegNext(mempred_check.io.valid)){
-        XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
-          RegNext(GTimer()),
-          RegNext(mempred_check.io.pc),
-          RegNext(mempred_check.io.is_load),
-          RegNext(mempred_check.io.need_wait),
-          mempred_check.io.oracle_vaddr 
-        );
-      }
-      updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
   }
 
@@ -252,8 +217,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
-    io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove
-    io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove &&
+    val doesNotNeedExec = io.fromRename(i).bits.eliminatedMove
+    io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !doesNotNeedExec
+    io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && !doesNotNeedExec &&
                                canEnterDpq && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.toIntDq.req(i).bits  := updatedUop(i)
 

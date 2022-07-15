@@ -130,7 +130,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     resp(i).bits.paddr := Mux(vmEnable, paddr, vaddr)
     resp(i).bits.miss := miss
     resp(i).bits.fast_miss := fast_miss
-    resp(i).bits.ptwBack := io.ptw.resp.fire()
+    resp(i).bits.ptwBack := ptw.resp.fire()
 
     // val pmp_paddr = Mux(vmEnable, Cat(super_ppn, get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
@@ -261,9 +261,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
   XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
+    XSDebug(ptw.req(i).fire(), p"L2TLB req:${ptw.req(i).bits}\n")
   }
-  XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
+  XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
   println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
 

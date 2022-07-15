@@ -16,18 +16,21 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.stage.ChiselGeneratorAnnotation
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
+import chisel3.stage.ChiselGeneratorAnnotation
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
 import utils.GTimer
 import xiangshan.{DebugOptions, DebugOptionsKey}
-import chipsalliance.rocketchip.config._
-import freechips.rocketchip.devices.debug._
 import difftest._
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.ElaborationArtefacts
+import huancun.utils.ChiselDB
 import top.TopMain.writeOutputFile
+import utils.GTimer
+import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -35,6 +38,9 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
+  // Don't allow the top-level signals to be optimized out,
+  // so that we can re-use this SimTop for any generated Verilog RTL.
+  dontTouch(soc.io)
 
   l_soc.module.dma <> 0.U.asTypeOf(l_soc.module.dma)
 
@@ -56,9 +62,21 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.sram_config := 0.U
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
+  soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
+
+  // soc.io.rtc_clock is a div100 of soc.io.clock
+  val rtcClockDiv = 100
+  val rtcTickCycle = rtcClockDiv / 2
+  val rtcCounter = RegInit(0.U(log2Ceil(rtcTickCycle + 1).W))
+  rtcCounter := Mux(rtcCounter === (rtcTickCycle - 1).U, 0.U, rtcCounter + 1.U)
+  val rtcClock = RegInit(false.B)
+  when (rtcCounter === 0.U) {
+    rtcClock := ~rtcClock
+  }
+  soc.io.rtc_clock := rtcClock
 
   val success = Wire(Bool())
-  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
+  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)
   soc.io.systemjtag.reset := reset
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
@@ -99,14 +117,20 @@ class SimTop(implicit p: Parameters) extends Module {
 object SimTop extends App {
   override def main(args: Array[String]): Unit = {
     // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        DisableMonitors(p => new SimTop()(p))(config)
-      })
-    ))
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    Generator.execute(
+      firrtlOpts,
+      DisableMonitors(p => new SimTop()(p))(config),
+      firrtlComplier
+    )
+    ChiselDB.addToElaborationArtefacts
+    ElaborationArtefacts.files.foreach{
+      case (extension, contents) =>
+        val prefix = extension match {
+          case "h" | "cpp" => "chisel_db"
+          case _ => "XSTop"
+        }
+        writeOutputFile("./build", s"$prefix.${extension}", contents())
     }
   }
 }

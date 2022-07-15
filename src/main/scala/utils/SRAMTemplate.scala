@@ -180,14 +180,21 @@ class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4, way: Int =
   val rdata = array.io.r.resp.data
   for (w <- 0 until way) {
     val wayData = VecInit(rdata.indices.filter(_ % way == w).map(rdata(_)))
-    io.r.resp.data(w) := Mux1H(UIntToOH(ridx, width), wayData)
+    val holdRidx = HoldUnless(ridx, RegNext(io.r.req.valid))
+    val realRidx = if (holdRead) holdRidx else ridx
+    io.r.resp.data(w) := Mux1H(UIntToOH(realRidx, width), wayData)
   }
 
   val wen = io.w.req.valid
   val wdata = VecInit(Seq.fill(width)(io.w.req.bits.data).flatten)
   val waddr = io.w.req.bits.setIdx >> log2Ceil(width)
   val widthIdx = if (width != 1) io.w.req.bits.setIdx(log2Ceil(width)-1, 0) else 0.U
-  val wmask = if (width*way != 1) VecInit(Seq.tabulate(width*way)(n => (n / way).U === widthIdx)).asUInt else 1.U(1.W)
+  val wmask = (width, way) match {
+    case (1, 1) => 1.U(1.W)
+    case (x, 1) => UIntToOH(widthIdx)
+    case _      => VecInit(Seq.tabulate(width*way)(n => (n / way).U === widthIdx && io.w.req.bits.waymask.get(n % way))).asUInt
+  }
+  require(wmask.getWidth == way*width)
 
   array.io.w.apply(wen, wdata, waddr, wmask)
 }

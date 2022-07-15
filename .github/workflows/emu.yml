@@ -94,6 +94,10 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
+      - name: Uncache Fetch Test - copy and run
+        run: |
+          $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
   emu-performance:
     runs-on: bosc
     continue-on-error: false
@@ -189,4 +193,42 @@ jobs:
       - name: SMP Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp 2> /dev/zero
-
+  simv-basics:
+    runs-on: bosc
+    continue-on-error: false
+    timeout-minutes: 900
+    name: SIMV - Basics
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
+          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Remote Connection Test
+        run: |
+          ssh -tt 172.28.10.101 "echo test-ok"
+      - name: Generate Verilog for VCS
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --release
+      - name: Build SIMV on Remote
+        run: |
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
+      - name: Basic Test - cputest
+        run: |
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
+      - name: Simple Test - CoreMark
+        run: |
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 1800" 2> /dev/zero
+      - name: System Test - Linux
+        run: |
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 7200" 2> /dev/zero

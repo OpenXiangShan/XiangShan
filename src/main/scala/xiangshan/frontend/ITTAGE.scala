@@ -278,7 +278,7 @@ class ITTageTable
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
   update_wdata.tag   := update_tag
   // only when ctr is null
-  update_wdata.target := Mux(ctr_null(old_ctr), update_target, io.update.old_target)
+  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
   
   val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
@@ -374,9 +374,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val s2_resps = RegEnable(s1_resps, io.s1_fire)
 
-  val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
+  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire)
 
   val s2_tageTaken         = Wire(Bool())
   val s2_tageTarget        = Wire(UInt(VAddrBits.W))

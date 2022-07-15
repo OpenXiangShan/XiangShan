@@ -42,10 +42,10 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
 
   object FreeListPtr {
-    def apply(f: Bool, v: UInt): FreeListPtr = {
+    def apply(f: Boolean, v: Int): FreeListPtr = {
       val ptr = Wire(new FreeListPtr)
-      ptr.flag := f
-      ptr.value := v
+      ptr.flag := f.B
+      ptr.value := v.U
       ptr
     }
   }
