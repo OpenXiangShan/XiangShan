@@ -183,8 +183,6 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     io.requestor(idx).resp.valid := req_out_v(idx) || req_in_flushed(idx)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx), false.B)
-      !RegNext(refill, init = false.B) &&
-      !RegNext(RegNext(refill, init = false.B), init = false.B)
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
   }
 
@@ -208,7 +206,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
-      resp(idx).bits.paddr := Cat(genPPN(pte.entry.ppn, get_pn(req_out(idx).vaddr), pte.entry.level.get), get_off(req_out(idx).vaddr))
+      resp(idx).bits.paddr := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
       perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
       pmp_check(resp(idx).bits.paddr, req_out(idx).size, req_out(idx).cmd, idx)
       // NOTE: the unfiltered req would be handled by Repeater

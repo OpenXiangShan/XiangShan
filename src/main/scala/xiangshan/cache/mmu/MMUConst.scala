@@ -101,13 +101,6 @@ trait HasTlbConst extends HasXSParameter {
     require(addr.getWidth > offLen)
     addr(offLen-1, 0)
   }
-  def genPPN(ppn: UInt, vpn: UInt, level: UInt): UInt = {
-    MuxLookup(level, 0.U, Seq(
-      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
-      1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
-      2.U -> ppn
-    ))
-  }
 
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     require(nSets >= 1)

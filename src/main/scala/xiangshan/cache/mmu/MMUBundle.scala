@@ -580,6 +580,15 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     else level.get === 2.U
   }
 
+  def genPPN(vpn: UInt): UInt = {
+    if (!hasLevel) ppn
+    else MuxLookup(level.get, 0.U, Seq(
+          0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
+          1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
+          2.U -> ppn)
+    )
+  }
+
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
@@ -618,6 +627,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     e.refill(vpn, asid, pte, level, prefetch, valid)
     e
   }
+
 
 
   override def toPrintable: Printable = {
