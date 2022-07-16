@@ -441,7 +441,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
-  val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
+  val fetch       = new ICacheMainPipeBundle
   val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
   val itlb        = Vec(PortNumber * 2 + 1, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
@@ -563,9 +563,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlb(3)        <>    mainPipe.io.itlb(3)
   io.itlb(4)        <>    prefetchPipe.io.iTLBInter
 
-  for(i <- 0 until PortNumber){
-    io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp
 
+  io.fetch.resp     <>    mainPipe.io.fetch.resp
+
+  for(i <- 0 until PortNumber){
     missUnit.io.req(i)           <>   mainPipe.io.mshr(i).toMSHR
     mainPipe.io.mshr(i).fromMSHR <>   missUnit.io.resp(i)
 
@@ -647,12 +648,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
   
-  (0 until PortNumber).map{i => 
-      mainPipe.io.fetch(i).req.valid := io.fetch(i).req.valid //&& !fetchShouldBlock(i)
-      io.fetch(i).req.ready          :=  mainPipe.io.fetch(i).req.ready //&& !fetchShouldBlock(i)
-      mainPipe.io.fetch(i).req.bits  := io.fetch(i).req.bits
-  }
-
+  mainPipe.io.fetch.req <> io.fetch.req //&& !fetchShouldBlock(i)
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B
   when ( bus.d.bits.opcode === TLMessages.GrantData) {

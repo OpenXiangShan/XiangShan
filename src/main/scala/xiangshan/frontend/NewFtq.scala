@@ -219,6 +219,12 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle with HasCircularQueueP
   }
 }
 
+class FtqToICacheIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
+  //NOTE: req.bits must be prepare in T cycle
+  // while req.valid is set true in T + 1 cycle
+  val req = Decoupled(new FtqToICacheRequestBundle)
+}
+
 trait HasBackendRedirectInfo extends HasXSParameter {
   def numRedirectPcRead = exuParameters.JmpCnt + exuParameters.AluCnt + 1
   def isLoadReplay(r: Valid[Redirect]) = r.bits.flushItself()
@@ -427,6 +433,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     val toBpu = new FtqToBpuIO
     val toIfu = new FtqToIfuIO
+    val toICache = new FtqToICacheIO
     val toBackend = new FtqToCtrlIO
 
     val toPrefetch = new FtqPrefechBundle
@@ -477,9 +484,37 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
   // read ports:    jumpPc + redirects + loadPred + robFlush + ifuReq1 + ifuReq2 + commitUpdate
-  val num_pc_read = 1+numRedirectPcRead+2+1+1+1
+  val num_pc_read = 1+numRedirectPcRead+2+1+1+1+2
   val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize,
     num_pc_read, 1, "FtqPC", concatData=false, Some(Seq.tabulate(num_pc_read)(i => false))))
+
+  //wrbypass read only for ifu req read
+  val critical_read_num = 1 + 1 //ifu + ifuPlus
+  val ftq_pc_dq_data_reg = Reg(Vec(critical_read_num,new Ftq_RF_Components))      //only for update
+  val ftq_pc_dq_data_wire = Wire(Vec(critical_read_num,new Ftq_RF_Components)) 
+  val ftq_pc_next_step_data = Wire(Vec(critical_read_num * 2, new Ftq_RF_Components))
+  val critical_rf_read = Seq(ftq_pc_mem.io.rdata.init.init.last,  ftq_pc_mem.io.rdata.init.last)
+
+  val readPtrVec  = Seq(ifuPtr, ifuPtrPlus1, ifuPtrPlus1 + 1.U, ifuPtrPlus1 + 2.U)
+  val writePtrVec = Seq(bpu_in_resp_ptr)
+  val wrAddrMatch = new QPtrMatchMatrix(readPtrVec, writePtrVec)
+  for(i <- 0 until 2 * critical_read_num) {
+    val wrMatchVec = VecInit(wrAddrMatch(i))
+    val wrBypassEn = bpu_in_fire && wrMatchVec(0)  // wen && waddr === raddr
+    val enqBypassData = Wire(new Ftq_RF_Components).fromBranchPrediction(bpu_in_resp)
+    println(s"index $i")
+    val readData =  if(i < critical_read_num) ftq_pc_dq_data_reg(i) else critical_rf_read(i - critical_read_num)
+    ftq_pc_next_step_data(i) := Mux(wrBypassEn, enqBypassData, readData)
+  }
+
+  val deqEnable = io.toIfu.req.fire && allowToIfu
+  val deqEnable_n = Seq(!deqEnable, !deqEnable)
+  for (i <- 0 until critical_read_num) {
+    ftq_pc_dq_data_wire(i) := ParallelPriorityMux(deqEnable_n, ftq_pc_next_step_data.drop(i).take(critical_read_num + 1))
+    ftq_pc_dq_data_reg(i) := ftq_pc_dq_data_wire(i)
+  }
+
+
   // resp from uBTB
   ftq_pc_mem.io.wen(0) := bpu_in_fire
   ftq_pc_mem.io.waddr(0) := bpu_in_resp_idx
@@ -587,6 +622,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.last := ifuPtrPlus1.value
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
+
+  //TODO: icache req to be connected
+  io.toICache.req.valid := DontCare
+  io.toICache.req.bits := DontCare
 
   
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
