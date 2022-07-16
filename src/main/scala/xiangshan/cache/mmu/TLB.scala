@@ -33,7 +33,7 @@ import freechips.rocketchip.rocket.PMPConfig
   * support block request and non-block request io at the same time
   * return paddr at next cycle, then go for pmp/pma check
   * @param Width: The number of requestors
-  * @param NonBlock: The number of non-block requestors (part of Width)
+  * @param Block: Blocked or not for each requestor ports
   * @param q: TLB Parameters, like entry number, each TLB has its own parameters
   * @param p: XiangShan Paramemters, like XLEN
   */
@@ -44,8 +44,6 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   with HasPerfEvents
 {
   val io = IO(new TlbIO(Width, q))
-
-  require(q.superAssociative == "fa")
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -63,8 +61,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val satp = DelayN(io.csr.satp, q.fenceDelay)
   val flush_mmu = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
-  val flush_pipe = io.flushPipe // DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // || io.flushPipe, for non-block
-  // NOTE: the "2" should be same with Repeater to not to abanndon req sliently.
+  val flush_pipe = io.flushPipe
 
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
   val ifecth = if (q.fetchi) true.B else false.B
@@ -117,7 +114,6 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   def TLBRead(i: Int) = {
     val (hit, ppn, perm, super_hit, super_ppn, static_pm) = entries.io.r_resp_apply(i)
 
-    /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     val fast_miss = !super_hit && vmEnable
     hit.suggestName(s"hit_read_${i}")
@@ -172,7 +168,6 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    // for tlb without sram, tlb will miss, pm should be ignored outsize
     resp(idx).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
     resp(idx).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
     resp(idx).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
@@ -188,7 +183,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   }
 
   def handle_block(idx: Int): Unit = {
-    // three valid: 1. if exist a entry 2. if sent to ptw 3. unset resp.valid
+    // three valid: 1.if exist a entry; 2.if sent to ptw; 3.unset resp.valid
     io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
     // req_out_v for if there is a request, may long latency, fixme
 
