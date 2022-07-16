@@ -65,8 +65,9 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
-  // dtlb filter
-  filterSize: Int = 8,
+  // filter
+  ifilterSize: Int = 4,
+  dfilterSize: Int = 8,
   // miss queue, add more entries than 'must require'
   // 0 for easier bug trigger, please set as big as u can, 8 maybe
   missqueueExtendSize: Int = 0,
@@ -156,7 +157,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
   val prefetchID = PtwWidth
-  val maxPrefetchNum = l2tlbParams.filterSize
 
   val blockBits = l2tlbParams.blockBytes * 8
 
@@ -191,7 +191,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
 
   // miss queue
-  val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
+  val MSHRBaseSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize + l2tlbParams.missqueueExtendSize
   val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
   val MemReqWidth = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
