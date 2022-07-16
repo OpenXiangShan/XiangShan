@@ -450,10 +450,11 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
     val asid = UInt(AsidLength.W)
+    val flushPipe = Bool()
   }
 
   override def toPrintable: Printable = {
-    p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
+    p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}, flushPipe:${bits.flushPipe}"
   }
 }
 

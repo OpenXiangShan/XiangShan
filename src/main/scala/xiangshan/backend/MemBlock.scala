@@ -178,6 +178,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
+  dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)

@@ -42,7 +42,8 @@ case class TLBParameters
   superAssociative: String = "fa", // must be fa
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
   outReplace: Boolean = false,
-  partialStaticPMP: Boolean = false, // partila static pmp result stored in entries
+  partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
+  outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
   saveLevel: Boolean = false
 )
 

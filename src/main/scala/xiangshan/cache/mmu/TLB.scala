@@ -61,7 +61,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val sfence = DelayN(io.sfence, q.fenceDelay)
   val csr = io.csr
   val satp = DelayN(io.csr.satp, q.fenceDelay)
-  val flush = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
+  val flush_mmu = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
+  val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
+  val flush_pipe = io.flushPipe // DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // || io.flushPipe, for non-block
   // NOTE: the "2" should be same with Repeater to not to abanndon req sliently.
 
   // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
@@ -73,10 +75,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush))
-  val req_in_flushed = (0 until Width).map(i => RegNext(req_in(i).fire && !req_in(i).bits.kill && flush, false.B))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = ptw.resp.fire() && !flush
+  val refill = ptw.resp.fire() && !flush_mmu
   val entries = Module(new TlbStorageWrapper(Width, q))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
@@ -180,9 +181,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   }
 
   def handle_nonblock(idx: Int): Unit = {
-    io.requestor(idx).resp.valid := req_out_v(idx) || req_in_flushed(idx)
+    io.requestor(idx).resp.valid := req_out_v(idx)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
-    io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx), false.B)
+    io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx), false.B) // TODO: remove the regnext, timing
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
   }
 
@@ -195,10 +196,11 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
     val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
-    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush, false.B)
+    val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val miss_wire = new_coming && missVec(idx)
-    val miss_req_v = ValidHoldBypass(miss_wire, io.ptw.req(idx).fire() || resp(idx).fire(), flush)
-    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire(), flush)
+    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire(), flush_pipe(idx))
+    val miss_req_v = ValidHoldBypass(miss_wire || (miss_v && flush_mmu && !mmu_flush_pipe),
+      io.ptw.req(idx).fire() || resp(idx).fire(), flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     resp(idx).valid := req_out_v(idx) && !miss_v
@@ -207,6 +209,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       resp(idx).bits.paddr := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+
       perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
       pmp_check(resp(idx).bits.paddr, req_out(idx).size, req_out(idx).cmd, idx)
       // NOTE: the unfiltered req would be handled by Repeater
@@ -218,12 +221,21 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
 
-    when ((flush && req_out_v(idx)) || req_in_flushed(idx)) {
-      resp(idx).valid := true.B
-      resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
-      resp(idx).bits.excp.pf.st := true.B
-      resp(idx).bits.excp.pf.instr := true.B
+    // NOTE: when flush pipe, tlb should abandon last req
+    // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
+    // just resp valid and raise page fault to go through. The pipe(ifu) will abandon it.
+    if (!q.outsideRecvFlush) {
+      when (req_out_v(idx) && flush_pipe(idx) && vmEnable) {
+        resp(idx).valid := true.B
+        resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
+        resp(idx).bits.excp.pf.st := true.B
+        resp(idx).bits.excp.pf.instr := true.B
+      }
     }
+  }
+  // assert
+  for(i <- 0 until Width) {
+    TimeOutAssert(req_out_v(i) && !resp(i).valid, timeOutThreshold, s"{q.name} port{i} long time no resp valid.")
   }
 
   // perf event

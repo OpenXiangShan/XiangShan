@@ -67,6 +67,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
 
+  val needFlush = RegNext(io.backend.toFtq.redirect.valid)
+
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
   val sfence = RegNext(RegNext(io.sfence))
@@ -104,10 +106,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   itlb.io.base_connect(io.sfence, tlbCsr)
   io.ptw.connect(itlb.io.ptw)
   itlb.io.ptw_replenish <> DontCare
+  itlb.io.flushPipe.map(_ := needFlush)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
-  val needFlush = RegNext(io.backend.toFtq.redirect.valid)
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu

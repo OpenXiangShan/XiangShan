@@ -493,6 +493,7 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
 class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
+  val flushPipe = Vec(Width, Input(Bool()))
   val ptw = new TlbPtwIO(Width)
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
