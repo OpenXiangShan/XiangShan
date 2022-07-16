@@ -72,7 +72,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val top = Reg(new RASEntry())
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
     
-    val wen = Wire(Bool())
+    val wen = WireInit(false.B)
     val write_bypass_entry = Reg(new RASEntry())
     val write_bypass_ptr = Reg(UInt(log2Up(rasSize).W))
     val write_bypass_valid = Reg(Bool())
