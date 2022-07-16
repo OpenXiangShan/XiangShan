@@ -191,8 +191,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
 
   // miss queue
-  val MSHRBaseSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize + l2tlbParams.missqueueExtendSize
-  val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
+  val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
   val MemReqWidth = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
