@@ -37,15 +37,6 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
   val redirect = Valid(new Redirect)
-  val for_redirect_gen = new Bundle {
-    val rawRedirect = Valid(new Redirect)
-    val s1_redirect_onehot = Output(Vec(numRedirect+1, Bool()))
-    val s1_oldest_redirect = ValidIO(new Redirect)
-    val s1_oldest_exu_output = ValidIO(new ExuOutput)
-    val s1_jumpTarget = Output(UInt(VAddrBits.W))
-    val flushRedirect = Valid(new Redirect)
-    val frontendFlushTarget = Output(UInt(VAddrBits.W))
-  }
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -62,13 +53,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
-    val for_frontend_redirect_gen = new Bundle {
-      val s1_jumpTarget = Output(UInt(VAddrBits.W))
-      val s1_redirect_onehot = Output(Vec(numRedirect+1, Bool()))
-      val s1_oldest_redirect = ValidIO(new Redirect)
-      val s1_oldest_exu_output = ValidIO(new ExuOutput)
-      val s1_real_pc = Input(UInt(VAddrBits.W))
-    }
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -129,11 +113,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s1_redirect_bits_reg = RegNext(oldestRedirect.bits)
   val s1_redirect_valid_reg = RegNext(oldestValid)
   val s1_redirect_onehot = RegNext(oldestOneHot)
-  io.for_frontend_redirect_gen.s1_jumpTarget := s1_jumpTarget
-  io.for_frontend_redirect_gen.s1_redirect_onehot := s1_redirect_onehot
-  io.for_frontend_redirect_gen.s1_oldest_redirect.valid := s1_redirect_valid_reg
-  io.for_frontend_redirect_gen.s1_oldest_redirect.bits := s1_redirect_bits_reg
-  io.for_frontend_redirect_gen.s1_oldest_exu_output := RegNext(oldestExuOutput)
 
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
@@ -173,20 +152,17 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // store_pc is used to update store set
   val store_pc = io.memPredPcRead(s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
-  val s1_real_pc_from_frontend = io.for_frontend_redirect_gen.s1_real_pc
   // update load violation predictor if load violation redirect triggered
   io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B)
   // update wait table
-  io.memPredUpdate.waddr := RegNext(XORFold(s1_real_pc_from_frontend(VAddrBits-1, 1), MemPredPCWidth))
+  io.memPredUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   io.memPredUpdate.wdata := true.B
   // update store set
-  io.memPredUpdate.ldpc := RegNext(XORFold(s1_real_pc_from_frontend(VAddrBits-1, 1), MemPredPCWidth))
+  io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
 
-  XSError(io.memPredUpdate.valid && RegNext(s1_real_pc_from_frontend) =/= RegNext(real_pc), "s1_real_pc error")
-
-  // recover runahead checkpoint if redirect
+  // // recover runahead checkpoint if redirect
   // if (!env.FPGAPlatform) {
   //   val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
   //   runahead_redirect.io.clock := clock
@@ -367,16 +343,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
   }
-  redirectGen.io.for_frontend_redirect_gen.s1_real_pc := io.frontend.fromFtq.redirect_s1_real_pc
-  io.frontend.toFtq.for_redirect_gen.s1_oldest_redirect := redirectGen.io.for_frontend_redirect_gen.s1_oldest_redirect
-  io.frontend.toFtq.for_redirect_gen.s1_oldest_exu_output := redirectGen.io.for_frontend_redirect_gen.s1_oldest_exu_output
-  io.frontend.toFtq.for_redirect_gen.s1_redirect_onehot := redirectGen.io.for_frontend_redirect_gen.s1_redirect_onehot
-  io.frontend.toFtq.for_redirect_gen.s1_jumpTarget := redirectGen.io.for_frontend_redirect_gen.s1_jumpTarget
-  io.frontend.toFtq.for_redirect_gen.rawRedirect := redirectGen.io.stage2Redirect
-  io.frontend.toFtq.for_redirect_gen.flushRedirect.valid := frontendFlushValid
-  io.frontend.toFtq.for_redirect_gen.flushRedirect.bits := frontendFlushBits
-
-  io.frontend.toFtq.for_redirect_gen.frontendFlushTarget := RegNext(flushTarget)
 
 
   val pendingRedirect = RegInit(false.B)
