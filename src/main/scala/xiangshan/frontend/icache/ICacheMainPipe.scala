@@ -24,6 +24,7 @@ import xiangshan._
 import xiangshan.cache.mmu._
 import utils._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import xiangshan.frontend.{FtqToICacheRequestBundle}
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -45,8 +46,8 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val req  = Flipped(DecoupledIO(new ICacheMainPipeReq))
-  val resp = ValidIO(new ICacheMainPipeResp)
+  val req  = Flipped(Decoupled(new FtqToICacheRequestBundle))
+  val resp = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
@@ -90,7 +91,11 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
-  val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
+  //val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
+  /* when ftq.valid is high in T + 1 cycle 
+   * the ftq component must be valid in T cycle
+   */
+  val fetch       = new ICacheMainPipeBundle
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new TlbRequestIO)
   val respStall   = Input(Bool())
@@ -107,7 +112,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val io = IO(new ICacheMainPipeInterface)
 
   /** Input/Output port */
-  val (fromIFU, toIFU)    = (io.fetch.map(_.req), io.fetch.map(_.resp))
+  val (fromFtq, toIFU)    = (io.fetch.req, io.fetch.resp)
   val (toMeta, metaResp)  = (io.metaArray.toIMeta, io.metaArray.fromIMeta)
   val (toData, dataResp)  = (io.dataArray.toIData,  io.dataArray.fromIData)
   val (toMSHR, fromMSHR)  = (io.mshr.map(_.toMSHR), io.mshr.map(_.fromMSHR))
@@ -115,6 +120,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   io.itlb.foreach(_.req_kill := false.B)
 
+  //Ftq RegNext Register
+  val ftqReqReg = Reg(Vec(4, new fromFtq.bits.cloneType))
+  ftqReqReg.map(_ := fromFtq.bits)
+  dontTouch(ftqReqReg)
+  
   /** pipeline control signal */
   val s1_ready, s2_ready = Wire(Bool())
   val s0_fire,  s1_fire , s2_fire  = Wire(Bool())
@@ -134,11 +144,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   /** s0 control */
-  val s0_valid       = fromIFU.map(_.valid).reduce(_||_)
-  val s0_req_vaddr   = VecInit(fromIFU.map(_.bits.vaddr))
-  val s0_req_vsetIdx = VecInit(fromIFU.map(_.bits.vsetIdx))
-  val s0_only_first  = fromIFU(0).valid && !fromIFU(0).valid
-  val s0_double_line = fromIFU(0).valid && fromIFU(1).valid
+  val s0_valid       = fromFtq.valid
+  val s0_req_vaddr   = VecInit(Seq(ftqReqReg.startAddr, ftqReqReg.nextlineStart))//VecInit(fromIFU.map(_.bits.vaddr))
+  val s0_req_vsetIdx = VecInit(s0_req_vaddr.map(get_idx(_)))//VecInit(fromIFU.map(_.bits.vsetIdx))
+  val s0_only_first  = fromFtq.valid && !ftqReqReg.crossCacheline
+  val s0_double_line = fromFtq.valid && ftqReqReg.crossCacheline
 
   val s0_final_valid       = s0_valid
   val s0_final_vaddr   = s0_req_vaddr
@@ -188,7 +198,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toITLB.map{port => port.bits.kill := !icache_can_go || !pipe_can_go}
 
   //TODO: fix GTimer() condition
-  fromIFU.map(_.ready := s0_can_go)
+  fromFtq.ready := s0_can_go
 
   /**
     ******************************************************************************
