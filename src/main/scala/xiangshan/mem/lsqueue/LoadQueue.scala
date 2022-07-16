@@ -25,7 +25,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
-
+import xiangshan.ExceptionNO._
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -87,6 +87,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
+    val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool()))
     val dcacheRequireReplay = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
@@ -95,7 +96,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = Flipped(ValidIO(new Refill)) // TODO: to be renamed
     val release = Flipped(ValidIO(new Release))
-    val uncache = new DCacheWordIO
+    val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
@@ -108,8 +109,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth))
-  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth, "LqVaddr"))
+  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth, "LqTrigger"))
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
@@ -240,7 +241,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
-      released(loadWbIndex) := release2cycle.valid && 
+      released(loadWbIndex) := release2cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release1cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
@@ -291,19 +292,26 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   for (i <- 0 until LoadPipelineWidth) {
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
+    val lastCycleLoadWbIndex = RegNext(loadWbIndex)
+    // update miss state in load s3
     if(!EnableFastForward){
       // dcacheRequireReplay will be used to update lq flag 1 cycle after for better timing
       //
-      // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate 
+      // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate
       when(dcacheRequireReplay(i)) {
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
-        miss(RegNext(loadWbIndex)) := false.B // disable refill listening
-        datavalid(RegNext(loadWbIndex)) := false.B // disable refill listening
-        assert(!datavalid(RegNext(loadWbIndex)))
+        miss(lastCycleLoadWbIndex) := false.B // disable refill listening
+        datavalid(lastCycleLoadWbIndex) := false.B // disable refill listening
+        assert(!datavalid(lastCycleLoadWbIndex))
       }
     }
+    // update load error state in load s3
+    when(RegNext(io.loadIn(i).fire()) && io.delayedLoadError(i)){
+      uop(lastCycleLoadWbIndex).cf.exceptionVec(loadAccessFault) := true.B
+    }
   }
+
 
   // Writeback up to 2 missed load insts to CDB
   //
@@ -324,7 +332,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
+    // allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
+    allocated(i) && !writebacked(i) && datavalid(i) // query refilling will cause bad timing
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
@@ -651,7 +660,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   * When load arrives load_s1, it searches LoadQueue for younger load instructions
   * with the same load physical address. If younger load has been released (or observed),
   * the younger load needs to be re-execed.
-  * 
+  *
   * For now, if re-exec it found to be needed in load_s1, we mark the older load as replayInst,
   * the two loads will be replayed if the older load becomes the head of rob.
   *
@@ -672,20 +681,24 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val xorMask = lqIdxMask ^ enqMask
     val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === enqPtrExt(0).flag
     val ldToEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
-    val ldld_violation_mask = WireInit(VecInit((0 until LoadQueueSize).map(j => {
-      dataModule.io.release_violation(i).match_mask(j) && // addr match
+    val ldld_violation_mask_gen_1 = WireInit(VecInit((0 until LoadQueueSize).map(j => {
       ldToEnqPtrMask(j) && // the load is younger than current load
       allocated(j) && // entry is valid
       released(j) && // cacheline is released
       (datavalid(j) || miss(j)) // paddr is valid
     })))
+    val ldld_violation_mask_gen_2 = WireInit(VecInit((0 until LoadQueueSize).map(j => {
+      dataModule.io.release_violation(i).match_mask(j)// addr match
+      // addr match result is slow to generate, we RegNext() it
+    })))
+    val ldld_violation_mask = RegNext(ldld_violation_mask_gen_1).asUInt & RegNext(ldld_violation_mask_gen_2).asUInt
     dontTouch(ldld_violation_mask)
     ldld_violation_mask.suggestName("ldldViolationMask_" + i)
-    io.loadViolationQuery(i).resp.bits.have_violation := RegNext(ldld_violation_mask.asUInt.orR)
+    io.loadViolationQuery(i).resp.bits.have_violation := ldld_violation_mask.orR
   })
 
   // "released" flag update
-  // 
+  //
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
 
@@ -698,20 +711,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   when(release2cycle.valid){
     // If a load comes in that cycle, we can not judge if it has ld-ld violation
     // We replay that load inst from RS
-    io.loadViolationQuery.map(i => i.req.ready := 
+    io.loadViolationQuery.map(i => i.req.ready :=
       !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
     )
     // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
   }
 
   (0 until LoadQueueSize).map(i => {
-    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
-      allocated(i) && 
+    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) &&
+      allocated(i) &&
       writebacked(i) &&
       release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
-      // its released flag still needs to be set as true if addr matches. 
+      // its released flag still needs to be set as true if addr matches.
       released(i) := true.B
     }
   })
@@ -850,17 +863,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
+  val perfValidCount = RegNext(validCount)
+
   val perfEvents = Seq(
-    ("rollback         ", io.rollback.valid                                                               ),
-    ("mmioCycle        ", uncacheState =/= s_idle                                                         ),
-    ("mmio_Cnt         ", io.uncache.req.fire()                                                           ),
-    ("refill           ", io.dcache.valid                                                                 ),
-    ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
-    ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
-    ("ltq_1_4_valid    ", (validCount < (LoadQueueSize.U/4.U))                                            ),
-    ("ltq_2_4_valid    ", (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))    ),
-    ("ltq_3_4_valid    ", (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))),
-    ("ltq_4_4_valid    ", (validCount > (LoadQueueSize.U*3.U/4.U))                                        )
+    ("rollback         ", io.rollback.valid),
+    ("mmioCycle        ", uncacheState =/= s_idle),
+    ("mmio_Cnt         ", io.uncache.req.fire()),
+    ("refill           ", io.dcache.valid),
+    ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))),
+    ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))),
+    ("ltq_1_4_valid    ", (perfValidCount < (LoadQueueSize.U/4.U))),
+    ("ltq_2_4_valid    ", (perfValidCount > (LoadQueueSize.U/4.U)) & (perfValidCount <= (LoadQueueSize.U/2.U))),
+    ("ltq_3_4_valid    ", (perfValidCount > (LoadQueueSize.U/2.U)) & (perfValidCount <= (LoadQueueSize.U*3.U/4.U))),
+    ("ltq_4_4_valid    ", (perfValidCount > (LoadQueueSize.U*3.U/4.U)))
   )
   generatePerfEvent()
 

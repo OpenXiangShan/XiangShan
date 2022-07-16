@@ -390,7 +390,7 @@ class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry w
     this.cfiOffset := entry.cfiOffset | Fill(cfiOffset.getWidth, !valid)
     this.taken := entry.taken && valid
     this.takenOnBr := entry.takenOnBr && valid
-    this.brNumOH := Mux(valid, entry.brNumOH, 1.U(3.W))
+    this.brNumOH := Mux(valid, entry.brNumOH, 1.U((numBr+1).W))
   }
 }
 @chiselName

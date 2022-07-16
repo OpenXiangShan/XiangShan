@@ -29,10 +29,10 @@ class RASEntry()(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class RAS(implicit p: Parameters) extends BasePredictor {
+class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p) {
   object RASEntry {
     def apply(retAddr: UInt, ctr: UInt): RASEntry = {
-      val e = Wire(new RASEntry)
+      val e = Wire(new RASEntry()(p))
       e.retAddr := retAddr
       e.ctr := ctr
       e
@@ -69,7 +69,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val stack = Reg(Vec(RasSize, new RASEntry))
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top = RegInit(RASEntry(0.U, 0.U))
+    val top = RegInit(RASEntry(0x80000000L.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
 
     def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
@@ -122,7 +122,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
-    
+
     update(io.recover_valid)(
       Mux(io.recover_valid, io.recover_push,     io.push_valid),
       Mux(io.recover_valid, io.recover_pop,      io.pop_valid),
@@ -131,10 +131,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(io.recover_valid, io.recover_sp - 1.U, topPtr),
       Mux(io.recover_valid, io.recover_new_addr, io.spec_new_addr),
       Mux(io.recover_valid, io.recover_top,      top))
-      
+
     io.sp := sp
     io.top := top
-    
+
     val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
     val do_reset = RegInit(true.B)
     when (do_reset) {
@@ -185,7 +185,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     // FIXME: should use s1 globally
   }
   s2_last_target_out := Mux(s2_is_jalr, s2_jalr_target, s2_last_target_in)
-  
+
   val s3_top = RegEnable(spec_ras.top, io.s2_fire)
   val s3_sp = RegEnable(spec_ras.sp, io.s2_fire)
   val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire)

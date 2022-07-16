@@ -29,7 +29,6 @@ if __name__ == "__main__":
                 err(line, line_number, "lsrc should not be in dispatch!!!\n")
             if "always @(posedge clock) begin" in line:
                 in_sync_always = True
-                print(f"start always in {line_number}")
             if in_sync_always:
                 if " begin " in line or line.endswith(" begin"):
                     always_depth += 1

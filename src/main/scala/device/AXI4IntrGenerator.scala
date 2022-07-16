@@ -22,9 +22,19 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
 
-// we support 256 interrupt bits by default
-class IntrGenIO extends Bundle {
-  val intrVec = Output(UInt(64.W))
+trait IntrGenConfig {
+  // we support 256 interrupt bits by default
+  def intrWidth = 256
+  // Delay the intr gen for 1000 cycles.
+  def delayCycles = 1000
+  // Defined in riscv-plic-1.0.0_rc1, page 11
+  def registerWidth = 32
+  def numIntrReg: Int = intrWidth / registerWidth
+  def numIntrGenReg: Int = 4 * numIntrReg
+}
+
+class IntrGenIO extends Bundle with IntrGenConfig {
+  val intrVec = Output(UInt(this.intrWidth.W))
 }
 
 class AXI4IntrGenerator
@@ -32,43 +42,43 @@ class AXI4IntrGenerator
   address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new IntrGenIO)
+    with IntrGenConfig
 {
 
   override lazy val module = new AXI4SlaveModuleImp(this){
 
-    val intrGenRegs = RegInit(VecInit(Seq.fill(8)(0.U(32.W))))
+    val intrGenRegs = RegInit(VecInit(Seq.fill(numIntrGenReg)(0.U(registerWidth.W))))
+    // 0x0 - 0x20
+    val intrReg = VecInit(intrGenRegs.take(numIntrReg))
+    // 0x20 - 0x40
+    val randEnable = VecInit(intrGenRegs.slice(numIntrReg, 2 * numIntrReg))
+    // 0x40
+    val randMask = intrGenRegs(2 * numIntrReg)
+    val randCounter = intrGenRegs(2 * numIntrReg + 1)
+    val randThres = intrGenRegs(2 * numIntrReg + 2)
 
-    // 0x0 - 0x8
-    val intrReg = VecInit(intrGenRegs.take(2))
-    // 0x8 - 0x10
-    val randEnable = VecInit(intrGenRegs.slice(2, 4))
-    // 0x10
-    val randMask = intrGenRegs(4)
-    val randCounter = intrGenRegs(5)
-    val randThres = intrGenRegs(6)
-
-    val randomPosition = LFSR64()(5, 0)
-    val randomCondition = randCounter === randThres && randEnable(randomPosition(5))(randomPosition(4, 0))
+    val randomPosition = LFSR64()(4 + log2Up(numIntrReg), 0)
+    val randomCondition = randCounter === randThres &&
+      randEnable(randomPosition(4 + log2Up(numIntrReg), 5))(randomPosition(4, 0))
     randCounter := randCounter + 1.U
     when (randomCondition) {
-      intrGenRegs(randomPosition(5)) := intrReg(randomPosition(5)) | UIntToOH(randomPosition(4, 0))
+      intrGenRegs(randomPosition(4 + log2Up(numIntrReg), 5)) :=
+        intrReg(randomPosition(4 + log2Up(numIntrReg), 5)) | UIntToOH(randomPosition(4, 0))
     }
 
     io.extra.get.intrVec := Cat(intrReg.reverse)
 
-    // Delay the intr gen for 1000 cycles.
-    val delayCycles = 1000
     var w_fire = in.w.fire && in.w.bits.data =/= 0.U
     for (i <- 0 until delayCycles) {
       w_fire = RegNext(w_fire, init=false.B)
     }
     val w_data = DelayN(in.w.bits.data(31, 0), delayCycles)
     when (w_fire) {
-      intrGenRegs(DelayN(waddr(4, 2), delayCycles)) := w_data
+      intrGenRegs(DelayN(waddr(log2Up(numIntrGenReg) + 1, 2), delayCycles)) := w_data
     }
     // Clear takes effect immediately
     when (in.w.fire && in.w.bits.data === 0.U) {
-      intrGenRegs(waddr(4, 2)) := 0.U
+      intrGenRegs(waddr(log2Up(numIntrGenReg) + 1, 2)) := 0.U
     }
     // write resets the threshold and counter
     when (in.w.fire && in.w.bits.data === 0.U || w_fire) {

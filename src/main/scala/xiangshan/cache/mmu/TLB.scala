@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import xiangshan._
 import utils._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
@@ -29,7 +31,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
+class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
@@ -41,6 +43,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
   val pmp = io.pmp
+  val ptw_resp = if (q.sameCycle) RegNext(ptw.resp.bits) else ptw.resp.bits
+  val ptw_resp_v = if (q.sameCycle) RegNext(ptw.resp.valid, init = false.B) else ptw.resp.valid
 
   val sfence = io.sfence
   val csr = io.csr
@@ -69,7 +73,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     ports = Width,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
-    sramSinglePort = sramSinglePort,
     saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
@@ -81,11 +84,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     ports = Width,
     nSets = q.superNSets,
     nWays = q.superNWays,
-    sramSinglePort = sramSinglePort,
     saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
   )
+  val (tlbMbistPipelineSram,tlbMbistPipelineRf,tlbMbistPipelineSramRepair,tlbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"TLB_${this.hashCode()}")
 
 
   for (i <- 0 until Width) {
@@ -110,6 +113,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   normalPage.csr <> io.csr
   superPage.csr <> io.csr
 
+  val refill_now = ptw_resp_v
   def TLBNormalRead(i: Int) = {
     val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
     val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
@@ -130,7 +134,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     val fast_miss = !super_hit && vmEnable
-    val miss_sameCycle = !hit_sameCycle && vmEnable
+    val miss_sameCycle = (!hit_sameCycle || refill_now) && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
@@ -138,13 +142,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
-    val refill_reg = RegNext(io.ptw.resp.valid)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || refill_reg) }
-    resp(i).bits.fast_miss := fast_miss || refill_reg
-    resp(i).bits.ptwBack := io.ptw.resp.fire()
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
+    resp(i).bits.fast_miss := fast_miss
+    resp(i).bits.ptwBack := ptw.resp.fire()
 
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
@@ -200,7 +203,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
   val normal_refill_idx = if (q.outReplace) {
     io.replace.normalPage.access <> normalPage.access
-    io.replace.normalPage.chosen_set := get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
+    io.replace.normalPage.chosen_set := get_set_idx(ptw_resp.entry.tag, q.normalNSets)
     io.replace.normalPage.refillIdx
   } else if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
@@ -209,7 +212,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
     re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
-    re.way(get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
+    re.way(get_set_idx(ptw_resp.entry.tag, q.normalNSets))
   }
 
   val super_refill_idx = if (q.outReplace) {
@@ -222,27 +225,27 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
+  val refill = ptw_resp_v && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
-    else refill && ptw.resp.bits.entry.level.get === 2.U },
+    else refill && ptw_resp.entry.is_normalentry()},
     wayIdx = normal_refill_idx,
-    data = ptw.resp.bits,
+    data = ptw_resp,
     data_replenish = io.ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
-    else refill && ptw.resp.bits.entry.level.get =/= 2.U },
+    else refill && !ptw_resp.entry.is_normalentry()},
     wayIdx = super_refill_idx,
-    data = ptw.resp.bits,
+    data = ptw_resp,
     data_replenish = io.ptw_replenish
   )
 
   // if sameCycle, just req.valid
-  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
+  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext
   // because sram is too slow and dtlb is too distant from dtlbRepeater
   for (i <- 0 until Width) {
-    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) && 
+    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) &&
       !RegNext(refill, init = false.B) &&
       param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
     io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
@@ -353,11 +356,12 @@ object TLB {
     csr: TlbCsrBundle,
     width: Int,
     shouldBlock: Boolean,
-    q: TLBParameters
+    q: TLBParameters,
+    parentName:String = "Unknown"
   )(implicit p: Parameters) = {
     require(in.length == width)
 
-    val tlb = Module(new TLB(width, q))
+    val tlb = Module(new TLB(parentName, width, q))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr

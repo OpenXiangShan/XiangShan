@@ -1,30 +1,31 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package top
 
 import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
+import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
-import huancun.mbist.{FUSEInterface, MBISTController, MBISTInterface, Ultiscan}
-import huancun.utils.ResetGen
+import huancun.mbist._
+import huancun.utils.{DFTResetGen, ResetGen, SRAMTemplate}
 import huancun.{HCCacheParamsKey, HuanCun}
 import system._
 import utils._
@@ -61,14 +62,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
-  val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alterPartial({
-      case XSCoreParamsKey => coreParams
-    })))
+  val core_with_l2 = tiles.zipWithIndex.map({
+    case(coreParams,idx) =>
+      LazyModule(new XSTile(s"XSTop_CoreWithL2_${idx}_")(p.alterPartial({
+        case XSCoreParamsKey => coreParams
+      })))
+  }
   )
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
+    LazyModule(new HuanCun("XSTop_L3_")(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param
     })))
   )
@@ -133,33 +136,55 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
+      val in_spare = Input(UInt(10.W))
+      val out_spare = Output(UInt(10.W))
     })
 
-    val xsx_ultiscan = Module(new Ultiscan(1100, 10, 10, 1, 1, 0, 0, "xsx", !debugOpts.FPGAPlatform))
-    dontTouch(xsx_ultiscan.io)
-    xsx_ultiscan.io := DontCare
-    xsx_ultiscan.io.core_clock_preclk := io.clock
+    val xsx_fscan = IO(new UltiscanExternalInterface)
 
-    val dfx_reset = Some(xsx_ultiscan.toResetGen)
+    val mem = IO(new Bundle{
+      val core_sram       = new MbitsExtraFullInterface
+      val core_rf         = new MbitsExtraFullInterface
+      val l2_sram         = new MbitsExtraFullInterface
+      val l2_rf           = new MbitsExtraFullInterface
+      val l3_banks        = Vec(4,new MbitsExtraFullInterface)
+      val l3_dir          = Vec(4,new MbitsExtraFullInterface)
+    })
+    mem := DontCare
+    val hd2prf_in = IO(new MbitsFuseInterface(isSRAM = false))
+    val hsuspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val uhdusplr_in = IO(new MbitsFuseInterface(isSRAM = true))
+    val hduspsr_in = IO(new MbitsFuseInterface(isSRAM = true))
+
+    val L3_BISR = if (l3cacheOpt.nonEmpty) Some(IO(Vec(4,new BISRInputInterface))) else None
+    val bisr_mem_chain_select = if (l3cacheOpt.nonEmpty) Some(IO(Input(UInt(1.W)))) else None
+
+    val dfx_reset = Some(xsx_fscan.toResetGen)
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen(2, dfx_reset) }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, dfx_reset) }
 
     // override LazyRawModuleImp's clock and reset
-    childClock := xsx_ultiscan.io.core_clock_postclk
+    childClock := io.clock
     childReset := reset_sync
 
     // core_with_l2 still use io_clock and io_reset
     core_with_l2.foreach(_.module.io.clock := io.clock)
     core_with_l2.foreach(_.module.io.reset := io.reset)
 
-    // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
+    io.out_spare := DontCare
 
-    // input
+    dontTouch(hd2prf_in)
+    dontTouch(hsuspsr_in)
+    dontTouch(uhdusplr_in)
+    dontTouch(hduspsr_in)
+    dontTouch(L3_BISR.get)
     dontTouch(dma)
     dontTouch(io)
     dontTouch(peripheral)
     dontTouch(memory)
+    dontTouch(mem)
+    dontTouch(xsx_fscan)
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
     misc.module.clock_div2 := io.clock_div2
@@ -181,100 +206,51 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // MBIST Interface Implementation begins
 
-    val xsx_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
-    val xsl2_ultiscan_ijtag = IO(xsx_ultiscan.io.ijtag.cloneType)
-    val xsx_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
-    val xsl2_ultiscan_uscan = IO(xsx_ultiscan.io.uscan.cloneType)
-    dontTouch(xsx_ultiscan_ijtag)
-    dontTouch(xsl2_ultiscan_ijtag)
-    dontTouch(xsx_ultiscan_uscan)
-    dontTouch(xsl2_ultiscan_uscan)
+    val xsl2_ultiscan = IO(core_with_l2.head.module.ultiscanIO.cloneType)
+    dontTouch(xsl2_ultiscan)
 
-    xsx_ultiscan.io.ijtag <> xsx_ultiscan_ijtag
-    xsx_ultiscan.io.uscan <> xsx_ultiscan_uscan
+    core_with_l2.head.module.ultiscanIO <> xsl2_ultiscan
+    core_with_l2.head.module.xsx_ultiscan_in.bypsel := xsx_fscan.ram.bypsel
+    core_with_l2.head.module.xsx_ultiscan_in.wdis_b := xsx_fscan.ram.wrdis_b
+    core_with_l2.head.module.xsx_ultiscan_in.rdis_b := xsx_fscan.ram.rddis_b
+    core_with_l2.head.module.xsx_ultiscan_in.init_en := xsx_fscan.ram.init_en
+    core_with_l2.head.module.xsx_ultiscan_in.init_val := xsx_fscan.ram.init_val
 
-    core_with_l2.head.module.ultiscan_ijtag <> xsl2_ultiscan_ijtag
-    core_with_l2.head.module.ultiscan_uscan <> xsl2_ultiscan_uscan
+    core_with_l2.head.module.mbist_extra_core_sram <> mem.core_sram
+    core_with_l2.head.module.mbist_extra_core_rf <> mem.core_rf
+    core_with_l2.head.module.mbist_extra_l2_sram <> mem.l2_sram
+    core_with_l2.head.module.mbist_extra_l2_rf <> mem.l2_rf
 
-    core_with_l2.head.module.ultiscanToControllerL2.bypsel := xsx_ultiscan.io.fscan.ram.bypsel
-    core_with_l2.head.module.ultiscanToControllerL2.wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
-    core_with_l2.head.module.ultiscanToControllerL2.rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
-    core_with_l2.head.module.ultiscanToControllerL2.init_en := xsx_ultiscan.io.fscan.ram.init_en
-    core_with_l2.head.module.ultiscanToControllerL2.init_val := xsx_ultiscan.io.fscan.ram.init_val
-
-    val mbistInterfacesL3 = {
-      if (l3cacheOpt.nonEmpty) {
-        Some(
-          l3cacheOpt.get.module.mbist.zipWithIndex.map({
-            case (l3MbistPort, idx) =>
-              val intfName = f"MBIST_L3_Slice_${idx}_intf"
-              val intf = Module(new MBISTInterface(l3MbistPort.params, intfName))
-              intf.toPipeline <> l3MbistPort
-              intf
-          })
-        )
-      }
-      else {
-          None
-      }
-    }
-    val hd2prf_in = IO(new FUSEInterface)
-    dontTouch(hd2prf_in)
     core_with_l2.head.module.hd2prf_in <> hd2prf_in
-    val hsuspsr_in = IO(new FUSEInterface)
-    dontTouch(hsuspsr_in)
     core_with_l2.head.module.hsuspsr_in <> hsuspsr_in
-    val mbistControllersL3 = {
-      if (l3cacheOpt.nonEmpty){
-        Some(
-          mbistInterfacesL3.get.zipWithIndex.map({
-            case (intf, idx) =>
-              val prefix = f"L3S$idx"
-              val ctrl = Module(new MBISTController(Seq(intf.mbist.params), 2, Seq(prefix), !debugOpts.FPGAPlatform))
-              dontTouch(ctrl.io)
-              ctrl.io.mbist.head <> intf.mbist
-              ctrl.io.fscan_ram.head <> intf.fscan_ram
-              ctrl.io.static.head <> intf.static
-              ctrl.io.fscan_clkungate := xsx_ultiscan.io.fscan.clkungate
-              ctrl.io.clock := childClock
-              ctrl.io.hd2prf_in := hd2prf_in
-              ctrl.io.hsuspsr_in := hsuspsr_in
-              ctrl.io.fscan_in(0).bypsel := xsx_ultiscan.io.fscan.ram.bypsel
-              ctrl.io.fscan_in(0).wdis_b := xsx_ultiscan.io.fscan.ram.wrdis_b
-              ctrl.io.fscan_in(0).rdis_b := xsx_ultiscan.io.fscan.ram.rddis_b
-              ctrl.io.fscan_in(0).init_en := xsx_ultiscan.io.fscan.ram.init_en
-              ctrl.io.fscan_in(0).init_val := xsx_ultiscan.io.fscan.ram.init_val
-              ctrl.io.fscan_in(1) <> core_with_l2.head.module.ultiscanToControllerL3
-              ctrl
-          })
-        )
-      }
-      else{
-        None
-      }
-    }
-    val l1l2_mbist_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
-    dontTouch(l1l2_mbist_jtag)
-    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_jtag
+    core_with_l2.head.module.uhdusplr_in <> uhdusplr_in
+    core_with_l2.head.module.hduspsr_in <> hduspsr_in
 
-    val l3_mbist = IO(new Bundle {
-      val ijtag = {
-        if(l3cacheOpt.nonEmpty) {
-          Some(Vec(mbistControllersL3.get.length, mbistControllersL3.get.head.io.mbist_ijtag.cloneType))
-        } else {
-          None
-        }
-      }
-    })
-    if (l3_mbist.ijtag.isDefined) {
-      dontTouch(l3_mbist.ijtag.get)
-    }
 
+    val l1l2_mbist_sram_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
+    dontTouch(l1l2_mbist_sram_jtag)
+    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_sram_jtag
+
+    val l3SliceNum = l3cacheOpt.get.module.mbist_jtag.get.length
+    val l3_sram_mbist = if(l3cacheOpt.nonEmpty) Some(IO(Vec(l3SliceNum, new JTAGInterface))) else None
     if(l3cacheOpt.nonEmpty){
-      l3_mbist.ijtag.get.zip(mbistControllersL3.get).foreach({
-        case(port,ctrl) =>
-          port <> ctrl.io.mbist_ijtag
-      })
+      val l3Module = l3cacheOpt.get.module
+      mem.l3_dir.zip(l3Module.mbist_extra_dirs.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
+      mem.l3_banks.zip(l3Module.mbist_extra_banks.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
+      l3Module.fscan_clkungate.get := xsx_fscan.clkungate
+      l3Module.xsx_ultiscan.get.bypsel <> xsx_fscan.ram.bypsel
+      l3Module.xsx_ultiscan.get.wdis_b <> xsx_fscan.ram.wrdis_b
+      l3Module.xsx_ultiscan.get.rdis_b <> xsx_fscan.ram.rddis_b
+      l3Module.xsx_ultiscan.get.init_en <> xsx_fscan.ram.init_en
+      l3Module.xsx_ultiscan.get.init_val <> xsx_fscan.ram.init_val
+      l3Module.xsl2_ultiscan.get <> core_with_l2.head.module.xsl2_ultiscan_out
+      l3Module.hd2prf_in.get <> hd2prf_in
+      l3Module.hsuspsr_in.get <> hsuspsr_in
+      l3Module.uhdusplr_in.get <> uhdusplr_in
+      l3Module.hduspsr_in.get <> hduspsr_in
+      l3Module.bisr.get.zip(L3_BISR.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
+      l3Module.mbist_jtag.get.zip(l3_sram_mbist.get).foreach({ case(extIO,cacheIO) => extIO <> cacheIO})
+      l3Module.bisr_mem_chain_select.get := bisr_mem_chain_select.get
     }
     //MBIST Interface Implementation ends
 

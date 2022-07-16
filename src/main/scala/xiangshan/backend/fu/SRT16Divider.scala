@@ -146,10 +146,11 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val aIsZero = RegEnable(aLZC(lzc_width), state(s_pre_0))
   val aTooSmall = RegEnable(aLZC(lzc_width) | lzcWireDiff(lzc_width), state(s_pre_0))
   special := dIsOne | dIsZero | aTooSmall
+  val aRegNeg = RegEnable(-aReg, state(s_pre_0))
 
   val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt,
                             Mux(aTooSmall, 0.U,
-                              Mux(dSignReg, -aReg, aReg) //  signed 2^(len-1)
+                              Mux(dSignReg, aRegNeg, aReg) //  signed 2^(len-1)
                             ))
   val remSpecial = Mux(dIsZero || aTooSmall, aReg, 0.U)
   val quotSpecialReg = RegEnable(quotSpecial, state(s_pre_1))

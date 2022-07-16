@@ -224,6 +224,7 @@ class WithNKBL2
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
+          blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
         reqField = Seq(PreferCacheField()),
@@ -256,7 +257,10 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = tiles.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
+          l2params.copy(
+            sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64,
+            blockGranularity = log2Ceil(clientDirBytes / core.L2NBanks / l2params.ways / 64 / tiles.size)
+          )
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(
@@ -299,8 +303,15 @@ class MediumConfig(n: Int = 1) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(3 * 1024, inclusive = false, banks = 4, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+  new WithNKBL3(2 * 1024, inclusive = false, banks = 4, ways = 8)
+    ++ new WithNKBL2(512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+class FPGAConfig(n: Int = 1) extends Config(
+  new WithNKBL3(2 * 1024, inclusive = false, banks = 4, ways = 8)
+    ++ new WithNKBL2(512, inclusive = false, banks = 2, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )

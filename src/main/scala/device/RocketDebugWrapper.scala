@@ -25,13 +25,11 @@ import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.LogicalModuleTree
 import freechips.rocketchip.jtag._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.{ClockSinkNode, ClockSinkParameters}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.{DebugCustomXbar, DebugIO, DebugTransportModuleJTAG, JtagDTMConfig, PSDIO, ResetCtrlIO, SystemJTAGIO, TLDebugModule}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.devices.debug._
 
 // this file uses code from rocketchip Periphery.scala
@@ -50,8 +48,6 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
 //  }
-  val fakeTreeNode = new GenericLogicalTreeNode
-  LogicalModuleTree.add(fakeTreeNode, debug.logicalTreeNode)
 
   lazy val module = new LazyRawModuleImp(this) {
     val io = IO(new Bundle{

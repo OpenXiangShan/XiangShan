@@ -19,6 +19,8 @@ package xiangshan.cache.prefetch
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import utils._
 import xiangshan.cache.mmu.HasTlbConst
@@ -380,7 +382,7 @@ class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule wit
   XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
 }
 
-class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
+class BestOffsetPrefetch(parentName:String)(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new BestOffsetPrefetchIO)
 
   def nEntries = bopParams.nEntries
@@ -426,6 +428,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
   rrTable.io.r <> scoreTable.io.test
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := getBlockAddr(io.train.bits.addr)
+  val (bestOffsetPrefetcherMbistPipelineSram,bestOffsetPrefetcherMbistPipelineRf,bestOffsetPrefetcherMbistPipelineSramRepair,bestOffsetPrefetcherMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_BestOffsetPrefetcher")
 
   XSDebug(p"io: ${io}\n")
   XSDebug(p"entryReadyIdx=${entryReadyIdx} inflightMatchVec=${Binary(inflightMatchVec.asUInt)}\n")

@@ -24,7 +24,7 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.{GlobalHistory, ShiftingGlobalHistory, CircularGlobalHistory, AllFoldedHistories}
+import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
@@ -37,6 +37,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -120,10 +121,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
-  val loadWaitBit = Bool() 
-  // If (loadWaitBit && loadWaitStrict), strict load wait is needed 
+  val loadWaitBit = Bool()
+  // If (loadWaitBit && loadWaitStrict), strict load wait is needed
   // load inst will not be executed until ALL former store addr calcuated
-  val loadWaitStrict = Bool() 
+  val loadWaitStrict = Bool()
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -163,7 +164,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-  val isRVF = Bool()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
@@ -175,7 +175,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -190,6 +190,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   }
 
   def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
+  def isSoftPrefetch: Bool = {
+    fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+  }
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -228,16 +231,17 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
-    isFp match {
-      case false => ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U && (srcState(index) === SrcState.rdy || ignoreState.B)
-      case _ => ctrl.srcType(index) === SrcType.fp && (srcState(index) === SrcState.rdy || ignoreState.B)
+    val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
+    val readReg = if (isFp) {
+      ctrl.srcType(index) === SrcType.fp
+    } else {
+      ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U
     }
+    readReg && stateReady
   }
   def srcIsReady: Vec[Bool] = {
     VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcOrImm(t) || s === SrcState.rdy })
   }
-  def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
-  def doWriteFpRf: Bool = ctrl.fpWen
   def clearExceptions(
     exceptionBits: Seq[Int] = Seq(),
     flushPipe: Boolean = false,
@@ -248,6 +252,29 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+  // Assume only the LUI instruction is decoded with IMM_U in ALU.
+  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
+  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
+  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+    successor.map{ case (src, srcType) =>
+      val pdestMatch = pdest === src
+      // For state: no need to check whether src is x0/imm/pc because they are always ready.
+      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
+      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
+      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
+      val bothStateMatch = Mux(SrcType.regIsFp(srcType), fpMatch, rfStateMatch)
+      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
+      // For data: types are matched and int pdest is not $zero.
+      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
+      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
+      (stateCond, dataCond)
+    }
+  }
+  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
+  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
+  }
+  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
@@ -329,7 +356,7 @@ class ExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isInterrupt = Bool()
 }
 
-class RobCommitInfo(implicit p: Parameters) extends XSBundle {
+class RobDispatchData(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
   val fpWen = Bool()
@@ -339,14 +366,30 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+}
 
+class RobCommitInfo(implicit p: Parameters) extends RobDispatchData {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+
+  def connectDispatchData(data: RobDispatchData) {
+    ldest := data.ldest
+    rfWen := data.rfWen
+    fpWen := data.fpWen
+    wflags := data.wflags
+    commitType := data.commitType
+    pdest := data.pdest
+    old_pdest := data.old_pdest
+    ftqIdx := data.ftqIdx
+    ftqOffset := data.ftqOffset
+  }
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val isWalk = Output(Bool())
   val valid = Vec(CommitWidth, Output(Bool()))
+  // valid bits optimized for walk
+  val walkValid = Vec(CommitWidth, Output(Bool()))
   val info = Vec(CommitWidth, Output(new RobCommitInfo))
 
   def hasWalkInstr = isWalk && valid.asUInt.orR

@@ -24,8 +24,8 @@ import xiangshan._
 import utils._
 
 @chiselName
-class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
+class Composer(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, parentName = parentName)
   io.out.resp := resp
 
   var metas = 0.U(1.W)

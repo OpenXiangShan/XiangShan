@@ -19,23 +19,25 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
 
-class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+class Frontend(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
   val instrUncache  = LazyModule(new InstrUncache())
-  val icache        = LazyModule(new ICache())
+  val icache        = LazyModule(new ICache(parentName = parentName + "icache_")(p))
 
-  lazy val module = new FrontendImp(this)
+  lazy val module = new FrontendImp(this,parentName)
 }
 
 
-class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
 {
@@ -61,10 +63,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu     = Module(new Predictor)
+  val bpu     = Module(new Predictor(parentName = parentName + "bpu_")(p))
   val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
-  val ftq = Module(new Ftq)
+  val ftq = Module(new Ftq(parentName = parentName + "ftq_")(p))
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -121,8 +123,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     csr = tlbCsr,
     width = 6,
     shouldBlock = true,
-    itlbParams
+    itlbParams,
+    parentName = parentName + "TLB_"
   )
+  val (frontendMbistPipelineSram,frontendMbistPipelineRf,frontendMbistPipelineSramRepair,frontendMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_frontend")
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
@@ -175,7 +179,19 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.take(8)
 
-  val allPerfEvents = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerf)
-  override val perfEvents = HPerfMonitor(csrevents, allPerfEvents).getPerfEvents
+  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEvents)
+  val perfFromIO    = Seq()
+  val perfBlock     = Seq()
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("Frontend perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }

@@ -51,6 +51,7 @@ class SimTop(implicit p: Parameters) extends Module {
     rtcClock := ~rtcClock
   }
   soc.io.rtc_clock := rtcClock
+  soc.io.in_spare := DontCare
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2, l_soc.misc.l3FrontendAXI4Node.out.head._2))
   val simMMIO = Module(l_simMMIO.module)
@@ -100,15 +101,22 @@ class SimTop(implicit p: Parameters) extends Module {
     io.memAXI <> soc.memory
   }
 
-  soc.xsx_ultiscan_ijtag := DontCare
-  soc.xsl2_ultiscan_ijtag := DontCare
-  soc.xsx_ultiscan_uscan := DontCare
-  soc.xsl2_ultiscan_uscan := DontCare
+  soc.xsx_fscan := DontCare
+  soc.mem := DontCare
   soc.hd2prf_in := DontCare
   soc.hsuspsr_in := DontCare
-  soc.l1l2_mbist_jtag := DontCare
-  if (soc.l3_mbist.ijtag.isDefined) {
-    soc.l3_mbist.ijtag.get := DontCare
+  soc.uhdusplr_in := DontCare
+  soc.hduspsr_in := DontCare
+  if (soc.L3_BISR.isDefined) {
+    soc.L3_BISR.get := DontCare
+  }
+  soc.xsl2_ultiscan := DontCare
+  soc.l1l2_mbist_sram_jtag := DontCare
+  if (soc.l3_sram_mbist.isDefined) {
+    soc.l3_sram_mbist.get := DontCare
+  }
+  if (soc.bisr_mem_chain_select.isDefined) {
+    soc.bisr_mem_chain_select.get := DontCare
   }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {

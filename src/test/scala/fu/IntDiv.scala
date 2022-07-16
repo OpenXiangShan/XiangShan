@@ -19,9 +19,6 @@ package futest
 import chisel3._
 import chiseltest._
 import chiseltest.ChiselScalatestTester
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
-import chiseltest.legacy.backends.verilator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -32,7 +29,7 @@ import xiangshan.backend.fu._
 import scala.util.Random
 
 
-class SRT4DividerWrapper extends Module {
+class SRTDividerWrapper extends Module {
   val io = IO(new Bundle{
     val dividend = Input(UInt(64.W))
     val divisor = Input(UInt(64.W))
@@ -67,13 +64,8 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
   behavior of "srt16 divider"
   it should "run" in {
     val rand = new Random(0x14226)
-    val testNum = 1000
-    test(new SRT4DividerWrapper).withAnnotations(Seq(VerilatorBackendAnnotation,
-      LineCoverageAnnotation,
-      ToggleCoverageAnnotation,
-      VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000",
-        "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT", "--trace")),
-      RunFirrtlTransformAnnotation(new PrintModuleName))){ m =>
+    val testNum = 100000
+    test(new SRTDividerWrapper){ m =>
       println("Test started!")
       m.clock.step(20)
 

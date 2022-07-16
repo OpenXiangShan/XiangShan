@@ -119,6 +119,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }.otherwise {
       XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
     }
+    // For the LUI instruction: psrc(0) is from register file and should always be zero.
+    when (io.fromRename(i).bits.isLUI) {
+      updatedUop(i).psrc(0) := 0.U
+    }
 
     io.lfst.req(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)

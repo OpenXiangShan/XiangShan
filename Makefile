@@ -15,14 +15,22 @@
 #***************************************************************************************
 
 TOP = XSTop
+ifeq ($(NANHU),1)
+FPGATOP = top.FPGATop
+else
 FPGATOP = top.TopMain
+endif
 BUILD_DIR = ./build
 TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
+ifeq ($(NANHU),1)
+SIMTOP  = top.SimFPGA
+else
 SIMTOP  = top.SimTop
+endif
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
@@ -65,7 +73,13 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	python3 scripts/parser.py bosc_ $(CONFIG)
+	# fix sram model when RANDOMIZE_REG_INIT is defined
+	sed -i -e '/.*data_hold_data.*=.*_RAND.*/d' $(TOP_V) 
+ifeq ($(NANHU),1)
+	sed -i -e 's/ XSTop / SLTop /g' $(TOP_V)
+	sed -i -e 's/ XSTop(/ SLTop(/g' $(TOP_V)
+	sed -i -e 's/ FPGATop(/ XSTop(/g' $(TOP_V)
+endif
 
 verilog: $(TOP_V)
 
@@ -87,12 +101,29 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+	# fix sram model when RANDOMIZE_REG_INIT is defined
+	sed -i -e '/.*data_hold_data.*=.*_RAND.*/d' $(SIM_TOP_V) 
 
 sim-verilog: $(SIM_TOP_V)
+
+sim-verilog-release:
+	# if you have generated $(SIM_TOP_V) without setting RELEASE = 1, make clean first
+	# force set RELEASE = 1 to generate release rtl
+	$(MAKE) $(SIM_TOP_V) RELEASE=1
+	# update SimTop.v, use "bosc_" module name prefix
+	sed -i -e 's/ XSTop / bosc_XSTop /g' $(SIM_TOP_V)
+	sed -i -e 's/ XSTop(/ bosc_XSTop(/g' $(SIM_TOP_V)
+	# split rtl modules and sim top, copy extra files
+	python3 scripts/parser.py SimTop --config $(CONFIG) \
+		--ignore bosc_XSTop --include difftest          \
+        --no-sram-conf --no-sram-xlsx --no-extra-files
 
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf ./build
+
+clean-release:
+	rm -rf ./*-Release-*
 
 init:
 	git submodule update --init
@@ -119,4 +150,3 @@ simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
-

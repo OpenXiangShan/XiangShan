@@ -23,7 +23,7 @@ jobs:
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-          rm -rf $GITHUB_WORKSPACE/XSTop-Release*
+          rm -rf $GITHUB_WORKSPACE/bosc_XSTop-Release*
           mkdir -p $WAVE_HOME
       - name: generate verilog file
         run:
@@ -32,8 +32,64 @@ jobs:
         run:
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
       - name: release
+        run: |
+          python3 scripts/parser.py XSTop --xs-home $GITHUB_WORKSPACE \
+            --config DefaultConfig --prefix bosc_                     \
+            --sram-replace --mbist-scan-replace
+          tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz bosc_XSTop-Release*
+
+  generate-fpga-verilog:
+    runs-on: bosc
+    continue-on-error: false
+    name: Generate Verilog for NANHU FPGA
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          rm -rf $GITHUB_WORKSPACE/XSTop-Release*
+          mkdir -p $WAVE_HOME
+      - name: generate verilog file
+        run: |
+          sed -i -e "s/AlwaysBasicDiff: Boolean = true/AlwaysBasicDiff: Boolean = false/g" \
+            $GITHUB_WORKSPACE/src/main/scala/xiangshan/Parameters.scala
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --generate --nanhu --config FPGAConfig
+      - name: release
+        run: |
+          python3 scripts/parser.py XSTop --xs-home $GITHUB_WORKSPACE \
+            --config FPGAConfig --no-extra-files
+          tar -czf $WAVE_HOME/release-${HEAD_SHA}-fpga.tar.gz XSTop-Release*
+
+  generate-sim-release:
+    runs-on: bosc
+    continue-on-error: false
+    name: Generate release Verilog of SimTop
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          rm -rf $GITHUB_WORKSPACE/SimTop-Release*
+          mkdir -p $WAVE_HOME
+      - name: generate release verilog for SimTop
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --sim-release --config DefaultConfig
+      - name: release
         run:
-          tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz XSTop-Release*
+          tar -czf $WAVE_HOME/release-${HEAD_SHA}-sim-wrapper.tar.gz SimTop-Release*
 
   default-emu:
     runs-on: bosc

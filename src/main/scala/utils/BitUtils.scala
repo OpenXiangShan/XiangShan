@@ -18,26 +18,63 @@ package utils
 
 import chisel3._
 import chisel3.util._
+
 import scala.math.min
 
+object RegNextWithEnable {
+  def apply[T <: Data](data: Valid[T], hasInit: Boolean = true): Valid[T] = {
+    val next = Wire(data.cloneType)
+    if (hasInit) {
+      next.valid := RegNext(data.valid, false.B)
+    }
+    else {
+      next.valid := RegNext(data.valid)
+    }
+    next.bits := RegEnable(data.bits, data.valid)
+    next
+  }
+}
+
+class CircularShift(data: UInt) {
+  private def helper(step: Int, isLeft: Boolean): UInt = {
+    if (step == 0) {
+      data
+    }
+    else {
+      val splitIndex = if (isLeft) {
+        data.getWidth - (step % data.getWidth)
+      } else {
+        step % data.getWidth
+      }
+      Cat(data(splitIndex - 1, 0), data(data.getWidth - 1, splitIndex))
+    }
+  }
+  def left(step: Int): UInt = helper(step, true)
+  def right(step: Int): UInt = helper(step, false)
+}
+
+object CircularShift {
+  def apply(data: UInt): CircularShift = new CircularShift(data)
+}
+
 object WordShift {
-  def apply(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
+  def apply(data: UInt, wordIndex: UInt, step: Int): UInt = (data << (wordIndex * step.U)).asUInt
 }
 
 object MaskExpand {
- def apply(m: UInt) = Cat(m.asBools.map(Fill(8, _)).reverse)
+ def apply(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
 }
 
 object MaskData {
-  def apply(oldData: UInt, newData: UInt, fullmask: UInt) = {
+  def apply(oldData: UInt, newData: UInt, fullmask: UInt): UInt = {
     require(oldData.getWidth <= fullmask.getWidth, s"${oldData.getWidth} < ${fullmask.getWidth}")
     require(newData.getWidth <= fullmask.getWidth, s"${newData.getWidth} < ${fullmask.getWidth}")
-    (newData & fullmask) | (oldData & ~fullmask)
+    (newData & fullmask) | (oldData & (~fullmask).asUInt)
   }
 }
 
 object SignExt {
-  def apply(a: UInt, len: Int) = {
+  def apply(a: UInt, len: Int): UInt = {
     val aLen = a.getWidth
     val signBit = a(aLen-1)
     if (aLen >= len) a(len-1,0) else Cat(Fill(len - aLen, signBit), a)
@@ -45,7 +82,7 @@ object SignExt {
 }
 
 object ZeroExt {
-  def apply(a: UInt, len: Int) = {
+  def apply(a: UInt, len: Int): UInt = {
     val aLen = a.getWidth
     if (aLen >= len) a(len-1,0) else Cat(0.U((len - aLen).W), a)
   }
@@ -66,23 +103,23 @@ object Or {
   def rightOR(x: UInt, width: Integer, cap: Integer = 999999): UInt = {
     val stop = min(width, cap)
     def helper(s: Int, x: UInt): UInt =
-      if (s >= stop) x else helper(s+s, x | (x >> s))
+      if (s >= stop) x else helper(s+s, x | (x >> s).asUInt)
     helper(1, x)(width-1, 0)
   }
 }
 
 object OneHot {
-  def OH1ToOH(x: UInt): UInt = (x << 1 | 1.U) & ~Cat(0.U(1.W), x)
+  def OH1ToOH(x: UInt): UInt = ((x << 1).asUInt | 1.U) & (~Cat(0.U(1.W), x)).asUInt
   def OH1ToUInt(x: UInt): UInt = OHToUInt(OH1ToOH(x))
-  def UIntToOH1(x: UInt, width: Int): UInt = ~((-1).S(width.W).asUInt << x)(width-1, 0)
+  def UIntToOH1(x: UInt, width: Int): UInt = (~((-1).S(width.W).asUInt << x)(width-1, 0)).asUInt
   def UIntToOH1(x: UInt): UInt = UIntToOH1(x, (1 << x.getWidth) - 1)
   def checkOneHot(in: Bits): Unit = assert(PopCount(in) <= 1.U)
   def checkOneHot(in: Iterable[Bool]): Unit = assert(PopCount(in) <= 1.U)
 }
 
 object LowerMask {
-  def apply(a: UInt, len: Int) = {
-    ParallelOR((0 until len).map(i => a >> i.U))
+  def apply(a: UInt, len: Int): UInt = {
+    ParallelOR((0 until len).map(i => (a >> i).asUInt))
   }
   def apply(a: UInt): UInt = {
     apply(a, a.getWidth)
@@ -168,7 +205,7 @@ object GetOddBits {
 object XORFold {
   def apply(input: UInt, resWidth: Int): UInt = {
     require(resWidth > 0)
-    val fold_range = input.getWidth / resWidth
+    val fold_range = (input.getWidth + resWidth - 1) / resWidth
     val value = ZeroExt(input, fold_range * resWidth)
     ParallelXOR((0 until fold_range).map(i => value(i*resWidth+resWidth-1, i*resWidth)))
   }
@@ -181,6 +218,9 @@ object OnesMoreThan {
     }
     else if (input.length < thres) {
       false.B
+    }
+    else if (thres == 1) {
+      VecInit(input).asUInt.orR
     }
     else {
       val tail = input.drop(1)
@@ -288,12 +328,26 @@ class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   }
 }
 
+class CenterSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  require(max_sel == 2, "only 2 is supported!")
+  val n_bits = bits.length
+  val half_index = (bits.length + 1) / 2
+  def centerReverse(data: Seq[Bool]): Seq[Bool] = data.take(half_index).reverse ++ data.drop(half_index).reverse
+  val select = new CircSelectOne(centerReverse(bits), max_sel)
+
+  def getNthOH(n: Int, need_balance: Boolean): (Bool, Vec[Bool]) = {
+    val selected = select.getNthOH(n)
+    (selected._1, VecInit(centerReverse(selected._2)))
+  }
+}
+
 object SelectOne {
   def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = {
     policy.toLowerCase match {
       case "naive" => new NaiveSelectOne(bits, max_sel)
       case "circ" => new CircSelectOne(bits, max_sel)
       case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+      case "center" => new CenterSelectOne(bits, max_sel)
       case _ => throw new IllegalArgumentException(s"unknown select policy")
     }
   }

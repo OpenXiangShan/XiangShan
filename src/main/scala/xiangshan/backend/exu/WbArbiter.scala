@@ -21,8 +21,9 @@ import chisel3._
 import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{XSPerfAccumulate, XSPerfHistogram}
+import utils._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.HasExuWbHelper
 
 class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
@@ -74,7 +75,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
     val sel = VecInit(io.in.map(_.fire)).asUInt
     io.out.bits := Mux1H(RegNext(sel), dataVec)
     // uop comes at the same cycle with valid and only RegNext is needed.
-    io.out.bits.uop := RegNext(uop)
+    io.out.bits.uop := RegEnable(uop, ctrl_arb.io.out.valid)
   }
 }
 
@@ -117,6 +118,8 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   val otherConnections = splitN(otherPorts, sharedPorts.length)
   val sharedConnections = sharedPorts.zip(otherConnections).map{ case (s, o) => s +: o }
   val allConnections: Seq[Seq[Int]] = exclusivePorts.map(Seq(_)) ++ sharedConnections
+  val hasWbPipeline = allConnections.map(_.map(cfgs(_).needWbPipeline(isFp)))
+  val cfgHasFast = cfgs.map(_.hasFastUopOut)
   val hasFastUopOutVec = allConnections.map(_.map(cfgs(_).hasFastUopOut))
   val hasFastUopOut: Seq[Boolean] = hasFastUopOutVec.map(_.reduce(_ || _))
   hasFastUopOutVec.zip(hasFastUopOut).foreach{ case (vec, fast) =>
@@ -133,8 +136,9 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   for ((port, i) <- sharedPorts.zipWithIndex) {
     sb.append(s"[ ${cfgs(port).name} ")
     val useArb = otherConnections(i).nonEmpty
-    for (req <- otherConnections(i)) {
-      sb.append(s"${cfgs(req).name} ")
+    for ((req, j) <- otherConnections(i).zipWithIndex) {
+      val hasBuffer = if (hasWbPipeline(exclusivePorts.length + i)(j + 1)) "(buffered)" else ""
+      sb.append(s"${cfgs(req).name}$hasBuffer ")
     }
     val hasFastUopOutS = if (hasFastUopOut(i + exclusivePorts.length)) s" (hasFastUopOut)" else ""
     sb.append(s"] -> ${if(useArb) "arb ->" else ""} out$hasFastUopOutS #${exclusivePorts.size + i}\n")
@@ -152,6 +156,8 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
   })
 
+  val redirect = RegNextWithEnable(io.redirect)
+
   val exclusiveIn = outer.exclusivePorts.map(io.in(_))
   val sharedIn = outer.sharedPorts.map(io.in(_))
 
@@ -164,24 +170,47 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
       require(!hasFastUopOut || !outer.needRegNext(i))
       if (hasFastUopOut) {
         // When hasFastUopOut, only uop comes at the same cycle with valid.
-        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits.uop := RegNext(in.bits.uop)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits.uop := RegEnable(in.bits.uop, in.valid)
       }
       if (outer.needRegNext(i)) {
-        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits := RegNext(in.bits)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits := RegEnable(in.bits, in.valid)
       }
       in.ready := true.B
   }
 
   // shared ports are connected with an arbiter
   for (i <- sharedIn.indices) {
-    val out = io.out(exclusiveIn.size + i)
-    val shared = outer.sharedConnections(i).map(io.in(_))
-    val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
-    val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
+    val portIndex = exclusiveIn.length + i
+    val out = io.out(portIndex)
+    val shared = outer.sharedConnections(i).zip(outer.hasWbPipeline(portIndex)).map { case (i, hasPipe) =>
+      if (hasPipe) {
+        // Some function units require int/fp sources and write to the other register file, such as f2i, i2f.
+        // Their out.ready depends on the other function units and may cause timing issues.
+        // For the function units that operate across int and fp, we add a buffer after their output.
+        val flushFunc = (o: ExuOutput, r: Valid[Redirect]) => o.uop.robIdx.needFlush(r)
+        if (outer.cfgHasFast(i)) {
+          val ctrl_pipe = Wire(io.in(i).cloneType)
+          val buffer = PipelineConnect(io.in(i), ctrl_pipe, flushFunc, redirect, io.in(i).bits, 1)
+          buffer.extra.in := io.in(i).bits
+          val buffer_out = Wire(io.in(i).cloneType)
+          ctrl_pipe.ready := buffer_out.ready
+          buffer_out.valid := ctrl_pipe.valid
+          buffer_out.bits := buffer.extra.out
+          buffer_out.bits.uop := ctrl_pipe.bits.uop
+          buffer_out
+        }
+        else {
+          PipelineNext(io.in(i), flushFunc, redirect)
+        }
+      }
+      else io.in(i)
+    }
+    val hasFastUopOut = outer.hasFastUopOut(portIndex)
+    val fastVec = outer.hasFastUopOutVec(portIndex)
     val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
-    arb.io.redirect <> io.redirect
+    arb.io.redirect <> redirect
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
@@ -320,19 +349,35 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
   }
 
-  lazy val module = new LazyModuleImp(this) with HasWritebackSourceImp {
+  lazy val module = new LazyModuleImp(this)
+    with HasWritebackSourceImp
+    with HasXSParameter
+  {
     val io = IO(new Bundle {
       val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(configs.length, Input(Decoupled(new ExuOutput)))
       val out = Vec(configs.length, ValidIO(new ExuOutput))
+      val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool())) // Dirty fix of data ecc error timing
     })
+    val redirect = RegNextWithEnable(io.redirect)
 
     for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
       out.valid := in.fire
       out.bits := in.bits
-      if (config.hasFastUopOut) {
-        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
-        out.bits.uop := RegNext(in.bits.uop)
+      if (config.hasFastUopOut || config.hasLoadError) {
+        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(redirect))
+        out.bits.uop := RegEnable(in.bits.uop, in.fire)
+      }
+    }
+
+    if(EnableAccurateLoadError){
+      for ((((out, in), config), delayed_error) <- io.out.zip(io.in).zip(configs)
+        .filter(_._2.hasLoadError)
+        .zip(io.delayedLoadError)
+      ){
+        // overwrite load exception writeback
+        out.bits.uop.cf.exceptionVec(loadAccessFault) := delayed_error ||
+          RegEnable(in.bits.uop.cf.exceptionVec(loadAccessFault), in.valid)
       }
     }
 

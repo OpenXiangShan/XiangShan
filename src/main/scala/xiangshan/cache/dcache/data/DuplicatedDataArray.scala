@@ -68,7 +68,6 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         set = nSets,
         way = 1,
         shouldReset = false,
-        holdRead = false,
         singlePort = singlePort
       ))
     }
@@ -116,7 +115,6 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         set = nSets,
         way = nWays,
         shouldReset = false,
-        holdRead = false,
         singlePort = singlePort
       ))
       ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)

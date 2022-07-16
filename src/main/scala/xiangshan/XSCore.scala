@@ -24,6 +24,8 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
+import huancun.mbist.MBISTPipeline
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.{DFTResetGen, ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
 import utils._
@@ -130,7 +132,7 @@ trait HasWritebackSink {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
+abstract class XSCoreBase(parentName:String = "Unknown")(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
@@ -138,8 +140,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
-  val frontend = LazyModule(new Frontend())
-  val ptw = LazyModule(new PTWWrapper())
+  val frontend = LazyModule(new Frontend(parentName + "frontend_")(p))
+  val ptw = LazyModule(new PTWWrapper(parentName + "ptw_")(p))
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
@@ -220,7 +222,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
   }
 
-  val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
+  val memBlock = LazyModule(new MemBlock(parentName = parentName + "memBlock_")(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = exuBlocks.head.scheduler.memRsEntries.max
     )
@@ -228,18 +230,19 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
   wb2Ctrl.addWritebackSink(exuBlocks :+ memBlock)
-  val ctrlBlock = LazyModule(new CtrlBlock)
+  val dpExuConfigs = exuBlocks.flatMap(_.scheduler.dispatch2.map(_.configs))
+  val ctrlBlock = LazyModule(new CtrlBlock(dpExuConfigs))
   val writebackSources = Seq(Seq(wb2Ctrl), Seq(wbArbiter))
   writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 }
 
-class XSCore()(implicit p: config.Parameters) extends XSCoreBase
+class XSCore(parentName:String = "Unknown")(implicit p: config.Parameters) extends XSCoreBase(parentName)
   with HasXSDts
 {
-  lazy val module = new XSCoreImp(this)
+  lazy val module = new XSCoreImp(parentName = parentName,this)
 }
 
-class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
+class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter {
   val io = IO(new Bundle {
@@ -270,11 +273,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
+  io.cpu_halt := ctrlBlock.io.cpu_halt
+
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
+
+  // memblock error exception writeback, 1 cycle after normal writeback
+  wb2Ctrl.io.delayedLoadError <> memBlock.io.delayedLoadError
 
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
@@ -317,6 +325,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
+  ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
+  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
+  ctrlBlock.io.sqDeq := memBlock.io.sqDeq
+  ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
+  ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
   exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get
@@ -408,6 +421,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+
+  val (coreMbistPipelineSram,coreMbistPipelineRf,coreMbistPipelineSramRepair,coreMbistPipelineRfRepair) = placePipelines(level = Int.MaxValue,infoName = s"Core")
+  val mbist_sram = IO(coreMbistPipelineSram.get.io.mbist.get.cloneType)
+  coreMbistPipelineSram.get.io.mbist.get <> mbist_sram
+  val mbist_rf = IO(coreMbistPipelineRf.get.io.mbist.get.cloneType)
+  coreMbistPipelineRf.get.io.mbist.get <> mbist_rf
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

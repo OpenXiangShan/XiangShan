@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import huancun.utils.FastArbiter
 
 class MissReq(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -555,8 +556,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
   arbiter_with_pipereg(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
-  arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
-  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
+
+  fastArbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
+
+  fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
@@ -587,12 +590,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
+  val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
   val perfEvents = Seq(
-    ("dcache_missq_req      ", io.req.fire()                                                                                                                                                                       ),
-    ("dcache_missq_1_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) < (cfg.nMissEntries.U/4.U))                                                                                              ),
-    ("dcache_missq_2_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/4.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U/2.U))    ),
-    ("dcache_missq_3_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U/2.U)) & (PopCount(entries.map(entry => (!entry.io.primary_ready))) <= (cfg.nMissEntries.U*3.U/4.U))),
-    ("dcache_missq_4_4_valid", (PopCount(entries.map(entry => (!entry.io.primary_ready))) > (cfg.nMissEntries.U*3.U/4.U))                                                                                          ),
+    ("dcache_missq_req      ", io.req.fire()),
+    ("dcache_missq_1_4_valid", (perfValidCount < (cfg.nMissEntries.U/4.U))),
+    ("dcache_missq_2_4_valid", (perfValidCount > (cfg.nMissEntries.U/4.U)) & (perfValidCount <= (cfg.nMissEntries.U/2.U))),
+    ("dcache_missq_3_4_valid", (perfValidCount > (cfg.nMissEntries.U/2.U)) & (perfValidCount <= (cfg.nMissEntries.U*3.U/4.U))),
+    ("dcache_missq_4_4_valid", (perfValidCount > (cfg.nMissEntries.U*3.U/4.U))),
   )
   generatePerfEvent()
 }

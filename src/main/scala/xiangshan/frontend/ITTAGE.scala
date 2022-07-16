@@ -23,6 +23,7 @@ import chisel3.util._
 import huancun.utils.FoldedSRAMTemplate
 import utils._
 import xiangshan._
+import huancun.mbist.MBISTPipeline.placePipelines
 
 import scala.math.min
 
@@ -138,6 +139,7 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
 @chiselName
 class ITTageTable
 (
+  parentName:String = "Unknown",
   val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int
 )(implicit p: Parameters)
   extends ITTageModule with HasFoldedHistory {
@@ -215,8 +217,9 @@ class ITTageTable
   
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=false, holdRead=true, singlePort=true)))
+  val table_banks = (0 until nBanks).map(idx => {
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set = nRows / nBanks, width = bankFoldWidth, shouldReset = false, singlePort = true, parentName = parentName + s"tabbleBank${idx}_" ))
+  })
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -317,7 +320,7 @@ class ITTageTable
 
 }
 
-abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITTageParams with BPUUtils {
+abstract class BaseITTage(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor(parentName)(p) with ITTageParams with BPUUtils {
   // class TAGEResp {
   //   val takens = Vec(PredictWidth, Bool())
   //   val hits = Vec(PredictWidth, Bool())
@@ -337,7 +340,7 @@ abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITT
   // override val io = IO(new TageIO)
 }
 
-class FakeITTage(implicit p: Parameters) extends BaseITTage {
+class FakeITTage(parentName:String = "Unknown")(implicit p: Parameters) extends BaseITTage(parentName)(p) {
   io.out <> 0.U.asTypeOf(DecoupledIO(new BasePredictorOutput))
 
   // io.s0_ready := true.B
@@ -346,13 +349,13 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
 }
 // TODO: check target related logics
 @chiselName
-class ITTage(implicit p: Parameters) extends BaseITTage {
+class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends BaseITTage(parentName)(p) {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
   val tables = ITTageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
-      val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
+      val t = Module(new ITTageTable(parentName + s"table${i}_",nRows, histLen, tagLen, UBitPeriod, i)(p))
       t.io.req.valid := io.s0_fire
       t.io.req.bits.pc := s0_pc
       t.io.req.bits.folded_hist := io.in.bits.folded_hist
@@ -586,6 +589,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
   XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
+
+  //place mbist pipelines
+  val (ittageMbistPipelineSram,ittageMbistPipelineRf,ittageMbistPipelineSramRepair,ittageMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_ittage")
   // Debug and perf info
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)

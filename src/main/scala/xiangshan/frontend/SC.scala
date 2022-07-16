@@ -64,12 +64,12 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 }
 
 @chiselName
-class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
+class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int,parentName:String = "Unknown")(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
 
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, singlePort=false, parentName = parentName + "table_"))
 
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
@@ -213,9 +213,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info = Set[FoldedHistoryInfo]()
   if (EnableSC) {
-    val scTables = SCTableInfos.map {
-      case (nRows, ctrBits, histLen) => {
-        val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen))
+    val scTables = SCTableInfos.zipWithIndex.map {
+      case ((nRows, ctrBits, histLen),idx) => {
+        val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen,parentName = parentName + s"scTable${idx}_"))
         val req = t.io.req
         req.valid := io.s0_fire
         req.bits.pc := s0_pc
