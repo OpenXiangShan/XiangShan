@@ -330,7 +330,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    l3_xbar := TLBuffer() := sb2tl.node
+    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
 
   peripheralXbar :=
