@@ -127,7 +127,7 @@ trait HaveSlaveAXI4Port {
   private val errorDevice = LazyModule(new TLError(
     params = DevNullParams(
       // requests to address below memory will be granted with erros
-      address = paddrRange.subtract(getAddressSet("memory")),
+      address = paddrRange.subtract(getAddressSet("memory") ++ getAddressSet("peripheral")),
       maxAtomic = 8,
       maxTransfer = 64),
     beatBytes = L3InnerBusWidth / 8
@@ -193,10 +193,10 @@ trait HaveAXI4MemPort {
     TLCacheCork() :=*
     bankedNode
 
-  mem_xbar :=
-    TLWidthWidget(8) :=
-    TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
-    peripheralXbar
+  // mem_xbar :=
+  //   TLWidthWidget(8) :=
+  //   TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
+  //   peripheralXbar
 
   class MemPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
     val memoryNode = AXI4IdentityNode()
@@ -330,8 +330,17 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    l3_xbar := TLBuffer() := sb2tl.node
+    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
+
+  peripheralXbar :=
+    TLBuffer() :=
+    TLFIFOFixer() :=
+    // TLWidthWidget(8) :=
+    TLFragmenter(8, 32, holdFirstDeny = true) :=
+    TLWidthWidget(32) :=
+    TLBuffer() :=
+    l3_xbar
 
   lazy val module = new LazyModuleImp(this) {
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
