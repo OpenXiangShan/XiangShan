@@ -114,6 +114,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
 
   // Send TLB feedback to store issue queue
+  // Store feedback is generated in store_s1, sent to RS in store_s2
   io.rsFeedback.valid := io.in.valid
   io.rsFeedback.bits.hit := !s1_tlb_miss
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
@@ -224,10 +225,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
 
   store_s1.io.dtlbResp <> io.tlb.resp
-  store_s1.io.rsFeedback <> io.feedbackSlow
   io.lsq <> store_s1.io.lsq
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  
+  // feedback tlb miss to RS in store_s2
+  io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
+  io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)

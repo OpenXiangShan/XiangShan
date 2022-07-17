@@ -642,7 +642,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
-  val perf_valid_entry_count = PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt)
+  val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire())).asUInt))
