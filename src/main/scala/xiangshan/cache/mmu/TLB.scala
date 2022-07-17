@@ -63,7 +63,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
 
-  // FIXME: itlb need sfence.vma, but icache doesn't care flush/fence/redirect, how to fix it
+  // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
+  // because, csr will influence tlb behavior.
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
@@ -74,7 +75,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = ptw.resp.fire() && !flush_mmu
+  val refill = ptw.resp.fire() && !flush_mmu && vmEnable
   val entries = Module(new TlbStorageWrapper(Width, q))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
@@ -198,8 +199,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       io.ptw.req(idx).fire() || resp(idx).fire(), flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
-    resp(idx).valid := req_out_v(idx) && !miss_v
-    when (io.ptw.resp.fire()&& hit && req_out_v(idx)) {
+    resp(idx).valid := req_out_v(idx) && !(miss_v && vmEnable)
+    when (io.ptw.resp.fire() && hit && req_out_v(idx) && vmEnable) {
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
