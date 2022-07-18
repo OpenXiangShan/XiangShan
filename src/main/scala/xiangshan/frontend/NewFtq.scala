@@ -758,10 +758,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ***************************** to backend *****************************
   // **********************************************************************
   // to backend pc mem / target
-  io.toBackend.pc_mem_wen   := last_cycle_bpu_in
-  io.toBackend.pc_mem_waddr := last_cycle_bpu_in_idx
-  io.toBackend.pc_mem_wdata := bpu_in_bypass_buf
-  io.toBackend.target       := last_cycle_update_target
+  io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
+  io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
+  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf)
+  io.toBackend.target       := RegNext(last_cycle_update_target)
 
   // *******************************************************************************
   // **************************** redirect from backend ****************************
@@ -860,17 +860,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       mispredict_vec(r_idx)(r_offset) := r_mispred
     }
   }
-
-  io.toBackend.pd_redirect_waddr.valid := false.B
-  io.toBackend.pd_redirect_waddr.bits  := ifuRedirectToBpu.bits.ftqIdx.value
-  io.toBackend.pd_redirect_target      := ifuRedirectToBpu.bits.cfiUpdate.target
+  
+  // write to backend target vec
+  io.toBackend.pd_redirect_waddr.valid := RegNext(fromIfuRedirect.valid)
+  io.toBackend.pd_redirect_waddr.bits  := RegNext(fromIfuRedirect.bits.ftqIdx.value)
+  io.toBackend.pd_redirect_target      := RegNext(fromIfuRedirect.bits.cfiUpdate.target)
 
   when(backendRedirectReg.valid && lastIsMispredict) {
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
-    // write to backend target vec
-    io.toBackend.pd_redirect_waddr.valid := true.B
   }
 
   // ***********************************************************************************
