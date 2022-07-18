@@ -72,6 +72,20 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
     val top = RegInit(RASEntry(0x80000000L.U, 0.U))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
 
+    val wen = WireInit(false.B)
+    val write_bypass_entry = Reg(new RASEntry())
+    val write_bypass_ptr = Reg(UInt(log2Up(rasSize).W))
+    val write_bypass_valid = Reg(Bool())
+    when (wen) {
+      write_bypass_valid := true.B
+    }.elsewhen (write_bypass_valid) {
+      write_bypass_valid := false.B
+    }
+
+    when (write_bypass_valid) {
+      stack(write_bypass_ptr) := write_bypass_entry
+    }
+
     def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
     def ptrDec(ptr: UInt) = Mux(ptr === 0.U, (rasSize-1).U, ptr - 1.U)
 
@@ -88,7 +102,10 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
           topPtr := do_sp
           top.retAddr := do_new_addr
           top.ctr := 0.U
-          stack(do_sp) := RASEntry(do_new_addr, 0.U)
+          // write bypass
+          wen := true.B
+          write_bypass_entry := RASEntry(do_new_addr, 0.U)
+          write_bypass_ptr := do_sp
         }.otherwise {
           when (recover) {
             sp := do_sp
@@ -96,13 +113,21 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
             top.retAddr := do_top.retAddr
           }
           top.ctr := do_top.ctr + 1.U
-          stack(do_top_ptr) := RASEntry(do_new_addr, do_top.ctr + 1.U)
+          // write bypass
+          wen := true.B
+          write_bypass_entry := RASEntry(do_new_addr, do_top.ctr + 1.U)
+          write_bypass_ptr := do_top_ptr
         }
       }.elsewhen (do_pop) {
         when (do_top.ctr === 0.U) {
           sp     := ptrDec(do_sp)
           topPtr := ptrDec(do_top_ptr)
-          top := stack(ptrDec(do_top_ptr))
+          // read bypass
+          top :=
+            Mux(ptrDec(do_top_ptr) === write_bypass_ptr && write_bypass_valid,
+              write_bypass_entry,
+              stack(ptrDec(do_top_ptr))
+            )
         }.otherwise {
           when (recover) {
             sp := do_sp
@@ -110,14 +135,20 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
             top.retAddr := do_top.retAddr
           }
           top.ctr := do_top.ctr - 1.U
-          stack(do_top_ptr) := RASEntry(do_top.retAddr, do_top.ctr - 1.U)
+          // write bypass
+          wen := true.B
+          write_bypass_entry := RASEntry(do_top.retAddr, do_top.ctr - 1.U)
+          write_bypass_ptr := do_top_ptr
         }
       }.otherwise {
         when (recover) {
           sp := do_sp
           topPtr := do_top_ptr
           top := do_top
-          stack(do_top_ptr) := do_top
+          // write bypass
+          wen := true.B
+          write_bypass_entry := do_top
+          write_bypass_ptr := do_top_ptr
         }
       }
     }
@@ -152,7 +183,7 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
     debugIO.sp := sp
     debugIO.topRegister := top
     for (i <- 0 until RasSize) {
-        debugIO.out_mem(i) := stack(i)
+        debugIO.out_mem(i) := Mux(i.U === write_bypass_ptr && write_bypass_valid, write_bypass_entry, stack(i))
     }
   }
 

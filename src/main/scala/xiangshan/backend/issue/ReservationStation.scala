@@ -267,11 +267,56 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   validAfterAllocate := statusArray.io.isValidNext | validUpdateByAllocate
   select.io.validVec := validAfterAllocate
 
+  // FIXME: this allocation ready bits can be used with naive/circ selection policy only.
+  val dispatchReady = Wire(Vec(params.numEnq, Bool()))
+  if (params.numEnq == 4) {
+    require(params.numEnq == 4, "4 fast ready only supported")
+    for (i <- 0 until 2) {
+      val bitFunc = if (i == 0) (x: UInt) => GetEvenBits(x) else (x: UInt) => GetOddBits(x)
+      val numEmptyEntries = PopCount(bitFunc(statusArray.io.isValid).asBools.map(v => !v))
+      val numAllocateS1 = PopCount(statusArray.io.update.map(u => u.enable && bitFunc(u.addr).orR))
+      val realNumEmptyAfterS1 = numEmptyEntries - numAllocateS1
+      val numEmptyAfterS1 = Wire(UInt(3.W)) // max: 4
+      val highBits = (realNumEmptyAfterS1 >> 2).asUInt
+      numEmptyAfterS1 := Mux(highBits.orR, 4.U, realNumEmptyAfterS1(1, 0))
+      val numDeq = PopCount(statusArray.io.deqResp.map(r => r.valid && r.bits.success && bitFunc(r.bits.rsMask).orR))
+      val emptyThisCycle = Reg(UInt(3.W)) // max: 6?
+      emptyThisCycle := numEmptyAfterS1 + numDeq
+      val numAllocateS0 = PopCount(s0_doEnqueue.zip(s0_allocatePtrOH).map(x => x._1 && bitFunc(x._2).orR))
+      for (j <- 0 until 2) {
+        val allocateThisCycle = Reg(UInt(2.W))
+        allocateThisCycle := numAllocateS0 +& j.U
+        dispatchReady(2 * j + i) := emptyThisCycle > allocateThisCycle
+      }
+    }
+  }
+  else if (params.numEnq <= 2) {
+    val numEmptyEntries = PopCount(statusArray.io.isValid.asBools.map(v => !v))
+    val numAllocateS1 = PopCount(statusArray.io.update.map(_.enable))
+    val realNumEmptyAfterS1 = numEmptyEntries - numAllocateS1
+    val numEmptyAfterS1 = Wire(UInt(3.W)) // max: 4
+    val highBits = (realNumEmptyAfterS1 >> 2).asUInt
+    numEmptyAfterS1 := Mux(highBits.orR, 4.U, realNumEmptyAfterS1(1, 0))
+    val numDeq = PopCount(VecInit(statusArray.io.deqResp.map(resp => resp.valid && resp.bits.success)))
+    val emptyThisCycle = Reg(UInt(3.W)) // max: 6?
+    emptyThisCycle := numEmptyAfterS1 + numDeq // max: 3 + numDeq = 5?
+    val numAllocateS0 = PopCount(s0_doEnqueue)
+    for (i <- 0 until params.numEnq) {
+      val allocateThisCycle = Reg(UInt(2.W))
+      allocateThisCycle := numAllocateS0 +& i.U
+      dispatchReady(i) := emptyThisCycle > allocateThisCycle
+    }
+  }
+  else {
+    dispatchReady := select.io.allocate.map(_.valid)
+  }
+
   for (i <- 0 until params.numEnq) {
-    io.fromDispatch(i).ready := select.io.allocate(i).valid
+    io.fromDispatch(i).ready := dispatchReady(i)
+    XSError(s0_doEnqueue(i) && !select.io.allocate(i).valid, s"port $i should not enqueue\n")
+    XSError(!RegNext(io.redirect.valid) && select.io.allocate(i).valid =/= dispatchReady(i), s"port $i performance deviation\n")
     s0_enqFlushed(i) := (if (params.dropOnRedirect) io.redirect.valid else io.fromDispatch(i).bits.robIdx.needFlush(io.redirect))
     s0_doEnqueue(i) := io.fromDispatch(i).fire && !s0_enqFlushed(i)
-    val wakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
     val slowWakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
     val fastWakeup = io.fastUopsIn.map(_.bits.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
     for (j <- 0 until params.numSrc) {
@@ -314,6 +359,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
   dataArray.io.read.last.addr := s0_oldestSel.bits
 
+  def enqReverse[T <: Data](in: Seq[T]): Seq[T] = {
+    if (params.numDeq == 2) {
+      in.take(params.numDeq).reverse ++ in.drop(params.numDeq)
+    }
+    else in
+  }
   /**
     * S1: read uop and data
     */
@@ -321,11 +372,11 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_fastUops = RegNext(io.fastUopsIn)
   val s1_dispatchUops = Reg(Vec(params.numEnq, Valid(new MicroOp)))
   val s1_delayedSrc = Wire(Vec(params.numEnq, Vec(params.numSrc, Bool())))
-  val s1_allocatePtrOH = RegNext(VecInit(s0_allocatePtrOH.reverse))
-  val s1_allocatePtr = RegNext(VecInit(s0_allocatePtr.reverse))
-  val s1_enqWakeup = RegNext(VecInit(s0_enqWakeup.reverse))
-  val s1_enqDataCapture = RegNext(VecInit(s0_enqDataCapture.reverse))
-  val s1_fastWakeup = RegNext(VecInit(s0_fastWakeup.reverse))
+  val s1_allocatePtrOH = RegNext(VecInit(enqReverse(s0_allocatePtrOH)))
+  val s1_allocatePtr = RegNext(VecInit(enqReverse(s0_allocatePtr)))
+  val s1_enqWakeup = RegNext(VecInit(enqReverse(s0_enqWakeup)))
+  val s1_enqDataCapture = RegNext(VecInit(enqReverse(s0_enqDataCapture)))
+  val s1_fastWakeup = RegNext(VecInit(enqReverse(s0_fastWakeup)))
   val s1_in_selectPtr = RegNext(select.io.grant)
   val s1_in_selectPtrValid = s1_in_selectPtr.map(_.valid)
   val s1_in_selectPtrOH = s1_in_selectPtr.map(_.bits)
@@ -337,8 +388,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_issuePtr = s1_issuePtrOH.map(iss => OHToUInt(iss.bits))
 
   // Allocation: store dispatch uops into payload and data array
-  s1_dispatchUops.zip(io.fromDispatch.reverse).zipWithIndex.foreach{ case ((uop, in), i) =>
-    val s0_valid = in.fire && !s0_enqFlushed.reverse(i)
+  s1_dispatchUops.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
+    val s0_valid = in.fire && !enqReverse(s0_enqFlushed)(i)
     uop.valid := s0_valid
     when (s0_valid) {
       uop.bits := in.bits
@@ -515,7 +566,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // for read-before-issue, it's done over the enqueue uop (and store the imm in dataArray to save space)
   // TODO: need to bypass data here.
   val immBypassedData = Wire(Vec(params.numEnq, Vec(params.numSrc, UInt(params.dataBits.W))))
-  for (((uop, data), bypass) <- s1_dispatchUops.map(_.bits).zip(io.srcRegValue.reverse).zip(immBypassedData)) {
+  for (((uop, data), bypass) <- s1_dispatchUops.map(_.bits).zip(enqReverse(io.srcRegValue)).zip(immBypassedData)) {
     val jumpPc = if (io.jump.isDefined) Some(io.jump.get.jumpPc) else None
     val jalr_target = if (io.jump.isDefined) Some(io.jump.get.jalr_target) else None
     bypass := ImmExtractor(params, uop, data, jumpPc, jalr_target)
@@ -541,7 +592,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         if (params.delayedFpRf) {
           dataArray.io.delayedWrite(i).mask(j) := RegNext(RegNext(s1_dispatchUops(i).valid && s1_delayedSrc(i)(j)))
           dataArray.io.delayedWrite(i).addr    := RegNext(RegNext(dataArray.io.write(i).addr))
-          dataArray.io.delayedWrite(i).data(0) := io.fpRegValue.get.reverse(i)
+          dataArray.io.delayedWrite(i).data(0) := enqReverse(io.fpRegValue.get)(i)
         }
         if (params.isJump) {
           dataArray.io.delayedWrite(i).mask(j) := RegNext(s1_dispatchUops(i).valid && s1_delayedSrc(i)(j))
@@ -631,7 +682,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   dataSelect.io.enqBypass := s1_select_bypass_s0
   for ((enq, i) <- dataSelect.io.enqData.zipWithIndex) {
     for (j <- 0 until params.numSrc) {
-      enq(j).valid := RegNext(io.fromDispatch.reverse(i).bits.srcIsReady(j))
+      enq(j).valid := RegNext(enqReverse(io.fromDispatch)(i).bits.srcIsReady(j))
       enq(j).bits := immBypassedData(i)(j)
     }
   }

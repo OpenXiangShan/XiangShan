@@ -446,7 +446,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
           l2cache.map(_.module) ++
           l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
       )
-      ResetGen(resetChain, (childReset.asBool || core_soft_rst.asBool).asAsyncReset, !debugOpts.FPGAPlatform, dfx_reset)
+      ResetGen(resetChain, childReset, !debugOpts.FPGAPlatform, dfx_reset)
     }
   }
 }
