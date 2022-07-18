@@ -880,8 +880,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
-    // write to backend target vec
-    io.toBackend.pd_redirect_waddr.valid := true.B
   }
 
   // ***********************************************************************************
