@@ -173,13 +173,10 @@ case class XSCoreParameters
     name = "itlb",
     fetchi = true,
     useDmode = false,
-    sameCycle = false,
-    missSameCycle = true,
     normalNWays = 32,
     normalReplacer = Some("plru"),
     superNWays = 4,
-    superReplacer = Some("plru"),
-    shouldBlock = true
+    superReplacer = Some("plru")
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
@@ -191,6 +188,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = false,
     partialStaticPMP = true,
+    outsideRecvFlush = true,
     saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -203,6 +201,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = false,
     partialStaticPMP = true,
+    outsideRecvFlush = true,
     saveLevel = true
   ),
   refillBothTlb: Boolean = false,

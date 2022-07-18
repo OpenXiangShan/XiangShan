@@ -21,12 +21,12 @@ import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
+import freechips.rocketchip.formal.PropertyClass
 
 import scala.math.min
 
 @chiselName
 class TLBFA(
-  sameCycle: Boolean,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -34,7 +34,6 @@ class TLBFA(
   normalPage: Boolean,
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule with HasPerfEvents {
-  require(!(sameCycle && saveLevel))
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
   io.r.req.map(_.ready := true.B)
@@ -49,17 +48,17 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
-    val vpn_gen_ppn = if(sameCycle || saveLevel) vpn else vpn_reg
+    val vpn_reg = RegEnable(vpn, req.fire())
+    val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
 
-    val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
+    val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
 
     hitVec.suggestName("hitVec")
 
-    val hitVecReg = if (sameCycle) hitVec else RegEnable(hitVec, req.fire())
+    val hitVecReg = RegEnable(hitVec, req.fire())
 
-    resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
+    resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
       resp.bits.ppn := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
@@ -68,7 +67,6 @@ class TLBFA(
       resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
       resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
-    io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
     access.touch_ways.valid := resp.valid && Cat(hitVecReg).orR
@@ -153,7 +151,6 @@ class TLBFA(
 
 @chiselName
 class TLBSA(
-  sameCycle: Boolean,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -161,7 +158,6 @@ class TLBSA(
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule {
   require(!superPage, "super page should use reg/fa")
-  require(!sameCycle, "syncDataModule needs next cycle")
   require(nWays == 1, "nWays larger than 1 causes bad timing")
 
   // timing optimization to divide v select into two cycles.
@@ -193,7 +189,6 @@ class TLBSA(
     resp.bits.hit := hit
     resp.bits.ppn := data.genPPN()(vpn_reg)
     resp.bits.perm := data.perm
-    io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := { RegNext(req.valid) }
     resp.bits.hit.suggestName("hit")
@@ -285,7 +280,6 @@ object TlbStorage {
   (
     name: String,
     associative: String,
-    sameCycle: Boolean,
     ports: Int,
     nSets: Int,
     nWays: Int,
@@ -294,13 +288,122 @@ object TlbStorage {
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(ports, nSets, nWays, saveLevel, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, normalPage, superPage))
+       val storage = Module(new TLBSA(ports, nSets, nWays, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }
+  }
+}
+
+class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
+  val io = IO(new TlbStorageWrapperIO(ports, q))
+
+// TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
+  val normalPage = TlbStorage(
+    name = "normal",
+    associative = q.normalAssociative,
+    ports = ports,
+    nSets = q.normalNSets,
+    nWays = q.normalNWays,
+    saveLevel = q.saveLevel,
+    normalPage = true,
+    superPage = false
+  )
+  val superPage = TlbStorage(
+    name = "super",
+    associative = q.superAssociative,
+    ports = ports,
+    nSets = q.superNSets,
+    nWays = q.superNWays,
+    normalPage = q.normalAsVictim,
+    superPage = true,
+  )
+
+  for (i <- 0 until ports) {
+    normalPage.r_req_apply(
+      valid = io.r.req(i).valid,
+      vpn = io.r.req(i).bits.vpn,
+      i = i
+    )
+    superPage.r_req_apply(
+      valid = io.r.req(i).valid,
+      vpn = io.r.req(i).bits.vpn,
+      i = i
+    )
+  }
+
+  for (i <- 0 until ports) {
+    val nq = normalPage.r.req(i)
+    val np = normalPage.r.resp(i)
+    val sq = superPage.r.req(i)
+    val sp = superPage.r.resp(i)
+    val rq = io.r.req(i)
+    val rp = io.r.resp(i)
+    rq.ready := nq.ready && sq.ready // actually, not used
+    rp.valid := np.valid && sp.valid // actually, not used
+    rp.bits.hit := np.bits.hit || sp.bits.hit
+    rp.bits.ppn := Mux(sp.bits.hit, sp.bits.ppn, np.bits.ppn)
+    rp.bits.perm := Mux(sp.bits.hit, sp.bits.perm, np.bits.perm)
+    rp.bits.super_hit := sp.bits.hit
+    rp.bits.super_ppn := sp.bits.ppn
+    rp.bits.spm := np.bits.perm.pm
+  }
+
+  normalPage.victim.in <> superPage.victim.out
+  normalPage.victim.out <> superPage.victim.in
+  normalPage.sfence <> io.sfence
+  superPage.sfence <> io.sfence
+  normalPage.csr <> io.csr
+  superPage.csr <> io.csr
+
+  val normal_refill_idx = if (q.outReplace) {
+    io.replace.normalPage.access <> normalPage.access
+    io.replace.normalPage.chosen_set := get_set_idx(io.w.bits.data.entry.tag, q.normalNSets)
+    io.replace.normalPage.refillIdx
+  } else if (q.normalAssociative == "fa") {
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
+    re.access(normalPage.access.map(_.touch_ways)) // normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.way
+  } else { // set-acco && plru
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
+    re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
+    re.way(get_set_idx(io.w.bits.data.entry.tag, q.normalNSets))
+  }
+
+  val super_refill_idx = if (q.outReplace) {
+    io.replace.superPage.access <> superPage.access
+    io.replace.superPage.chosen_set := DontCare
+    io.replace.superPage.refillIdx
+  } else {
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
+    re.access(superPage.access.map(_.touch_ways))
+    re.way
+  }
+
+  normalPage.w_apply(
+    valid = { if (q.normalAsVictim) false.B
+    else io.w.valid && io.w.bits.data.entry.level.get === 2.U },
+    wayIdx = normal_refill_idx,
+    data = io.w.bits.data,
+    data_replenish = io.w.bits.data_replenish
+  )
+  superPage.w_apply(
+    valid = { if (q.normalAsVictim) io.w.valid
+    else io.w.valid && io.w.bits.data.entry.level.get =/= 2.U },
+    wayIdx = super_refill_idx,
+    data = io.w.bits.data,
+    data_replenish = io.w.bits.data_replenish
+  )
+
+    // replacement
+  def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
+    val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
+    res.valid := Cat(one_hot).orR && valid
+    res.bits := OHToUInt(one_hot)
+    res
   }
 }

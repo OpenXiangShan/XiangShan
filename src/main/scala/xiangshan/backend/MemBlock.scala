@@ -27,7 +27,7 @@ import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
+import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
 
 class Std(implicit p: Parameters) extends FunctionUnit {
@@ -75,7 +75,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
+    val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -166,11 +166,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLB(exuParameters.LduCnt, ldtlbParams))
+    val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLB(exuParameters.StuCnt, sttlbParams))
+    val tlb_st = Module(new TLBNonBlock(exuParameters.StuCnt, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st
@@ -178,6 +178,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
+  dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)

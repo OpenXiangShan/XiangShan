@@ -38,8 +38,8 @@ class L2TlbMQIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst
 }
 
 class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
-  require(MSHRSize >= (2 + l2tlbParams.filterSize))
+  require(MissQueueSize >= (l2tlbParams.ifilterSize + l2tlbParams.dfilterSize))
   val io = IO(new L2TlbMQIO())
 
-  io.out <> Queue(io.in, MSHRSize, flush = Some(io.sfence.valid || io.csr.satp.changed)) 
+  io.out <> Queue(io.in, MissQueueSize, flush = Some(io.sfence.valid || io.csr.satp.changed))
 }

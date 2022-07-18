@@ -25,13 +25,13 @@ import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+
 case class TLBParameters
 (
   name: String = "none",
   fetchi: Boolean = false, // TODO: remove it
+  fenceDelay: Int = 2,
   useDmode: Boolean = true,
-  sameCycle: Boolean = false,
-  missSameCycle: Boolean = false,
   normalNSets: Int = 1, // when da or sa
   normalNWays: Int = 8, // when fa or sa
   superNSets: Int = 1,
@@ -42,8 +42,8 @@ case class TLBParameters
   superAssociative: String = "fa", // must be fa
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
   outReplace: Boolean = false,
-  shouldBlock: Boolean = false, // only for perf, not support for io
-  partialStaticPMP: Boolean = false, // partila static pmp result stored in entries
+  partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
+  outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
   saveLevel: Boolean = false
 )
 
@@ -65,8 +65,9 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
-  // dtlb filter
-  filterSize: Int = 8,
+  // filter
+  ifilterSize: Int = 4,
+  dfilterSize: Int = 8,
   // miss queue, add more entries than 'must require'
   // 0 for easier bug trigger, please set as big as u can, 8 maybe
   missqueueExtendSize: Int = 0,
@@ -93,6 +94,15 @@ trait HasTlbConst extends HasXSParameter {
   val sramSinglePort = true
 
   val timeOutThreshold = 10000
+
+  def get_pn(addr: UInt) = {
+    require(addr.getWidth > offLen)
+    addr(addr.getWidth-1, offLen)
+  }
+  def get_off(addr: UInt) = {
+    require(addr.getWidth > offLen)
+    addr(offLen-1, 0)
+  }
 
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     require(nSets >= 1)
@@ -126,13 +136,27 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
+  implicit def ptwresp_to_tlbprem(ptwResp: PtwResp): TlbPermBundle = {
+    val tp = Wire(new TlbPermBundle)
+    val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
+    tp.pf := ptwResp.pf
+    tp.af := ptwResp.af
+    tp.d := ptePerm.d
+    tp.a := ptePerm.a
+    tp.g := ptePerm.g
+    tp.u := ptePerm.u
+    tp.x := ptePerm.x
+    tp.w := ptePerm.w
+    tp.r := ptePerm.r
+    tp.pm := DontCare
+    tp
+  }
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
   val prefetchID = PtwWidth
-  val maxPrefetchNum = l2tlbParams.filterSize
 
   val blockBits = l2tlbParams.blockBytes * 8
 
@@ -167,8 +191,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
 
   // miss queue
-  val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
-  val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
+  val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
   val MemReqWidth = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)

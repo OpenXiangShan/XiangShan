@@ -43,7 +43,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val hartId = Input(UInt(8.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
-    val ptw = new TlbPtwIO(6)
+    val ptw = new VectorTlbPtwIO(4)
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -66,6 +66,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
+
+  val needFlush = RegNext(io.backend.toFtq.redirect.valid)
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -98,36 +100,16 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.pmp(2).resp <> pmp_check(2).resp
   ifu.io.pmp.resp <> pmp_check(3).resp
 
-  // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
-  // tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
-  // tlb_req_arb.io.in(1) <> icache.io.itlb(1).req
-
-  val itlb_requestors = Wire(Vec(6, new BlockTlbRequestIO))
-  itlb_requestors(0) <> icache.io.itlb(0)
-  itlb_requestors(1) <> icache.io.itlb(1)
-  itlb_requestors(2) <> icache.io.itlb(2)
-  itlb_requestors(3) <> icache.io.itlb(3)
-  itlb_requestors(4) <> icache.io.itlb(4)
-  itlb_requestors(5) <> ifu.io.iTLBInter
-
-  // itlb_requestors(1).req <>  tlb_req_arb.io.out
-
-  // ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
-  // icache.io.itlb(1).resp <> itlb_requestors(1).resp
-
-  io.ptw <> TLB(
-    //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
-    in = Seq(itlb_requestors(0),itlb_requestors(1),itlb_requestors(2),itlb_requestors(3),itlb_requestors(4),itlb_requestors(5)),
-    sfence = sfence,
-    csr = tlbCsr,
-    width = 6,
-    shouldBlock = true,
-    itlbParams
-  )
+  val itlb = Module(new TLB(4, Seq(true, true, false, true), itlbParams))
+  itlb.io.requestor.take(3) zip icache.io.itlb foreach {case (a,b) => a <> b}
+  itlb.io.requestor(3) <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
+  itlb.io.base_connect(io.sfence, tlbCsr)
+  io.ptw.connect(itlb.io.ptw)
+  itlb.io.ptw_replenish <> DontCare
+  itlb.io.flushPipe.map(_ := needFlush)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
-  val needFlush = RegNext(io.backend.toFtq.redirect.valid)
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu

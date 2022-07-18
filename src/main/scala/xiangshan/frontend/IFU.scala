@@ -65,7 +65,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
   val csrTriggerEnable = Input(Vec(4, Bool()))
   val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
-  val iTLBInter       = new BlockTlbRequestIO
+  val iTLBInter       = new TlbRequestIO
   val pmp             =   new ICachePMPBundle
 }
 
@@ -488,8 +488,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.req.bits.vaddr    := f3_resend_vaddr
   io.iTLBInter.req.bits.debug.pc := f3_resend_vaddr
 
+  io.iTLBInter.req.bits.kill                := false.B // IFU use itlb for mmio, doesn't need sync, set it to false
   io.iTLBInter.req.bits.cmd                 := TlbCmd.exec
-  io.iTLBInter.req.bits.robIdx              := DontCare
+  io.iTLBInter.req.bits.debug.robIdx        := DontCare
   io.iTLBInter.req.bits.debug.isFirstIssue  := DontCare
 
   io.pmp.req.valid := (mmio_state === m_sendPMP) && f3_req_is_mmio

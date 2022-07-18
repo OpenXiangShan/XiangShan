@@ -63,6 +63,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   sfence.valid := state === s_tlb && !disableSfence
   sfence.bits.rs1  := uop.ctrl.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.ctrl.imm(9, 5) === 0.U
+  sfence.bits.flushPipe := uop.ctrl.flushPipe
   XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
   XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
   sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire())

@@ -42,6 +42,7 @@ object ValidHold {
   }
 }
 
+
 /*
  * Hold the 'fire' for only one cycle unless new fire comes in
  */

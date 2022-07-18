@@ -623,7 +623,8 @@ package object xiangshan {
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false,
-    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr) // TODO: need rewrite latency structure, not just this value,
+    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr), // TODO: need rewrite latency structure, not just this value,
+    flushPipe = true
   )
 
   val csrCfg = FuConfig(

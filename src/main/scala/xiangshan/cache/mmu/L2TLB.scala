@@ -147,7 +147,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     missQueue.io.in.ready || ptw.io.req.ready))
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    !cache.io.resp.bits.toFsm.l2Hit && !ptw.io.req.ready
+    !cache.io.resp.bits.toFsm.l2Hit && !from_pre(cache.io.resp.bits.req_info.source) && !ptw.io.req.ready
   missQueue.io.in.bits := cache.io.resp.bits.req_info
   missQueue.io.sfence  := sfence
   missQueue.io.csr := csr
@@ -330,7 +330,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("mem_count", mem.a.fire())
 
   // print configs
-  println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MSHRSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
+  println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
 
   // time out assert
   for (i <- 0 until MemReqWidth) {

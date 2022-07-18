@@ -120,10 +120,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
-  val loadWaitBit = Bool() 
-  // If (loadWaitBit && loadWaitStrict), strict load wait is needed 
+  val loadWaitBit = Bool()
+  // If (loadWaitBit && loadWaitStrict), strict load wait is needed
   // load inst will not be executed until ALL former store addr calcuated
-  val loadWaitStrict = Bool() 
+  val loadWaitStrict = Bool()
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -409,28 +409,27 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 
-class SatpStruct extends Bundle {
+class SatpStruct(implicit p: Parameters) extends XSBundle {
   val mode = UInt(4.W)
   val asid = UInt(16.W)
   val ppn  = UInt(44.W)
 }
 
-class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
-  val satp = new Bundle {
-    val changed = Bool()
-    val mode = UInt(4.W) // TODO: may change number to parameter
-    val asid = UInt(16.W)
-    val ppn = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
+class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
+  val changed = Bool()
 
-    def apply(satp_value: UInt): Unit = {
-      require(satp_value.getWidth == XLEN)
-      val sa = satp_value.asTypeOf(new SatpStruct)
-      mode := sa.mode
-      asid := sa.asid
-      ppn := sa.ppn
-      changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
-    }
+  def apply(satp_value: UInt): Unit = {
+    require(satp_value.getWidth == XLEN)
+    val sa = satp_value.asTypeOf(new SatpStruct)
+    mode := sa.mode
+    asid := sa.asid
+    ppn := Cat(0.U(44-PAddrBits), sa.ppn(PAddrBits-1, 0)).asUInt()
+    changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
   }
+}
+
+class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
+  val satp = new TlbSatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
@@ -451,10 +450,11 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
     val asid = UInt(AsidLength.W)
+    val flushPipe = Bool()
   }
 
   override def toPrintable: Printable = {
-    p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
+    p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}, flushPipe:${bits.flushPipe}"
   }
 }
 

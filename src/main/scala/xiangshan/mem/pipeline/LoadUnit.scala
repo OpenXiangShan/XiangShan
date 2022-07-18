@@ -44,8 +44,8 @@ class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
-  val tdata2 = Input(UInt(64.W)) 
-  val matchType = Input(UInt(2.W)) 
+  val tdata2 = Input(UInt(64.W))
+  val matchType = Input(UInt(2.W))
   val tEnable = Input(Bool()) // timing is calculated before this
   val addrHit = Output(Bool())
   val lastDataHit = Output(Bool())
@@ -102,7 +102,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
-  io.dtlbReq.bits.robIdx := s0_uop.robIdx
+  io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.debug.robIdx := s0_uop.robIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
@@ -300,13 +301,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // exception that may cause load addr to be invalid / illegal
   //
   // if such exception happen, that inst and its exception info
-  // will be force writebacked to rob 
+  // will be force writebacked to rob
   val s2_exception_vec = WireInit(io.in.bits.uop.cf.exceptionVec)
   s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || pmp.ld
   // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
   when (s2_is_prefetch) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
-  } 
+  }
   val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR
 
   // writeback access fault caused by ecc error / bus error
@@ -390,8 +391,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
-    io.out.bits.miss := s2_cache_miss && 
-      !s2_exception && 
+    io.out.bits.miss := s2_cache_miss &&
+      !s2_exception &&
       !s2_forward_fail &&
       !s2_ldld_violation &&
       !fullForward &&
@@ -419,7 +420,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // We use io.dataForwarded instead. It means:
   // 1. Forward logic have prepared all data needed,
   //    and dcache query is no longer needed.
-  // 2. ... or data cache tag error is detected, this kind of inst 
+  // 2. ... or data cache tag error is detected, this kind of inst
   //    will not update miss queue. That is to say, if miss, that inst
   //    may not be refilled
   // Such inst will be writebacked from load queue.
@@ -439,10 +440,10 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     s2_need_replay_from_rs :=
       s2_tlb_miss || // replay if dtlb miss
       s2_cache_replay && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation && !s2_mmio && !s2_exception && !fullForward || // replay if dcache miss queue full / busy
-      s2_data_invalid && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation // replay if store to load forward data is not ready 
+      s2_data_invalid && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation // replay if store to load forward data is not ready
   } else {
-    // Note that if all parts of data are available in sq / sbuffer, replay required by dcache will not be scheduled   
-    s2_need_replay_from_rs := 
+    // Note that if all parts of data are available in sq / sbuffer, replay required by dcache will not be scheduled
+    s2_need_replay_from_rs :=
       s2_tlb_miss || // replay if dtlb miss
       s2_cache_replay && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation && !s2_mmio && !s2_exception && !io.dataForwarded || // replay if dcache miss queue full / busy
       s2_data_invalid && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation // replay if store to load forward data is not ready
@@ -466,8 +467,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   if (EnableFastForward) {
     io.dcacheRequireReplay := s2_cache_replay && !fullForward
   } else {
-    io.dcacheRequireReplay := s2_cache_replay && 
-      !io.rsFeedback.bits.hit && 
+    io.dcacheRequireReplay := s2_cache_replay &&
+      !io.rsFeedback.bits.hit &&
       !io.dataForwarded &&
       !s2_is_prefetch &&
       io.out.bits.miss

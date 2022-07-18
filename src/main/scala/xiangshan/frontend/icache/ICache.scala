@@ -28,7 +28,7 @@ import xiangshan.frontend._
 import xiangshan.cache._
 import utils._
 import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -137,7 +137,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
   }}
 
   io.read.ready := !io.write.valid
@@ -226,7 +226,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
   when(io.cacheOp.req.valid){
     when(
       CacheInstrucion.isReadTag(io.cacheOp.req.bits.opCode) ||
@@ -242,8 +242,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       for (i <- 0 until 2) {
         tagArrays(i).io.w.req.valid := true.B
         tagArrays(i).io.w.req.bits.apply(
-          data = io.cacheOp.req.bits.write_tag_low, 
-          setIdx = io.cacheOp.req.bits.index, 
+          data = io.cacheOp.req.bits.write_tag_low,
+          setIdx = io.cacheOp.req.bits.index,
           waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
         )
       }
@@ -261,7 +261,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     // }
   }
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, 
+  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid,
     tagArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))(io.cacheOp.req.bits.wayNum),
     0.U
   )
@@ -294,7 +294,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheDataRespBundle)
-    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
   }}
 
   val port_0_read_0 = io.read.valid  && !io.read.bits.vSetIdx(0)(0)
@@ -341,7 +341,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     dataArray
   }
 
-  val codeArrays = (0 until 2) map { i => 
+  val codeArrays = (0 until 2) map { i =>
     val codeArray = Module(new SRAMTemplate(
       UInt(dataCodeEntryBits.W),
       set=nSets/2,
@@ -363,7 +363,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       codeArray.io.w.req.valid := write_bank_1
       codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
-    
+
     codeArray
   }
 
@@ -375,7 +375,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
     read_datas(i) := dataArray.io.r.resp.asTypeOf(Vec(nWays,UInt(blockBits.W)))
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
-  } 
+  }
 
 
   //Parity Encode
@@ -394,7 +394,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
   when(io.cacheOp.req.valid){
     when(
       CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode) ||
@@ -424,14 +424,14 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     read_datas(1),
     read_datas(0)
   )
-  
-  val numICacheLineWords = blockBits / 64 
+
+  val numICacheLineWords = blockBits / 64
   require(blockBits >= 64 && isPow2(blockBits))
   for (wordIndex <- 0 until numICacheLineWords) {
     io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
   }
-  // io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
-    // bank_result(io.cacheOp.req.bits.bank_num).ecc, 
+  // io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid,
+    // bank_result(io.cacheOp.req.bits.bank_num).ecc,
     // 0.U
   // )
 }
@@ -444,7 +444,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val stop        = Input(Bool())
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
-  val itlb        = Vec(PortNumber * 2 + 1, new BlockTlbRequestIO)
+  val itlb        = Vec(PortNumber + 1, new TlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
   /* Cache Instruction */
@@ -560,9 +560,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.itlb(0)        <>    mainPipe.io.itlb(0)
   io.itlb(1)        <>    mainPipe.io.itlb(1)
-  io.itlb(2)        <>    mainPipe.io.itlb(2)
-  io.itlb(3)        <>    mainPipe.io.itlb(3)
-  io.itlb(4)        <>    prefetchPipe.io.iTLBInter
+  // io.itlb(2)        <>    mainPipe.io.itlb(2)
+  // io.itlb(3)        <>    mainPipe.io.itlb(3)
+  io.itlb(2)        <>    prefetchPipe.io.iTLBInter
 
   for(i <- 0 until PortNumber){
     io.fetch(i).resp     <>    mainPipe.io.fetch(i).resp
@@ -647,8 +647,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
-  
-  (0 until PortNumber).map{i => 
+
+  (0 until PortNumber).map{i =>
       mainPipe.io.fetch(i).req.valid := io.fetch(i).req.valid //&& !fetchShouldBlock(i)
       io.fetch(i).req.ready          :=  mainPipe.io.fetch(i).req.ready //&& !fetchShouldBlock(i)
       mainPipe.io.fetch(i).req.bits  := io.fetch(i).req.bits
@@ -675,7 +675,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  cacheOpDecoder.io.cache.resp.valid := 
+  cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
@@ -684,5 +684,4 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
-
-} 
+}

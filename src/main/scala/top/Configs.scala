@@ -113,14 +113,11 @@ class MinimalConfig(n: Int = 1) extends Config(
           name = "itlb",
           fetchi = true,
           useDmode = false,
-          sameCycle = false,
-          missSameCycle = true,
           normalReplacer = Some("plru"),
           superReplacer = Some("plru"),
           normalNWays = 4,
           normalNSets = 1,
-          superNWays = 2,
-          shouldBlock = true
+          superNWays = 2
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
@@ -131,6 +128,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           superNWays = 4,
           normalAsVictim = true,
           partialStaticPMP = true,
+          outsideRecvFlush = true,
           outReplace = false
         ),
         sttlbParameters = TLBParameters(
@@ -142,6 +140,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalAsVictim = true,
           superNWays = 4,
           partialStaticPMP = true,
+          outsideRecvFlush = true,
           outReplace = false
         ),
         btlbParameters = TLBParameters(
