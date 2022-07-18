@@ -44,7 +44,7 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Par
 
   def doBypass(bypassValid: Seq[Bool], bypassData: Seq[UInt], baseData: UInt, debugIndex: Int = 0): UInt = {
     val bypassVec = VecInit(bypassValid)
-    val target = Mux(bypassVec.asUInt.orR, Mux1H(bypassValid, bypassData), baseData)
+    val target = Mux(bypassVec.asUInt.orR, ParallelMux(bypassValid, bypassData), baseData)
 
     XSError(PopCount(bypassVec) > 1.U, p"bypass mask ${Binary(bypassVec.asUInt)} is not one-hot\n")
     bypassVec.zipWithIndex.map { case (m, i) =>
