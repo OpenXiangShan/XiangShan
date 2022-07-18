@@ -58,7 +58,7 @@ case class RSParams
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
   def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
   def delayedFpRf: Boolean = exuCfg.get == StdExeUnitCfg
-  def delayedSrc: Boolean = delayedFpRf || isJump
+  def delayedSrc: Boolean = delayedFpRf
   def needScheduledBit: Boolean = hasFeedback || delayedSrc || hasMidState
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
@@ -417,16 +417,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         s1_delayedSrc(i)(0) := true.B
       }
     }
-    if (params.isJump) {
-      when (uop.bits.isJump) {
-        when (SrcType.isPc(uop.bits.ctrl.srcType(0))) {
-          s1_delayedSrc(i)(0) := true.B
-        }
-        when (SrcType.isPcOrImm(uop.bits.ctrl.srcType(1))) {
-          s1_delayedSrc(i)(1) := true.B
-        }
-      }
-    }
     statusUpdate.enable := uop.valid
     statusUpdate.addr := s1_allocatePtrOH(i)
     statusUpdate.data.valid := true.B
@@ -594,12 +584,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
           dataArray.io.delayedWrite(i).mask(j) := RegNext(RegNext(s1_dispatchUops(i).valid && s1_delayedSrc(i)(j)))
           dataArray.io.delayedWrite(i).addr    := RegNext(RegNext(dataArray.io.write(i).addr))
           dataArray.io.delayedWrite(i).data(0) := enqReverse(io.fpRegValue.get)(i)
-        }
-        if (params.isJump) {
-          dataArray.io.delayedWrite(i).mask(j) := RegNext(s1_dispatchUops(i).valid && s1_delayedSrc(i)(j))
-          dataArray.io.delayedWrite(i).addr    := RegNext(dataArray.io.write(i).addr)
-          dataArray.io.delayedWrite(i).data(0) := SignExt(io.jump.get.jumpPc, XLEN)
-          dataArray.io.delayedWrite(i).data(1) := io.jump.get.jalr_target
         }
       }
     }
@@ -880,7 +864,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
     for (i <- 0 until params.numEntries) {
       val writeEn = VecInit(dataArray.io.write.map(w => w.enable && w.addr(i))).asUInt.orR
-      when (RegNext(writeEn)) {
+      when (writeEn) {
         pcMem(i) := io.jump.get.jumpPc
       }
     }
@@ -890,7 +874,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       val oldestPc = Mux1H(s1_in_oldestPtrOH.bits, pcMem)
       val issuePc = Mux1H(s1_in_selectPtrOH(i), pcMem)
       val pcRead = Mux(s1_issue_oldest(i), oldestPc, issuePc)
-      io.deq(i).bits.uop.cf.pc := RegEnable(pcRead, s1_out_fire(i))
+      val pcBypass = Mux(s1_select_bypass_s0.asUInt.orR, io.jump.get.jumpPc, pcRead)
+      io.deq(i).bits.uop.cf.pc := RegEnable(pcBypass, s1_out_fire(i))
     }
   }
 

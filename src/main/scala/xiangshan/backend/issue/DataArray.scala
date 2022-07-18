@@ -102,14 +102,13 @@ class JumpImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
   val jump_pc = IO(Input(UInt(VAddrBits.W)))
   val jalr_target = IO(Input(UInt(VAddrBits.W)))
 
-  // Jump now don;t need
-  // when (SrcType.isPc(io.uop.ctrl.srcType(0))) {
-  //   io.data_out(0) := SignExt(jump_pc, XLEN)
-  // }
+  when (SrcType.isPc(io.uop.ctrl.srcType(0))) {
+    io.data_out(0) := SignExt(jump_pc, XLEN)
+  }
   // when src1 is reg (like sfence's asid) do not let data_out(1) be the jalr_target
-  // when (SrcType.isPcOrImm(io.uop.ctrl.srcType(1))) {
-  //   io.data_out(1) := jalr_target
-  // }
+  when (SrcType.isPcOrImm(io.uop.ctrl.srcType(1))) {
+    io.data_out(1) := jalr_target
+  }
 }
 
 class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
