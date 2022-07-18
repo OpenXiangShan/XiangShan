@@ -264,9 +264,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-  // jumpPc + redirects + loadPredUpdate + robFlush
-  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 4, 1))
-  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 1, 1))
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + robFlush (1)
+  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 5, 1))
+  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 2, 1))
   val rob = outer.rob.module
 
   pcMem.io.wen.head := io.frontend.fromFtq.pc_mem_wen
@@ -305,10 +305,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
-  pcMem.io.raddr(1) := redirectGen.io.redirectPcRead.ptr.value
-  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(1).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
-  pcMem.io.raddr(2) := redirectGen.io.memPredPcRead.ptr.value
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(2).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
+  pcMem.io.raddr(2) := redirectGen.io.redirectPcRead.ptr.value
+  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(2).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
+  pcMem.io.raddr(3) := redirectGen.io.memPredPcRead.ptr.value
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(3).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
   redirectGen.io.hartId := io.hartId
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
@@ -490,11 +490,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   val pingpong = RegInit(false.B)
   pingpong := !pingpong
-  val jumpInst = Mux(pingpong && (exuParameters.AluCnt > 2).B, io.dispatch(2).bits, io.dispatch(0).bits)
-  pcMem.io.raddr.head := jumpInst.cf.ftqPtr.value
-  io.jumpPc := pcMem.io.rdata.head.getPc(RegNext(jumpInst.cf.ftqOffset))
-  jalrTargetMem.io.raddr.head := jumpInst.cf.ftqPtr.value
-  io.jalr_target := jalrTargetMem.io.rdata.head
+  pcMem.io.raddr(0) := intDq.io.deqNext(0).cf.ftqPtr.value
+  pcMem.io.raddr(1) := intDq.io.deqNext(2).cf.ftqPtr.value
+  val jumpPcRead0 = pcMem.io.rdata(0).getPc(RegNext(intDq.io.deqNext(0).cf.ftqOffset))
+  val jumpPcRead1 = pcMem.io.rdata(1).getPc(RegNext(intDq.io.deqNext(2).cf.ftqOffset))
+  io.jumpPc := Mux(pingpong && (exuParameters.AluCnt > 2).B, jumpPcRead1, jumpPcRead0)
+  jalrTargetMem.io.raddr(0) := intDq.io.deqNext(0).cf.ftqPtr.value
+  jalrTargetMem.io.raddr(1) := intDq.io.deqNext(2).cf.ftqPtr.value
+  val jalrTargetRead = jalrTargetMem.io.rdata
+  io.jalr_target := Mux(pingpong && (exuParameters.AluCnt > 2).B, jalrTargetRead(1), jalrTargetRead(0))
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
