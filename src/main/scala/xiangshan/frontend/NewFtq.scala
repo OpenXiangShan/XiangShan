@@ -872,10 +872,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBackend.pd_redirect_waddr.bits  := RegNext(fromIfuRedirect.bits.ftqIdx.value)
   io.toBackend.pd_redirect_target      := RegNext(fromIfuRedirect.bits.cfiUpdate.target)
 
+  io.toBackend.pd_redirect_waddr.valid := false.B
+  io.toBackend.pd_redirect_waddr.bits  := ifuRedirectToBpu.bits.ftqIdx.value
+  io.toBackend.pd_redirect_target      := ifuRedirectToBpu.bits.cfiUpdate.target
+
   when(backendRedirectReg.valid && lastIsMispredict) {
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
+    // write to backend target vec
+    io.toBackend.pd_redirect_waddr.valid := true.B
   }
 
   // ***********************************************************************************
