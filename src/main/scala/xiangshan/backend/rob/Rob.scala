@@ -352,7 +352,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
-  val validCounter = RegInit(0.U(log2Ceil(RobSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrVec.head
@@ -453,13 +452,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       }
     }
   }
-  val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
-  io.enq.isEmpty   := RegNext(isEmpty && dispatchNum === 0.U)
-
-  // debug info for enqueue (dispatch)
-  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
-  XSInfo(dispatchNum =/= 0.U, p"dispatched $dispatchNum insts\n")
-
+  val dispatchNum = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  io.enq.isEmpty   := RegNext(isEmpty && !VecInit(io.enq.req.map(_.valid)).asUInt.orR)
 
   /**
     * Writeback (from execution units)
@@ -717,18 +711,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   )
   walkPtrVec := walkPtrVec_next
 
-  val lastCycleRedirect = RegNext(io.redirect.valid)
-  val trueValidCounter = Mux(lastCycleRedirect, distanceBetween(enqPtr, deqPtr), validCounter)
+  val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
-  validCounter := Mux(io.commits.isCommit,
-    (validCounter - commitCnt) + dispatchNum,
-    trueValidCounter
-  )
 
-  allowEnqueue := Mux(io.commits.isCommit,
-    validCounter + dispatchNum <= (RobSize - RenameWidth).U,
-    trueValidCounter <= (RobSize - RenameWidth).U
-  )
+  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
 
   val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtr, enqPtr - 1.U)
   val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)
