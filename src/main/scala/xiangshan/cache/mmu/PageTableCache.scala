@@ -232,11 +232,12 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
 
     // delay one cycle after sram read
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
+    val vVec_delay = DataHoldBypass(getl2vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = getl2vSet(check_vpn).asBools
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
     val hitVec = VecInit(ramDatas.zip(vVec).map { case (wayData, v) =>
       wayData.entries.hit(check_vpn, io.csr.satp.asid) && v })
@@ -273,11 +274,12 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
 
     // delay one cycle after sram read
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
+    val vVec_delay = DataHoldBypass(getl3vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = getl3vSet(check_vpn).asBools
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
     val hitVec = VecInit(ramDatas.zip(vVec).map{ case (wayData, v) =>
       wayData.entries.hit(check_vpn, io.csr.satp.asid) && v })
