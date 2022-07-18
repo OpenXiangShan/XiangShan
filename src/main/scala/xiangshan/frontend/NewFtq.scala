@@ -162,28 +162,6 @@ class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 }
 
-// class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-//   val startAddr = UInt(VAddrBits.W)
-//   val fallThruAddr = UInt(VAddrBits.W)
-//   val isNextMask = Vec(PredictWidth, Bool())
-
-//   val meta = UInt(MaxMetaLength.W)
-
-//   val rasSp = UInt(log2Ceil(RasSize).W)
-//   val rasEntry = new RASEntry
-//   val hist = new ShiftingGlobalHistory
-//   val specCnt = Vec(numBr, UInt(10.W))
-  
-//   val valids = Vec(PredictWidth, Bool())
-//   val brMask = Vec(PredictWidth, Bool())
-//   // isJalr, isCall, isRet
-//   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
-//   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
-  
-//   val mispredVec = Vec(PredictWidth, Bool())
-//   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-//   val target = UInt(VAddrBits.W)
-// }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
   val ptr = Output(new FtqPtr)
@@ -225,14 +203,14 @@ trait HasBackendRedirectInfo extends HasXSParameter {
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedirectInfo {
-  val pc_reads = Vec(1 + numRedirectPcRead + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
-  val target_read = Flipped(new FtqRead(UInt(VAddrBits.W)))
-  val redirect_s1_real_pc = Output(UInt(VAddrBits.W))
-  def getJumpPcRead = pc_reads.head
-  def getRedirectPcRead = VecInit(pc_reads.tail.dropRight(2))
-  def getRedirectPcReadData = pc_reads.tail.dropRight(2).map(_.data)
-  def getMemPredPcRead = pc_reads.init.last
-  def getRobFlushPcRead = pc_reads.last
+  // write to backend pc mem
+  val pc_mem_wen = Output(Bool())
+  val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
+  val pc_mem_wdata = Output(new Ftq_RF_Components)
+  val target = Output(UInt(VAddrBits.W))
+  // predecode correct target
+  val pd_redirect_waddr = Valid(UInt(log2Ceil(FtqSize).W))
+  val pd_redirect_target = Output(UInt(VAddrBits.W))
 }
 
 
@@ -476,8 +454,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_in_resp_ptr = Mux(bpu_in_stage === BP_S1, bpuPtr, bpu_in_resp.ftq_idx)
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
-  // read ports:                            jumpPc + redirects + loadPred + robFlush + ifuReq1 + ifuReq2 + commitUpdate
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirectPcRead+2+1+1+1, 1))
+  // read ports:                                                ifuReq1 + ifuReq2 + commitUpdate
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 3, 1))
   // resp from uBTB
   ftq_pc_mem.io.wen(0) := bpu_in_fire
   ftq_pc_mem.io.waddr(0) := bpu_in_resp_idx
@@ -704,16 +682,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
   // **********************************************************************
-  // **************************** backend read ****************************
+  // ***************************** to backend *****************************
   // **********************************************************************
-
-  // pc reads
-  for ((req, i) <- io.toBackend.pc_reads.zipWithIndex) {
-    ftq_pc_mem.io.raddr(i) := req.ptr.value
-    req.data := ftq_pc_mem.io.rdata(i).getPc(RegNext(req.offset))
-  }
-  // target read
-  io.toBackend.target_read.data := RegNext(update_target(io.toBackend.target_read.ptr.value))
+  // to backend pc mem / target
+  io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
+  io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
+  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf)
+  io.toBackend.target       := RegNext(last_cycle_update_target)
 
   // *******************************************************************************
   // **************************** redirect from backend ****************************
@@ -782,59 +757,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** wb from exu ****************************
   // *********************************************************************
 
-  class RedirectGen(implicit p: Parameters) extends XSModule
-    with HasCircularQueuePtrHelper {
-    val io = IO(new Bundle {
-      val in = Flipped((new CtrlToFtqIO).for_redirect_gen)
-      val stage1Pc = Input(Vec(numRedirectPcRead, UInt(VAddrBits.W)))
-      val out = Valid(new Redirect)
-      val s1_real_pc = Output(UInt(VAddrBits.W))
-      val debug_diff = Flipped(Valid(new Redirect))
-    })
-    val s1_jumpTarget = io.in.s1_jumpTarget
-    val s1_uop = io.in.s1_oldest_exu_output.bits.uop
-    val s1_imm12_reg = s1_uop.ctrl.imm(11,0)
-    val s1_pd = s1_uop.cf.pd
-    val s1_isReplay = io.in.s1_redirect_onehot.last
-    val s1_isJump = io.in.s1_redirect_onehot.head
-    val real_pc = Mux1H(io.in.s1_redirect_onehot, io.stage1Pc)
-    val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
-    val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
-    val target = Mux(s1_isReplay,
-      real_pc,
-      Mux(io.in.s1_oldest_redirect.bits.cfiUpdate.taken,
-        Mux(s1_isJump, io.in.s1_jumpTarget, brTarget),
-        snpc  
-      )
-    )
-
-    val redirectGenRes = WireInit(io.in.rawRedirect)
-    redirectGenRes.bits.cfiUpdate.pc := real_pc
-    redirectGenRes.bits.cfiUpdate.pd := s1_pd
-    redirectGenRes.bits.cfiUpdate.target := target
-
-    val realRedirect = Wire(Valid(new Redirect))
-    realRedirect.valid := redirectGenRes.valid || io.in.flushRedirect.valid
-    realRedirect.bits := Mux(io.in.flushRedirect.valid, io.in.flushRedirect.bits, redirectGenRes.bits)
-
-    when (io.in.flushRedirect.valid) {
-      realRedirect.bits.level := RedirectLevel.flush
-      realRedirect.bits.cfiUpdate.target := io.in.frontendFlushTarget
-    }
-
-    io.out := realRedirect
-    io.s1_real_pc := real_pc
-    XSError((io.debug_diff.valid || realRedirect.valid) && io.debug_diff.asUInt =/= io.out.asUInt, "redirect wrong")
-
-  }
-
-  val redirectGen = Module(new RedirectGen)
-  redirectGen.io.in <> io.fromBackend.for_redirect_gen
-  redirectGen.io.stage1Pc := io.toBackend.getRedirectPcReadData
-  redirectGen.io.debug_diff := io.fromBackend.redirect
-  backendRedirect := redirectGen.io.out
-
-  io.toBackend.redirect_s1_real_pc := redirectGen.io.s1_real_pc
+  backendRedirect := io.fromBackend.redirect
 
   def extractRedirectInfo(wb: Valid[Redirect]) = {
     val ftqIdx = wb.bits.ftqIdx.value
@@ -864,6 +787,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       mispredict_vec(r_idx)(r_offset) := r_mispred
     }
   }
+  
+  // write to backend target vec
+  io.toBackend.pd_redirect_waddr.valid := RegNext(fromIfuRedirect.valid)
+  io.toBackend.pd_redirect_waddr.bits  := RegNext(fromIfuRedirect.bits.ftqIdx.value)
+  io.toBackend.pd_redirect_target      := RegNext(fromIfuRedirect.bits.cfiUpdate.target)
 
   when(backendRedirectReg.valid && lastIsMispredict) {
     updateCfiInfo(backendRedirectReg)

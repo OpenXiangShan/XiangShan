@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
-import xiangshan.frontend.FtqRead
+import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
@@ -37,15 +37,6 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
   val redirect = Valid(new Redirect)
-  val for_redirect_gen = new Bundle {
-    val rawRedirect = Valid(new Redirect)
-    val s1_redirect_onehot = Output(Vec(numRedirect+1, Bool()))
-    val s1_oldest_redirect = ValidIO(new Redirect)
-    val s1_oldest_exu_output = ValidIO(new ExuOutput)
-    val s1_jumpTarget = Output(UInt(VAddrBits.W))
-    val flushRedirect = Valid(new Redirect)
-    val frontendFlushTarget = Output(UInt(VAddrBits.W))
-  }
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -57,18 +48,11 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val stage1PcRead = Vec(numRedirect+1, new FtqRead(UInt(VAddrBits.W)))
+    val redirectPcRead = new FtqRead(UInt(VAddrBits.W))
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
-    val for_frontend_redirect_gen = new Bundle {
-      val s1_jumpTarget = Output(UInt(VAddrBits.W))
-      val s1_redirect_onehot = Output(Vec(numRedirect+1, Bool()))
-      val s1_oldest_redirect = ValidIO(new Redirect)
-      val s1_oldest_exu_output = ValidIO(new ExuOutput)
-      val s1_real_pc = Input(UInt(VAddrBits.W))
-    }
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -87,11 +71,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
                             |
                 redirect (send to frontend)
    */
-  private class Wrapper(val n: Int) extends Bundle {
-    val redirect = new Redirect
-    val valid = Bool()
-    val idx = UInt(log2Up(n).W)
-  }
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
     val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
     val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
@@ -101,12 +80,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     )).andR))
     resultOnehot
   }
-
-  val redirects = io.exuMispredict.map(_.bits.redirect) :+ io.loadReplay.bits
-  val stage1FtqReadPcs =
-    (io.stage1PcRead zip redirects).map{ case (r, redirect) =>
-      r(redirect.ftqIdx, redirect.ftqOffset)
-    }
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
     val redirect = Wire(Valid(new Redirect))
@@ -122,6 +95,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
   val oldestExuOutput = Mux1H(io.exuMispredict.indices.map(oldestOneHot), io.exuMispredict)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
+  io.redirectPcRead.ptr := oldestRedirect.bits.ftqIdx
+  io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
 
   val s1_jumpTarget = RegEnable(jumpOut.bits.redirect.cfiUpdate.target, jumpOut.valid)
   val s1_imm12_reg = RegNext(oldestExuOutput.bits.uop.ctrl.imm(11, 0))
@@ -129,11 +104,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s1_redirect_bits_reg = RegNext(oldestRedirect.bits)
   val s1_redirect_valid_reg = RegNext(oldestValid)
   val s1_redirect_onehot = RegNext(oldestOneHot)
-  io.for_frontend_redirect_gen.s1_jumpTarget := s1_jumpTarget
-  io.for_frontend_redirect_gen.s1_redirect_onehot := s1_redirect_onehot
-  io.for_frontend_redirect_gen.s1_oldest_redirect.valid := s1_redirect_valid_reg
-  io.for_frontend_redirect_gen.s1_oldest_redirect.bits := s1_redirect_bits_reg
-  io.for_frontend_redirect_gen.s1_oldest_exu_output := RegNext(oldestExuOutput)
 
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
@@ -141,7 +111,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val s1_isReplay = s1_redirect_onehot.last
   val s1_isJump = s1_redirect_onehot.head
-  val real_pc = Mux1H(s1_redirect_onehot, stage1FtqReadPcs)
+  val real_pc = io.redirectPcRead.data
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
   val target = Mux(s1_isReplay,
@@ -173,18 +143,15 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // store_pc is used to update store set
   val store_pc = io.memPredPcRead(s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
-  val s1_real_pc_from_frontend = io.for_frontend_redirect_gen.s1_real_pc
   // update load violation predictor if load violation redirect triggered
   io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B)
   // update wait table
-  io.memPredUpdate.waddr := RegNext(XORFold(s1_real_pc_from_frontend(VAddrBits-1, 1), MemPredPCWidth))
+  io.memPredUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   io.memPredUpdate.wdata := true.B
   // update store set
-  io.memPredUpdate.ldpc := RegNext(XORFold(s1_real_pc_from_frontend(VAddrBits-1, 1), MemPredPCWidth))
+  io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
-
-  XSError(io.memPredUpdate.valid && RegNext(s1_real_pc_from_frontend) =/= RegNext(real_pc), "s1_real_pc error")
 
   // // recover runahead checkpoint if redirect
   // if (!env.FPGAPlatform) {
@@ -297,11 +264,24 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + robFlush (1)
+  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 5, 1))
+  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 2, 2))
   val rob = outer.rob.module
 
-  val robPcRead = io.frontend.fromFtq.getRobFlushPcRead
-  val flushPC = robPcRead(rob.io.flushOut.bits.ftqIdx, rob.io.flushOut.bits.ftqOffset)
+  pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
+  pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
+  jalrTargetMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
+  jalrTargetMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
+  jalrTargetMem.io.wdata.head := RegNext(io.frontend.fromFtq.target)
+  jalrTargetMem.io.wen.tail.head   := RegNext(io.frontend.fromFtq.pd_redirect_waddr.valid)
+  jalrTargetMem.io.waddr.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_waddr.bits)
+  jalrTargetMem.io.wdata.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_target)
+
+
+  pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
+  val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
 
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
@@ -329,8 +309,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
-  io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
-  io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
+  pcMem.io.raddr(2) := redirectGen.io.redirectPcRead.ptr.value
+  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(2).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
+  pcMem.io.raddr(3) := redirectGen.io.memPredPcRead.ptr.value
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(3).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
   redirectGen.io.hartId := io.hartId
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
@@ -367,16 +349,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
   }
-  redirectGen.io.for_frontend_redirect_gen.s1_real_pc := io.frontend.fromFtq.redirect_s1_real_pc
-  io.frontend.toFtq.for_redirect_gen.s1_oldest_redirect := redirectGen.io.for_frontend_redirect_gen.s1_oldest_redirect
-  io.frontend.toFtq.for_redirect_gen.s1_oldest_exu_output := redirectGen.io.for_frontend_redirect_gen.s1_oldest_exu_output
-  io.frontend.toFtq.for_redirect_gen.s1_redirect_onehot := redirectGen.io.for_frontend_redirect_gen.s1_redirect_onehot
-  io.frontend.toFtq.for_redirect_gen.s1_jumpTarget := redirectGen.io.for_frontend_redirect_gen.s1_jumpTarget
-  io.frontend.toFtq.for_redirect_gen.rawRedirect := redirectGen.io.stage2Redirect
-  io.frontend.toFtq.for_redirect_gen.flushRedirect.valid := frontendFlushValid
-  io.frontend.toFtq.for_redirect_gen.flushRedirect.bits := frontendFlushBits
-
-  io.frontend.toFtq.for_redirect_gen.frontendFlushTarget := RegNext(flushTarget)
 
 
   val pendingRedirect = RegInit(false.B)
@@ -522,11 +494,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   val pingpong = RegInit(false.B)
   pingpong := !pingpong
-  val jumpInst = Mux(pingpong && (exuParameters.AluCnt > 2).B, io.dispatch(2).bits, io.dispatch(0).bits)
-  val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
-  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset).asUInt
-  val jumpTargetRead = io.frontend.fromFtq.target_read
-  io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+  pcMem.io.raddr(0) := intDq.io.deqNext(0).cf.ftqPtr.value
+  pcMem.io.raddr(1) := intDq.io.deqNext(2).cf.ftqPtr.value
+  val jumpPcRead0 = pcMem.io.rdata(0).getPc(RegNext(intDq.io.deqNext(0).cf.ftqOffset))
+  val jumpPcRead1 = pcMem.io.rdata(1).getPc(RegNext(intDq.io.deqNext(2).cf.ftqOffset))
+  io.jumpPc := Mux(pingpong && (exuParameters.AluCnt > 2).B, jumpPcRead1, jumpPcRead0)
+  jalrTargetMem.io.raddr(0) := intDq.io.deqNext(0).cf.ftqPtr.value
+  jalrTargetMem.io.raddr(1) := intDq.io.deqNext(2).cf.ftqPtr.value
+  val jalrTargetRead = jalrTargetMem.io.rdata
+  io.jalr_target := Mux(pingpong && (exuParameters.AluCnt > 2).B, jalrTargetRead(1), jalrTargetRead(0))
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
