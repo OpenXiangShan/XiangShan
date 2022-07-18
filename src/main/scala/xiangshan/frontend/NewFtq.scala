@@ -208,6 +208,9 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
   val pc_mem_wdata = Output(new Ftq_RF_Components)
   val target = Output(UInt(VAddrBits.W))
+  // predecode correct target
+  val pd_redirect_waddr = Valid(UInt(log2Ceil(FtqSize).W))
+  val pd_redirect_target = Output(UInt(VAddrBits.W))
 }
 
 
@@ -785,10 +788,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
+  io.toBackend.pd_redirect_waddr.valid := false.B
+  io.toBackend.pd_redirect_waddr.bits  := ifuRedirectToBpu.bits.ftqIdx.value
+  io.toBackend.pd_redirect_target      := ifuRedirectToBpu.bits.cfiUpdate.target
+
   when(backendRedirectReg.valid && lastIsMispredict) {
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
+    // write to backend target vec
+    io.toBackend.pd_redirect_waddr.valid := true.B
   }
 
   // ***********************************************************************************
