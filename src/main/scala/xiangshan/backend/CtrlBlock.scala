@@ -266,15 +266,19 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val redirectGen = Module(new RedirectGenerator)
   // jumpPc (2) + redirects (1) + loadPredUpdate (1) + robFlush (1)
   val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 5, 1))
-  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 2, 1))
+  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 2, 2))
   val rob = outer.rob.module
 
-  pcMem.io.wen.head := io.frontend.fromFtq.pc_mem_wen
-  pcMem.io.waddr.head := io.frontend.fromFtq.pc_mem_waddr
-  pcMem.io.wdata.head := io.frontend.fromFtq.pc_mem_wdata
-  jalrTargetMem.io.wen.head := io.frontend.fromFtq.pc_mem_wen
-  jalrTargetMem.io.waddr.head := io.frontend.fromFtq.pc_mem_waddr
-  jalrTargetMem.io.wdata.head := io.frontend.fromFtq.target
+  pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
+  pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
+  jalrTargetMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
+  jalrTargetMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
+  jalrTargetMem.io.wdata.head := RegNext(io.frontend.fromFtq.target)
+  jalrTargetMem.io.wen.tail.head   := RegNext(io.frontend.fromFtq.pd_redirect_waddr.valid)
+  jalrTargetMem.io.waddr.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_waddr.bits)
+  jalrTargetMem.io.wdata.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_target)
+
 
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
   val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
