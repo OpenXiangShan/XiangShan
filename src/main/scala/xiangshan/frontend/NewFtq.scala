@@ -547,6 +547,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
   // multi-write
+  val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
   val newest_entry_target = Reg(UInt(VAddrBits.W))
   val newest_entry_ptr = Reg(new FtqPtr)
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
@@ -578,6 +579,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     mispredict_vec(last_cycle_bpu_in_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     pred_stage(last_cycle_bpu_in_idx) := last_cycle_bpu_in_stage
 
+    update_target(last_cycle_bpu_in_idx) := last_cycle_bpu_target // TODO: remove this
     newest_entry_target := last_cycle_bpu_target
     newest_entry_ptr := last_cycle_bpu_in_ptr
   }
@@ -645,12 +647,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val entry_is_to_send = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_ftq_offset = WireInit(cfiIndex_vec(ifuPtr.value))
   val entry_next_addr  = Wire(UInt(VAddrBits.W))
+  val diff_entry_next_addr = WireInit(update_target(ifuPtr.value)) //TODO: remove this
 
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf.head
     entry_is_to_send := true.B
     entry_next_addr := last_cycle_bpu_target
     entry_ftq_offset := last_cycle_cfiIndex
+    diff_entry_next_addr := last_cycle_bpu_target // TODO: remove this
   }.elsewhen (last_cycle_to_ifu_fire) {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)
     toICachePcBundle := ftq_pc_mem.io.ifuPtrPlus1_rdata
@@ -685,6 +689,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     bypassWrtie.nextlineStart := bpu_in_bypass_buf.tail(i).nextLineAddr
   }
 
+  // TODO: remove this
+  XSError(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
+          "\nifu_req_target wrong! ifuPtr: %d, entry_next_addr: %d, diff_entry_next_addr: %d\n",
+          ifuPtr, entry_next_addr, diff_entry_next_addr)
+  
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
@@ -883,6 +892,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     when (newest_entry_ptr === r_ptr && isFull(newest_entry_ptr, commPtr)){
       newest_entry_target := redirect.bits.cfiUpdate.target
     }
+    update_target(r_idx) := redirect.bits.cfiUpdate.target // TODO: remove this
     if (isBackend) {
       mispredict_vec(r_idx)(r_offset) := r_mispred
     }
@@ -996,6 +1006,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   val can_commit_hit = entry_hit_status(commPtr.value)
   val commit_hit = RegNext(can_commit_hit)
+  val diff_commit_target = RegNext(update_target) // TODO: remove this
   val commit_stage = RegNext(pred_stage(commPtr.value))
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
@@ -1016,6 +1027,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
     }
   }
+
+  // TODO: remove this
+  XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
