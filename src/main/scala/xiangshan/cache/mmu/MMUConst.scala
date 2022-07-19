@@ -136,7 +136,7 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
-  implicit def ptwresp_to_tlbprem(ptwResp: PtwResp): TlbPermBundle = {
+  implicit def ptwresp_to_tlbperm(ptwResp: PtwResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
