@@ -63,7 +63,11 @@ class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasI
   val startAddr       = UInt(VAddrBits.W)
   val nextlineStart   = UInt(VAddrBits.W)
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
-
+  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+    this.startAddr := b.startAddr
+    this.nextlineStart := b.nextLineAddr
+    this
+  }
 }
 
 

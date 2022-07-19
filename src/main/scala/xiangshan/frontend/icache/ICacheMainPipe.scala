@@ -120,8 +120,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
 
   //Ftq RegNext Register
-  val ftqReqReg = RegNext(fromFtq.bits)
-
+  val ftqReqReg = Reg(Vec(4, new fromFtq.bits.cloneType))
+  ftqReqReg.map(_ := fromFtq.bits)
+  dontTouch(ftqReqReg)
+  
   /** pipeline control signal */
   val s0_ready, s1_ready, s2_ready = WireInit(false.B)
   val s0_fire,  s1_fire , s2_fire  = WireInit(false.B)

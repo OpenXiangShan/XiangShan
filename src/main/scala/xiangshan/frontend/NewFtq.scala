@@ -621,30 +621,47 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
   ftq_pc_mem.io.raddr.init.last := ifuPtrPlus1.value
 
+  //TODO: ftq_pc_mem read addr conncetion
+  ftq_pc_mem.io.ifuPtr_w := DontCare
+  ftq_pc_mem.io.ifuPtrPlus1_w := DontCare
+  ftq_pc_mem.io.commPtr_w := DontCare
+
+  dontTouch(ftq_pc_mem.io.ifuPtr_w)
+  dontTouch(ftq_pc_mem.io.ifuPtrPlus1_w)
+  dontTouch(ftq_pc_mem.io.commPtr_w)
+
   io.toIfu.req.bits.ftqIdx := ifuPtr
 
-  //TODO: icache req to be connected
-  io.toICache.req.valid := DontCare
-  io.toICache.req.bits := DontCare
-
-  
+  val toICachePcBundle = Wire(new Ftq_RF_Components)
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
   val entry_is_to_send = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_next_addr = WireInit(update_target(ifuPtr.value))
   val entry_ftq_offset = WireInit(cfiIndex_vec(ifuPtr.value))
 
-  
+
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf
+    //this may become timing critical path
+    toICachePcBundle := ftq_pc_mem.io.wdata
     entry_is_to_send := true.B
     entry_next_addr := last_cycle_update_target
     entry_ftq_offset := last_cycle_cfiIndex
   }.elsewhen (last_cycle_to_ifu_fire) {
+<<<<<<< HEAD
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.last
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
   }.otherwise {
     toIfuPcBundle := ftq_pc_mem.io.rdata.init.init.last
+=======
+    toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)
+    toICachePcBundle := ftq_pc_mem.io.ifuPtrPlus1_rdata
+    entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
+                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
+  }.otherwise {
+    toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
+    toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
+>>>>>>> 975c3e219 (RegNext ICache)
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
   }
 
@@ -653,6 +670,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toIfu.req.bits.ftqOffset := entry_ftq_offset
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
 
+  io.toICache.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
+  io.toICache.req.bits.fromFtqPcBundle(toICachePcBundle)
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
