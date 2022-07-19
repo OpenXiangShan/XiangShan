@@ -691,8 +691,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   // TODO: remove this
   XSError(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
-          "\nifu_req_target wrong! ifuPtr: %d, entry_next_addr: %d, diff_entry_next_addr: %d\n",
-          ifuPtr, entry_next_addr, diff_entry_next_addr)
+          f"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr)}\n")
   
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
@@ -1006,7 +1005,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   val can_commit_hit = entry_hit_status(commPtr.value)
   val commit_hit = RegNext(can_commit_hit)
-  val diff_commit_target = RegNext(update_target) // TODO: remove this
+  val diff_commit_target = RegNext(update_target(commPtr.value)) // TODO: remove this
   val commit_stage = RegNext(pred_stage(commPtr.value))
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
