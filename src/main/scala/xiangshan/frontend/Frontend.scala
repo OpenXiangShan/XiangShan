@@ -139,7 +139,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ftq.io.toICache.req.ready :=  ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
 
   ifu.io.icacheInter.resp <>    icache.io.fetch.resp
-
+  ifu.io.icacheInter.req.ready := DontCare
   icache.io.stop := ifu.io.icacheStop
 
   ifu.io.icachePerfInfo := icache.io.perfInfo

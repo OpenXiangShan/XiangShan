@@ -657,20 +657,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf
-    //this may become timing critical path
     toICachePcBundle := ftq_pc_mem.io.wdata
     entry_is_to_send := true.B
     entry_next_addr := last_cycle_update_target
     entry_ftq_offset := last_cycle_cfiIndex
   }.elsewhen (last_cycle_to_ifu_fire) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-    toIfuPcBundle := ftq_pc_mem.io.rdata.init.last
-    entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
-                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
-  }.otherwise {
-    toIfuPcBundle := ftq_pc_mem.io.rdata.init.init.last
-=======
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)
     toICachePcBundle := ftq_pc_mem.io.ifuPtrPlus1_rdata
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
@@ -678,14 +669,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }.otherwise {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
     toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
->>>>>>> 975c3e219 (RegNext ICache)
-=======
-    toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)
-    entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
-                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
-  }.otherwise {
-    toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
->>>>>>> f8ca2f16d ([WIP]ftq: read ftq_pc_mem one cycle ahead, reqs to be copied)
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
   }
 

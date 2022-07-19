@@ -51,12 +51,12 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIMeta       = Decoupled(new ICacheReadBundle)
+  val toIMeta       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
   val fromIMeta     = Input(new ICacheMetaRespBundle)
 }
 
 class ICacheDataReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIData       = Decoupled(new ICacheReadBundle)
+  val toIData       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
   val fromIData     = Input(new ICacheDataRespBundle)
 }
 
@@ -120,7 +120,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
 
   //Ftq RegNext Register
-  val ftqReqReg = Reg(Vec(4, new fromFtq.bits.cloneType))
+  val ftqReqReg = Reg(Vec(partWayNum, new FtqToICacheRequestBundle))
   ftqReqReg.map(_ := fromFtq.bits)
   dontTouch(ftqReqReg)
   
@@ -146,10 +146,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s0 control */
   val s0_valid       = fromFtq.valid
-  val s0_req_vaddr   = VecInit(Seq(ftqReqReg.startAddr, ftqReqReg.nextlineStart))//VecInit(fromIFU.map(_.bits.vaddr))
-  val s0_req_vsetIdx = VecInit(s0_req_vaddr.map(get_idx(_)))//VecInit(fromIFU.map(_.bits.vsetIdx))
-  val s0_only_first  = fromFtq.valid && !ftqReqReg.crossCacheline
-  val s0_double_line = fromFtq.valid && ftqReqReg.crossCacheline
+  val s0_req_vaddr   = (0 until partWayNum).map(i => VecInit(Seq(ftqReqReg(i).startAddr, ftqReqReg(i).nextlineStart))) //VecInit(fromIFU.map(_.bits.vaddr))
+  val s0_req_vsetIdx = (0 until partWayNum).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_)))) //VecInit(fromIFU.map(_.bits.vsetIdx))
+  val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !ftqReqReg(i).crossCacheline) //fromFtq.valid && !ftqReqReg.crossCacheline
+  val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  ftqReqReg(i).crossCacheline)
 
   val s0_slot_fire   = WireInit(false.B)
   val s0_fetch_fire  = WireInit(false.B)
@@ -167,30 +167,29 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val tlb_slot = RegInit(0.U.asTypeOf(new tlbMissSlot))
 
-  val s0_final_vaddr        = Mux(tlb_slot.valid,tlb_slot.req_vaddr ,s0_req_vaddr)
-  val s0_final_vsetIdx      = Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx)
-  val s0_final_only_first   = Mux(tlb_slot.valid,tlb_slot.only_first ,s0_only_first)
-  val s0_final_double_line  = Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line)
-
+  val s0_final_vaddr        = Mux(tlb_slot.valid,tlb_slot.req_vaddr ,s0_req_vaddr.head)
+  val s0_final_vsetIdx      = Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx.head)
+  val s0_final_only_first   = Mux(tlb_slot.valid,tlb_slot.only_first ,s0_only_first.head)
+  val s0_final_double_line  = Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line.head)
 
 
   /** SRAM request */
   val fetch_req = List(toMeta, toData)
-  for(i <- 0 until 2) {
-    fetch_req(i).valid             := (s0_valid || tlb_slot.valid) && !missSwitchBit
-    fetch_req(i).bits.isDoubleLine := s0_final_double_line
-    fetch_req(i).bits.vSetIdx      := s0_final_vsetIdx
+  for(i <- 0 until partWayNum) {
+    fetch_req.map(_.valid                  := (s0_valid || tlb_slot.valid) && !missSwitchBit)
+    fetch_req.map(_.bits(i).isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line(i)))
+    fetch_req.map(_.bits(i).vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx(i)))
   }
 
   toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
-  toITLB(0).bits.vaddr    := s0_req_vaddr(0)
-  toITLB(0).bits.debug.pc := s0_req_vaddr(0)
+  toITLB(0).bits.vaddr    := s0_req_vaddr.head(0)
+  toITLB(0).bits.debug.pc := s0_req_vaddr.head(0)
 
-  toITLB(1).valid         := s0_valid && s0_double_line 
+  toITLB(1).valid         := s0_valid && s0_double_line.head
   toITLB(1).bits.size     := 3.U // TODO: fix the size
-  toITLB(1).bits.vaddr    := s0_req_vaddr(1)
-  toITLB(1).bits.debug.pc := s0_req_vaddr(1)
+  toITLB(1).bits.vaddr    := s0_req_vaddr.head(1)
+  toITLB(1).bits.debug.pc := s0_req_vaddr.head(1)
 
   toITLB(2).valid         := tlb_slot.valid  
   toITLB(2).bits.size     := 3.U // TODO: fix the size
@@ -221,14 +220,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   tlb_resp(1) := (!fromITLB(3).bits.miss && toITLB(3).valid) || !tlb_slot.double_line
   val tlb_all_resp = RegNext(tlb_resp.reduce(_&&_))
 
+  val sram_ready = fetch_req.map(array => array.ready).reduce(_&&_)
+
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
   when(tlb_has_miss && !tlb_slot.valid){
     tlb_slot.valid := s0_valid
-    tlb_slot.only_first := s0_only_first
-    tlb_slot.double_line := s0_double_line
-    tlb_slot.req_vaddr := s0_req_vaddr
-    tlb_slot.req_vsetIdx := s0_req_vsetIdx
+    tlb_slot.only_first := s0_only_first.head
+    tlb_slot.double_line := s0_double_line.head
+    tlb_slot.req_vaddr := s0_req_vaddr.head
+    tlb_slot.req_vsetIdx := s0_req_vsetIdx.head
   }
 
 
@@ -236,19 +237,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     tlb_slot.valid := false.B
   }
 
-  s0_can_go      := !missSwitchBit && s1_ready && fetch_req(0).ready && fetch_req(1).ready  
+  s0_can_go      := !missSwitchBit && s1_ready && sram_ready
   s0_slot_fire   := tlb_slot.valid && tlb_all_resp && s0_can_go
   s0_fetch_fire  := s0_valid && !tlb_slot.valid && s0_can_go
   s0_fire        := s0_slot_fire || s0_fetch_fire              
 
   //TODO: fix GTimer() condition
-  fromFtq.ready := fetch_req(0).ready && fetch_req(1).ready && 
-                   !missSwitchBit  &&
-                   !tlb_slot.valid && 
-                    s1_ready
-  // fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && !missSwitchBit  &&
-  //                        !tlb_slot.valid && 
-  //                        s1_ready )//&& GTimer() > 500.U )
+  fromFtq.ready := sram_ready && !missSwitchBit  && !tlb_slot.valid && s1_ready
   /**
     ******************************************************************************
     * ICache Stage 1
