@@ -23,17 +23,25 @@ import freechips.rocketchip.tilelink.{ClientMetadata, TLPermissions}
 import xiangshan._
 import utils._
 
-
 class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val isDoubleLine  = Bool()
   val vSetIdx       = Vec(2,UInt(log2Ceil(nSets).W))
+
+  def port_0_read_0 =  !vSetIdx(0)(0)
+  def port_0_read_1 =   vSetIdx(0)(0)
+  def port_1_read_0 =   vSetIdx(1)(0) && isDoubleLine
+  def port_1_read_1 =  !vSetIdx(1)(0) && isDoubleLine
+
+  def read_bank_0 = port_0_read_0 || port_1_read_0
+  def read_bank_1 =  port_0_read_1 || port_1_read_1
 }
+
 
 class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
-  val errors = Vec(2, Vec(nWays ,Bool() ))
+  val errors     = Vec(2, Vec(nWays ,Bool() ))
 
   def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
   def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
