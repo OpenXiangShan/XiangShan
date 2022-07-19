@@ -25,6 +25,62 @@ import freechips.rocketchip.formal.PropertyClass
 
 import scala.math.min
 
+class BankedAsyncDataModuleTemplateWithDup[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numDup: Int,
+  numBanks: Int
+) extends Module {
+  val io = IO(new Bundle {
+    val raddr = Vec(numRead, Input(UInt(log2Ceil(numEntries).W)))
+    val rdata = Vec(numRead, Vec(numDup, Output(gen)))
+    val wen   = Input(Bool())
+    val waddr = Input(UInt(log2Ceil(numEntries).W))
+    val wdata = Input(gen)
+  })
+  require(numBanks > 1)
+  require(numEntries > numBanks)
+
+  val numBankEntries = numEntries / numBanks
+  def bankOffset(address: UInt): UInt = {
+    address(log2Ceil(numBankEntries) - 1, 0)
+  }
+
+  def bankIndex(address: UInt): UInt = {
+    address(log2Ceil(numEntries) - 1, log2Ceil(numBankEntries))
+  }
+
+  val dataBanks = Seq.tabulate(numBanks)(i => {
+    val bankEntries = if (i < numBanks - 1) numBankEntries else (numEntries - (i * numBankEntries))
+    Mem(bankEntries, gen)
+  })
+
+  // async read, but regnext
+  for (i <- 0 until numRead) {
+    val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
+    val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
+    for (j <- 0 until numDup) {
+      bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
+      for (k <- 0 until numBanks) {
+        data_read(j)(k) := Mux(io.wen && (io.waddr === io.raddr(i)),
+          io.wdata, dataBanks(k)(bankOffset(io.raddr(i))))
+      }
+    }
+    // next cycle48G
+    for (j <- 0 until numDup) {
+      io.rdata(i)(j) := Mux1H(bank_index(j), data_read(j))
+    }
+  }
+
+  // write
+  for (i <- 0 until numBanks) {
+    when (io.wen && (bankIndex(io.waddr) === i.U)) {
+      dataBanks(i)(bankOffset(io.waddr)) := io.wdata
+    }
+  }
+}
+
 @chiselName
 class TLBFA(
   parentName: String,
@@ -63,11 +119,11 @@ class TLBFA(
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
-      resp.bits.ppn := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
-      resp.bits.perm := entries(0).perm
+      resp.bits.ppn(0) := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
+      resp.bits.perm(0) := entries(0).perm
     } else {
-      resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
-      resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+      resp.bits.ppn(0) := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
+      resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
@@ -158,6 +214,7 @@ class TLBFA(
 class TLBSA(
   parentName: String,
   ports: Int,
+  nDups: Int,
   nSets: Int,
   nWays: Int,
   normalPage: Boolean,
@@ -169,12 +226,13 @@ class TLBSA(
   // timing optimization to divide v select into two cycles.
   val VPRE_SELECT = min(8, nSets)
   val VPOST_SELECT = nSets / VPRE_SELECT
+  val nBanks = 8
 
-  val io = IO(new TlbStorageIO(nSets, nWays, ports))
+  val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
 
   io.r.req.map(_.ready :=  true.B)
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
-  val entries = Module(new SyncDataModuleTemplate(new TlbEntry(normalPage, superPage), nSets, ports, 1))
+  val entries = Module(new BankedAsyncDataModuleTemplateWithDup(new TlbEntry(normalPage, superPage), nSets, ports, nDups, nBanks))
 
   for (i <- 0 until ports) { // duplicate sram
     val req = io.r.req(i)
@@ -192,10 +250,12 @@ class TLBSA(
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
+    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
-    resp.bits.ppn := data.genPPN()(vpn_reg)
-    resp.bits.perm := data.perm
+    for (d <- 0 until nDups) {
+      resp.bits.ppn(d) := data(d).genPPN()(vpn_reg)
+      resp.bits.perm(d) := data(d).perm
+    }
 
     resp.valid := { RegNext(req.valid) }
     resp.bits.hit.suggestName("hit")
@@ -208,11 +268,11 @@ class TLBSA(
   }
 
   // W ports should be 1, or, check at above will be wrong.
-  entries.io.wen(0) := io.w.valid || io.victim.in.valid
-  entries.io.waddr(0) := Mux(io.w.valid,
+  entries.io.wen := io.w.valid || io.victim.in.valid
+  entries.io.waddr := Mux(io.w.valid,
     get_set_idx(io.w.bits.data.entry.tag, nSets),
     get_set_idx(io.victim.in.bits.entry.tag, nSets))
-  entries.io.wdata(0) := Mux(io.w.valid,
+  entries.io.wdata := Mux(io.w.valid,
     (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
     io.victim.in.bits.entry)
 
@@ -282,6 +342,7 @@ object TlbStorage {
     parentName: String,
     associative: String,
     ports: Int,
+    nDups: Int = 1,
     nSets: Int,
     nWays: Int,
     saveLevel: Boolean = false,
@@ -293,21 +354,22 @@ object TlbStorage {
        storage.suggestName(s"${parentName}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(parentName, ports, nSets, nWays, normalPage, superPage))
+       val storage = Module(new TLBSA(parentName, ports, nDups, nSets, nWays, normalPage, superPage))
        storage.suggestName(s"${parentName}_sa")
        storage.io
     }
   }
 }
 
-class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
-  val io = IO(new TlbStorageWrapperIO(ports, q))
+class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends TlbModule {
+  val io = IO(new TlbStorageWrapperIO(ports, q, nDups))
 
 // TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
   val normalPage = TlbStorage(
     parentName = q.name + "_np_storage",
     associative = q.normalAssociative,
     ports = ports,
+    nDups = nDups,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
     saveLevel = q.saveLevel,
@@ -347,11 +409,13 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
     rq.ready := nq.ready && sq.ready // actually, not used
     rp.valid := np.valid && sp.valid // actually, not used
     rp.bits.hit := np.bits.hit || sp.bits.hit
-    rp.bits.ppn := Mux(sp.bits.hit, sp.bits.ppn, np.bits.ppn)
-    rp.bits.perm := Mux(sp.bits.hit, sp.bits.perm, np.bits.perm)
+    for (d <- 0 until nDups) {
+      rp.bits.ppn(d) := Mux(sp.bits.hit, sp.bits.ppn(0), np.bits.ppn(d))
+      rp.bits.perm(d) := Mux(sp.bits.hit, sp.bits.perm(0), np.bits.perm(d))
+    }
     rp.bits.super_hit := sp.bits.hit
-    rp.bits.super_ppn := sp.bits.ppn
-    rp.bits.spm := np.bits.perm.pm
+    rp.bits.super_ppn := sp.bits.ppn(0)
+    rp.bits.spm := np.bits.perm(0).pm
     assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
 

@@ -39,11 +39,11 @@ import freechips.rocketchip.rocket.PMPConfig
   */
 
 @chiselName
-class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
-  val io = IO(new TlbIO(Width, q))
+  val io = IO(new TlbIO(Width, nRespDups, q))
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -76,7 +76,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
   val refill = ptw.resp.fire() && !flush_mmu && vmEnable
-  val entries = Module(new TlbStorageWrapper(Width, q))
+  val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
@@ -97,7 +97,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   // check permisson
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
-    perm_check(perm(i), req_out(i).cmd, static_pm(i), static_pm_v(i), i)
+    for (d <- 0 until nRespDups) {
+        perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d)
+    }
   }
 
   // handle block or non-block io
@@ -111,30 +113,35 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   io.ptw.resp.ready := true.B
 
   /************************  main body above | method/log/perf below ****************************/
-
+  
   def TLBRead(i: Int) = {
     val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
 
     val hit = e_hit || p_hit
-    val ppn = Mux(p_hit, p_ppn, e_ppn)
-    val perm = Mux(p_hit, p_perm, e_perm)
-
     val miss = !hit && vmEnable
     val fast_miss = !(e_super_hit || p_hit) && vmEnable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
-    XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn)} perm:${perm}\n")
-
-    val paddr = Cat(ppn, get_off(req_out(i).vaddr))
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
-
-    resp(i).bits.paddr := Mux(vmEnable, paddr, vaddr)
     resp(i).bits.miss := miss
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := ptw.resp.fire()
 
+    val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
+    val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
+
+    for (d <- 0 until nRespDups) {
+      ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
+      perm(d) := Mux(p_hit, p_perm, e_perm(d))
+
+      val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
+      resp(i).bits.paddr(d) := Mux(vmEnable, paddr, vaddr)
+    }
+
+    XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
+    
     val pmp_paddr = Mux(vmEnable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
     // val pmp_paddr = Mux(vmEnable, paddr, vaddr)
@@ -146,11 +153,11 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
     pmp(idx).valid := resp(idx).valid
     pmp(idx).bits.addr := addr
-    pmp(idx).bits.size := size
+    pmp(idx).bits.size := size           
     pmp(idx).bits.cmd := cmd
   }
 
-  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int) = {
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
@@ -167,16 +174,16 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
     val fault_valid = vmEnable
-    resp(idx).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
-    resp(idx).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
-    resp(idx).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(idx).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
-    resp(idx).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
-    resp(idx).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
     resp(idx).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
     resp(idx).bits.static_pm.bits := !spm.c
   }
@@ -215,10 +222,12 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
-      resp(idx).bits.paddr := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+      for (d <- 0 until nRespDups) {
+        resp(idx).bits.paddr(d) := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d)
+      }
+      pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
-      perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx)
-      pmp_check(resp(idx).bits.paddr, req_out(idx).size, req_out(idx).cmd, idx)
       // NOTE: the unfiltered req would be handled by Repeater
     }
     assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
@@ -234,9 +243,11 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     if (!q.outsideRecvFlush) {
       when (req_out_v(idx) && flush_pipe(idx) && vmEnable) {
         resp(idx).valid := true.B
-        resp(idx).bits.excp.pf.ld := true.B // sfence happened, pf for not to use this addr
-        resp(idx).bits.excp.pf.st := true.B
-        resp(idx).bits.excp.pf.instr := true.B
+        for (d <- 0 until nRespDups) {
+          resp(idx).bits.excp(d).pf.ld := true.B // sfence happened, pf for not to use this addr
+          resp(idx).bits.excp(d).pf.st := true.B
+          resp(idx).bits.excp(d).pf.instr := true.B
+        }
       }
     }
   }
@@ -296,8 +307,8 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
 }
 
-class TLBNonBlock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Seq.fill(Width)(false), q)
-class TLBBLock(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, Seq.fill(Width)(true), q)
+class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(false), q)
+class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(true), q)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))

@@ -121,7 +121,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // 6when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
@@ -133,7 +133,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
