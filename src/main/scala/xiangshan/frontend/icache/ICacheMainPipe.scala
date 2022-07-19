@@ -51,12 +51,12 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIMeta       = Decoupled(new ICacheReadBundle)
+  val toIMeta       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
   val fromIMeta     = Input(new ICacheMetaRespBundle)
 }
 
 class ICacheDataReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIData       = Decoupled(new ICacheReadBundle)
+  val toIData       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
   val fromIData     = Input(new ICacheDataRespBundle)
 }
 
@@ -121,7 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   io.itlb.foreach(_.req_kill := false.B)
 
   //Ftq RegNext Register
-  val ftqReqReg = Reg(Vec(4, new fromFtq.bits.cloneType))
+  val ftqReqReg = Reg(Vec(partWayNum, new FtqToICacheRequestBundle))
   ftqReqReg.map(_ := fromFtq.bits)
   dontTouch(ftqReqReg)
   
@@ -145,10 +145,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s0 control */
   val s0_valid       = fromFtq.valid
-  val s0_req_vaddr   = VecInit(Seq(ftqReqReg.startAddr, ftqReqReg.nextlineStart))//VecInit(fromIFU.map(_.bits.vaddr))
-  val s0_req_vsetIdx = VecInit(s0_req_vaddr.map(get_idx(_)))//VecInit(fromIFU.map(_.bits.vsetIdx))
-  val s0_only_first  = fromFtq.valid && !ftqReqReg.crossCacheline
-  val s0_double_line = fromFtq.valid && ftqReqReg.crossCacheline
+  val s0_req_vaddr   = (0 until partWayNum).map(i => VecInit(Seq(ftqReqReg(i).startAddr, ftqReqReg(i).nextlineStart))) //VecInit(fromIFU.map(_.bits.vaddr))
+  val s0_req_vsetIdx = (0 until partWayNum).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_)))) //VecInit(fromIFU.map(_.bits.vsetIdx))
+  val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !ftqReqReg(i).crossCacheline) //fromFtq.valid && !ftqReqReg.crossCacheline
+  val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  ftqReqReg(i).crossCacheline)
 
   val s0_final_valid       = s0_valid
   val s0_final_vaddr   = s0_req_vaddr
@@ -168,13 +168,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s0 tlb **/
   toITLB(0).valid         := s0_valid
   toITLB(0).bits.size     := 3.U // TODO: fix the size
-  toITLB(0).bits.vaddr    := s0_req_vaddr(0)
-  toITLB(0).bits.debug.pc := s0_req_vaddr(0)
+  toITLB(0).bits.vaddr    := s0_req_vaddr.head(0)
+  toITLB(0).bits.debug.pc := s0_req_vaddr.head(0)
 
-  toITLB(1).valid         := s0_valid && s0_double_line
+  toITLB(1).valid         := s0_valid && s0_double_line.head
   toITLB(1).bits.size     := 3.U // TODO: fix the size
-  toITLB(1).bits.vaddr    := s0_req_vaddr(1)
-  toITLB(1).bits.debug.pc := s0_req_vaddr(1)
+  toITLB(1).bits.vaddr    := s0_req_vaddr.head(1)
+  toITLB(1).bits.debug.pc := s0_req_vaddr.head(1)
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec

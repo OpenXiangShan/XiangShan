@@ -162,7 +162,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // toICache(0).bits.vaddr  := DontCare//fromFtq.req.bits.startAddr
   // toICache(1).valid       := DontCare//fromFtq.req.valid && f0_doubleLine //&& !f0_flush
   // toICache(1).bits.vaddr  := DontCare//fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
-
+  io.icacheInter.req.valid := DontCare
+  io.icacheInter.req.bits  := DontCare
   /** <PERF> f0 fetch bubble */
 
   XSPerfAccumulate("fetch_bubble_ftq_not_valid",   !fromFtq.req.valid && fromFtq.req.ready  )
