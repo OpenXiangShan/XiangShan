@@ -529,50 +529,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
   // read ports:    jumpPc + redirects + loadPred + robFlush + ifuReq1 + ifuReq2 + commitUpdate
-<<<<<<< HEAD
-  val num_pc_read = 1+numRedirectPcRead+2+1+1+1+2
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize,
-    num_pc_read, 1, "FtqPC", concatData=false, Some(Seq.tabulate(num_pc_read)(i => false))))
-
-  //wrbypass read only for ifu req read
-  val critical_read_num = 1 + 1 //ifu + ifuPlus
-  val ftq_pc_dq_data_reg = Reg(Vec(critical_read_num,new Ftq_RF_Components))      //only for update
-  val ftq_pc_dq_data_wire = Wire(Vec(critical_read_num,new Ftq_RF_Components)) 
-  val ftq_pc_next_step_data = Wire(Vec(critical_read_num * 2, new Ftq_RF_Components))
-  val critical_rf_read = Seq(ftq_pc_mem.io.rdata.init.init.last,  ftq_pc_mem.io.rdata.init.last)
-
-  val readPtrVec  = Seq(ifuPtr, ifuPtrPlus1, ifuPtrPlus1 + 1.U, ifuPtrPlus1 + 2.U)
-  val writePtrVec = Seq(bpu_in_resp_ptr)
-  val wrAddrMatch = new QPtrMatchMatrix(readPtrVec, writePtrVec)
-  for(i <- 0 until 2 * critical_read_num) {
-    val wrMatchVec = VecInit(wrAddrMatch(i))
-    val wrBypassEn = bpu_in_fire && wrMatchVec(0)  // wen && waddr === raddr
-    val enqBypassData = Wire(new Ftq_RF_Components).fromBranchPrediction(bpu_in_resp)
-    println(s"index $i")
-    val readData =  if(i < critical_read_num) ftq_pc_dq_data_reg(i) else critical_rf_read(i - critical_read_num)
-    ftq_pc_next_step_data(i) := Mux(wrBypassEn, enqBypassData, readData)
-  }
-
-  val deqEnable = io.toIfu.req.fire && allowToIfu
-  val deqEnable_n = Seq(!deqEnable, !deqEnable)
-  for (i <- 0 until critical_read_num) {
-    ftq_pc_dq_data_wire(i) := ParallelPriorityMux(deqEnable_n, ftq_pc_next_step_data.drop(i).take(critical_read_num + 1))
-    ftq_pc_dq_data_reg(i) := ftq_pc_dq_data_wire(i)
-  }
-
-
-  // resp from uBTB
-  ftq_pc_mem.io.wen(0) := bpu_in_fire
-  ftq_pc_mem.io.waddr(0) := bpu_in_resp_idx
-  ftq_pc_mem.io.wdata(0).fromBranchPrediction(bpu_in_resp)
-=======
   val num_pc_read = 1+numRedirectPcRead+2+1+1+1
   val num_backend_read = 1+numRedirectPcRead+2
   val ftq_pc_mem = Module(new FtqPcMemWrapper(num_backend_read))
   ftq_pc_mem.io.wen := bpu_in_fire
   ftq_pc_mem.io.waddr := bpu_in_resp_idx
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
->>>>>>> f8ca2f16d ([WIP]ftq: read ftq_pc_mem one cycle ahead, reqs to be copied)
 
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1))
