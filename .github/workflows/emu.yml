@@ -94,6 +94,7 @@ jobs:
   default-emu:
     runs-on: bosc
     continue-on-error: false
+    timeout-minutes: 600
     name: Test Default-EMU
     steps:
       - uses: actions/checkout@v2
