@@ -34,7 +34,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new AtomicWordIO
-    val dtlb          = new TlbRequestIO
+    val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
@@ -133,7 +133,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
     when(io.dtlb.resp.fire){
-      paddr := io.dtlb.resp.bits.paddr
+      paddr := io.dtlb.resp.bits.paddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -142,10 +142,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
       exceptionVec(storeAddrMisaligned) := !addrAligned
-      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
-      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
-      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
-      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
+      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
@@ -354,7 +354,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     for (j <- 0 until 3) {
 
       val addrHit = TriggerCmp(
-        vaddr, 
+        vaddr,
         tdata(lTriggerMapping(j)).tdata2,
         tdata(lTriggerMapping(j)).matchType,
         tEnable(lTriggerMapping(j))
@@ -377,14 +377,14 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   io.out.bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
   when(isLr){
     // enable load trigger
-    io.out.bits.uop.cf.trigger.backendHit(2) := backendTriggerHitReg(2) 
-    io.out.bits.uop.cf.trigger.backendHit(3) := backendTriggerHitReg(3) 
-    io.out.bits.uop.cf.trigger.backendHit(5) := backendTriggerHitReg(5) 
+    io.out.bits.uop.cf.trigger.backendHit(2) := backendTriggerHitReg(2)
+    io.out.bits.uop.cf.trigger.backendHit(3) := backendTriggerHitReg(3)
+    io.out.bits.uop.cf.trigger.backendHit(5) := backendTriggerHitReg(5)
   }.otherwise{
     // enable store trigger
-    io.out.bits.uop.cf.trigger.backendHit(0) := backendTriggerHitReg(0) 
-    io.out.bits.uop.cf.trigger.backendHit(1) := backendTriggerHitReg(1) 
-    io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4) 
+    io.out.bits.uop.cf.trigger.backendHit(0) := backendTriggerHitReg(0)
+    io.out.bits.uop.cf.trigger.backendHit(1) := backendTriggerHitReg(1)
+    io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4)
   }
 
   if (env.EnableDifftest) {
