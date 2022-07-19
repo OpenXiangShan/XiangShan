@@ -24,7 +24,7 @@ import xiangshan._
 import xiangshan.cache.mmu._
 import utils._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import xiangshan.frontend.{FtqToICacheRequestBundle}
+import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle}
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -120,9 +120,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
 
   //Ftq RegNext Register
-  val ftqReqReg = Reg(Vec(partWayNum, new FtqToICacheRequestBundle))
-  ftqReqReg.map(_ := fromFtq.bits)
-  dontTouch(ftqReqReg)
+  val pcMemReadReg  = Reg(Vec(partWayNum, new FtqICacheInfo))
+  val fromFtqReq = Wire(Vec(partWayNum, new FtqICacheInfo))
+  pcMemReadReg.map( _ := fromFtq.bits.pcMemRead)
+
+  fromFtqReq.zipWithIndex.map{case(req,i) => req := Mux(fromFtq.bits.bypassSelect, fromFtq.bits.bpuBypassWrite(i), pcMemReadReg(i) )}
+  dontTouch(pcMemReadReg)
   
   /** pipeline control signal */
   val s0_ready, s1_ready, s2_ready = WireInit(false.B)
@@ -146,10 +149,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s0 control */
   val s0_valid       = fromFtq.valid
-  val s0_req_vaddr   = (0 until partWayNum).map(i => VecInit(Seq(ftqReqReg(i).startAddr, ftqReqReg(i).nextlineStart))) //VecInit(fromIFU.map(_.bits.vaddr))
-  val s0_req_vsetIdx = (0 until partWayNum).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_)))) //VecInit(fromIFU.map(_.bits.vsetIdx))
-  val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !ftqReqReg(i).crossCacheline) //fromFtq.valid && !ftqReqReg.crossCacheline
-  val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  ftqReqReg(i).crossCacheline)
+  val s0_req_vaddr   = (0 until partWayNum).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
+  val s0_req_vsetIdx = (0 until partWayNum).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
+  val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !fromFtqReq(i).crossCacheline)
+  val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  fromFtqReq(i).crossCacheline)
 
   val s0_slot_fire   = WireInit(false.B)
   val s0_fetch_fire  = WireInit(false.B)
