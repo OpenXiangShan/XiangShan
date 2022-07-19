@@ -59,13 +59,19 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   }
 }
 
-class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
-  val startAddr       = UInt(VAddrBits.W)
-  val nextlineStart   = UInt(VAddrBits.W)
+class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val startAddr           = UInt(VAddrBits.W)
+  val nextlineStart       = UInt(VAddrBits.W)
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
+}
+
+class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val pcMemRead           = new FtqICacheInfo
+  val bpuBypassWrite      = Vec(4, new FtqICacheInfo)
+  val bypassSelect        = Bool()
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
-    this.startAddr := b.startAddr
-    this.nextlineStart := b.nextLineAddr
+    this.pcMemRead.startAddr := b.startAddr
+    this.pcMemRead.nextlineStart := b.nextLineAddr
     this
   }
 }

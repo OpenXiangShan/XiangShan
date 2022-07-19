@@ -607,7 +607,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   // **************************** to ifu ****************************
   // ****************************************************************
-  val bpu_in_bypass_buf = RegEnable(ftq_pc_mem.io.wdata, enable=bpu_in_fire)
+  // 0  for ifu, and 1-4 for ICache
+  val bpu_in_bypass_buf = VecInit(Seq.fill(5)(RegEnable(ftq_pc_mem.io.wdata, enable=bpu_in_fire)))
   val bpu_in_bypass_ptr = RegNext(bpu_in_resp_ptr)
   val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
 
@@ -626,16 +627,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
 
-  val toICachePcBundle = Wire(new Ftq_RF_Components)
+  val toICachePcBundle = WireInit(ftq_pc_mem.io.ifuPtr_rdata)
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
   val entry_is_to_send = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_next_addr = WireInit(update_target(ifuPtr.value))
   val entry_ftq_offset = WireInit(cfiIndex_vec(ifuPtr.value))
 
-
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
-    toIfuPcBundle := bpu_in_bypass_buf
-    toICachePcBundle := ftq_pc_mem.io.wdata
+    toIfuPcBundle := bpu_in_bypass_buf.head
     entry_is_to_send := true.B
     entry_next_addr := last_cycle_update_target
     entry_ftq_offset := last_cycle_cfiIndex
@@ -646,21 +645,23 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
   }.otherwise {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
-    toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
+    //toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
   }
-  
+
   io.toIfu.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
   io.toIfu.req.bits.nextStartAddr := entry_next_addr
   io.toIfu.req.bits.ftqOffset := entry_ftq_offset
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
-<<<<<<< HEAD
-  
-=======
 
   io.toICache.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
   io.toICache.req.bits.fromFtqPcBundle(toICachePcBundle)
->>>>>>> 3d9e78c83 ([WIP]FTQ: add icache req port)
+  io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
+  io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
+    bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
+    bypassWrtie.nextlineStart := bpu_in_bypass_buf.tail(i).nextLineAddr
+  }
+  
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
@@ -757,22 +758,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **********************************************************************
   // ***************************** to backend *****************************
   // **********************************************************************
-<<<<<<< HEAD
   // to backend pc mem / target
   io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
   io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
   io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf)
   io.toBackend.target       := RegNext(last_cycle_update_target)
-=======
-
-  // pc reads
-  for ((req, i) <- io.toBackend.pc_reads.zipWithIndex) {
-    ftq_pc_mem.io.other_raddrs(i) := req.ptr.value
-    req.data := ftq_pc_mem.io.other_rdatas(i).getPc(RegNext(req.offset))
-  }
-  // target read
-  io.toBackend.target_read.data := RegNext(update_target(io.toBackend.target_read.ptr.value))
->>>>>>> 8973c7ae8 ([WIP]ftq: read ftq_pc_mem one cycle ahead, reqs to be copied)
 
   // *******************************************************************************
   // **************************** redirect from backend ****************************
