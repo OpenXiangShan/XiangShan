@@ -119,11 +119,15 @@ jobs:
           cat perf.log | sort
       - name: EMU - microbench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci microbench 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --wave-dump $WAVE_HOME --threads 8 --numa    \
+            --ci microbench 2> perf.log
           cat perf.log | sort
       - name: EMU - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --wave-dump $WAVE_HOME --threads 8 --numa    \
+            --ci linux-hello 2> perf.log
           cat perf.log | sort
 
   release-emu:
