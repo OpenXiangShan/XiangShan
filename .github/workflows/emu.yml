@@ -94,7 +94,7 @@ jobs:
   default-emu:
     runs-on: bosc
     continue-on-error: false
-    name: Test Minimal-EMU
+    name: Test Default-EMU
     steps:
       - uses: actions/checkout@v2
         with:
@@ -107,21 +107,23 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
           mkdir -p $WAVE_HOME
-      - name: Build Minimal-EMU
+      - name: Build Default-EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --build --threads 8
       - name: EMU - CoreMark
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci coremark 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --wave-dump $WAVE_HOME --threads 8 --numa    \
+            --ci coremark 2> perf.log
           cat perf.log | sort
       - name: EMU - microbench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci microbench 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci microbench 2> perf.log
           cat perf.log | sort
       - name: EMU - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello 2> perf.log
           cat perf.log | sort
 
   release-emu:
@@ -143,9 +145,11 @@ jobs:
           mkdir -p $WAVE_HOME
       - name: Build Release Default-EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --release
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --build --threads 8 --release
       - name: EMU - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --wave-dump $WAVE_HOME --threads 8 --numa    \
+            --ci linux-hello 2> perf.log
           cat perf.log | sort
