@@ -35,6 +35,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
+  val deqNext = Vec(deqnum, Output(new MicroOp))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -227,9 +228,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     val readData = if (i < deqnum) deqData(i) else dataModule.io.rdata(i)
     nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
   }
-  when (!io.redirect.valid) {
-    deqData := (0 until deqnum).map(i => ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1)))
+  for (i <- 0 until deqnum) {
+    io.deqNext(i) := deqData(i)
+    when (!io.redirect.valid) {
+      io.deqNext(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1))
+    }
   }
+  deqData := io.deqNext
   // T-2: read data from storage: next
   dataModule.io.raddr := headPtrNext.map(_.value)
 
