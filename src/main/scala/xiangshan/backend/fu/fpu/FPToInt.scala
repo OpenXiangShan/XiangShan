@@ -84,11 +84,11 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
       !ctrl.typ(0)
     )
   }
+  val s2i_s1_to_s2 = RegEnable(s2i_s1.io.to_s2, regEnables(0))
+  val d2i_s1_to_s2 = RegEnable(d2i_s1.io.to_s2, regEnables(0))
 
   // stage2
   val mv_cls_out_s2 = RegEnable(mv_cls_out, regEnables(1))
-  val s2i_s1_to_s2 = RegEnable(s2i_s1.io.to_s2, regEnables(1))
-  val d2i_s1_to_s2 = RegEnable(d2i_s1.io.to_s2, regEnables(1))
 
   val s2i_s2 = Module(new fudian.FPToInt_s2(FPU.f32.expWidth, FPU.f32.precision))
   val d2i_s2 = Module(new fudian.FPToInt_s2(FPU.f64.expWidth, FPU.f64.precision))
