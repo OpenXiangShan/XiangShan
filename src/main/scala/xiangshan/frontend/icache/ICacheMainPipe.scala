@@ -51,7 +51,7 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIMeta       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
+  val toIMeta       = DecoupledIO(new ICacheReadBundle)
   val fromIMeta     = Input(new ICacheMetaRespBundle)
 }
 
@@ -160,14 +160,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_double_line  = s0_double_line.head
 
   /** SRAM request */
-  val fetch_req = List(toMeta, toData)
+  //0 -> metaread, 1,2,3 -> data, 3 -> code
   for(i <- 0 until partWayNum) {
-    fetch_req.map(_.valid                  := s0_valid && !missSwitchBit)
-    fetch_req.map(_.bits(i).isDoubleLine   := s0_double_line(i))
-    fetch_req.map(_.bits(i).vSetIdx        := s0_req_vsetIdx(i))
+    toData.valid                  := s0_valid && !missSwitchBit
+    toData.bits(i).isDoubleLine   := s0_double_line(i)
+    toData.bits(i).vSetIdx        := s0_req_vsetIdx(i)
   }
-  /** s0 tlb **/
-  toITLB(0).valid         := s0_valid
+
+  toMeta.valid               := s0_valid && !missSwitchBit
+  toMeta.bits.isDoubleLine   := s0_double_line.head
+  toMeta.bits.vSetIdx        := s0_req_vsetIdx.head
+
+
+  toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := s0_req_vaddr.head(0)
   toITLB(0).bits.debug.pc := s0_req_vaddr.head(0)
@@ -191,7 +196,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    */
 
   val itlb_can_go    = toITLB(0).ready && toITLB(1).ready
-  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready
+  val icache_can_go  = toData.ready && toMeta.ready
   val pipe_can_go    = !missSwitchBit && s1_ready
   val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go
   val s0_fetch_fire  = s0_valid && s0_can_go
@@ -218,7 +223,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_vsetIdx = RegEnable(s0_final_vsetIdx, s0_fire)
   val s1_only_first  = RegEnable(s0_final_only_first, s0_fire)
   val s1_double_line = RegEnable(s0_final_double_line, s0_fire)
-  //val s1_tlb_miss    = RegEnable(tlb_slot.valid, s0_fire)
 
   /** tlb response latch for pipeline stop */
   val tlb_back = fromITLB.map(_.fire())
