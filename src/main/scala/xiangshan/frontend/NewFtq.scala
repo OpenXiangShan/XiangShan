@@ -660,9 +660,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     toICachePcBundle := ftq_pc_mem.io.ifuPtrPlus1_rdata
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
-    entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus2),
-                          last_cycle_bpu_target,
-                          Mux(isFull(ifuPtr, commPtr),
+    entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
+                          bpu_in_bypass_buf.startAddr,
+                          Mux(isFull(ifuPtrPlus1, commPtr),
                             newest_entry_target,
                             ftq_pc_mem.io.ifuPtrPlus2_rdata.startAddr)) // ifuPtr+2
   }.otherwise {
@@ -670,8 +670,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     //toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
-                          last_cycle_bpu_target,
-                          Mux(isFull(ifuPtr, commPtr),
+                          bpu_in_bypass_buf.startAddr,
+                          Mux(isFull(ifuPtrPlus1, commPtr),
                             newest_entry_target,
                             ftq_pc_mem.io.ifuPtrPlus1_rdata.startAddr)) // ifuPtr+1
   }
