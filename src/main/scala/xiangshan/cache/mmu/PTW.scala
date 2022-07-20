@@ -182,6 +182,14 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   mem_arb.io.in(1) <> mq_mem.req
   mem_arb.io.out.ready := mem.a.ready && !flush
 
+  // assert, should not send mem access at same addr for twice.
+  val last_req_addr = RegEnable(blockBytes_align(mem_arb.io.out.bits.addr), mem_arb.io.out.fire())
+  val last_req_v = RegInit(false.B)
+  when (mem_arb.io.out.fire) { last_req_v := true.B }
+  when (flush) { last_req_v := false.B }
+  XSError(last_req_v && mem_arb.io.out.fire && (last_req_addr === blockBytes_align(mem_arb.io.out.bits.addr)),
+    "l2tlb should not access mem at same addr for twice")
+
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
   when (missQueue.io.in.fire()) {
