@@ -244,10 +244,11 @@ class TLBSA(
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx_bypass = RegNext((entries.io.waddr(0) === ridx) && entries.io.wen(0))
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, nSets) && vidx(0)
+    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
     for (d <- 0 until nDups) {
       resp.bits.ppn(d) := data(d).genPPN()(vpn_reg)
