@@ -691,7 +691,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   // TODO: remove this
   XSError(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
-          f"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr)}\n")
+          p"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr)}\n")
   
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
