@@ -168,6 +168,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l2cache.map(_.module) ++
         l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
     )
-    ResetGen(resetChain, reset.asBool || core_soft_rst, !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
   }
 }

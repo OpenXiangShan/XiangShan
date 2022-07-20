@@ -143,7 +143,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     * ICache Stage 0
     * - send req to ITLB and wait for tlb miss fixing
-    * - send req to Meta/Data SRAM 
+    * - send req to Meta/Data SRAM
     ******************************************************************************
     */
 
@@ -199,12 +199,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toITLB(1).bits.vaddr    := s0_req_vaddr.head(1)
   toITLB(1).bits.debug.pc := s0_req_vaddr.head(1)
 
-  toITLB(2).valid         := tlb_slot.valid  
+  toITLB(2).valid         := tlb_slot.valid
   toITLB(2).bits.size     := 3.U // TODO: fix the size
   toITLB(2).bits.vaddr    := tlb_slot.req_vaddr(0)
   toITLB(2).bits.debug.pc := tlb_slot.req_vaddr(0)
 
-  toITLB(3).valid         := tlb_slot.valid && tlb_slot.double_line  
+  toITLB(3).valid         := tlb_slot.valid && tlb_slot.double_line
   toITLB(3).bits.size     := 3.U // TODO: fix the size
   toITLB(3).bits.vaddr    := tlb_slot.req_vaddr(1)
   toITLB(3).bits.debug.pc := tlb_slot.req_vaddr(1)
@@ -248,7 +248,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s0_can_go      := !missSwitchBit && s1_ready && sram_ready
   s0_slot_fire   := tlb_slot.valid && tlb_all_resp && s0_can_go
   s0_fetch_fire  := s0_valid && !tlb_slot.valid && s0_can_go
-  s0_fire        := s0_slot_fire || s0_fetch_fire              
+  s0_fire        := s0_slot_fire || s0_fetch_fire
 
   //TODO: fix GTimer() condition
   fromFtq.ready := sram_ready && !missSwitchBit  && !tlb_slot.valid && s1_ready
@@ -256,7 +256,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     * ICache Stage 1
     * - get tlb resp data (exceptiong info and physical addresses)
-    * - get Meta/Data SRAM read responses (latched for pipeline stop) 
+    * - get Meta/Data SRAM read responses (latched for pipeline stop)
     * - tag compare/hit check
     ******************************************************************************
     */
@@ -286,13 +286,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
 
-  val hit_tlbRespPAddr = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.paddr)))
-  val hit_tlbExcpPF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.excp.pf.instr && fromITLB(i).valid)))   
-  val hit_tlbExcpAF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.excp.af.instr && fromITLB(i).valid)))   
+  val hit_tlbRespPAddr = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.paddr(0))))
+  val hit_tlbExcpPF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.excp(0).pf.instr && fromITLB(i).valid)))
+  val hit_tlbExcpAF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((0 until PortNumber).map( i => fromITLB(i).bits.excp(0).af.instr && fromITLB(i).valid)))
 
-  val miss_tlbRespPAddr = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.paddr)))
-  val miss_tlbExcpPF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.excp.pf.instr && fromITLB(i).valid)))    
-  val miss_tlbExcpAF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.excp.af.instr && fromITLB(i).valid))) 
+  val miss_tlbRespPAddr = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.paddr(0))))
+  val miss_tlbExcpPF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.excp(0).pf.instr && fromITLB(i).valid)))
+  val miss_tlbExcpAF    = ResultHoldBypass(valid = RegNext(s0_fire), data = VecInit((PortNumber until PortNumber * 2).map( i => fromITLB(i).bits.excp(0).af.instr && fromITLB(i).valid)))
 
   val tlbRespPAddr  = Mux(s1_tlb_miss,miss_tlbRespPAddr,hit_tlbRespPAddr )
   val tlbExcpPF     = Mux(s1_tlb_miss,miss_tlbExcpPF,hit_tlbExcpPF )
@@ -387,28 +387,28 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_meta_errors    = RegEnable(next = s1_meta_errors,    enable = s1_fire)
   val s2_data_errorBits = RegEnable(next = s1_data_errorBits, enable = s1_fire)
   val s2_data_cacheline = RegEnable(next = s1_data_cacheline, enable = s1_fire)
-  
+
   val s2_data_errors    = Wire(Vec(PortNumber,Vec(nWays, Bool())))
 
-  (0 until PortNumber).map{ i => 
+  (0 until PortNumber).map{ i =>
     val read_datas = s2_data_cacheline(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeUnit.W))))
     val read_codes = s2_data_errorBits(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeBits.W))))
-    val data_full_wayBits = VecInit((0 until nWays).map( w => 
-                                  VecInit((0 until dataCodeUnitNum).map(u => 
+    val data_full_wayBits = VecInit((0 until nWays).map( w =>
+                                  VecInit((0 until dataCodeUnitNum).map(u =>
                                         Cat(read_codes(w)(u), read_datas(w)(u))))))
-    val data_error_wayBits = VecInit((0 until nWays).map( w => 
-                                  VecInit((0 until dataCodeUnitNum).map(u => 
+    val data_error_wayBits = VecInit((0 until nWays).map( w =>
+                                  VecInit((0 until dataCodeUnitNum).map(u =>
                                        cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
     if(i == 0){
-      (0 until nWays).map{ w => 
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_) 
-      } 
+      (0 until nWays).map{ w =>
+        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_)
+      }
     } else {
-      (0 until nWays).map{ w => 
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(RegNext(s1_double_line)) && RegNext(data_error_wayBits(w)).reduce(_||_) 
-      } 
-    }                                
-  } 
+      (0 until nWays).map{ w =>
+        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(RegNext(s1_double_line)) && RegNext(data_error_wayBits(w)).reduce(_||_)
+      }
+    }
+  }
 
   val s2_parity_meta_error  = VecInit((0 until PortNumber).map(i => s2_meta_errors(i).reduce(_||_) && io.csr_parity_enable))
   val s2_parity_data_error  = VecInit((0 until PortNumber).map(i => s2_data_errors(i).reduce(_||_) && io.csr_parity_enable))
@@ -438,7 +438,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
   val s2_except_tlb_af    = RegEnable(tlbExcpAF, s1_fire)
   //long delay exception signal
-  val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))    
+  val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
   // val s2_except_parity_af =  VecInit(s2_parity_error(i) && RegNext(RegNext(s1_fire))                      )
 
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_tlb_af(i)})
@@ -460,7 +460,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val port_miss_fix  = VecInit(Seq(fromMSHR(0).fire() && !s2_port_hit(0),   fromMSHR(1).fire() && s2_double_line && !s2_port_hit(1) ))
 
-  // secondary miss record registers 
+  // secondary miss record registers
   class MissSlot(implicit p: Parameters) extends  ICacheBundle {
     val m_vSetIdx   = UInt(idxBits.W)
     val m_pTag      = UInt(tagBits.W)
@@ -479,7 +479,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val sec_meet_0_miss = fix_sec_miss(0) || fix_sec_miss(2)
   val sec_meet_1_miss = fix_sec_miss(1) || fix_sec_miss(3)
   sec_meet_vec := VecInit(Seq(sec_meet_0_miss,sec_meet_1_miss ))
-  
+
   /*** miss/hit pattern: <Control Signal> only raise at the first cycle of s2_valid ***/
   val cacheline_0_hit  = (s2_port_hit(0) || sec_meet_0_miss)
   val cacheline_0_miss = !s2_port_hit(0) && !sec_meet_0_miss
@@ -525,10 +525,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 
   def getMissSituat(slotNum : Int, missNum : Int ) :Bool =  {
-    RegNext(s1_fire) && 
-    RegNext(missSlot(slotNum).m_vSetIdx === s1_req_vsetIdx(missNum)) && 
-    RegNext(missSlot(slotNum).m_pTag  === s1_req_ptags(missNum)) && 
-    !s2_port_hit(missNum)  && 
+    RegNext(s1_fire) &&
+    RegNext(missSlot(slotNum).m_vSetIdx === s1_req_vsetIdx(missNum)) &&
+    RegNext(missSlot(slotNum).m_pTag  === s1_req_ptags(missNum)) &&
+    !s2_port_hit(missNum)  &&
     waitSecondComeIn(missStateQueue(slotNum))
   }
 
@@ -681,9 +681,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   val miss_all_fix       =  wait_state === wait_finish
-                              
+
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch)
-  
+
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := s2_req_vsetIdx(i)
@@ -740,7 +740,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   io.perfInfo.miss_0_except_1 := miss_0_except_1_latch
   io.perfInfo.except_0      := except_0_latch
   io.perfInfo.bank_hit(0)   := only_0_miss_latch  || hit_0_hit_1_latch || hit_0_miss_1_latch || hit_0_except_1_latch
-  io.perfInfo.bank_hit(1)   := miss_0_hit_1_latch || hit_0_hit_1_latch 
+  io.perfInfo.bank_hit(1)   := miss_0_hit_1_latch || hit_0_hit_1_latch
   io.perfInfo.hit           := hit_0_hit_1_latch || only_0_hit_latch || hit_0_except_1_latch || except_0_latch
 
   /** <PERF> fetch bubble generated by icache miss*/

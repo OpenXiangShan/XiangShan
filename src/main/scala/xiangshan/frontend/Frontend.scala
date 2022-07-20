@@ -118,6 +118,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     sfence = sfence,
     csr = tlbCsr,
     width = 6,
+    nRespDups = 1,
     shouldBlock = true,
     itlbParams
   )

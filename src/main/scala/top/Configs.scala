@@ -124,25 +124,25 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // 6when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
           superNWays = 4,
           normalAsVictim = true,
           partialStaticPMP = true,
-          outReplace = true
+          outReplace = false
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
           normalAsVictim = true,
           superNWays = 4,
           partialStaticPMP = true,
-          outReplace = true
+          outReplace = false
         ),
         btlbParameters = TLBParameters(
           name = "btlb",

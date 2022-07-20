@@ -29,8 +29,8 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
-  val io = IO(new TlbIO(Width, q))
+class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
+  val io = IO(new TlbIO(Width, nRespDups, q))
 
   require(q.superAssociative == "fa")
   if (q.sameCycle || q.missSameCycle) {
@@ -71,6 +71,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     ports = Width,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
+    nDups = nRespDups,
     saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
@@ -118,11 +119,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
-    val ppn = Mux(super_hit, super_ppn, normal_ppn)
-    val perm = Mux(super_hit, super_perm, normal_perm)
-
-    val pf = perm.pf
-    val af = perm.af
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -135,13 +131,9 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
-    XSDebug(validReg, p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn)} perm:${perm}\n")
-
-    val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
-    resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := ptw.resp.fire()
@@ -149,38 +141,50 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
-    val pmp_paddr = Mux(vmEnable, Cat(super_ppn, offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
+    val pmp_paddr = Mux(vmEnable, Cat(super_ppn(0), offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
     pmp(i).valid := resp(i).valid
     pmp(i).bits.addr := pmp_paddr
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
-    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
-    val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
-    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
-    val stPermFail = !(modeCheck && perm.w)
-    val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
-    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
-    val fault_valid = vmEnable
-    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
-    resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
-    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
-    // NOTE: pf need && with !af, page fault has higher priority than access fault
-    // but ptw may also have access fault, then af happens, the translation is wrong.
-    // In this case, pf has lower priority than af
+    resp(i).bits.static_pm.valid := !super_hit && vmEnable && q.partialStaticPMP.B // ls/st unit should use this mmio, not the result from pmp
+    resp(i).bits.static_pm.bits := !normal_perm(0).pm.c
 
-    val spm = normal_perm.pm // static physical memory protection or attribute
-    val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
-    // for tlb without sram, tlb will miss, pm should be ignored outsize
-    resp(i).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
-    resp(i).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
-    resp(i).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
-    resp(i).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
-    resp(i).bits.static_pm.bits := !spm.c
+    // duplicate resp part
+    for (d <- 0 until nRespDups) {
+      val ppn = Mux(super_hit, super_ppn(0), normal_ppn(d))
+      val perm = Mux(super_hit, super_perm(0), normal_perm(d))
+
+      val pf = perm.pf
+      val af = perm.af
+      val paddr = Cat(ppn, offReg)
+      resp(i).bits.paddr(d) := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+
+      val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+      val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+      val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
+      val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
+      val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+      val stPermFail = !(modeCheck && perm.w)
+      val instrPermFail = !(modeCheck && perm.x)
+      val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
+      val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+      val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+      val fault_valid = vmEnable
+      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
+      resp(i).bits.excp(d).pf.st := (stPf || stUpdate) && fault_valid && !af
+      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+      // NOTE: pf need && with !af, page fault has higher priority than access fault
+      // but ptw may also have access fault, then af happens, the translation is wrong.
+      // In this case, pf has lower priority than af
+
+      val spm = normal_perm(d).pm // static physical memory protection or attribute
+      val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+      // for tlb without sram, tlb will miss, pm should be ignored outsize
+      resp(i).bits.excp(d).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
+      resp(i).bits.excp(d).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
+      resp(i).bits.excp(d).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
+    }
 
     (hit, miss, validReg)
   }
@@ -352,12 +356,13 @@ object TLB {
     sfence: SfenceBundle,
     csr: TlbCsrBundle,
     width: Int,
+    nRespDups: Int = 1,
     shouldBlock: Boolean,
     q: TLBParameters
   )(implicit p: Parameters) = {
     require(in.length == width)
 
-    val tlb = Module(new TLB(width, q))
+    val tlb = Module(new TLB(width, nRespDups, q))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
