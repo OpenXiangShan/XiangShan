@@ -51,7 +51,7 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
-  val toIMeta       = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
+  val toIMeta       = DecoupledIO(new ICacheReadBundle)
   val fromIMeta     = Input(new ICacheMetaRespBundle)
 }
 
@@ -177,12 +177,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   /** SRAM request */
-  val fetch_req = List(toMeta, toData)
+  //0 -> metaread, 1,2,3 -> data, 3 -> code
   for(i <- 0 until partWayNum) {
-    fetch_req.map(_.valid                  := (s0_valid || tlb_slot.valid) && !missSwitchBit)
-    fetch_req.map(_.bits(i).isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line(i)))
-    fetch_req.map(_.bits(i).vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx(i)))
+    toData.valid              := (s0_valid || tlb_slot.valid) && !missSwitchBit
+    toData.bits(i).isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line(i))
+    toData.bits(i).vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx(i))
   }
+
+  toMeta.valid                    := (s0_valid || tlb_slot.valid) && !missSwitchBit
+  toMeta.bits.isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,s0_double_line.head)
+  toMeta.bits.vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,s0_req_vsetIdx.head)
+
 
   toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
@@ -223,7 +228,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   tlb_resp(1) := (!fromITLB(3).bits.miss && toITLB(3).valid) || !tlb_slot.double_line
   val tlb_all_resp = RegNext(tlb_resp.reduce(_&&_))
 
-  val sram_ready = fetch_req.map(array => array.ready).reduce(_&&_)
+  val sram_ready = toData.ready && toMeta.ready
 
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 

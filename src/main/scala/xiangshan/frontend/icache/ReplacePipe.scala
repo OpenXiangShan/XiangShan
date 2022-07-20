@@ -44,7 +44,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val io = IO(new Bundle{
     val pipe_req = Flipped(DecoupledIO(new ReplacePipeReq))
 
-    val meta_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
+    val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
 
     val error      = Output(new L1CacheErrorInfo)
@@ -87,14 +87,20 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   r0_fire        := io.pipe_req.fire()
 
-  val array_req = List(toMeta, toData)
 
   for(i <- 0 until partWayNum) {
-    array_req.map(_.valid                  := r0_valid)
-    array_req.map(_.bits(i).isDoubleLine   := false.B)
-    array_req.map(_.bits(i).vSetIdx(0)        := r0_req_vidx)
-    array_req.map(_.bits(i).vSetIdx(1)        := DontCare)
+    toData.valid                    :=  r0_valid
+    toData.bits(i).isDoubleLine     :=  false.B
+    toData.bits(i).vSetIdx(0)        :=  r0_req_vidx
+    toData.bits(i).vSetIdx(1)        :=  DontCare
   }
+
+  val array_req = List(toMeta, toData)
+
+  toMeta.valid               := r0_valid
+  toMeta.bits.isDoubleLine   :=false.B
+  toMeta.bits.vSetIdx(0)        := r0_req_vidx
+  toMeta.bits.vSetIdx(1)        := DontCare
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
