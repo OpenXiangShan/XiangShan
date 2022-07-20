@@ -185,10 +185,11 @@ class TLBSA(
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx_bypass = RegNext((entries.io.waddr(0) === ridx) && entries.io.wen(0))
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && vidx(0)
+    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
     resp.bits.ppn := data.genPPN()(vpn_reg)
     resp.bits.perm := data.perm
@@ -203,6 +204,7 @@ class TLBSA(
     access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
   }
 
+  // W ports should be 1, or, check at above will be wrong.
   entries.io.wen(0) := io.w.valid || io.victim.in.valid
   entries.io.waddr(0) := Mux(io.w.valid,
     get_set_idx(io.w.bits.data.entry.tag, nSets),
