@@ -73,8 +73,29 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
 
   val mv_cls_out = RegEnable(Mux(rm(0), classify_out, move_out), regEnables(0))
 
+  val s2i_s1 = Module(new fudian.FPToInt_s1(FPU.f32.expWidth, FPU.f32.precision))
+  val d2i_s1 = Module(new fudian.FPToInt_s1(FPU.f64.expWidth, FPU.f64.precision))
+
+  for(f2i <- Seq(s2i_s1, d2i_s1)){
+    f2i.io.a := src1_d_s1
+    f2i.io.rm := rm
+    f2i.io.op := Cat(
+      ctrl.typ(1),
+      !ctrl.typ(0)
+    )
+  }
+
   // stage2
   val mv_cls_out_s2 = RegEnable(mv_cls_out, regEnables(1))
+  val s2i_s1_to_s2 = RegEnable(s2i_s1.io.to_s2, regEnables(1))
+  val d2i_s1_to_s2 = RegEnable(d2i_s1.io.to_s2, regEnables(1))
+
+  val s2i_s2 = Module(new fudian.FPToInt_s2(FPU.f32.expWidth, FPU.f32.precision))
+  val d2i_s2 = Module(new fudian.FPToInt_s2(FPU.f64.expWidth, FPU.f64.precision))
+
+  s2i_s2.io.s1 := s2i_s1_to_s2
+  d2i_s2.io.s1 := d2i_s1_to_s2
+
 
   val scmp = Module(new FCMP(FPU.f32.expWidth, FPU.f32.precision))
   val dcmp = Module(new FCMP(FPU.f64.expWidth, FPU.f64.precision))
@@ -99,25 +120,15 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
     dcmp.io.fflags
   ), regEnables(1))
 
-  val s2i = Module(new fudian.FPToInt(FPU.f32.expWidth, FPU.f32.precision))
-  val d2i = Module(new fudian.FPToInt(FPU.f64.expWidth, FPU.f64.precision))
 
-  for(f2i <- Seq(s2i, d2i)){
-    f2i.io.a := src1_d
-    f2i.io.rm := rm_reg
-    f2i.io.op := Cat(
-      ctrl_reg.typ(1),
-      !ctrl_reg.typ(0)
-    )
-  }
 
   val conv_out = RegEnable(Mux(ctrl_reg.typeTagIn === FPU.S,
-    s2i.io.result,
-    d2i.io.result
+    s2i_s2.io.result,
+    d2i_s2.io.result
   ), regEnables(1))
   val conv_exc = RegEnable(Mux(ctrl_reg.typeTagIn === FPU.S,
-    s2i.io.fflags,
-    d2i.io.fflags
+    s2i_s2.io.fflags,
+    d2i_s2.io.fflags
   ), regEnables(1))
 
   val ctrl_reg_s2 = RegEnable(ctrl_reg, regEnables(1))
