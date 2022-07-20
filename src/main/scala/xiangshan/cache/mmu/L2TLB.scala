@@ -192,11 +192,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem_arb.io.out.ready := mem.a.ready && !flush
 
   // assert, should not send mem access at same addr for twice.
-  val last_req_addr = RegEnable(blockBytes_align(mem_arb.io.out.bits.addr), mem_arb.io.out.fire())
-  val last_req_v = RegInit(false.B)
-  when (mem_arb.io.out.fire) { last_req_v := true.B }
-  when (flush) { last_req_v := false.B }
-  XSError(last_req_v && mem_arb.io.out.fire && (last_req_addr === blockBytes_align(mem_arb.io.out.bits.addr)),
+  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info.vpn, cache.io.refill.valid)
+  val last_resp_level = RegEnable(cache.io.refill.bits.level, cache.io.refill.valid)
+  val last_resp_v = RegInit(false.B)
+  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
+  when (cache.io.refill.valid && !last_has_invalid) { last_resp_v := true.B }
+  when (flush) { last_resp_v := false.B }
+  XSError(last_resp_v && cache.io.refill.valid &&
+    (cache.io.refill.bits.req_info.vpn === last_resp_vpn) &&
+    (cache.io.refill.bits.level === last_resp_level),
     "l2tlb should not access mem at same addr for twice")
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
