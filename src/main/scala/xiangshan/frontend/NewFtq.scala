@@ -213,10 +213,9 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val pc_mem_wen = Output(Bool())
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
   val pc_mem_wdata = Output(new Ftq_RF_Components)
-  val target = Output(UInt(VAddrBits.W))
-  // predecode correct target
-  val pd_redirect_waddr = Valid(UInt(log2Ceil(FtqSize).W))
-  val pd_redirect_target = Output(UInt(VAddrBits.W))
+  // newest target
+  val newest_entry_target = Output(UInt(VAddrBits.W))
+  val newest_entry_ptr = Output(new FtqPtr)
 }
 
 
@@ -584,6 +583,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     newest_entry_ptr := last_cycle_bpu_in_ptr
   }
 
+  // num cycle is fixed
+  io.toBackend.newest_entry_ptr := RegNext(newest_entry_ptr)
+  io.toBackend.newest_entry_target := RegNext(newest_entry_target)
+
 
   bpuPtr := bpuPtr + enq_fire
   when (io.toIfu.req.fire && allowToIfu) {
@@ -649,6 +652,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val entry_next_addr  = Wire(UInt(VAddrBits.W))
   val diff_entry_next_addr = WireInit(update_target(ifuPtr.value)) //TODO: remove this
 
+  // TODO: reconsider target address bypass logic
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf.head
     entry_is_to_send := true.B
@@ -793,7 +797,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
   io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
   io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf.head)
-  io.toBackend.target       := RegNext(last_cycle_bpu_target)
 
   // *******************************************************************************
   // **************************** redirect from backend ****************************
@@ -888,29 +891,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     when (cfiIndex_bits_wen) {
       cfiIndex_vec(r_idx).bits := r_offset
     }
-    when (newest_entry_ptr === r_ptr && isFull(newest_entry_ptr, commPtr)){
-      newest_entry_target := redirect.bits.cfiUpdate.target
-    }
+    newest_entry_target := redirect.bits.cfiUpdate.target
+    newest_entry_ptr := r_ptr
     update_target(r_idx) := redirect.bits.cfiUpdate.target // TODO: remove this
     if (isBackend) {
       mispredict_vec(r_idx)(r_offset) := r_mispred
     }
   }
   
-  // write to backend target vec
-  io.toBackend.pd_redirect_waddr.valid := RegNext(fromIfuRedirect.valid)
-  io.toBackend.pd_redirect_waddr.bits  := RegNext(fromIfuRedirect.bits.ftqIdx.value)
-  io.toBackend.pd_redirect_target      := RegNext(fromIfuRedirect.bits.cfiUpdate.target)
-
-  // write to backend target vec
-  io.toBackend.pd_redirect_waddr.valid := RegNext(fromIfuRedirect.valid)
-  io.toBackend.pd_redirect_waddr.bits  := RegNext(fromIfuRedirect.bits.ftqIdx.value)
-  io.toBackend.pd_redirect_target      := RegNext(fromIfuRedirect.bits.cfiUpdate.target)
-
-  io.toBackend.pd_redirect_waddr.valid := false.B
-  io.toBackend.pd_redirect_waddr.bits  := ifuRedirectToBpu.bits.ftqIdx.value
-  io.toBackend.pd_redirect_target      := ifuRedirectToBpu.bits.cfiUpdate.target
-
   when(backendRedirectReg.valid && lastIsMispredict) {
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
