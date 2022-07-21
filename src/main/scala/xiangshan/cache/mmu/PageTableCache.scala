@@ -527,7 +527,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       memSelData,
       refill.level,
       refill_prefetch,
-      !memPte.isPf(refill.level),
+      true.B,
     )
     spreplace.access(refillIdx)
     spv := spv | rfOH
