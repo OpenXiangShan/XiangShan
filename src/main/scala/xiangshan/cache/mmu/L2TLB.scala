@@ -148,7 +148,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     missQueue.io.in.ready || ptw.io.req.ready))
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) && !from_pre(cache.io.resp.bits.req_info.source) && !ptw.io.req.ready
+    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed)
+    && !from_pre(cache.io.resp.bits.req_info.source) 
+    && (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
   missQueue.io.in.bits := cache.io.resp.bits.req_info
   missQueue.io.sfence  := sfence
   missQueue.io.csr := csr
