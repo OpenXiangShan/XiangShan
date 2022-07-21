@@ -63,6 +63,7 @@ class PageCacheRespBundle(implicit p: Parameters) extends PtwBundle {
 class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
   val req_info = new L2TlbInnerBundle()
   val isFirst = Bool()
+  val bypassed = Vec(3, Bool())
 }
 
 class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
@@ -72,6 +73,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
     val isFirst = Bool()
     val hit = Bool()
     val prefetch = Bool() // is the entry fetched by prefetch
+    val bypassed = Bool()
     val toFsm = new Bundle {
       val l1Hit = Bool()
       val l2Hit = Bool()
@@ -113,9 +115,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val stageResp = Wire(Decoupled(new PtwCacheReq()))         // deq stage
   stageReq <> io.req
   PipelineConnect(stageReq, stageDelay(0), stageDelay(1).ready, flush, rwHarzad)
-  InsideStageConnect(stageDelay(0), stageDelay(1))
+  InsideStageConnect(stageDelay(0), stageDelay(1), stageReq.fire)
   PipelineConnect(stageDelay(1), stageCheck(0), stageCheck(1).ready, flush)
-  InsideStageConnect(stageCheck(0), stageCheck(1))
+  InsideStageConnect(stageCheck(0), stageCheck(1), stageDelay(1).fire)
   PipelineConnect(stageCheck(1), stageResp, io.resp.ready, flush)
   stageResp.ready := !stageResp.valid || io.resp.ready
 
@@ -193,14 +195,25 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val stageCheck_valid_1cycle = OneCycleValid(stageDelay(1).fire, flush) // replace & perf counter
   val stageResp_valid_1cycle = OneCycleValid(stageCheck(1).fire, flush)  // ecc flush
 
+
+  def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
+    vpn1(vpnnLen*3-1, vpnnLen*(2-level)) === vpn2(vpnnLen*3-1, vpnnLen*(2-level))
+  }
+  // NOTE: not actually bypassed, just check if hit, re-access the page cache
+  def refill_bypass(vpn: UInt, level: Int) = {
+    io.refill.valid && (level.U === io.refill.bits.level) && vpn_match(io.refill.bits.req_info.vpn, vpn, level),
+  }
+
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
     val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr.satp.asid) && l1v(i) }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
-    val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
-    val hitPre = ParallelPriorityMux(hitVec zip l1.map(_.prefetch))
-    val hit = ParallelOR(hitVec)
+
+    // stageDelay, but check for l1
+    val hitPPN = DataHoldBypass(ParallelMux(hitVec zip l1.map(_.ppn)), stageDelay_valid_1cycle)
+    val hitPre = DataHoldBypass(ParallelMux(hitVec zip l1.map(_.prefetch)), stageDelay_valid_1cycle)
+    val hit = DataHoldBypass(ParallelOR(hitVec), stageDelay_valid_1cycle)
 
     when (hit && stageDelay_valid_1cycle) { ptwl1replace.access(OHToUInt(hitVec)) }
 
@@ -272,6 +285,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // delay one cycle after sram read
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = DataHoldBypass(getl3vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
+    val bypass_delay = DataHoldBypass(refill_bypass(stageDelay(0).bits.req_info.vpn, 2), stageDelay_valid_1cycle || io.refill.valid)
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
@@ -339,13 +353,21 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   check_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError)
   check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel, spValid)
 
-  // stage3, add stage 3 for ecc check...
   val resp_res = Reg(new PageCacheRespBundle)
   when (stageCheck(1).fire) { resp_res := check_res }
+
+  // stageResp bypass
+  val bypassed = Wire(Vec(3, Bool()))
+  bypassed.indices.foreach(i =>
+    bypassed(i) := stageResp.bits.bypassed(i) ||
+      ValidHoldBypass(refill_bypass(stageResp.bits.req_info.vpn, i),
+        OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
+  )
 
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := resp_res.l3.hit || resp_res.sp.hit
+  io.resp.bits.bypassed := bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
@@ -359,6 +381,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
+  XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
@@ -582,10 +605,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
   }
 
-  def InsideStageConnect[T <:Data](in: DecoupledIO[T], out: DecoupledIO[T], block: Bool = false.B): Unit = {
+  def InsideStageConnect(in: DecoupledIO[PtwCacheReq], out: DecoupledIO[PtwCacheReq], InFire: Bool): Unit = {
     in.ready := !in.valid || out.ready
     out.valid := in.valid
     out.bits := in.bits
+    out.bits.bypassed.zip(in.bits.bypassed).zipWithIndex.map{ case (b, i) =>
+      b._1 := b._2 || DataHoldBypass(refill_bypass(in.bits.req_info.vpn, i), OneCycleValid(InFire, false.B) || io.refill.valid)
+    }
   }
 
   // Perf Count

@@ -127,7 +127,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val LLPTWARB_CACHE=0
   val LLPTWARB_PTW=1
   val llptw_arb = Module(new Arbiter(new LLPTWInBundle, 2))
-  llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit
+  llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   llptw_arb.io.in(LLPTWARB_CACHE).bits.req_info := cache.io.resp.bits.req_info
   llptw_arb.io.in(LLPTWARB_CACHE).bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw_arb.io.in(LLPTWARB_PTW) <> ptw.io.llptw
@@ -139,21 +139,22 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
+  cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    Mux(cache.io.resp.bits.toFsm.l2Hit, llptw_arb.io.in(LLPTWARB_CACHE).ready,
+    Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
     missQueue.io.in.ready || ptw.io.req.ready))
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    !cache.io.resp.bits.toFsm.l2Hit && !ptw.io.req.ready
+    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) && !from_pre(cache.io.resp.bits.req_info.source) && !ptw.io.req.ready
   missQueue.io.in.bits := cache.io.resp.bits.req_info
   missQueue.io.sfence  := sfence
   missQueue.io.csr := csr
 
   // NOTE: missQueue req has higher priority
-  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit
+  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn

@@ -731,3 +731,13 @@ class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
 class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {
   val source = UInt(bSourceWidth.W)
 }
+
+object ValidHoldBypass{
+  def apply(infire: Bool, outfire: Bool, flush: Bool = false.B) = {
+    val valid = RegInit(false.B)
+    when (infire) { valid := true.B }
+    when (outfire) { valid := false.B } // ATTENTION: order different with ValidHold
+    when (flush) { valid := false.B } // NOTE: the flush will flush in & out, is that ok?
+    valid || infire
+  }
+}
