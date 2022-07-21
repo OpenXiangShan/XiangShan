@@ -27,6 +27,7 @@ import scala.math.min
 
 @chiselName
 class TLBFA(
+  parentName: String,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -57,6 +58,7 @@ class TLBFA(
     hitVec.suggestName("hitVec")
 
     val hitVecReg = RegEnable(hitVec, req.fire())
+    assert(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U), s"${parentName} fa port${i} multi-hit")
 
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
@@ -146,11 +148,12 @@ class TLBFA(
   )
   generatePerfEvent()
 
-  println(s"tlb_fa: nSets${nSets} nWays:${nWays}")
+  println(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
 @chiselName
 class TLBSA(
+  parentName: String,
   ports: Int,
   nSets: Int,
   nWays: Int,
@@ -182,10 +185,11 @@ class TLBSA(
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx_bypass = RegNext((entries.io.waddr(0) === ridx) && entries.io.wen(0))
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && vidx(0)
+    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
     resp.bits.ppn := data.genPPN()(vpn_reg)
     resp.bits.perm := data.perm
@@ -200,6 +204,7 @@ class TLBSA(
     access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
   }
 
+  // W ports should be 1, or, check at above will be wrong.
   entries.io.wen(0) := io.w.valid || io.victim.in.valid
   entries.io.waddr(0) := Mux(io.w.valid,
     get_set_idx(io.w.bits.data.entry.tag, nSets),
@@ -244,24 +249,17 @@ class TLBSA(
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
 
   for (i <- 0 until nSets) {
-    for (j <- 0 until nWays) {
-      XSPerfAccumulate(s"refill${i}_${j}", (io.w.valid || io.victim.in.valid) &&
-        (Mux(io.w.valid, get_set_idx(io.w.bits.data.entry.tag, nSets), get_set_idx(io.victim.in.bits.entry.tag, nSets)) === i.U) &&
-        (j.U === io.w.bits.wayIdx)
+    XSPerfAccumulate(s"refill${i}", (io.w.valid || io.victim.in.valid) &&
+        (Mux(io.w.valid, get_set_idx(io.w.bits.data.entry.tag, nSets), get_set_idx(io.victim.in.bits.entry.tag, nSets)) === i.U)
       )
-    }
   }
 
   for (i <- 0 until nSets) {
-    for (j <- 0 until nWays) {
-      XSPerfAccumulate(s"hit${i}_${j}", io.r.resp.map(_.valid)
-        .zip(io.access.map(a => UIntToOH(a.touch_ways.bits)(j)))
-        .map{case(vi, hi) => vi && hi }
-        .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn, nSets)) === i.U))
-        .map{a => (a._1 && a._2).asUInt()}
-        .fold(0.U)(_ + _)
-      )
-    }
+    XSPerfAccumulate(s"hit${i}", io.r.resp.map(a => a.valid & a.bits.hit)
+      .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn, nSets)) === i.U))
+      .map{a => (a._1 && a._2).asUInt()}
+      .fold(0.U)(_ + _)
+    )
   }
 
   for (i <- 0 until nSets) {
@@ -272,13 +270,13 @@ class TLBSA(
     )
   }
 
-  println(s"tlb_sa: nSets:${nSets} nWays:${nWays}")
+  println(s"${parentName} tlb_sa: nSets:${nSets} nWays:${nWays}")
 }
 
 object TlbStorage {
   def apply
   (
-    name: String,
+    parentName: String,
     associative: String,
     ports: Int,
     nSets: Int,
@@ -288,12 +286,12 @@ object TlbStorage {
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(ports, nSets, nWays, saveLevel, normalPage, superPage))
-       storage.suggestName(s"tlb_${name}_fa")
+       val storage = Module(new TLBFA(parentName, ports, nSets, nWays, saveLevel, normalPage, superPage))
+       storage.suggestName(s"${parentName}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(ports, nSets, nWays, normalPage, superPage))
-       storage.suggestName(s"tlb_${name}_sa")
+       val storage = Module(new TLBSA(parentName, ports, nSets, nWays, normalPage, superPage))
+       storage.suggestName(s"${parentName}_sa")
        storage.io
     }
   }
@@ -304,7 +302,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
 
 // TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
   val normalPage = TlbStorage(
-    name = "normal",
+    parentName = q.name + "_storage",
     associative = q.normalAssociative,
     ports = ports,
     nSets = q.normalNSets,
@@ -314,7 +312,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
     superPage = false
   )
   val superPage = TlbStorage(
-    name = "super",
+    parentName = q.name + "_storage",
     associative = q.superAssociative,
     ports = ports,
     nSets = q.superNSets,
@@ -351,6 +349,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
     rp.bits.super_hit := sp.bits.hit
     rp.bits.super_ppn := sp.bits.ppn
     rp.bits.spm := np.bits.perm.pm
+    assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
 
   normalPage.victim.in <> superPage.victim.out
