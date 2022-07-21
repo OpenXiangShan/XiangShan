@@ -87,7 +87,6 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   r0_fire        := io.pipe_req.fire()
 
-
   for(i <- 0 until partWayNum) {
     toData.valid                    :=  r0_valid
     toData.bits(i).isDoubleLine     :=  false.B
@@ -101,7 +100,6 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   toMeta.bits.isDoubleLine   :=false.B
   toMeta.bits.vSetIdx(0)        := r0_req_vidx
   toMeta.bits.vSetIdx(1)        := DontCare
-
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
   /**
