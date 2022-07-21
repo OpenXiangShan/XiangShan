@@ -197,7 +197,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val last_resp_level = RegEnable(cache.io.refill.bits.level, cache.io.refill.valid)
   val last_resp_v = RegInit(false.B)
   val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
-  when (cache.io.refill.valid && !last_has_invalid) { last_resp_v := true.B }
+  when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
   when (flush) { last_resp_v := false.B }
   XSError(last_resp_v && cache.io.refill.valid &&
     (cache.io.refill.bits.req_info.vpn === last_resp_vpn) &&
