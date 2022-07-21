@@ -170,12 +170,13 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     inflight_counter := Mux(io.ptw.req(0).fire(), inflight_counter + 1.U, inflight_counter - 1.U)
   }
 
+  val canEnqueue = Wire(Bool()) // NOTE: actually enqueue
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
   val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
     vi && io.ptw.resp.bits.entry.hit(pi, io.csr.satp.asid, true, true)}
   val ptwResp_valid = RegNext(io.ptw.resp.fire() && Cat(ptwResp_OldMatchVec).orR, init = false.B)
   val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
-  val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn})
+  val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue})
   val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn))
 
   (0 until Width) foreach { i =>
@@ -224,7 +225,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val enqPtrVecInit = VecInit((0 until Width).map(i => enqPtr + i.U))
   val enqPtrVec = VecInit((0 until Width).map(i => enqPtrVecInit(accumEnqNum(i))))
   val enqNum = PopCount(reqs.map(_.valid))
-  val canEnqueue = counter +& enqNum <= Size.U
+  canEnqueue := counter +& enqNum <= Size.U
 
   // the req may recv false ready, but actually received. Filter and TLB will handle it.
   val enqNum_fake = PopCount(io.tlb.req.map(_.valid))
