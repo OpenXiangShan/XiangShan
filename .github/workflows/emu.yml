@@ -112,6 +112,11 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
             --build --threads 8
+      - name: EMU - riscv-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
+            --wave-dump $WAVE_HOME --threads 8 --numa    \
+            --ci riscv-tests 2> /dev/zero
       - name: EMU - CoreMark
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
@@ -123,12 +128,6 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
             --wave-dump $WAVE_HOME --threads 8 --numa    \
             --ci microbench 2> perf.log
-          cat perf.log | sort
-      - name: EMU - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
-            --wave-dump $WAVE_HOME --threads 8 --numa    \
-            --ci linux-hello 2> perf.log
           cat perf.log | sort
 
   release-emu:

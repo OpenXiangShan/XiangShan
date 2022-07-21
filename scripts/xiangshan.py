@@ -33,7 +33,7 @@ class XSArgs(object):
     nemu_home = os.path.join(noop_home, "../NEMU")
     am_home = os.path.join(noop_home, "../nexus-am")
     dramsim3_home = os.path.join(noop_home, "../DRAMsim3")
-    rvtest_home = os.path.join(noop_home, "../riscv-tests")
+    rvtest_home = "/nfs-nvme/home/share/debug/southlake/riscv-tests"
     default_wave_home = os.path.join(noop_home, "build")
     wave_home   = default_wave_home
 
@@ -305,7 +305,7 @@ class XiangShan(object):
     def run_ci(self, test):
         all_tests = {
             # "cputest": self.__get_ci_cputest,
-            # "riscv-tests": self.__get_ci_rvtest,
+            "riscv-tests": self.__get_ci_rvtest,
             # "misc-tests": self.__get_ci_misc,
             # "mc-tests": self.__get_ci_mc,
             # "nodiff-tests": self.__get_ci_nodiff,
