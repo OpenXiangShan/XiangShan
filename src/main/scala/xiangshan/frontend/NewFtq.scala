@@ -494,7 +494,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ifuPtrPlus2  := ifuPtrPlus2_write
   ifuWbPtr     := ifuWbPtr_write
   commPtr      := commPtr_write
-  commPtrPlus1 := commPtr_write
+  commPtrPlus1 := commPtrPlus1_write
   val validEntries = distanceBetween(bpuPtr, commPtr)
 
   // **********************************************************************
@@ -670,7 +670,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                           bpu_in_bypass_buf_for_ifu.startAddr,
                           Mux(isFull(ifuPtrPlus1, commPtr),
                             newest_entry_target,
-                            ftq_pc_mem.io.ifuPtrPlus2_rdata.startAddr)) // ifuPtr+2
+                            RegNext(ftq_pc_mem.io.ifuPtrPlus2_rdata.startAddr))) // ifuPtr+2
   }.otherwise {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
     //toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
@@ -679,7 +679,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                           bpu_in_bypass_buf_for_ifu.startAddr,
                           Mux(isFull(ifuPtrPlus1, commPtr),
                             newest_entry_target,
-                            ftq_pc_mem.io.ifuPtrPlus1_rdata.startAddr)) // ifuPtr+1
+                            RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata.startAddr))) // ifuPtr+1
   }
 
   io.toIfu.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
