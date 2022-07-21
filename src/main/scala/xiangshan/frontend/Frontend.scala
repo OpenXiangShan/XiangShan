@@ -122,6 +122,7 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
     sfence = sfence,
     csr = tlbCsr,
     width = 6,
+    nRespDups = 1,
     shouldBlock = true,
     itlbParams,
     parentName = parentName + "TLB_"

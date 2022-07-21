@@ -25,6 +25,62 @@ import utils._
 
 import scala.math.min
 
+class BankedAsyncDataModuleTemplateWithDup[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numDup: Int,
+  numBanks: Int
+) extends Module {
+  val io = IO(new Bundle {
+    val raddr = Vec(numRead, Input(UInt(log2Ceil(numEntries).W)))
+    val rdata = Vec(numRead, Vec(numDup, Output(gen)))
+    val wen   = Input(Bool())
+    val waddr = Input(UInt(log2Ceil(numEntries).W))
+    val wdata = Input(gen)
+  })
+  require(numBanks > 1)
+  require(numEntries > numBanks)
+
+  val numBankEntries = numEntries / numBanks
+  def bankOffset(address: UInt): UInt = {
+    address(log2Ceil(numBankEntries) - 1, 0)
+  }
+
+  def bankIndex(address: UInt): UInt = {
+    address(log2Ceil(numEntries) - 1, log2Ceil(numBankEntries))
+  }
+
+  val dataBanks = Seq.tabulate(numBanks)(i => {
+    val bankEntries = if (i < numBanks - 1) numBankEntries else (numEntries - (i * numBankEntries))
+    Mem(bankEntries, gen)
+  })
+
+  // async read, but regnext
+  for (i <- 0 until numRead) {
+    val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
+    val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
+    for (j <- 0 until numDup) {
+      bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
+      for (k <- 0 until numBanks) {
+        data_read(j)(k) := Mux(io.wen && (io.waddr === io.raddr(i)),
+          io.wdata, dataBanks(k)(bankOffset(io.raddr(i))))
+      }
+    }
+    // next cycle48G
+    for (j <- 0 until numDup) {
+      io.rdata(i)(j) := Mux1H(bank_index(j), data_read(j))
+    }
+  }
+
+  // write
+  for (i <- 0 until numBanks) {
+    when (io.wen && (bankIndex(io.waddr) === i.U)) {
+      dataBanks(i)(bankOffset(io.waddr)) := io.wdata
+    }
+  }
+}
+
 @chiselName
 class TLBFA(
   sameCycle: Boolean,
@@ -63,11 +119,11 @@ class TLBFA(
     resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
-      resp.bits.ppn := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
-      resp.bits.perm := entries(0).perm
+      resp.bits.ppn(0) := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
+      resp.bits.perm(0) := entries(0).perm
     } else {
-      resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
-      resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+      resp.bits.ppn(0) := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
+      resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
     io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
@@ -157,6 +213,7 @@ class TLBSA
 (
   sameCycle: Boolean,
   ports: Int,
+  nDups: Int,
   nSets: Int,
   nWays: Int,
   normalPage: Boolean,
@@ -169,12 +226,13 @@ class TLBSA
   // timing optimization to divide v select into two cycles.
   val VPRE_SELECT = min(8, nSets)
   val VPOST_SELECT = nSets / VPRE_SELECT
+  val nBanks = 8
 
-  val io = IO(new TlbStorageIO(nSets, nWays, ports))
+  val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
 
   io.r.req.map(_.ready :=  true.B)
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
-  val entries = Module(new SyncDataModuleTemplate(new TlbEntry(normalPage, superPage), nSets, ports, 1, "l1tlb_sa"))
+  val entries = Module(new BankedAsyncDataModuleTemplateWithDup(new TlbEntry(normalPage, superPage), nSets, ports, nDups, nBanks))
 
   for (i <- 0 until ports) { // duplicate sram
     val req = io.r.req(i)
@@ -188,13 +246,16 @@ class TLBSA
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx_bypass = RegNext((entries.io.waddr(0) === ridx) && entries.io.wen(0))
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data.hit(vpn_reg, io.csr.satp.asid, nSets) && vidx(0)
+    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
-    resp.bits.ppn := data.genPPN()(vpn_reg)
-    resp.bits.perm := data.perm
+    for (d <- 0 until nDups) {
+      resp.bits.ppn(d) := data(d).genPPN()(vpn_reg)
+      resp.bits.perm(d) := data(d).perm
+    }
     io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := { RegNext(req.valid) }
@@ -207,11 +268,11 @@ class TLBSA
     access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
   }
 
-  entries.io.wen(0) := io.w.valid || io.victim.in.valid
-  entries.io.waddr(0) := Mux(io.w.valid,
+  entries.io.wen := io.w.valid || io.victim.in.valid
+  entries.io.waddr := Mux(io.w.valid,
     get_set_idx(io.w.bits.data.entry.tag, nSets),
     get_set_idx(io.victim.in.bits.entry.tag, nSets))
-  entries.io.wdata(0) := Mux(io.w.valid,
+  entries.io.wdata := Mux(io.w.valid,
     (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
     io.victim.in.bits.entry)
 
@@ -289,6 +350,7 @@ object TlbStorage {
     associative: String,
     sameCycle: Boolean,
     ports: Int,
+    nDups: Int = 1,
     nSets: Int,
     nWays: Int,
     saveLevel: Boolean = false,
@@ -300,7 +362,7 @@ object TlbStorage {
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, normalPage, superPage))
+       val storage = Module(new TLBSA(sameCycle, ports, nDups, nSets, nWays, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }

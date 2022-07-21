@@ -298,15 +298,15 @@ object TlbCmd {
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
-class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
+class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
-      val ppn = Output(UInt(ppnLen.W))
-      val perm = Output(new TlbPermBundle())
+      val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val perm = Vec(nDups, Output(new TlbPermBundle()))
     }))
     val resp_hit_sameCycle = Output(Vec(ports, Bool())) // req hit or not same cycle with req
   }
@@ -397,25 +397,25 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
   val instr = Output(Bool())
 }
 
-class TlbResp(implicit p: Parameters) extends TlbBundle {
-  val paddr = Output(UInt(PAddrBits.W))
+class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
+  val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val miss = Output(Bool())
   val fast_miss = Output(Bool()) // without sram part for timing optimization
-  val excp = new Bundle {
+  val excp = Vec(nDups, new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
-  }
+  })
   val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
 
   override def toPrintable: Printable = {
-    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
+    p"paddr:0x${Hexadecimal(paddr(0))} miss:${miss} excp.pf: ld:${excp(0).pf.ld} st:${excp(0).pf.st} instr:${excp(0).pf.instr} ptwBack:${ptwBack}"
   }
 }
 
-class TlbRequestIO()(implicit p: Parameters) extends TlbBundle {
+class TlbRequestIO(nRespDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
-  val resp = Flipped(DecoupledIO(new TlbResp))
+  val resp = Flipped(DecoupledIO(new TlbResp(nRespDups)))
 }
 
 class BlockTlbRequestIO()(implicit p: Parameters) extends TlbBundle {
@@ -438,9 +438,9 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
   val csr = Input(new TlbCsrBundle)
 }
 
-class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
+class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
-  val requestor = Vec(Width, Flipped(new TlbRequestIO))
+  val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val ptw = new TlbPtwIO(Width)
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null

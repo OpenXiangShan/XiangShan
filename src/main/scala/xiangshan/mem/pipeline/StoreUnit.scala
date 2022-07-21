@@ -94,7 +94,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle())
-    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
@@ -103,7 +103,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
     io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_inval
 
-  val s1_paddr = io.dtlbResp.bits.paddr
+  val s1_paddr = io.dtlbResp.bits.paddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mmio = is_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
@@ -133,8 +133,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.paddr := s1_paddr
   io.out.bits.miss := false.B
   io.out.bits.mmio := s1_mmio
-  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
-  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
+  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
 
   io.lsq.valid := io.in.valid
   io.lsq.bits := io.out.bits

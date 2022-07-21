@@ -165,11 +165,11 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd", exuParameters.LduCnt, ldtlbParams))
+    val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd", exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLB(parentName = parentName + s"tlbSt", exuParameters.StuCnt, sttlbParams))
+    val tlb_st = Module(new TLB(parentName = parentName + s"tlbSt", exuParameters.StuCnt, 1, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st
