@@ -30,8 +30,8 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 
   def port_0_read_0 =  !vSetIdx(0)(0)
   def port_0_read_1 =   vSetIdx(0)(0)
-  def port_1_read_0 =   vSetIdx(1)(0) && isDoubleLine
-  def port_1_read_1 =  !vSetIdx(1)(0) && isDoubleLine
+  def port_1_read_0 =  !vSetIdx(1)(0) && isDoubleLine
+  def port_1_read_1 =   vSetIdx(1)(0) && isDoubleLine
 
   def read_bank_0 = port_0_read_0 || port_1_read_0
   def read_bank_1 =  port_0_read_1 || port_1_read_1
