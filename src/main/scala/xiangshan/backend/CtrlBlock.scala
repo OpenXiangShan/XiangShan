@@ -496,9 +496,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val jumpPcRead1 = pcMem.io.rdata(1).getPc(RegNext(intDq.io.deqNext(2).cf.ftqOffset))
   io.jumpPc := Mux(pingpong && (exuParameters.AluCnt > 2).B, jumpPcRead1, jumpPcRead0)
   val jalrTargetReadPtr = Mux(pingpong && (exuParameters.AluCnt > 2).B,
-    intDq.io.deqNext(2).cf.ftqPtr,
-    intDq.io.deqNext(0).cf.ftqPtr)
-  pcMem.io.raddr(4) := (jalrTargetReadPtr+1.U).value
+    io.dispatch(2).bits.cf.ftqPtr,
+    io.dispatch(0).bits.cf.ftqPtr)
+  pcMem.io.raddr(4) := (jalrTargetReadPtr + 1.U).value
   val jalrTargetRead = pcMem.io.rdata(4).startAddr
   val read_from_newest_entry = RegNext(jalrTargetReadPtr) === RegNext(io.frontend.fromFtq.newest_entry_ptr)
   io.jalr_target := Mux(read_from_newest_entry, RegNext(io.frontend.fromFtq.newest_entry_target), jalrTargetRead)
