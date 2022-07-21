@@ -30,7 +30,7 @@ import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
 import huancun.debug.TLLogger
-import huancun.utils.{ClockSync3, DFTResetGen, ResetGen}
+import huancun.utils.{PulseClockSync3, DFTResetGen, ResetGen}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 
@@ -363,7 +363,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     // sync external interrupts
     require(plicSource.module.in.length == ext_intrs.getWidth)
     for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
-      plic_in := ClockSync3(interrupt)
+      plic_in := PulseClockSync3(interrupt)
     }
 
     // positive edge sampling of the lower-speed rtc_clock
