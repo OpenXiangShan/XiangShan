@@ -86,7 +86,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
-  io.dtlb.resp.ready   := false.B
+  io.dtlb.resp.ready   := true.B
 
   io.flush_sbuffer.valid := false.B
 
@@ -125,7 +125,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
-    io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.robIdx := in.uop.robIdx

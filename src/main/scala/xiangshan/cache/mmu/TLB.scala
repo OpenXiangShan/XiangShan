@@ -184,6 +184,7 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   def handle_nonblock(idx: Int): Unit = {
     io.requestor(idx).resp.valid := req_out_v(idx)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
+    XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
     val ptw_just_back = ptw.resp.fire && ptw.resp.bits.entry.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
