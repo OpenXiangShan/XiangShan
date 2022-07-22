@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.chiselName
 import xiangshan._
-import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.icache._
 import utils._
 import scala.math._
 
@@ -63,6 +63,11 @@ class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParame
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
+}
+
+class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val icacheReady       = Output(Bool())
+  val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
 }
 
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
