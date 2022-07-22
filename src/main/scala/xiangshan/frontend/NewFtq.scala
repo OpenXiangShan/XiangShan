@@ -668,7 +668,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
                           bpu_in_bypass_buf_for_ifu.startAddr,
-                          Mux(isFull(ifuPtrPlus1, commPtr),
+                          Mux(ifuPtr === newest_entry_ptr,
                             newest_entry_target,
                             RegNext(ftq_pc_mem.io.ifuPtrPlus2_rdata.startAddr))) // ifuPtr+2
   }.otherwise {
@@ -678,7 +678,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) // reduce potential bubbles
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
                           bpu_in_bypass_buf_for_ifu.startAddr,
-                          Mux(isFull(ifuPtrPlus1, commPtr),
+                          Mux(ifuPtr === newest_entry_ptr,
                             newest_entry_target,
                             RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata.startAddr))) // ifuPtr+1
   }
