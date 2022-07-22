@@ -57,7 +57,7 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
 }
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
-  val icacheInter     = Flipped(new ICacheMainPipeBundle)
+  val icacheInter     = Flipped(new IFUICacheIO)
   val icacheStop      = Output(Bool())
   val icachePerfInfo  = Input(new ICachePerfInfo)
   val toIbuffer       = Decoupled(new FetchToIBuffer)
@@ -155,14 +155,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
-  fromFtq.req.ready := f1_ready//toICache(0).ready && toICache(1).ready && f1_ready //&& GTimer() > 500.U
+  fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
 
-  // toICache(0).valid       := DontCare//fromFtq.req.valid //&& !f0_flush
-  // toICache(0).bits.vaddr  := DontCare//fromFtq.req.bits.startAddr
-  // toICache(1).valid       := DontCare//fromFtq.req.valid && f0_doubleLine //&& !f0_flush
-  // toICache(1).bits.vaddr  := DontCare//fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
-  io.icacheInter.req.valid := DontCare
-  io.icacheInter.req.bits  := DontCare
   /** <PERF> f0 fetch bubble */
 
   XSPerfAccumulate("fetch_bubble_ftq_not_valid",   !fromFtq.req.valid && fromFtq.req.ready  )

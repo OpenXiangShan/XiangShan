@@ -449,6 +449,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle
+  val toIFU       = Output(Bool())
   val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
   val itlb        = Vec(PortNumber * 2 + 1, new BlockTlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
@@ -551,6 +552,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
   prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
 
+  //notify IFU that Icache pipeline is available
+  io.toIFU := mainPipe.io.fetch.req.ready
 
   // tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
   // tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
@@ -576,7 +579,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   for(i <- 0 until PortNumber){
     missUnit.io.req(i)           <>   mainPipe.io.mshr(i).toMSHR
     mainPipe.io.mshr(i).fromMSHR <>   missUnit.io.resp(i)
-
   }
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
