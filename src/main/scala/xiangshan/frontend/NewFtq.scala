@@ -975,8 +975,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // commit reads
   val commit_pc_bundle = RegNext(ftq_pc_mem.io.commPtr_rdata)
   val commit_target =
-    Mux(commPtr === newest_entry_ptr,
-      newest_entry_target,
+    Mux(RegNext(commPtr === newest_entry_ptr),
+      RegNext(newest_entry_target),
       RegNext(ftq_pc_mem.io.commPtrPlus1_rdata.startAddr))
   ftq_pd_mem.io.raddr.last := commPtr.value
   val commit_pd = ftq_pd_mem.io.rdata.last
