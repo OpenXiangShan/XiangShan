@@ -423,7 +423,7 @@ class FtqPcMemWrapper(numOtherReads: Int)(implicit p: Parameters) extends XSModu
 
   val num_pc_read = numOtherReads + 5
   val mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize,
-    num_pc_read, 1, "FtqPC", concatData=false, Some(Seq.tabulate(num_pc_read)(i => false))))
+    num_pc_read, 1, "FtqPC"))
   mem.io.wen(0)   := io.wen
   mem.io.waddr(0) := io.waddr
   mem.io.wdata(0) := io.wdata
@@ -674,7 +674,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }.otherwise {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
     //toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
-    entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send)
+    entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send) ||
+                        RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) // reduce potential bubbles
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
                           bpu_in_bypass_buf_for_ifu.startAddr,
                           Mux(isFull(ifuPtrPlus1, commPtr),
