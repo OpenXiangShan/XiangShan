@@ -733,7 +733,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int, parentName: String = "Unk
       way=pWay,
       shouldReset = true,
       singlePort = true,
-      parentName = parentName
+      parentName = parentName + s"bank${bank}_"
     ))
 
     sramBank.io.r.req.valid := io.read.req(bank).valid
