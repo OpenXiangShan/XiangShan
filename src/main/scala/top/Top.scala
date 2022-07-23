@@ -235,6 +235,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val l3_sram_mbist = if(l3cacheOpt.nonEmpty) Some(IO(Vec(l3SliceNum, new JTAGInterface))) else None
     if(l3cacheOpt.nonEmpty){
       val l3Module = l3cacheOpt.get.module
+      l3Module.io.dfx_reset := dfx_reset.get
       mem.l3_dir.zip(l3Module.mbist_extra_dirs.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
       mem.l3_banks.zip(l3Module.mbist_extra_banks.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
       l3Module.fscan_clkungate.get := xsx_fscan.clkungate

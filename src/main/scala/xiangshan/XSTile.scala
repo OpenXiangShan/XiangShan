@@ -387,6 +387,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
           mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
           mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
         }
+
+        l2cache.get.module.io.dfx_reset := dfx_reset.get
       }
       else{
         mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
