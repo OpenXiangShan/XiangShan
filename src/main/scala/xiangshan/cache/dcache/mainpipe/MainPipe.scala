@@ -588,7 +588,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     )
   )
   val update_data = s3_req_miss_dup(2) || s3_store_hit_dup(0) || s3_can_do_amo_write
-  assert(!(banked_wmask.orR && !update_data))
+  assert(!(s3_valid && banked_wmask.orR && !update_data))
 
   // generate write data
   // AMO hits
