@@ -647,23 +647,27 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
 
-  val toICachePcBundle = WireInit(ftq_pc_mem.io.ifuPtr_rdata)
+  val toICachePcBundle = Wire(Vec(4,new Ftq_RF_Components))
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
   val entry_is_to_send = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_ftq_offset = WireInit(cfiIndex_vec(ifuPtr.value))
   val entry_next_addr  = Wire(UInt(VAddrBits.W))
+
+  val pc_mem_ifu_ptr_rdata = VecInit(Seq.fill(4)(RegNext(ftq_pc_mem.io.ifuPtr_rdata)))
+  val pc_mem_ifu_plus1_rdata = VecInit(Seq.fill(4)(RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)))
   val diff_entry_next_addr = WireInit(update_target(ifuPtr.value)) //TODO: remove this
 
   // TODO: reconsider target address bypass logic
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
     toIfuPcBundle := bpu_in_bypass_buf_for_ifu
+    toICachePcBundle.zipWithIndex.map{case(copy,i) => copy := bpu_in_bypass_buf.tail(i) }
     entry_is_to_send := true.B
     entry_next_addr := last_cycle_bpu_target
     entry_ftq_offset := last_cycle_cfiIndex
     diff_entry_next_addr := last_cycle_bpu_target // TODO: remove this
   }.elsewhen (last_cycle_to_ifu_fire) {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)
-    toICachePcBundle := ftq_pc_mem.io.ifuPtrPlus1_rdata
+    toICachePcBundle.zipWithIndex.map{case(copy,i) => copy := pc_mem_ifu_plus1_rdata(i) }
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) ||
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1)) // reduce potential bubbles
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
@@ -673,7 +677,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                             RegNext(ftq_pc_mem.io.ifuPtrPlus2_rdata.startAddr))) // ifuPtr+2
   }.otherwise {
     toIfuPcBundle := RegNext(ftq_pc_mem.io.ifuPtr_rdata)
-    //toICachePcBundle := ftq_pc_mem.io.ifuPtr_rdata
+    toICachePcBundle.zipWithIndex.map{case(copy,i) => copy := pc_mem_ifu_ptr_rdata(i) }
     entry_is_to_send := RegNext(entry_fetch_status(ifuPtr.value) === f_to_send) ||
                         RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) // reduce potential bubbles
     entry_next_addr := Mux(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1),
@@ -689,12 +693,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
 
   io.toICache.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
-  io.toICache.req.bits.fromFtqPcBundle(toICachePcBundle)
-  io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
-  io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
-    bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
-    bypassWrtie.nextlineStart := bpu_in_bypass_buf.tail(i).nextLineAddr
-  }
+  io.toICache.req.bits.pcMemRead.zipWithIndex.map{case(copy,i) => copy.fromFtqPcBundle(toICachePcBundle(i))}
+  // io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
+  // io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
+  //   bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
+  //   bypassWrtie.nextlineStart := bpu_in_bypass_buf.tail(i).nextLineAddr
+  // }
 
   // TODO: remove this
   XSError(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
