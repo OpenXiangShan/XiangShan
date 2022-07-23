@@ -34,7 +34,7 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
     val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
     fakeRAM.clk   := clock
     fakeRAM.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
+    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr_dup_dcache - "h80000000".U) >> 3)
     fakeRAM.wIdx  := 0.U
     fakeRAM.wdata := 0.U
     fakeRAM.wmask := 0.U
@@ -46,7 +46,7 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
     io.lsu.load(i).resp.bits.miss := false.B
     io.lsu.load(i).resp.bits.replay := false.B
     io.lsu.load(i).resp.bits.id := DontCare
-    io.lsu.load(i).s1_hit_way := 1.U
+    io.lsu.load(i).s2_hit := true.B
     io.lsu.load(i).s1_disable_fast_wakeup := false.B
   }
   // to LSQ
