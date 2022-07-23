@@ -465,9 +465,9 @@ class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
 }
 
 
-/****************************  PTW  *************************************/
+/****************************  L2TLB  *************************************/
 abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
-abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
+abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
@@ -714,7 +714,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   }
 }
 
-class PtwIO(implicit p: Parameters) extends PtwBundle {
+class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = new Bundle {
@@ -730,4 +730,14 @@ class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
 
 class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {
   val source = UInt(bSourceWidth.W)
+}
+
+object ValidHoldBypass{
+  def apply(infire: Bool, outfire: Bool, flush: Bool = false.B) = {
+    val valid = RegInit(false.B)
+    when (infire) { valid := true.B }
+    when (outfire) { valid := false.B } // ATTENTION: order different with ValidHold
+    when (flush) { valid := false.B } // NOTE: the flush will flush in & out, is that ok?
+    valid || infire
+  }
 }
