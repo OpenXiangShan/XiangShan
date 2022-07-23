@@ -472,8 +472,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   }
 
   // fast load to load forward
-  io.fastpath.valid := io.in.valid // for debug only
-  io.fastpath.data := rdata // raw data
+  io.fastpath.valid := RegNext(io.out.valid) // for debug only
+  io.fastpath.data := RegNext(io.out.bits.data)
 
 
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
