@@ -120,12 +120,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
 
   //Ftq RegNext Register
-  val pcMemReadReg  = Reg(Vec(partWayNum, new FtqICacheInfo))
-  val fromFtqReq = Wire(Vec(partWayNum, new FtqICacheInfo))
-  pcMemReadReg.map( _ := fromFtq.bits.pcMemRead)
-
-  fromFtqReq.zipWithIndex.map{case(req,i) => req := Mux(fromFtq.bits.bypassSelect, fromFtq.bits.bpuBypassWrite(i), pcMemReadReg(i) )}
-  dontTouch(pcMemReadReg)
+  val fromFtqReq = fromFtq.bits.pcMemRead
   
   /** pipeline control signal */
   val s0_ready, s1_ready, s2_ready = WireInit(false.B)
