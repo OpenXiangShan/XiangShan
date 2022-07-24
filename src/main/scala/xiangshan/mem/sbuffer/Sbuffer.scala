@@ -129,7 +129,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
-  val willSendDcacheReq = Wire(Bool())
+  val sbuffer_out_s0_fire = Wire(Bool())
 
   /*
        idle --[flush]   --> drain   --[buf empty]--> idle
@@ -183,7 +183,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
   val (missqReplayTimeOutIdx, missqReplayMayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
-  val missqReplayHasTimeOut = RegNext(missqReplayMayHasTimeOut) && !RegNext(willSendDcacheReq)
+  val missqReplayHasTimeOut = RegNext(missqReplayMayHasTimeOut) && !RegNext(sbuffer_out_s0_fire)
   val missqReplayTimeOutIdxReg = RegEnable(missqReplayTimeOutIdx, missqReplayMayHasTimeOut)
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
@@ -426,69 +426,90 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     genSameBlockInflightMask(ptag_in).orR
   }
 
+  // ---------------------------------------------------------------------------
+  // sbuffer to dcache pipeline
+  // ---------------------------------------------------------------------------
+
+  val sbuffer_out_s1_ready = Wire(Bool())
+
+  // ---------------------------------------------------------------------------
+  // sbuffer_out_s0
+  // ---------------------------------------------------------------------------
+
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
-  val evictionIdx = Mux(missqReplayHasTimeOut,
+  val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
     missqReplayTimeOutIdxReg,
     Mux(need_drain,
       drainIdx,
       Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
     )
   )
-  
-  /*
-      If there is a inflight dcache req which has same ptag with evictionIdx's ptag,
-      current eviction should be blocked.
-   */
-  val prepareValid = missqReplayHasTimeOut || 
-    stateVec(evictionIdx).isDcacheReqCandidate() && (need_drain || cohHasTimeOut || need_replace)
-  assert(!(stateVec(evictionIdx).isDcacheReqCandidate && !noSameBlockInflight(evictionIdx)))
-  val prepareValidReg = RegInit(false.B)
-  // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
-  val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
-  // when willSendDcacheReq, read dcache req data and store them in a pipeline reg 
-  willSendDcacheReq := prepareValid && canSendDcacheReq
-  when(io.dcache.req.fire()){
-    prepareValidReg := false.B
+
+  // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
+  // current eviction should be blocked.
+  val sbuffer_out_s0_valid = missqReplayHasTimeOut || 
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
+    (need_drain || cohHasTimeOut || need_replace)
+  assert(!(
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate && 
+    !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
+  ))
+  val sbuffer_out_s0_cango = sbuffer_out_s1_ready
+  sbuffer_out_s0_fire := sbuffer_out_s0_valid && sbuffer_out_s0_cango
+
+  // ---------------------------------------------------------------------------
+  // sbuffer_out_s1
+  // ---------------------------------------------------------------------------
+
+  val sbuffer_out_s1_valid = RegInit(false.B)
+  sbuffer_out_s1_ready := io.dcache.req.ready || !sbuffer_out_s1_valid
+  val sbuffer_out_s1_fire = io.dcache.req.fire()
+
+  // when sbuffer_out_s1_fire, send dcache req stored in pipeline reg to dcache
+  when(sbuffer_out_s1_fire){
+    sbuffer_out_s1_valid := false.B
   }
-  when(canSendDcacheReq){
-    prepareValidReg := prepareValid
+  // when sbuffer_out_s0_fire, read dcache req data and store them in a pipeline reg 
+  when(sbuffer_out_s0_cango){
+    sbuffer_out_s1_valid := sbuffer_out_s0_valid
   }
-  when(willSendDcacheReq){
-    stateVec(evictionIdx).state_inflight := true.B
-    stateVec(evictionIdx).w_timeout := false.B
-    // stateVec(evictionIdx).s_pipe_req := true.B
-    XSDebug(p"$evictionIdx will be sent to Dcache\n")
+  when(sbuffer_out_s0_fire){
+    stateVec(sbuffer_out_s0_evictionIdx).state_inflight := true.B
+    stateVec(sbuffer_out_s0_evictionIdx).w_timeout := false.B
+    // stateVec(sbuffer_out_s0_evictionIdx).s_pipe_req := true.B
+    XSDebug(p"$sbuffer_out_s0_evictionIdx will be sent to Dcache\n")
   }
+
   XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
   XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
-    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${activeMask(evictionIdx)}\n")
-  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.req.ready}\n")
+    p"blocked:${!noSameBlockInflight(sbuffer_out_s0_evictionIdx)} v:${activeMask(sbuffer_out_s0_evictionIdx)}\n")
+  XSDebug(p"sbuffer_out_s0_valid:$sbuffer_out_s0_valid evictIdx:$sbuffer_out_s0_evictionIdx dcache ready:${io.dcache.req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may not accurate
   accessIdx(EnsbufferWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && canSendDcacheReq && activeMask(replaceIdx))
+    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && sbuffer_out_s0_cango && activeMask(replaceIdx))
   accessIdx(EnsbufferWidth).bits := replaceIdx
-  val evictionIdxReg = RegEnable(evictionIdx, willSendDcacheReq)
-  val evictionPTag = RegEnable(ptag(evictionIdx), willSendDcacheReq)
-  val evictionVTag = RegEnable(vtag(evictionIdx), willSendDcacheReq)
+  val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, enable = sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
 
-  io.dcache.req.valid := prepareValidReg
+  io.dcache.req.valid := sbuffer_out_s1_valid
   io.dcache.req.bits := DontCare
-  io.dcache.req.bits.cmd    := MemoryOpConstants.M_XWR
-  io.dcache.req.bits.addr   := getAddr(evictionPTag)
-  io.dcache.req.bits.vaddr   := getAddr(evictionVTag)
-  io.dcache.req.bits.data  := data(evictionIdxReg).asUInt
-  io.dcache.req.bits.mask  := mask(evictionIdxReg).asUInt
-  io.dcache.req.bits.id := evictionIdxReg
+  io.dcache.req.bits.cmd   := MemoryOpConstants.M_XWR
+  io.dcache.req.bits.addr  := getAddr(sbuffer_out_s1_evictionPTag)
+  io.dcache.req.bits.vaddr := getAddr(sbuffer_out_s1_evictionVTag)
+  io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
+  io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
+  io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
 
-  when (io.dcache.req.fire()) {
+  when (sbuffer_out_s1_fire) {
     assert(!(io.dcache.req.bits.vaddr === 0.U))
     assert(!(io.dcache.req.bits.addr === 0.U))
   }
 
-  XSDebug(io.dcache.req.fire(),
-    p"send buf [$evictionIdxReg] to Dcache, req fire\n"
+  XSDebug(sbuffer_out_s1_fire,
+    p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
   )
 
   // update sbuffer status according to dcache resp source
