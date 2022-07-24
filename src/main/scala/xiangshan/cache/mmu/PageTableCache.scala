@@ -319,6 +319,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
   val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
+  val l3HitValid = l3HitData.vs(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
@@ -350,7 +351,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val check_res = Wire(new PageCacheRespBundle)
   check_res.l1.apply(l1Hit, l1Pre, l1HitPPN)
   check_res.l2.apply(l2Hit, l2Pre, l2HitPPN, ecc = l2eccError)
-  check_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError)
+  check_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError, valid = l3HitValid)
   check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel, spValid)
 
   val resp_res = Reg(new PageCacheRespBundle)
@@ -527,7 +528,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       memSelData,
       refill.level,
       refill_prefetch,
-      true.B,
+      !memPte.isPf(refill.level),
     )
     spreplace.access(refillIdx)
     spv := spv | rfOH
