@@ -35,6 +35,7 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def instr2Rs1: UInt = instr(1)(RS1_MSB, RS1_LSB)
   def instr2Rs2: UInt = instr(1)(RS2_MSB, RS2_LSB)
   protected def instr2Rd: UInt = instr(1)(RD_MSB, RD_LSB)
+  def instr2Imm12: UInt = instr(1)(IMM12_MSB, IMM12_LSB)
   protected def withSameDest: Bool = instr1Rd === instr2Rd
   def destToRs1: Bool = instr1Rd === instr2Rs1
   protected def destToRs2: Bool = instr1Rd === instr2Rs2
@@ -73,7 +74,7 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def lsrc2NeedZero: Boolean = false
   def lsrc2NeedMux: Boolean = false
   def lsrc2MuxResult: UInt = Mux(destToRs1, instr2Rs2, instr2Rs1)
-
+  def needExtraImm12: Boolean = false
   def fusionName: String
 }
 
@@ -458,10 +459,26 @@ class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def fusionName: String = "andi127_mulw"
 }
 
+class FusedLi32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
+  extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.LUI
+  def inst2Cond = instr(1) === Instructions.ADDI
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  override def thisInstr: Option[BitPat] = Some(Instructions.LUI)
+  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.add)
+  override def lsrc2NeedZero: Boolean = true
+  override def needExtraImm12: Boolean = true
+
+  def fusionName: String = "lui_addi"
+}
+
 class FusionDecodeInfo extends Bundle {
   val rs2FromRs1 = Output(Bool())
   val rs2FromRs2 = Output(Bool())
   val rs2FromZero = Output(Bool())
+  val hasExtraImm12 = Output(Bool())
 }
 
 class FusionDecodeReplace extends Bundle {
@@ -469,6 +486,7 @@ class FusionDecodeReplace extends Bundle {
   val fuOpType = Valid(FuOpType())
   val lsrc2 = Valid(UInt(5.W))
   val src2Type = Valid(SrcType())
+  val extraImm12 = Valid(UInt(12.W))
 
   def update(cs: CtrlSignals): Unit = {
     when (fuType.valid) {
@@ -482,6 +500,9 @@ class FusionDecodeReplace extends Bundle {
     }
     when (src2Type.valid) {
       cs.srcType(1) := src2Type.bits
+    }
+    when (extraImm12.valid) {
+      ReuseFields.connect(Seq(cs.fpu), extraImm12.bits) // non-float fusion share 19-bits fpu field
     }
   }
 }
@@ -502,7 +523,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
 
   io.clear.head := false.B
 
-  val instrPairs = io.in.dropRight(1).zip(io.in.drop(1)).map(x => Seq(x._1, x._2))
+  private val instrPairs = io.in.dropRight(1).zip(io.in.drop(1)).map(x => Seq(x._1, x._2))
   instrPairs.zip(io.dec).zip(io.out).zipWithIndex.foreach{ case (((pair, dec), out), i) =>
     val fusionList = Seq(
       new FusedAdduw(pair),
@@ -530,7 +551,8 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedAddwzexth(pair),
       new FusedAddwsexth(pair),
       new FusedLogiclsb(pair),
-      new FusedLogicZexth(pair)
+      new FusedLogicZexth(pair),
+      new FusedLi32(pair),
     )
     val fire = io.in(i).valid && io.inReady(i)
     val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
@@ -577,14 +599,22 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR
+    val needExtraImm12 = VecInit(fusionVec.zip(fusionList.map(_.needExtraImm12)).filter(_._2).map(_._1)).asUInt.orR
     io.info(i).rs2FromZero := src2WithZero
     io.info(i).rs2FromRs1 := src2WithMux && !RegEnable(fusionList.head.destToRs1, fire)
     io.info(i).rs2FromRs2 := src2WithMux && RegEnable(fusionList.head.destToRs1, fire)
+    io.info(i).hasExtraImm12 := needExtraImm12
     out.bits.lsrc2.valid := src2WithMux || src2WithZero
     when (src2WithMux) {
       out.bits.lsrc2.bits := RegEnable(fusionList.head.lsrc2MuxResult, fire)
     }.otherwise {//elsewhen (src2WithZero) {
       out.bits.lsrc2.bits := 0.U
+    }
+    out.bits.extraImm12.valid := needExtraImm12
+    when (needExtraImm12) {
+      out.bits.extraImm12.bits := RegEnable(fusionList.head.instr2Imm12, fire)
+    }.otherwise {
+      out.bits.extraImm12.bits := 0.U
     }
     // TODO: assume every instruction fusion clears the second instruction now
     io.clear(i + 1) := out.valid

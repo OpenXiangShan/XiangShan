@@ -142,6 +142,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
       }.elsewhen(io.fusionInfo(i).rs2FromZero) {
         uops(i).psrc(1) := 0.U
       }
+      when (io.fusionInfo(i).hasExtraImm12) {
+        uops(i).ctrl
+      }
     }
     uops(i).psrc(2) := io.fpReadPorts(i)(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, io.intReadPorts(i).last, io.fpReadPorts(i).last)
@@ -158,6 +161,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
+    if (i < RenameWidth - 1) {
+      val Imm12 = WireInit(0.U(12.W))
+      when (io.fusionInfo(i).hasExtraImm12) {
+        ReuseFields.connect(Imm12, Seq(uops(i).ctrl.fpu.asUInt))
+        ReuseFields.connect(Seq(io.out(i).bits.psrc(0), io.out(i).bits.psrc(1)), Imm12)
+        io.out(i).bits.ctrl.selImm := SelImm.IMM_FUSE_32
+      }
+    }
     // dirty code for fence. The lsrc is passed by imm.
     when (io.out(i).bits.ctrl.fuType === FuType.fence) {
       io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
@@ -246,8 +257,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
       io.out(i).bits.psrc(0) := lui_imm(lui_imm_in_imm + psrcWidth - 1, lui_imm_in_imm)
       io.out(i).bits.psrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + psrcWidth)
     }
-
   }
+
 
   /**
     * Instructions commit: update freelist and rename table

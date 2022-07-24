@@ -60,6 +60,8 @@ trait DecodeUnitConstants
   val RS2_LSB = 20
   val RS3_MSB = 31
   val RS3_LSB = 27
+  val IMM12_MSB = 31
+  val IMM12_LSB = 20
 }
 
 /**
@@ -554,6 +556,14 @@ case class Imm_LUI_LOAD() {
     val loadImmLen = Imm_I().len
     val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.ctrl.imm(ImmUnion.maxLen - 1, loadImmLen))
     Imm_U().do_toImm32(imm_u)
+  }
+}
+
+case class Imm_LUI_ADDI() {
+  def getImm(uop: MicroOp): UInt = {
+    val imm12 = Wire(UInt(12.W))
+    ReuseFields.connect(imm12, Seq(uop.psrc(0), uop.psrc(1)))
+    Cat(uop.ctrl.imm(Imm_U().len - 1, 0), imm12)
   }
 }
 

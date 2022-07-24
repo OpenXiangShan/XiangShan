@@ -493,7 +493,7 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b0111".U
+    def IMM_FUSE_32 = "b0111".U
     def IMM_S  = "b0000".U
     def IMM_SB = "b0001".U
     def IMM_U  = "b0010".U
