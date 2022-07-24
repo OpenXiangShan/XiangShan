@@ -306,7 +306,7 @@ class WbArbiterWrapper(
         val difftest = Module(new DifftestIntWriteback)
         difftest.io.clock := clock
         difftest.io.coreid := io.hartId
-        difftest.io.valid := out.valid
+        difftest.io.valid := out.valid && out.bits.uop.ctrl.rfWen
         difftest.io.dest := out.bits.uop.pdest
         difftest.io.data := out.bits.data
       })
@@ -327,7 +327,7 @@ class WbArbiterWrapper(
         val difftest = Module(new DifftestFpWriteback)
         difftest.io.clock := clock
         difftest.io.coreid := io.hartId
-        difftest.io.valid := out.valid
+        difftest.io.valid := out.valid // all fp instr will write fp rf
         difftest.io.dest := out.bits.uop.pdest
         difftest.io.data := out.bits.data
       })
