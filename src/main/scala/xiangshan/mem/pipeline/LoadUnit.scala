@@ -674,9 +674,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       load_s1.io.in.valid && // valid load request
       !load_s1.io.s1_kill && // killed by load-load forwarding
       !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
-      !io.lsq.forward.dataInvalidFast && // forward failed
-      !load_s1.io.needLdVioCheckRedo // load-load violation check: load paddr cam struct hazard
+      !io.lsq.forward.dataInvalidFast // forward failed
     ) && 
+    !RegNext(load_s1.io.needLdVioCheckRedo) && // load-load violation check: load paddr cam struct hazard
     !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) &&
     s2_dcache_hit // dcache hit in lsu side
   
