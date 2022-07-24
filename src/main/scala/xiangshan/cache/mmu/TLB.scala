@@ -113,10 +113,15 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   /************************  main body above | method/log/perf below ****************************/
 
   def TLBRead(i: Int) = {
-    val (hit, ppn, perm, super_hit, super_ppn, static_pm) = entries.io.r_resp_apply(i)
+    val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
+    val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
+
+    val hit = e_hit || p_hit
+    val ppn = Mux(p_hit, p_ppn, e_ppn)
+    val perm = Mux(p_hit, p_perm, e_perm)
 
     val miss = !hit && vmEnable
-    val fast_miss = !super_hit && vmEnable
+    val fast_miss = !(e_super_hit || p_hit) && vmEnable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -130,10 +135,10 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := ptw.resp.fire()
 
-    // val pmp_paddr = Mux(vmEnable, Cat(super_ppn, get_off(req_out(i).vaddr)), vaddr)
+    val pmp_paddr = Mux(vmEnable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
-    val pmp_paddr = Mux(vmEnable, paddr, vaddr)
-    val static_pm_valid = !super_hit && vmEnable && q.partialStaticPMP.B
+    // val pmp_paddr = Mux(vmEnable, paddr, vaddr)
+    val static_pm_valid = !(e_super_hit || p_hit) && vmEnable && q.partialStaticPMP.B
 
     (hit, miss, pmp_paddr, static_pm, static_pm_valid, perm)
   }
@@ -179,7 +184,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
   def handle_nonblock(idx: Int): Unit = {
     io.requestor(idx).resp.valid := req_out_v(idx)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
-    io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx), false.B) // TODO: remove the regnext, timing
+
+    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.entry.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
+    io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
   }
 
@@ -229,6 +236,16 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
       }
     }
   }
+
+  // when ptw resp, tlb at refill_idx maybe set to miss by force.
+  // Bypass ptw resp to check.
+  def ptw_resp_bypass(vpn: UInt) = {
+    val p_hit = RegNext(ptw.resp.bits.entry.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
+    val p_ppn = RegEnable(ptw.resp.bits.entry.genPPN(vpn), io.ptw.resp.fire)
+    val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits), io.ptw.resp.fire)
+    (p_hit, p_ppn, p_perm)
+  }
+
   // assert
   for(i <- 0 until Width) {
     TimeOutAssert(req_out_v(i) && !resp(i).valid, timeOutThreshold, s"{q.name} port{i} long time no resp valid.")
