@@ -804,7 +804,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
         (s3_s_amoalu_dup(2) || !amo_wait_amoalu) &&
         io.tag_write.ready
     ) && need_wb
-  io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req_vaddr_dup_for_wb)))
+
+  io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
+  io.wb.bits.addr_dup_0 := get_block_addr(Cat(s3_tag, get_untag(s3_req_vaddr_dup_for_wb)))
+  io.wb.bits.addr_dup_1 := get_block_addr(Cat(s3_tag, get_untag(s3_req_vaddr_dup_for_wb)))
   io.wb.bits.param := writeback_param
   io.wb.bits.voluntary := s3_req_miss_dup(9) || s3_req_replace_dup(5)
   io.wb.bits.hasData := writeback_data
