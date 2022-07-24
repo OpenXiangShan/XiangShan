@@ -197,7 +197,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
 
   def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
-    vpn1(vpnnLen*3-1, vpnnLen*(2-level)) === vpn2(vpnnLen*3-1, vpnnLen*(2-level))
+    vpn1(vpnnLen*3-1, vpnnLen*(2-level)+3) === vpn2(vpnnLen*3-1, vpnnLen*(2-level)+3)
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int) = {
