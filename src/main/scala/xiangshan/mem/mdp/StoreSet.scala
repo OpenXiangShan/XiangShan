@@ -55,7 +55,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // rdata will be send to rename
   require(DecodeWidth == RenameWidth)
 
-  // data sram read port allocate 
+  // data sram read port allocate
   //
   // SSIT update logic will reuse decode ssit read port.
   // If io.update.valid, a redirect will be send to frontend,
@@ -118,7 +118,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
     // read SSIT in decode stage
     valid_array.io.raddr(i) := io.raddr(i)
     data_array.io.raddr(i) := io.raddr(i)
-    
+
     // gen result in rename stage
     io.rdata(i).valid := valid_array.io.rdata(i)
     io.rdata(i).ssid := data_array.io.rdata(i).ssid
@@ -127,20 +127,19 @@ class SSIT(implicit p: Parameters) extends XSModule {
 
   // flush SSIT
   // reset period: ResetTimeMax2Pow
-  val resetStepCounter = RegInit(0.U((log2Up(SSITSize)+1).W))
-  val resetStepCounterFull = resetStepCounter(log2Up(SSITSize))
+  val resetStepCounter = RegInit(0.U(log2Up(SSITSize + 1).W))
   val s_idle :: s_flush :: Nil = Enum(2)
   val state = RegInit(s_flush)
-  
+
   switch (state) {
     is(s_idle) {
-      when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+      when(resetCounter(ResetTimeMax2Pow - 1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
         state := s_flush
         resetCounter := 0.U
       }
     }
     is(s_flush) {
-      when(resetStepCounterFull) {
+      when(resetStepCounter === (SSITSize - 1).U) {
         state := s_idle // reset finished
         resetStepCounter := 0.U
       }.otherwise{
@@ -152,6 +151,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
       }
     }
   }
+  XSPerfAccumulate("reset_timeout", state === s_flush && resetCounter === 0.U)
 
   // update SSIT if load violation redirect is detected
 
@@ -191,7 +191,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
 
   val s2_ssidIsSame = s2_loadOldSSID === s2_storeOldSSID
   // for now we just use lowest bits of ldpc as store set id
-  val s2_ssidAllocate = s1_mempred_update_req.ldpc(SSIDWidth-1, 0)
+  val s2_ldSsidAllocate = XORFold(s1_mempred_update_req.ldpc, SSIDWidth)
+  val s2_stSsidAllocate = XORFold(s1_mempred_update_req.stpc, SSIDWidth)
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
   val s2_winnerSSID = Mux(s2_loadOldSSID < s2_storeOldSSID, s2_loadOldSSID, s2_storeOldSSID)
@@ -206,7 +207,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
     data_array.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).strict := strict
     debug_valid(pc) := valid
     debug_ssid(pc) := ssid
-    debug_strict(pc) := strict 
+    debug_strict(pc) := strict
   }
 
   def update_st_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
@@ -219,44 +220,44 @@ class SSIT(implicit p: Parameters) extends XSModule {
     data_array.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).strict := strict
     debug_valid(pc) := valid
     debug_ssid(pc) := ssid
-    debug_strict(pc) := strict 
+    debug_strict(pc) := strict
   }
 
   when(s2_mempred_update_req_valid){
     switch (Cat(s2_loadAssigned, s2_storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set,
-      // one is allocated and assigned to both instructions."
+      // two are allocated and assigned to each instruction."
       is ("b00".U(2.W)) {
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = s2_ssidAllocate,
+          ssid = s2_ldSsidAllocate,
           strict = false.B
         )
         update_st_ssit_entry(
           pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = s2_ssidAllocate,
+          ssid = s2_stSsidAllocate,
           strict = false.B
         )
       }
       // 2. "If the load has been assigned a store set, but the store has not,
-      // the store is assigned the load’s store set."
+      // one is allocated and assigned to the store instructions."
       is ("b10".U(2.W)) {
         update_st_ssit_entry(
           pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = s2_loadOldSSID,
+          ssid = s2_stSsidAllocate,
           strict = false.B
         )
       }
       // 3. "If the store has been assigned a store set, but the load has not,
-      // the load is assigned the store’s store set."
+      // one is allocated and assigned to the load instructions."
       is ("b01".U(2.W)) {
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = s2_storeOldSSID,
+          ssid = s2_ldSsidAllocate,
           strict = false.B
         )
       }
@@ -298,17 +299,14 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_update_lxsy", s2_mempred_update_req_valid && !s2_loadAssigned && s2_storeAssigned)
   XSPerfAccumulate("ssit_update_lysy", s2_mempred_update_req_valid && s2_loadAssigned && s2_storeAssigned)
   XSPerfAccumulate("ssit_update_should_strict", s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadAssigned && s2_storeAssigned)
-  XSPerfAccumulate("ssit_update_strict_failed", 
+  XSPerfAccumulate("ssit_update_strict_failed",
     s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadStrict && s2_loadAssigned && s2_storeAssigned
   ) // should be zero
 
-
   // debug
-  for (i <- 0 until StorePipelineWidth) {
-    when (s2_mempred_update_req.valid) {
-      XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
-      XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
-    }
+  when (s2_mempred_update_req.valid) {
+    XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
+    XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
   }
 }
 

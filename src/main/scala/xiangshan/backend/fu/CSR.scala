@@ -517,7 +517,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.dsid := sdsid
 
   // slvpredctl: load violation predict settings
-  val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
+  // Default reset period: 2^16
+  // Why this number: reset more frequently while keeping the overhead low
+  // Overhead: extra two redirections in every 64K cycles => ~0.1% overhead
+  val slvpredctl = RegInit(UInt(XLEN.W), "h60".U)
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.storeset_wait_store := slvpredctl(2)
