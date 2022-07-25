@@ -511,7 +511,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   reservedRefillData(1) := DataHoldBypass(data = missSlot(1).m_data, valid = miss_1_s2_0 || miss_1_s2_1)
 
   /*** miss state machine ***/
-  def only_pmp_af(portNum: Int) =  s2_except_pmp_af(portNum) && !s2_port_hit(portNum) && !s2_except(portNum) && s2_valid
+
+  //deal with not-cache-hit pmp af
+  val only_pmp_af = Wire(Vec(2, Bool()))
+  only_pmp_af(0) := s2_except_pmp_af(0) && cacheline_0_miss && !s2_except(0) && s2_valid
+  only_pmp_af(1) := s2_except_pmp_af(1) && cacheline_1_miss && !s2_except(1) && s2_valid && s2_double_line
 
   switch(wait_state){
     is(wait_idle){
