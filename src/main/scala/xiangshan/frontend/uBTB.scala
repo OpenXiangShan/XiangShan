@@ -28,7 +28,7 @@ import huancun.mbist.MBISTPipeline.placePipelines
 trait MicroBTBParams extends HasXSParameter with HasBPUParameter {
   val numEntries = UbtbSize
   val ftPredBits = 1
-  val ftPredSize = UbtbSize
+  val ftPredSize = FtbSize
   val ftPredDecayPeriod = 2048 // each time decay an entire row
   def ubtbAddr = new TableAddr(log2Up(numEntries), 1)
 }
@@ -87,8 +87,11 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     val decay_idx = RegInit(0.U(log2Ceil(nRows).W))
     decay_idx := decay_idx + doing_decay
 
-    val data = RegInit(VecInit(Seq.tabulate(nRows)(i => 0.U(1.W))))
-    io.rdata := data(RegNext(io.ridx))
+    val data = Module(new SyncDataModuleTemplate(Bool(), nRows, 1, 1, "UbtbFallThruPred",
+      concatData=false, perReadPortBypassEnable=Some(Seq(false))))
+
+    data.io.raddr(0) := io.ridx
+    io.rdata := data.io.rdata(0)
 
     
     val wdata = Mux1H(Seq(
@@ -101,11 +104,11 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
       (!doing_reset && doing_decay, decay_idx),
       (!(doing_reset || doing_decay) && io.wen, io.widx)
     ))
-    val ram_wen = io.wen || doing_decay || doing_reset
+    val wen = io.wen || doing_decay || doing_reset
 
-    when (ram_wen) {
-      data(widx) := wdata
-    }
+    data.io.wen(0) := wen
+    data.io.waddr(0) := widx
+    data.io.wdata(0) := wdata
 
     XSPerfAccumulate("num_decays", doing_decay)
     XSPerfAccumulate("num_writes", io.wen)
