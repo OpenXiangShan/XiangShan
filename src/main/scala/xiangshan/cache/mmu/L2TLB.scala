@@ -127,7 +127,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val LLPTWARB_CACHE=0
   val LLPTWARB_PTW=1
   val llptw_arb = Module(new Arbiter(new LLPTWInBundle, 2))
-  llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit
+  llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   llptw_arb.io.in(LLPTWARB_CACHE).bits.req_info := cache.io.resp.bits.req_info
   llptw_arb.io.in(LLPTWARB_CACHE).bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw_arb.io.in(LLPTWARB_PTW) <> ptw.io.llptw
@@ -139,21 +139,24 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
+  cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    Mux(cache.io.resp.bits.toFsm.l2Hit, llptw_arb.io.in(LLPTWARB_CACHE).ready,
-    missQueue.io.in.ready || ptw.io.req.ready))
+    Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
+    Mux(cache.io.resp.bits.bypassed, missQueue.io.in.ready, missQueue.io.in.ready || ptw.io.req.ready)))
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    !cache.io.resp.bits.toFsm.l2Hit && !from_pre(cache.io.resp.bits.req_info.source) && !ptw.io.req.ready
+    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
+    !from_pre(cache.io.resp.bits.req_info.source) &&
+    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
   missQueue.io.in.bits := cache.io.resp.bits.req_info
   missQueue.io.sfence  := sfence
   missQueue.io.csr := csr
 
   // NOTE: missQueue req has higher priority
-  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit
+  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
@@ -190,6 +193,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem_arb.io.in(0) <> ptw.io.mem.req
   mem_arb.io.in(1) <> llptw_mem.req
   mem_arb.io.out.ready := mem.a.ready && !flush
+
+  // assert, should not send mem access at same addr for twice.
+  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info.vpn, cache.io.refill.valid)
+  val last_resp_level = RegEnable(cache.io.refill.bits.level, cache.io.refill.valid)
+  val last_resp_v = RegInit(false.B)
+  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
+  when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
+  when (flush) { last_resp_v := false.B }
+  XSError(last_resp_v && cache.io.refill.valid &&
+    (cache.io.refill.bits.req_info.vpn === last_resp_vpn) &&
+    (cache.io.refill.bits.level === last_resp_level),
+    "l2tlb should not access mem at same addr for twice")
+  // ATTENTION: this may wronngly assert when: a ptes is l2, last part is valid,
+  // but the current part is invalid, so one more mem access happened
+  // If this happened, remove the assert.
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
