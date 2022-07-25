@@ -184,6 +184,22 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     AddPipelineReg(arb.io.out, out, false.B)
   }
 
+  def arbiter_with_pipereg_N_dup[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    dups: Seq[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    AddPipelineReg(arb.io.out, out, false.B)
+    for (dup <- dups) {
+      dup := RegEnable(arb.io.out.bits, arb.io.out.fire())
+    }
+  }
+
   def rrArbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
@@ -623,6 +639,10 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
+  refillPipe.io.req_dup_0 := missQueue.io.refill_pipe_req_dup_0
+  refillPipe.io.req_dup_1 := missQueue.io.refill_pipe_req_dup_1
+  refillPipe.io.req_dup_2 := missQueue.io.refill_pipe_req_dup_2
+  refillPipe.io.req_dup_3 := missQueue.io.refill_pipe_req_dup_3
   missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
@@ -708,7 +728,7 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
   cacheOpDecoder.io.csr <> io.csr
-  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache_req_dup_0
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
