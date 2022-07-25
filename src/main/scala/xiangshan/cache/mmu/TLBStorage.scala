@@ -83,6 +83,9 @@ class TLBFA(
     v(io.w.bits.wayIdx) := true.B
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
+  // write assert, shoulg not duplicate with the existing entries
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid) && vi })
+  XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
   val refill_wayIdx_reg = RegNext(io.w.bits.wayIdx)
@@ -302,7 +305,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
 
 // TODO: wrap Normal page and super page together, wrap the declare & refill dirty codes
   val normalPage = TlbStorage(
-    parentName = q.name + "_storage",
+    parentName = q.name + "_np_storage",
     associative = q.normalAssociative,
     ports = ports,
     nSets = q.normalNSets,
@@ -312,7 +315,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters)(implicit p: Parameters) ex
     superPage = false
   )
   val superPage = TlbStorage(
-    parentName = q.name + "_storage",
+    parentName = q.name + "_sp_storage",
     associative = q.superAssociative,
     ports = ports,
     nSets = q.superNSets,
