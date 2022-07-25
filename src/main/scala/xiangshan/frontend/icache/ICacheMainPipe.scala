@@ -143,10 +143,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s0 control */
   val s0_valid       = fromFtq.valid
-  val s0_req_vaddr   = (0 until partWayNum).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
-  val s0_req_vsetIdx = (0 until partWayNum).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
-  val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !fromFtqReq(i).crossCacheline)
-  val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  fromFtqReq(i).crossCacheline)
+  val s0_req_vaddr   = (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
+  val s0_req_vsetIdx = (0 until partWayNum + 1).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
+  val s0_only_first  = (0 until partWayNum + 1).map(i => fromFtq.valid && !fromFtqReq(i).crossCacheline)
+  val s0_double_line = (0 until partWayNum + 1).map(i => fromFtq.valid &&  fromFtqReq(i).crossCacheline)
 
   val s0_final_valid        = s0_valid
   val s0_final_vaddr        = s0_req_vaddr.head
@@ -155,27 +155,39 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_double_line  = s0_double_line.head
 
   /** SRAM request */
-  //0 -> metaread, 1,2,3 -> data, 3 -> code
+  //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
+  val ftq_req_to_data_doubleline  = s0_double_line.init
+  val ftq_req_to_data_vset_idx    = s0_req_vsetIdx.init
+
+  val ftq_req_to_meta_doubleline  = s0_double_line.head
+  val ftq_req_to_meta_vset_idx    = s0_req_vsetIdx.head
+
+  val ftq_req_to_itlb_only_first  = s0_only_first.last
+  val ftq_req_to_itlb_doubleline  = s0_double_line.last
+  val ftq_req_to_itlb_vaddr       = s0_req_vaddr.last
+  val ftq_req_to_itlb_vset_idx    = s0_req_vsetIdx.last
+
+
   for(i <- 0 until partWayNum) {
     toData.valid                  := s0_valid && !missSwitchBit
-    toData.bits(i).isDoubleLine   := s0_double_line(i)
-    toData.bits(i).vSetIdx        := s0_req_vsetIdx(i)
+    toData.bits(i).isDoubleLine   := ftq_req_to_data_doubleline(i)
+    toData.bits(i).vSetIdx        := ftq_req_to_data_vset_idx(i)
   }
 
   toMeta.valid               := s0_valid && !missSwitchBit
-  toMeta.bits.isDoubleLine   := s0_double_line.head
-  toMeta.bits.vSetIdx        := s0_req_vsetIdx.head
+  toMeta.bits.isDoubleLine   := ftq_req_to_meta_doubleline
+  toMeta.bits.vSetIdx        := ftq_req_to_meta_vset_idx
 
 
   toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
-  toITLB(0).bits.vaddr    := s0_req_vaddr.head(0)
-  toITLB(0).bits.debug.pc := s0_req_vaddr.head(0)
+  toITLB(0).bits.vaddr    := ftq_req_to_itlb_vaddr(0)
+  toITLB(0).bits.debug.pc := ftq_req_to_itlb_vaddr(0)
 
-  toITLB(1).valid         := s0_valid && s0_double_line.head
+  toITLB(1).valid         := s0_valid && ftq_req_to_itlb_doubleline
   toITLB(1).bits.size     := 3.U // TODO: fix the size
-  toITLB(1).bits.vaddr    := s0_req_vaddr.head(1)
-  toITLB(1).bits.debug.pc := s0_req_vaddr.head(1)
+  toITLB(1).bits.vaddr    := ftq_req_to_itlb_vaddr(1)
+  toITLB(1).bits.debug.pc := ftq_req_to_itlb_vaddr(1)
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
@@ -444,9 +456,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val cacheline_1_miss = !s2_port_hit(1) && !sec_meet_1_miss
 
   val  only_0_miss      = RegNext(s1_fire) && cacheline_0_miss && !s2_double_line && !s2_has_except && !s2_mmio
-  val  only_0_hit       = RegNext(s1_fire) && cacheline_0_hit && !s2_double_line && !s2_mmio
-  val  hit_0_hit_1      = RegNext(s1_fire) && cacheline_0_hit && cacheline_1_hit  && s2_double_line && !s2_mmio
-  val  hit_0_miss_1     = RegNext(s1_fire) && cacheline_0_hit && cacheline_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
+  val  only_0_hit       = RegNext(s1_fire) && cacheline_0_hit  && !s2_double_line && !s2_mmio
+  val  hit_0_hit_1      = RegNext(s1_fire) && cacheline_0_hit  && cacheline_1_hit  && s2_double_line && !s2_mmio
+  val  hit_0_miss_1     = RegNext(s1_fire) && cacheline_0_hit  && cacheline_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
   val  miss_0_hit_1     = RegNext(s1_fire) && cacheline_0_miss && cacheline_1_hit && s2_double_line  && !s2_has_except && !s2_mmio
   val  miss_0_miss_1    = RegNext(s1_fire) && cacheline_0_miss && cacheline_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
 
