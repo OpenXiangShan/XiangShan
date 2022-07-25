@@ -141,6 +141,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
+    val cache_req_dup_0 = Valid(new CacheCtrlReqInfo)
     val error = Flipped(new L1CacheErrorInfo)
   })
 
@@ -155,6 +156,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Translate CSR write to cache op
   val translated_cache_req = Reg(new CacheCtrlReqInfo)
+  val translated_cache_req_opCode_dup_0 = Reg(UInt(XLEN.W))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
@@ -176,6 +178,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   update_cache_req_when_write("CACHE_OP", translated_cache_req.opCode)
+  update_cache_req_when_write("CACHE_OP", translated_cache_req_opCode_dup_0)
   update_cache_req_when_write("CACHE_LEVEL", translated_cache_req.level)
   update_cache_req_when_write("CACHE_WAY", translated_cache_req.wayNum)
   update_cache_req_when_write("CACHE_IDX", translated_cache_req.index)
@@ -200,7 +203,9 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Send cache op to cache
   io.cache.req.valid := RegNext(cache_op_start)
+  io.cache_req_dup_0.valid := RegNext(cache_op_start)
   io.cache.req.bits := translated_cache_req
+  io.cache_req_dup_0.bits := translated_cache_req
   when(io.cache.req.fire()){
     wait_cache_op_resp := true.B
   }
@@ -233,8 +238,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.csr.update.w.valid := schedule_csr_op_resp_data || schedule_csr_op_resp_finish
   io.csr.update.w.bits := DontCare
 
-  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req.opCode))
-  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req.opCode))
+  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req_opCode_dup_0))
+  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req_opCode_dup_0))
   val isReadTag = WireInit(CacheInstrucion.isReadTag(translated_cache_req.opCode))
   val isReadData = WireInit(CacheInstrucion.isReadData(translated_cache_req.opCode))
 
