@@ -205,6 +205,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     (cache.io.refill.bits.req_info.vpn === last_resp_vpn) &&
     (cache.io.refill.bits.level === last_resp_level),
     "l2tlb should not access mem at same addr for twice")
+  // ATTENTION: this may wronngly assert when: a ptes is l2, last part is valid,
+  // but the current part is invalid, so one more mem access happened
+  // If this happened, remove the assert.
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 

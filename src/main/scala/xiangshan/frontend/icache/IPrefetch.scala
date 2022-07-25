@@ -43,7 +43,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromFtq         = Flipped(new FtqPrefechBundle)
   val iTLBInter       = new BlockTlbRequestIO
   val pmp             =   new ICachePMPBundle
-  val toIMeta         = Decoupled(new ICacheReadBundle)
+  val toIMeta         = DecoupledIO(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
   val toMissUnit      = new IPrefetchToMissUnit
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
@@ -94,7 +94,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   toIMeta.valid     := p0_valid
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
-
   toIMeta.bits.vSetIdx(1) := DontCare
   toIMeta.bits.isDoubleLine := false.B
 

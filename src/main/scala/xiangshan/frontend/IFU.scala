@@ -57,7 +57,7 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
 }
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
-  val icacheInter     = Vec(2, Flipped(new ICacheMainPipeBundle))
+  val icacheInter     = Flipped(new IFUICacheIO)
   val icacheStop      = Output(Bool())
   val icachePerfInfo  = Input(new ICachePerfInfo)
   val toIbuffer       = Decoupled(new FetchToIBuffer)
@@ -104,7 +104,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 {
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
-  val (toICache, fromICache) = (VecInit(io.icacheInter.map(_.req)), VecInit(io.icacheInter.map(_.resp)))
+  val fromICache = io.icacheInter.resp
   val (toUncache, fromUncache) = (io.uncacheInter.toUncache , io.uncacheInter.fromUncache)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
@@ -155,19 +155,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
-  fromFtq.req.ready := toICache(0).ready && toICache(1).ready && f1_ready //&& GTimer() > 500.U
-
-  toICache(0).valid       := fromFtq.req.valid //&& !f0_flush
-  toICache(0).bits.vaddr  := fromFtq.req.bits.startAddr
-  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine //&& !f0_flush
-  toICache(1).bits.vaddr  := fromFtq.req.bits.nextlineStart//fromFtq.req.bits.startAddr + (PredictWidth * 2).U //TODO: timing critical
+  fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
 
   /** <PERF> f0 fetch bubble */
 
   XSPerfAccumulate("fetch_bubble_ftq_not_valid",   !fromFtq.req.valid && fromFtq.req.ready  )
-  XSPerfAccumulate("fetch_bubble_pipe_stall",    f0_valid && toICache(0).ready && toICache(1).ready && !f1_ready )
-  XSPerfAccumulate("fetch_bubble_icache_0_busy",   f0_valid && !toICache(0).ready  )
-  XSPerfAccumulate("fetch_bubble_icache_1_busy",   f0_valid && !toICache(1).ready  )
+  // XSPerfAccumulate("fetch_bubble_pipe_stall",    f0_valid && toICache(0).ready && toICache(1).ready && !f1_ready )
+  // XSPerfAccumulate("fetch_bubble_icache_0_busy",   f0_valid && !toICache(0).ready  )
+  // XSPerfAccumulate("fetch_bubble_icache_1_busy",   f0_valid && !toICache(1).ready  )
   XSPerfAccumulate("fetch_flush_backend_redirect",   backend_redirect  )
   XSPerfAccumulate("fetch_flush_wb_redirect",    wb_redirect  )
   XSPerfAccumulate("fetch_flush_bpu_f1_flush",   from_bpu_f1_flush  )
