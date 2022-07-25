@@ -76,7 +76,7 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
 }
 
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
-  val pcMemRead           = Vec(4, new FtqICacheInfo)
+  val pcMemRead           = Vec(5, new FtqICacheInfo)
 }
 
 
