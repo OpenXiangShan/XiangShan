@@ -158,6 +158,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     })
 
     val r_way_en_reg = RegNext(io.r.way_en)
+    val r_way_en_reg_dup_0 = RegNext(io.r.way_en)
 
     // multiway data bank
     val data_bank = Array.fill(DCacheWays) {
@@ -186,7 +187,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val half = nWays / 2
     val data_read = data_bank.map(_.io.r.resp.data(0))
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
-    val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
+    val data_right = Mux1H(r_way_en_reg_dup_0.head(half), data_read.drop(half))
 
     val sel_low = r_way_en_reg.tail(half).orR()
     val row_data = Mux(sel_low, data_left, data_right)
