@@ -169,6 +169,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp(2)))
+    val lsuPAddr = Output(UInt(PAddrBits.W))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val dcacheBankConflict = Input(Bool())
@@ -182,7 +183,8 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   })
 
   val s1_uop = io.in.bits.uop
-  val s1_paddr = io.dtlbResp.bits.paddr(0)
+  val s1_paddr_dup_lsu = io.dtlbResp.bits.paddr(0)
+  val s1_paddr_dup_dcache = io.dtlbResp.bits.paddr(1)
   // af & pf exception were modified below.
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
@@ -193,13 +195,14 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   io.dtlbResp.ready := true.B
 
-  io.dcachePAddr := s1_paddr
+  io.lsuPAddr := s1_paddr_dup_lsu
+  io.dcachePAddr := s1_paddr_dup_dcache
   //io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
   io.dcacheKill := s1_tlb_miss || s1_exception
   // load forward query datapath
   io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
   io.sbuffer.vaddr := io.in.bits.vaddr
-  io.sbuffer.paddr := s1_paddr
+  io.sbuffer.paddr := s1_paddr_dup_lsu
   io.sbuffer.uop := s1_uop
   io.sbuffer.sqIdx := s1_uop.sqIdx
   io.sbuffer.mask := s1_mask
@@ -207,7 +210,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
   io.lsq.vaddr := io.in.bits.vaddr
-  io.lsq.paddr := s1_paddr
+  io.lsq.paddr := s1_paddr_dup_lsu
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
@@ -216,7 +219,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   // ld-ld violation query
   io.loadViolationQueryReq.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
-  io.loadViolationQueryReq.bits.paddr := s1_paddr
+  io.loadViolationQueryReq.bits.paddr := s1_paddr_dup_lsu
   io.loadViolationQueryReq.bits.uop := s1_uop
 
   // Generate forwardMaskFast to wake up insts earlier
@@ -240,7 +243,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   // if replay is detected in load_s1,
   // load inst will be canceled immediately
   io.out.valid := io.in.valid && !io.rsFeedback.valid
-  io.out.bits.paddr := s1_paddr
+  io.out.bits.paddr := s1_paddr_dup_lsu
   io.out.bits.tlbMiss := s1_tlb_miss
 
   // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -539,7 +542,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   load_s1.io.dtlbResp <> io.tlb.resp
-  io.dcache.s1_paddr <> load_s1.io.dcachePAddr
+  io.dcache.s1_paddr_dup_lsu <> load_s1.io.lsuPAddr
+  io.dcache.s1_paddr_dup_dcache <> load_s1.io.dcachePAddr
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
@@ -570,10 +574,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   load_s2.io.csrCtrl <> io.csrCtrl
   load_s2.io.sentFastUop := io.fastUop.valid
 
-  // actually load s3
-  io.lsq.dcacheRequireReplay := load_s2.io.dcacheRequireReplay
-  io.lsq.delayedLoadError := load_s2.io.delayedLoadError
-
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
   io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
@@ -592,19 +592,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
   io.lsq.forward.sqIdxMask := sqIdxMaskReg
 
-  // // use s2_hit_way to select data received in s1
-  // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
-  // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
-
+  // generate io.fastUop.valid for RS
   // now io.fastUop.valid is sent to RS in load_s2
+  val s2_dcache_hit = io.dcache.s2_hit // dcache hit dup in lsu side
+
   io.fastUop.valid := RegNext(
-    io.dcache.s1_hit_way.orR && // dcache hit
-    !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
-    load_s1.io.in.valid && // valid laod request
-    !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
-    !io.lsq.forward.dataInvalidFast && // forward failed
-    !load_s1.io.needLdVioCheckRedo // load-load violation check: load paddr cam struct hazard
-  ) && !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+      !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
+      load_s1.io.in.valid && // valid load request
+      !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
+      !io.lsq.forward.dataInvalidFast // forward failed
+    ) && 
+    !RegNext(load_s1.io.needLdVioCheckRedo) && // load-load violation check: load paddr cam struct hazard
+    !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) &&
+    s2_dcache_hit // dcache hit in lsu side
+  
   io.fastUop.bits := RegNext(load_s1.io.out.bits.uop)
 
   XSDebug(load_s0.io.out.valid,
@@ -637,6 +638,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   hitLoadOut.bits.fflags := DontCare
 
   load_s2.io.out.ready := true.B
+
+  // load s3
+  io.lsq.dcacheRequireReplay := load_s2.io.dcacheRequireReplay
+  io.lsq.delayedLoadError := load_s2.io.delayedLoadError
 
   val load_wb_reg = RegNext(Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits))
   io.ldout.bits := load_wb_reg
