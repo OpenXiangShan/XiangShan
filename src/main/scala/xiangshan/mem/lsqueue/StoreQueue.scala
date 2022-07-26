@@ -153,17 +153,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       rdataPtrExt
     )
   ))
+
   // deqPtrExtNext traces which inst is about to leave store queue
-  val deqPtrExtNext = Mux(io.sbuffer(1).fire(),
+  //
+  // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
+  // Before data write finish, sbuffer is unable to provide store to load
+  // forward data. As an workaround, deqPtrExt and allocated flag update 
+  // is delayed so that load can get the right data from store queue.
+  //
+  // Modify deqPtrExtNext and io.sqDeq with care!
+  val deqPtrExtNext = Mux(RegNext(io.sbuffer(1).fire()),
     VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
+    Mux(RegNext(io.sbuffer(0).fire()) || io.mmioStout.fire(),
       VecInit(deqPtrExt.map(_ + 1.U)),
       deqPtrExt
     )
   )
-  io.sqDeq := RegNext(Mux(io.sbuffer(1).fire(), 2.U,
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U)
+  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire()), 2.U,
+    Mux(RegNext(io.sbuffer(0).fire()) || io.mmioStout.fire(), 1.U, 0.U)
   ))
+  assert(!RegNext(RegNext(io.sbuffer(0).fire()) && io.mmioStout.fire()))
+
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.raddr(i) := rdataPtrExtNext(i).value
     paddrModule.io.raddr(i) := rdataPtrExtNext(i).value
@@ -547,9 +557,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
 
+    // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
+    // Before data write finish, sbuffer is unable to provide store to load
+    // forward data. As an workaround, deqPtrExt and allocated flag update 
+    // is delayed so that load can get the right data from store queue.
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (io.sbuffer(i).fire()) {
-      allocated(ptr) := false.B
+    when (RegNext(io.sbuffer(i).fire())) {
+      allocated(RegEnable(ptr, io.sbuffer(i).fire())) := false.B
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
@@ -618,7 +632,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExtNext
 
-  val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
+  // val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
 
   // If redirect at T0, sqCancelCnt is at T2
   io.sqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
