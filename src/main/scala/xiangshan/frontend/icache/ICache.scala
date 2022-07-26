@@ -407,42 +407,42 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
   io.cacheOp.resp.valid := false.B
-  val cacheOpShouldResp = WireInit(false.B)
+  val cacheOpShouldResp = WireInit(false.B) 
+  val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
+  dataresp := DontCare
   when(io.cacheOp.req.valid){
     when(
       CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode)
     ){
-      for (i <- 0 until 2) {
-        dataArrays(i).io.read.req.map{ port =>
-          port.valid     := !io.cacheOp.req.bits.index(0)
+      for (i <- 0 until partWayNum) {
+        dataArrays(i).io.read.req.zipWithIndex.map{ case(port,i) =>
+          if(i ==0) port.valid     := !io.cacheOp.req.bits.bank_num(0)
+          else      port.valid     :=  io.cacheOp.req.bits.bank_num(0)
           port.bits.ridx := io.cacheOp.req.bits.index(highestIdxBit,1)
         }
       }
-      cacheOpShouldResp := true.B
-      io.cacheOp.resp.valid := RegNext(dataArrays.head.io.read.req.map(_.fire()).reduce(_||_) && cacheOpShouldResp)
-
-      val dataresp = Mux(io.cacheOp.req.bits.bank_num(0).asBool,
-        read_datas(1),
-        read_datas(0)
-      )
-
-      val numICacheLineWords = blockBits / 64
-      require(blockBits >= 64 && isPow2(blockBits))
-      for (wordIndex <- 0 until numICacheLineWords) {
-        io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
-      }
+      cacheOpShouldResp := dataArrays.head.io.read.req.map(_.fire()).reduce(_||_)
+      dataresp :=Mux(io.cacheOp.req.bits.bank_num(0).asBool,  read_datas(1),  read_datas(0))
     }
     when(CacheInstrucion.isWriteData(io.cacheOp.req.bits.opCode)){
-      for (i <- 0 until 2) {
+      for (i <- 0 until partWayNum) {
         dataArrays(i).io.write.valid := true.B
         dataArrays(i).io.write.bits.wdata := io.cacheOp.req.bits.write_data_vec.asTypeOf(write_data.cloneType)
-        dataArrays(i).io.write.bits.wbankidx := io.cacheOp.req.bits.index(0)
+        dataArrays(i).io.write.bits.wbankidx := io.cacheOp.req.bits.bank_num(0)
         dataArrays(i).io.write.bits.widx := io.cacheOp.req.bits.index(highestIdxBit,1)
         dataArrays(i).io.write.bits.wmask  := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0)).asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
       }
       cacheOpShouldResp := true.B
     }
   }
+  
+  io.cacheOp.resp.valid := RegNext(cacheOpShouldResp)
+  val numICacheLineWords = blockBits / 64
+  require(blockBits >= 64 && isPow2(blockBits))
+  for (wordIndex <- 0 until numICacheLineWords) {
+    io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
+  }
+
 }
 
 
