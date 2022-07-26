@@ -35,7 +35,9 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
 {
   val vaddr    = UInt(VAddrBits.W)
-  val readData = UInt(blockBits.W)
+  val registerData = UInt(blockBits.W)
+  val sramData = UInt(blockBits.W)
+  val select   = Bool()
   val paddr    = UInt(PAddrBits.W)
   val tlbExcp  = new Bundle{
     val pageFault = Bool()
@@ -146,8 +148,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_valid       = fromFtq.valid
   val s0_req_vaddr   = (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
   val s0_req_vsetIdx = (0 until partWayNum + 1).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
-  val s0_only_first  = (0 until partWayNum + 1).map(i => fromFtq.valid && !fromFtqReq(i).crossCacheline)
-  val s0_double_line = (0 until partWayNum + 1).map(i => fromFtq.valid &&  fromFtqReq(i).crossCacheline)
+  val s0_only_first  = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) && !fromFtqReq(i).crossCacheline)
+  val s0_double_line = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) &&  fromFtqReq(i).crossCacheline)
 
   val s0_slot_fire   = WireInit(false.B)
   val s0_fetch_fire  = WireInit(false.B)
@@ -175,6 +177,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
   val ftq_req_to_data_doubleline  = s0_double_line.init
   val ftq_req_to_data_vset_idx    = s0_req_vsetIdx.init
+  val ftq_req_to_data_valid       = fromFtq.bits.readValid.init
 
   val ftq_req_to_meta_doubleline  = s0_double_line.head
   val ftq_req_to_meta_vset_idx    = s0_req_vsetIdx.head
@@ -186,7 +189,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   for(i <- 0 until partWayNum) {
-    toData.valid              := (s0_valid || tlb_slot.valid) && !missSwitchBit
+    toData.valid                  := (ftq_req_to_data_valid(i) || tlb_slot.valid) && !missSwitchBit
     toData.bits(i).isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,ftq_req_to_data_doubleline(i))
     toData.bits(i).vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,ftq_req_to_data_vset_idx(i))
   }
@@ -712,11 +715,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port_hit_data
   })
 
-  val s2_datas        = Wire(Vec(2, UInt(blockBits.W)))
+  val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W)))
 
-  s2_datas.zipWithIndex.map{case(bank,i) =>
-    if(i == 0) bank := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_0_latch,reservedRefillData(0), Mux(miss_1_s2_0_latch,reservedRefillData(1), missSlot(0).m_data)))
-    else    bank    := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_1_latch,reservedRefillData(0), Mux(miss_1_s2_1_latch,reservedRefillData(1), missSlot(1).m_data)))
+  s2_register_datas.zipWithIndex.map{case(bank,i) =>
+    // if(i == 0) bank := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_0_latch,reservedRefillData(0), Mux(miss_1_s2_0_latch,reservedRefillData(1), missSlot(0).m_data)))
+    // else    bank    := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_1_latch,reservedRefillData(0), Mux(miss_1_s2_1_latch,reservedRefillData(1), missSlot(1).m_data)))
+    if(i == 0) bank := Mux(miss_0_s2_0_latch,reservedRefillData(0), Mux(miss_1_s2_0_latch,reservedRefillData(1), missSlot(0).m_data))
+    else    bank    := Mux(miss_0_s2_1_latch,reservedRefillData(0), Mux(miss_1_s2_1_latch,reservedRefillData(1), missSlot(1).m_data))
   }
 
   /** response to IFU */
@@ -724,7 +729,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).map{ i =>
     if(i ==0) toIFU(i).valid          := s2_fire
        else   toIFU(i).valid          := s2_fire && s2_double_line
-    toIFU(i).bits.readData  := s2_datas(i)
+    //when select is high, use sramData. Otherwise, use registerData.
+    toIFU(i).bits.registerData  := s2_register_datas(i)
+    toIFU(i).bits.sramData  := s2_hit_datas(i)
+    toIFU(i).bits.select    := s2_port_hit(i)
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
