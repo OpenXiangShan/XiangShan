@@ -117,10 +117,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val mmio = Bool()
   }
 
-  val preDecoder      = Module(new PreDecode)
+  val preDecoders       = Seq.fill(4){ Module(new PreDecode) }
+
   val predChecker     = Module(new PredChecker)
   val frontendTrigger = Module(new FrontendTrigger)
-  val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
   val (checkerIn, checkerOutStage1, checkerOutStage2)         = (predChecker.io.in, predChecker.io.out.stage1Out,predChecker.io.out.stage2Out)
 
   io.iTLBInter.req_kill := false.B
@@ -236,7 +236,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
   // val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
-  val f2_cache_response_data = VecInit(fromICache.map(_.bits.readData))
+  val f2_cache_response_reg_data  = VecInit(fromICache.map(_.bits.registerData))
+  val f2_cache_response_sram_data = VecInit(fromICache.map(_.bits.sramData))
+  val f2_cache_response_select    = VecInit(fromICache.map(_.bits.select))
 
 
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
@@ -288,22 +290,37 @@ class NewIFU(implicit p: Parameters) extends XSModule
     // }
   }
 
-  val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
-  val f2_cut_data = cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_cut_ptr )
+  val f2_data_2_cacheline =  Wire(Vec(4, UInt((2 * blockBits).W)))
+  f2_data_2_cacheline(0) := Cat(f2_cache_response_reg_data(1) , f2_cache_response_reg_data(0))
+  f2_data_2_cacheline(1) := Cat(f2_cache_response_reg_data(1) , f2_cache_response_sram_data(0))
+  f2_data_2_cacheline(2) := Cat(f2_cache_response_sram_data(1) , f2_cache_response_reg_data(0))
+  f2_data_2_cacheline(3) := Cat(f2_cache_response_sram_data(1) , f2_cache_response_sram_data(0))
+
+  val f2_cut_data   = VecInit(f2_data_2_cacheline.map(data => cut(  data, f2_cut_ptr )))
+
+  val f2_predecod_ptr = Wire(UInt(2.W))
+  f2_predecod_ptr := Cat(f2_cache_response_select(1),f2_cache_response_select(0))
 
   /** predecode (include RVC expander) */
-  preDecoderIn.data := f2_cut_data
-  preDecoderIn.frontendTrigger := io.frontendTrigger
-  preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
-  preDecoderIn.pc  := f2_pc
+  // preDecoderRegIn.data := f2_reg_cut_data
+  // preDecoderRegInIn.frontendTrigger := io.frontendTrigger
+  // preDecoderRegInIn.csrTriggerEnable := io.csrTriggerEnable
+  // preDecoderRegIn.pc  := f2_pc
 
-  val f2_expd_instr   = preDecoderOut.expInstr
-  val f2_pd           = preDecoderOut.pd
-  val f2_jump_offset  = preDecoderOut.jumpOffset
-  val f2_hasHalfValid  =  preDecoderOut.hasHalfValid
+  val preDecoderOut = Mux1H(UIntToOH(f2_predecod_ptr), preDecoders.map(_.io.out))
+  for(i <- 0 until 4){
+    val preDecoderIn  = preDecoders(i).io.in
+    preDecoderIn.data := f2_cut_data(i)
+    preDecoderIn.frontendTrigger := io.frontendTrigger  
+    preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
+    preDecoderIn.pc  := f2_pc
+  }
+
+  val f2_expd_instr     = preDecoderOut.expInstr
+  val f2_pd             = preDecoderOut.pd
+  val f2_jump_offset    = preDecoderOut.jumpOffset
+  val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
-
-  val predecodeOutValid = WireInit(false.B)
 
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
@@ -330,7 +347,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f3_ready := f3_fire || !f3_valid
 
-  val f3_cut_data       = RegEnable(f2_cut_data, f2_fire)
+  val f3_cut_data       = RegEnable(next = f2_cut_data(f2_predecod_ptr), enable=f2_fire)
 
   val f3_except_pf      = RegEnable(f2_except_pf,  f2_fire)
   val f3_except_af      = RegEnable(f2_except_af,  f2_fire)
@@ -395,8 +412,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
 
   f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
-
-  // when(fromUncache.fire())    {f3_mmio_data   :=  fromUncache.bits.data}
 
 
   switch(mmio_state){
