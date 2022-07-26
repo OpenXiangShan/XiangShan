@@ -717,17 +717,21 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   load_s2.io.out.ready := true.B
 
+  // load s3
+  io.lsq.s3_dcache_require_replay := load_s2.io.s3_dcache_require_replay
+  io.lsq.s3_delayed_load_error := load_s2.io.s3_delayed_load_error
+
   val load_wb_reg = RegNext(Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits))
   io.ldout.bits := load_wb_reg
   io.ldout.valid := RegNext(hitLoadOut.valid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)) ||
     RegNext(io.lsq.ldout.valid) && !RegNext(io.lsq.ldout.bits.uop.robIdx.needFlush(io.redirect)) && !RegNext(hitLoadOut.valid)
 
-  // io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := load_wb_reg.uop.cf.exceptionVec(loadAccessFault) ||
-  //   hitLoadOut.valid && load_s2.io.delayedLoadError
+  io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := load_wb_reg.uop.cf.exceptionVec(loadAccessFault) ||
+    RegNext(hitLoadOut.valid) && load_s2.io.s3_delayed_load_error
 
-  // io.delayedLoadError := false.B
-
-  io.s3_delayed_load_error := hitLoadOut.valid && load_s2.io.s3_delayed_load_error
+  // s3_delayed_load_error path is not used for now, as we writeback load result in load_s3
+  // but we keep this path for future use
+  io.s3_delayed_load_error := false.B
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
