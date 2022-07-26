@@ -143,6 +143,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val release1cycle = io.release
   val release2cycle = RegNext(io.release)
+  val release2cycle_dup_lsu = RegNext(io.release)
 
   /**
     * Enqueue at dispatch
@@ -722,7 +723,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // If a load comes in that cycle, we can not judge if it has ld-ld violation
     // We replay that load inst from RS
     io.loadViolationQuery.map(i => i.req.ready :=
-      !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+      // use lsu side release2cycle_dup_lsu paddr for better timing
+      !i.req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle_dup_lsu.bits.paddr(PAddrBits-1, DCacheLineOffset)
     )
     // io.loadViolationQuery.map(i => i.req.ready := false.B) // For better timing
   }
