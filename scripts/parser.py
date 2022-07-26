@@ -238,7 +238,29 @@ class VCollection(object):
                 else:
                     f.write("{}_{}\n".format(negedge_module, num))
             f.write("]")            
-        
+
+    def dump_clkdiv2_modules_to_file(self, name, output_dir, with_submodule=True):
+        print("Dump clkdiv2 module {} to {}...".format(name, output_dir))
+        clkdiv2_modules = []
+        self.get_module(name, clkdiv2_modules, "ClkDiv2SRAMTemplate", with_submodule)
+        clkdiv2_modules_sort = []
+        for clkdiv2 in clkdiv2_modules:
+            re_degits = re.compile(r".*[0-9]$")
+            if re_degits.match(clkdiv2):
+                clkdiv2_module, num = clkdiv2.rsplit("_", 1)
+            else:
+                clkdiv2_module, num = clkdiv2, -1
+            clkdiv2_modules_sort.append((clkdiv2_module, int(num)))
+        clkdiv2_modules_sort.sort(key = lambda x : (x[0], x[1]))
+        output_file = os.path.join(output_dir, "clkdiv2_modules.txt")
+        with open(output_file, "w")as f:
+            f.write("[list\n")
+            for clkdiv2_module, num in clkdiv2_modules_sort:
+                if num == -1:
+                    f.write("{}\n".format(clkdiv2_module))
+                else:
+                    f.write("{}_{}\n".format(clkdiv2_module, num))
+            f.write("]")
 
     def add_module(self, name, line):
         module = VModule(name)
@@ -287,6 +309,7 @@ def main(files):
         collection.dump_to_file(m, os.path.join(directory, m))
     for m in out_negedge_modules:
         collection.dump_negedge_modules_to_file(m, "nanhu_release")
+        collection.dump_clkdiv2_modules_to_file(m, "nanhu_release")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
