@@ -162,6 +162,11 @@ class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val resp = Flipped(Valid(new LoadViolationQueryResp))
 }
 
+class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
+  val sqIdx = new SqPtr
+  val mask = UInt(8.W)
+}
+
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
   val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))

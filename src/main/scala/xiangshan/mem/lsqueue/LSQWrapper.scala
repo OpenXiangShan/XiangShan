@@ -61,6 +61,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
+    val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
@@ -134,6 +135,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.storeIn <> io.storeIn
   storeQueue.io.storeInRe <> io.storeInRe
   storeQueue.io.storeDataIn <> io.storeDataIn
+  storeQueue.io.storeMaskIn <> io.storeMaskIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.rob <> io.rob

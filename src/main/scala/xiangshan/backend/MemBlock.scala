@@ -351,8 +351,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
-    // Lsq to load unit's rs
+    // Lsq to sta unit
+    lsq.io.storeMaskIn(i) <> stu.io.storeMaskOut
+
+    // Lsq to std unit's rs
     lsq.io.storeDataIn(i) := stData(i)
+
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
