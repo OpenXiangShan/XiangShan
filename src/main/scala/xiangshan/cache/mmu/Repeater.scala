@@ -232,6 +232,10 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val canEnqueue_fake = counter +& enqNum_fake <= Size.U
   io.tlb.req.map(_.ready := canEnqueue_fake) // NOTE: just drop un-fire reqs
 
+  // tlb req flushed by ptw resp: last ptw resp && current ptw resp
+  // the flushed tlb req will fakely enq, with a false valid
+  val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && io.ptw.resp.bits.entry.hit(a.bits.vpn, 0.U, true, true))
+
   io.tlb.resp.valid := ptwResp_valid
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
@@ -246,7 +250,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   reqs.zipWithIndex.map{
     case (req, i) =>
       when (req.valid && canEnqueue) {
-        v(enqPtrVec(i)) := true.B
+        v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }
