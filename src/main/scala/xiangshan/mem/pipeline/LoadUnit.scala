@@ -621,7 +621,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.lsq.loadIn.valid := load_s2.io.out.valid
   // generate LqWriteBundle from LsPipelineBundle
   io.lsq.loadIn.bits.fromLsPipelineBundle(load_s2.io.out.bits)
-  io.lsq.loadIn.bits.writeQueueData := load_s2.io.in.valid
+  // generate duplicated load queue data wen
+  val load_s2_valid_vec = RegInit(0.U(6.W))
+  val load_s2_leftFire = load_s1.io.out.valid && load_s2.io.in.ready
+  load_s2_valid_vec := 0x0.U(6.W)
+  when (load_s2_leftFire) { load_s2_valid_vec := 0x3f.U(6.W)}
+  when (load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) { load_s2_valid_vec := 0x0.U(6.W) }
+  assert(RegNext(load_s2.io.in.valid === load_s2_valid_vec(0)))
+  io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools()
 
   // write to rob and writeback bus
   val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss && !load_s2.io.out.bits.mmio
