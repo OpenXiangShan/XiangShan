@@ -24,6 +24,19 @@ import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.ImmUnion
+import huancun.utils.ChiselDB
+
+class FtqDebugBundle extends Bundle {
+  val pc = UInt(39.W)
+  val target = UInt(39.W)
+  val isBr = Bool()
+  val isJmp = Bool()
+  val isCall = Bool()
+  val isRet = Bool()
+  val misPred = Bool()
+  val isTaken = Bool()
+  val predStage = UInt(2.W)
+}
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -1011,7 +1024,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
-
+  
+  val ftqBranchTraceDB = ChiselDB.createTable("FTQTable" + p(XSCoreParamsKey).HartId.toString, new FtqDebugBundle)
   // Cfi Info
   for (i <- 0 until PredictWidth) {
     val pc = commit_pc_bundle.startAddr + (i * instBytes).U
@@ -1033,6 +1047,25 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
+
+    val logbundle = Wire(new FtqDebugBundle)
+    logbundle.pc := pc
+    logbundle.target := target
+    logbundle.isBr := isBr
+    logbundle.isJmp := isJmp
+    logbundle.isCall := isJmp && commit_pd.hasCall
+    logbundle.isRet := isJmp && commit_pd.hasRet
+    logbundle.misPred := misPred
+    logbundle.isTaken := isTaken
+    logbundle.predStage := commit_stage
+
+    ftqBranchTraceDB.log(
+      data = logbundle /* hardware of type T */,
+      en = v && do_commit && isCfi,
+      site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
+      clock = clock,
+      reset = reset
+    )
   }
 
   val enq = io.fromBpu.resp
