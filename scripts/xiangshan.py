@@ -242,7 +242,7 @@ class XiangShan(object):
     def run(self, args):
         if args.ci is not None:
             return self.run_ci(args.ci)
-         if args.ci_vcs is not None:
+        if args.ci_vcs is not None:
             return self.run_ci_vcs(args.ci_vcs)
         actions = [
             (args.generate, lambda _ : self.generate_verilog()),
