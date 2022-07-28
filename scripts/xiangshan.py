@@ -205,7 +205,7 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
-     def build_simv(self):
+    def build_simv(self):
         print("Building XiangShan simv with the following configurations")
         self.show()
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
