@@ -17,8 +17,10 @@
 # Simple version of xiangshan python wrapper
 
 import argparse
+import json
 import os
 import random
+import signal
 import subprocess
 import sys
 import time
@@ -163,6 +165,7 @@ class XSArgs(object):
 class XiangShan(object):
     def __init__(self, args):
         self.args = XSArgs(args)
+        self.timeout = args.timeout
 
     def show(self):
         self.args.show()
@@ -266,10 +269,16 @@ class XiangShan(object):
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
         start = time.time()
-        return_code = subprocess.call(cmd, shell=True, env=env)
-        end = time.time()
-        print(f"Elapsed time: {end - start} seconds")
-        return return_code
+        proc = subprocess.Popen(cmd, shell=True, env=env, preexec_fn=os.setsid)
+        try:
+            return_code = proc.wait(self.timeout)
+            end = time.time()
+            print(f"Elapsed time: {end - start} seconds")
+            return return_code
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            print(f"KeyboardInterrupt or TimeoutExpired.")
+            return 0
 
     def __get_ci_cputest(self, name=None):
         base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
@@ -402,6 +411,7 @@ if __name__ == "__main__":
     parser.add_argument('--ci', nargs='?', type=str, const="", help='run CI tests')
     parser.add_argument('--ci-vcs', nargs='?', type=str, const="", help='run CI tests on simv')
     parser.add_argument('--clean', action='store_true', help='clean up XiangShan CI workspace')
+    parser.add_argument('--timeout', nargs='?', type=int, default=None, help='timeout (in seconds)')
     # environment variables
     parser.add_argument('--nemu', nargs='?', type=str, help='path to nemu')
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
