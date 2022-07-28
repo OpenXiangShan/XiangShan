@@ -63,7 +63,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
-    val s3_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
+    val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
+    val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -118,7 +119,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.s2_load_data_forwarded <> io.s2_load_data_forwarded
   loadQueue.io.s3_delayed_load_error <> io.s3_delayed_load_error
-  loadQueue.io.s3_dcache_require_replay <> io.s3_dcache_require_replay
+  loadQueue.io.s2_dcache_require_replay <> io.s2_dcache_require_replay
+  loadQueue.io.s3_replay_from_fetch <> io.s3_replay_from_fetch
   loadQueue.io.ldout <> io.ldout
   loadQueue.io.rob <> io.rob
   loadQueue.io.rollback <> io.rollback

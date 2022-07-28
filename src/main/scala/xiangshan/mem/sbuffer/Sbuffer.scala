@@ -670,10 +670,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))
   for ((forward, i) <- io.forward.zipWithIndex) {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
-    val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
+    // ptag_matches uses paddr from dtlb, which is far from sbuffer
+    val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), forward.valid) === RegEnable(getPTag(forward.paddr), forward.valid)))
     val tag_matches = vtag_matches
     val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
-      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((activeMask(w) || inflightMask(w)))
+      RegNext(vtag_matches(w)) =/= ptag_matches(w) && RegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
