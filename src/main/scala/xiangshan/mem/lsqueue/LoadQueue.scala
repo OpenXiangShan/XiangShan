@@ -555,7 +555,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
-    val lqViolation = lqViolationVec.asUInt().orR()
+    val lqViolation = lqViolationVec.asUInt().orR() && RegNext(!io.storeIn(i).bits.miss)
     val lqViolationIndex = getFirstOne(lqViolationVec, RegNext(lqIdxMask))
     val lqViolationUop = uop(lqViolationIndex)
     // lqViolationUop.lqIdx.flag := deqMask(lqViolationIndex) ^ deqPtrExt.flag
