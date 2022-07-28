@@ -55,7 +55,7 @@ case class RSParams
   def allWakeup: Int = numFastWakeup + numWakeup
   def indexWidth: Int = log2Up(numEntries)
   // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
-  def oldestFirst: (Boolean, Boolean, Int) = (false, !isLoad, if (isLoad) 0 else numDeq - 1)
+  def oldestFirst: (Boolean, Boolean, Int) = (true, !isLoad, if (isLoad) 0 else numDeq - 1)
   def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
   def needScheduledBit: Boolean = hasFeedback || delayedRf || hasMidState
   def needBalance: Boolean = exuCfg.get.needLoadBalance
