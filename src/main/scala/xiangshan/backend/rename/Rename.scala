@@ -282,7 +282,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     brSliceTab.io.write(2*i+1).data.valid := true.B
     brSliceTab.io.write(2*i+1).data.pc_br := Mux(isBranch(i), io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
 
-    io.out(i).bits.priority := Mux(isBranch(i), lowConf, dataflowLowConf)
+    io.out(i).bits.priority := false.B//Mux(isBranch(i), lowConf, dataflowLowConf)
   }
   XSPerfAccumulate("pubs_high_priority", PopCount(io.out.map(out => out.fire && out.bits.priority)))
   XSPerfAccumulate("pubs_high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && out._2)))
