@@ -159,6 +159,12 @@ trait HaveAXI4MemPort {
     TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
     peripheralXbar
 
+  val buffers = Seq.fill(125){ TLBuffer() }
+  (buffers.init zip buffers.tail) foreach { case (curr, succ) =>
+    curr := succ
+  }
+  println(s"add dummy delay ${buffers.size * 2}")
+
   memAXI4SlaveNode :=
     AXI4Buffer() :=
     AXI4Buffer() :=
@@ -167,6 +173,9 @@ trait HaveAXI4MemPort {
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
+    buffers.head
+
+  buffers.last :=
     TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
     TLBuffer.chainNode(2) :=
