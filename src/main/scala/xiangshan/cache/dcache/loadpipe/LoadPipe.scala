@@ -49,6 +49,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
 
+    // ------------ duplicate for solving fanout ------------
+    val miss_req_dup = Vec(cfg.nMissEntries, Valid(new MissReq_dup))
+    // ------------------------------------------------------
+
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
@@ -184,8 +188,21 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_fire = s2_valid
 
-  when (s1_fire) { s2_valid := !io.lsu.s1_kill }
-  .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
+  val s2_valid_dup = RegInit(VecInit(Seq.fill(cfg.nMissEntries)(false.B)))
+  val s2_paddr_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_paddr_dup_dcache, s1_fire))
+  val s2_vaddr_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_vaddr, s1_fire))
+  val s2_way_en_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_way_en, s1_fire))
+  val s2_instrtype_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_req.instrtype, s1_fire))
+  val s2_encTag_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_encTag, s1_fire))
+  val s2_tag_error_dup = s2_encTag_dup.map(dcacheParameters.tagCode.decode(_).error)
+
+  when (s1_fire) {
+    s2_valid := !io.lsu.s1_kill
+    s2_valid_dup.foreach(_ := !io.lsu.s1_kill)
+  }.elsewhen(io.lsu.resp.fire()) {
+    s2_valid := false.B
+    s2_valid_dup.foreach(_ := false.B)
+  }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
@@ -242,6 +259,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
+  val s2_can_send_miss_req_dup = (0 until cfg.nMissEntries).map(_ => RegEnable(s1_will_send_miss_req, s1_fire))
 
   // send load miss to miss queue
   io.miss_req.valid := s2_valid && s2_can_send_miss_req
@@ -255,6 +273,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
+
+  io.miss_req_dup.zipWithIndex.foreach { case (dup, i) =>
+    dup.valid := s2_valid_dup(i) && s2_can_send_miss_req_dup(i)
+    dup.bits.source := s2_instrtype_dup(i)
+    dup.bits.addr := get_block_addr(s2_paddr_dup(i))
+    dup.bits.vaddr := s2_vaddr_dup(i)
+    dup.bits.way_en := s2_way_en_dup(i)
+    dup.bits.cancel := io.lsu.s2_kill || s2_tag_error_dup(i)
+  }
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))

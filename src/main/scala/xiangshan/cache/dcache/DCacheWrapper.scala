@@ -586,8 +586,27 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
   missReqArb.io.out <> missQueue.io.req
+
+  for (i <- 0 until cfg.nMissEntries) {
+    val missReqArb_dup = Module(new Arbiter(new MissReq_dup, MissReqPortCount))
+    missReqArb_dup.io.in(MainPipeMissReqPort).valid := mainPipe.io.miss_req_dup(i).valid
+    missReqArb_dup.io.in(MainPipeMissReqPort).bits := mainPipe.io.miss_req_dup(i).bits
+    for (w <- 0 until LoadPipelineWidth) {
+      missReqArb_dup.io.in(w + 1).valid := ldu(w).io.miss_req_dup(i).valid
+      missReqArb_dup.io.in(w + 1).bits := ldu(w).io.miss_req_dup(i).bits
+    }
+    missQueue.io.req_dup(i).valid := missReqArb_dup.io.out.valid
+    missQueue.io.req_dup(i).bits := missReqArb_dup.io.out.bits
+    missReqArb_dup.io.out.ready := missQueue.io.req.ready
+
+    when (wb.io.block_miss_req) {
+      missReqArb_dup.io.out.ready := false.B
+    }
+  }
+
   when(wb.io.block_miss_req) {
     missQueue.io.req.bits.cancel := true.B
+    missQueue.io.req_dup.foreach(_.bits.cancel := true.B)
     missReqArb.io.out.ready := false.B
   }
 

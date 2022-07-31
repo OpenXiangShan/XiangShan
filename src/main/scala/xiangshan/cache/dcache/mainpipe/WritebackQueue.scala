@@ -69,7 +69,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-    val block_addr  = Output(Valid(UInt()))
+    val block_addr = Output(Valid(UInt()))
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
     val release_update = Flipped(ValidIO(new ReleaseUpdate))
@@ -84,8 +84,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //                     or: s_invalid -> s_sleep -> s_release_req -> s_release_resp -> s_release_req
   //                        (send a ProbeAck after Release transaction is over)
   val state = RegInit(s_invalid)
-  val state_dup_0 = RegInit(s_invalid)
-  val state_dup_1 = RegInit(s_invalid)
 
   // internal regs
   // remaining beats
@@ -128,12 +126,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     req := io.req.bits
     when (io.req.bits.delay_release) {
       state := s_sleep
-      state_dup_0 := s_sleep
-      state_dup_1 := s_sleep
     }.otherwise {
       state := s_release_req
-      state_dup_0 := s_release_req
-      state_dup_1 := s_release_req
       remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     }
   }
@@ -153,8 +147,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
     }.elsewhen (merge) {
       state := s_release_req
-      state_dup_0 := s_release_req
-      state_dup_1 := s_release_req
       req.voluntary := false.B
       req.param := req.param
       req.hasData := req.hasData || io.req.bits.hasData
@@ -170,8 +162,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     when (io.release_wakeup.valid && io.release_wakeup.bits === req.miss_id) {
       state := s_release_req
-      state_dup_0 := s_release_req
-      state_dup_1 := s_release_req
       req.delay_release := false.B
       remain_set := Mux(
         req.hasData || update && io.release_update.bits.mask.orR || merge && io.req.bits.hasData,
@@ -235,10 +225,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   val (_, _, release_done, _) = edge.count(io.mem_release)
 
-//  when (state === s_release_req && release_done) {
-//    state := Mux(req.voluntary, s_release_resp, s_invalid)
-//  }
-
   // Because now wbq merges a same-addr req unconditionally, when the req to be merged comes too late,
   // the previous req might not be able to merge. Thus we have to handle the new req later after the
   // previous one finishes.
@@ -270,7 +256,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
   val req_later = Reg(tmp_req())
 
-  when (state_dup_0 === s_release_req) {
+  when (state === s_release_req) {
     when (io.mem_release.fire()) {
       c_already_sent := !release_done
     }
@@ -279,8 +265,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       // The previous req is Release
       when (release_done) {
         state := s_release_resp
-        state_dup_0 := s_release_resp
-        state_dup_1 := s_release_resp
       }
       // merge a ProbeAck
       when (merge) {
@@ -322,26 +306,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       when (release_done) {
         when (merge) {
           // Send the Release after ProbeAck
-//          state := s_release_req
-//          req := Mux(merge, io.req.bits, req_later.toWritebackReq)
-//          release_later := false.B
           state := s_sleep
-          state_dup_0 := s_sleep
-          state_dup_1 := s_sleep
           req := io.req.bits
           release_later := false.B
         }.elsewhen (release_later) {
           state := Mux(
-            io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release,
-            s_release_req,
-            s_sleep
-          )
-          state_dup_0 := Mux(
-            io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release,
-            s_release_req,
-            s_sleep
-          )
-          state_dup_1 := Mux(
             io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release,
             s_release_req,
             s_sleep
@@ -353,8 +322,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
           release_later := false.B
         }.otherwise {
           state := s_invalid
-          state_dup_0 := s_invalid
-          state_dup_1 := s_invalid
           release_later := false.B
         }
       }
@@ -367,7 +334,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // --------------------------------------------------------------------------------
   // receive ReleaseAck for Releases
-  when (state_dup_0 === s_release_resp) {
+  when (state === s_release_resp) {
     io.mem_grant.ready := true.B
 
     when (merge) {
@@ -382,22 +349,16 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (io.mem_grant.fire()) {
       when (merge) {
         state := s_release_req
-        state_dup_0 := s_release_req
-        state_dup_1 := s_release_req
         req := io.req.bits
         remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
       }.elsewhen(release_later) {
         state := s_release_req
-        state_dup_0 := s_release_req
-        state_dup_1 := s_release_req
         req := req_later.toWritebackReq
         remain_set := Mux(req_later.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
       }.otherwise {
         state := s_invalid
-        state_dup_0 := s_invalid
-        state_dup_1 := s_invalid
         release_later := false.B
       }
     }
@@ -408,15 +369,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // 2. When this entry wants to release while still waiting for release_wakeup signal,
   //    and a probe req with the same addr comes. In this case we merge probe with release,
   //    handle this probe, so we don't need another release.
-  io.primary_ready := state_dup_1 === s_invalid
-  io.secondary_ready := state_dup_1 =/= s_invalid && io.req.bits.addr === req.addr
+  io.primary_ready := state === s_invalid
+  io.secondary_ready := state =/= s_invalid && io.req.bits.addr === req.addr
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
   XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
-  XSPerfAccumulate("wb_probe_resp", state_dup_0 === s_release_req && release_done && !req.voluntary)
+  XSPerfAccumulate("wb_probe_resp", state === s_release_req && release_done && !req.voluntary)
   XSPerfAccumulate("penalty_blocked_by_channel_C", io.mem_release.valid && !io.mem_release.ready)
-  XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state_dup_1 === s_release_resp)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_release_resp)
 }
 
 class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents {

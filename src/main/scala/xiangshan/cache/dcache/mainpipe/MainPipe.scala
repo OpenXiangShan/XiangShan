@@ -96,6 +96,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
     // store miss go to miss queue
     val miss_req = DecoupledIO(new MissReq)
+    // ------------ duplicate for solving fanout ------------
+    val miss_req_dup = Vec(cfg.nMissEntries, Valid(new MissReq_dup))
+    // ------------------------------------------------------
     // store buffer
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
@@ -149,6 +152,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     // ecc error
     val error = Output(new L1CacheErrorInfo())
   })
+
+  val nMiss = cfg.nMissEntries
 
   // meta array is made of regs, so meta write or read should always be ready
   assert(RegNext(io.meta_read.ready))
@@ -335,7 +340,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   // duplicate regs to reduce fanout
   val s2_valid_dup = RegInit(VecInit(Seq.fill(8)(false.B)))
-  val s2_req_vaddr_dup_for_miss_req = RegEnable(s1_req.vaddr, s1_fire)
+  val s2_valid_dup_for_miss_req = RegInit(VecInit(Seq.fill(nMiss)(false.B)))
   val s2_idx_dup_for_status = RegEnable(get_idx(s1_req.vaddr), s1_fire)
   val s2_idx_dup_for_replace_access = RegEnable(get_idx(s1_req.vaddr), s1_fire)
 
@@ -343,6 +348,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       s2_req_replace_dup_2 = RegEnable(s1_req.replace, s1_fire)
   
   val s2_can_go_to_mq_dup = (0 until 3).map(_ => RegEnable(s1_pregen_can_go_to_mq, s1_fire))
+  val s2_can_go_to_mq_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_pregen_can_go_to_mq, s1_fire))
+  val s2_req_source_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_req.source, s1_fire))
+  val s2_req_addr_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_req.addr, s1_fire))
+  val s2_req_vaddr_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_req.vaddr, s1_fire))
+  val s2_tag_match_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_tag_match, s1_fire))
+  val s2_tag_match_way_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_tag_match_way, s1_fire))
+  val s2_repl_way_en_dup_for_miss_req = (0 until nMiss).map(_ => RegEnable(s1_repl_way_en, s1_fire))
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = RegEnable(s1_tag, s1_fire)
@@ -372,9 +384,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   when (s1_fire) {
     s2_valid := true.B
     s2_valid_dup.foreach(_ := true.B)
+    s2_valid_dup_for_miss_req.foreach(_ := true.B)
   }.elsewhen (s2_fire) {
     s2_valid := false.B
     s2_valid_dup.foreach(_ := false.B)
+    s2_valid_dup_for_miss_req.foreach(_ := false.B)
   }
   s2_ready := !s2_valid_dup(3) || s2_can_go
   val replay = !io.miss_req.ready
@@ -692,7 +706,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.source := s2_req.source
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
-  miss_req.vaddr := s2_req_vaddr_dup_for_miss_req
+  miss_req.vaddr := s2_req.vaddr
   miss_req.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
   miss_req.store_data := s2_req.store_data
   miss_req.store_mask := s2_req.store_mask
@@ -704,6 +718,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.replace_tag := s2_repl_tag
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
+
+  io.miss_req_dup.zipWithIndex.foreach { case (dup, i) =>
+    dup.valid := s2_valid_dup_for_miss_req(i) && s2_can_go_to_mq_dup_for_miss_req(i)
+    dup.bits.source := s2_req_source_dup_for_miss_req(i)
+    dup.bits.addr := s2_req_addr_dup_for_miss_req(i)
+    dup.bits.vaddr := s2_req_vaddr_dup_for_miss_req(i)
+    dup.bits.way_en := Mux(s2_tag_match_dup_for_miss_req(i), s2_tag_match_way_dup_for_miss_req(i), s2_repl_way_en_dup_for_miss_req(i))
+    dup.bits.cancel := false.B
+  }
 
   io.store_replay_resp.valid := s2_valid_dup(5) && s2_can_go_to_mq_dup(1) && replay && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare

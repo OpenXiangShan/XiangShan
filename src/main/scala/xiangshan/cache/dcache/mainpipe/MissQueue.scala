@@ -65,6 +65,16 @@ class MissReq(implicit p: Parameters) extends DCacheBundle {
   def hit = req_coh.isValid()
 }
 
+// ------------ duplicate for solving fanout ------------
+class MissReq_dup(implicit p: Parameters) extends DCacheBundle {
+  val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+  val way_en = UInt(DCacheWays.W)
+  val source = UInt(sourceTypeWidth.W)
+  val cancel = Bool()
+}
+// ------------------------------------------------------
+
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     // MSHR ID
@@ -452,6 +462,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val req = Flipped(DecoupledIO(new MissReq))
+    // ------------ duplicate for solving fanout ------------
+    val req_dup = Vec(cfg.nMissEntries, Flipped(ValidIO(new MissReq_dup)))
+    // ------------------------------------------------------
     val refill_to_ldq = ValidIO(new Refill)
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -531,13 +544,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
       
       e.io.id := i.U
-      e.io.req.valid := io.req.valid
-      e.io.primary_valid := io.req.valid && 
+      e.io.req.valid := io.req_dup(i).valid
+      e.io.primary_valid := io.req_dup(i).valid && 
         !merge && 
         !reject && 
         !former_primary_ready &&
         e.io.primary_ready
       e.io.req.bits := io.req.bits
+      e.io.req.bits.addr := io.req_dup(i).bits.addr
+      e.io.req.bits.vaddr := io.req_dup(i).bits.vaddr
+      e.io.req.bits.way_en := io.req_dup(i).bits.way_en
+      e.io.req.bits.source := io.req_dup(i).bits.source
+      e.io.req.bits.cancel := io.req_dup(i).bits.cancel
 
       e.io.mem_grant.valid := false.B
       e.io.mem_grant.bits := DontCare
