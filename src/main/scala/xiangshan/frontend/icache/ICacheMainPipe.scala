@@ -167,6 +167,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val tlb_resp_af     = Vec(PortNumber,Bool())
   }
 
+
   val tlb_slot = RegInit(0.U.asTypeOf(new tlbMissSlot))
 
   val s0_final_vaddr        = Mux(tlb_slot.valid,tlb_slot.req_vaddr ,s0_req_vaddr.head)
@@ -247,7 +248,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       tlb_slot.tlb_resp_af(i)    := fromITLB(i + PortNumber).bits.excp(0).af.instr && fromITLB(i).valid
     }
   }
-  when(tlb_all_resp && !s0_can_go) { tlb_slot.has_latch_resp := true.B }
+  when(tlb_slot.valid && tlb_all_resp && !s0_can_go) { tlb_slot.has_latch_resp := true.B }
 
   when(tlb_slot.valid && (tlb_all_resp || tlb_slot.has_latch_resp) && s0_can_go){
     tlb_slot.valid := false.B
