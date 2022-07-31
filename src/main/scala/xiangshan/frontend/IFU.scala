@@ -664,6 +664,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
+  when(wb_valid && RegNext(f3_hasLastHalf) && wb_check_result_stage2.fixedMissPred(PredictWidth - 1)){
+    f3_lastHalf.valid := false.B
+  }
+
   val checkFlushWb = Wire(Valid(new PredecodeWritebackBundle))
   checkFlushWb.valid                  := wb_valid
   checkFlushWb.bits.pc                := wb_pc
