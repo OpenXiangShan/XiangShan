@@ -668,8 +668,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     RegNext(io.csrCtrl.ldld_vio_check_enable)
   )
   val s3_need_replay_from_fetch = s3_forward_fail || s3_ldld_violation
-  val s3_can_replay_from_fetch = RegEnable(load_s2.io.s2_can_replay_from_fetch, hitLoadOut.valid)
-  when (RegNext(hitLoadOut.valid)) {
+  val s3_can_replay_from_fetch = RegEnable(load_s2.io.s2_can_replay_from_fetch, load_s2.io.out.valid)
+  when (RegNext(load_s2.io.out.valid)) {
     io.ldout.bits.uop.ctrl.replayInst := s3_need_replay_from_fetch
   }
 
