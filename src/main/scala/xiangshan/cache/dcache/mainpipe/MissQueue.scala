@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
 
-class MissReq(implicit p: Parameters) extends DCacheBundle {
+class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
@@ -35,8 +35,7 @@ class MissReq(implicit p: Parameters) extends DCacheBundle {
   val way_en = UInt(DCacheWays.W)
 
   // store
-  val store_data = UInt((cfg.blockBytes * 8).W)
-  val store_mask = UInt(cfg.blockBytes.W)
+  val full_overwrite = Bool()
 
   // which word does amo work on?
   val word_idx = UInt(log2Up(blockWords).W)
@@ -64,12 +63,36 @@ class MissReq(implicit p: Parameters) extends DCacheBundle {
   def hit = req_coh.isValid()
 }
 
+class MissReqStoreData(implicit p: Parameters) extends DCacheBundle {
+  // store data and store mask will be written to miss queue entry 
+  // 1 cycle after req.fire() and meta write
+  val store_data = UInt((cfg.blockBytes * 8).W)
+  val store_mask = UInt(cfg.blockBytes.W)
+}
+
+class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
+  // store data and store mask will be written to miss queue entry 
+  // 1 cycle after req.fire() and meta write
+  val store_data = UInt((cfg.blockBytes * 8).W)
+  val store_mask = UInt(cfg.blockBytes.W)
+
+  def toMissReqStoreData(): MissReqStoreData = {
+    val out = Wire(new MissReqStoreData)
+    out.store_data := store_data
+    out.store_mask := store_mask
+    out
+  }
+}
+
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     // MSHR ID
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
-    val req    = Flipped(ValidIO(new MissReq))
+    // MSHR update request, MSHR state and addr will be updated when req.fire()
+    val req = Flipped(ValidIO(new MissReq))
+    // store data and mask will be write to miss queue entry 1 cycle after req.fire()
+    val req_data = Input(new MissReqStoreData)
     // allocate this entry for new req
     val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
@@ -110,6 +133,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   assert(!RegNext(io.primary_valid && !io.primary_ready))
 
   val req = Reg(new MissReq)
+  val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
 
@@ -118,6 +142,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val s_replace_req = RegInit(true.B)
   val s_refill = RegInit(true.B)
   val s_mainpipe_req = RegInit(true.B)
+  val s_write_storedata = RegInit(true.B)
 
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
@@ -135,16 +160,34 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
 
-  val full_overwrite = req.isStore && req.store_mask.andR
+  // val full_overwrite = req.isStore && req_store_mask.andR
+  val full_overwrite = Reg(Bool())
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+
+  // refill data with store data, this reg will be used to store:
+  // 1. store data (if needed), before l2 refill data
+  // 2. store data and l2 refill data merged result (i.e. new cacheline taht will be write to data array)
+  val refill_and_store_data = Reg(Vec(blockRows, UInt(rowBits.W)))
+  // raw data refilled to l1 by l2
+  val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
+
+  // allocate current miss queue entry for a miss req
+  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
+  // merge miss req to current miss queue entry
+  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
 
   when (release_entry && req_valid) {
     req_valid := false.B
   }
 
-  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
+  when (!s_write_storedata && req_valid) {
+    // store data will be write to miss queue entry 1 cycle after req.fire()
+    s_write_storedata := true.B
+    assert(RegNext(primary_fire || secondary_fire))
+  }
+
   when (primary_fire) {
     req_valid := true.B
     req := io.req.bits
@@ -155,6 +198,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     w_grantfirst := false.B
     w_grantlast := false.B
+
+    s_write_storedata := !io.req.bits.isStore // only store need to wait for data
+    full_overwrite := io.req.bits.isStore && io.req.bits.full_overwrite
 
     when (!io.req.bits.isAMO) {
       s_refill := false.B
@@ -175,7 +221,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     error := false.B
   }
 
-  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
   when (secondary_fire) {
     assert(io.req.bits.req_coh.state <= req.req_coh.state)
     assert(!(io.req.bits.isAMO || req.isAMO))
@@ -188,6 +233,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       req.way_en := req.way_en
       req.replace_coh := req.replace_coh
       req.replace_tag := req.replace_tag
+      s_write_storedata := false.B // only store need to wait for data
+      full_overwrite := io.req.bits.isStore && io.req.bits.full_overwrite
     }
 
     should_refill_data := should_refill_data_reg || io.req.bits.isLoad
@@ -198,19 +245,29 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     s_acquire := true.B
   }
 
-  val refill_data = Reg(Vec(blockRows, UInt(rowBits.W)))
-  val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
+  // store data and mask write
+  when (!s_write_storedata && req_valid) {
+    req_store_mask := io.req_data.store_mask
+    for (i <- 0 until blockRows) {
+      refill_and_store_data(i) := io.req_data.store_data(rowBits * (i + 1) - 1, rowBits * i)
+    }
+  }
+
+  // merge data refilled by l2 and store data, update miss queue entry, gen refill_req
   val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
   val new_mask = Wire(Vec(blockRows, UInt(rowBytes.W)))
+  // merge refilled data and store data (if needed)
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
     (~full_wmask & old_data | full_wmask & new_data)
   }
   for (i <- 0 until blockRows) {
-    new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
+    // new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
+    new_data(i) := refill_and_store_data(i)
     // we only need to merge data for Store
-    new_mask(i) := Mux(req.isStore, req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
+    new_mask(i) := Mux(req.isStore, req_store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
   }
+
   val hasData = RegInit(true.B)
   val isDirty = RegInit(false.B)
   when (io.mem_grant.fire()) {
@@ -221,7 +278,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       for (i <- 0 until beatRows) {
         val idx = (refill_count << log2Floor(beatRows)) + i.U
         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-        refill_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+        refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
       }
       w_grantlast := w_grantlast || refill_done
       hasData := true.B
@@ -229,7 +286,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       // Grant
       assert(full_overwrite)
       for (i <- 0 until blockRows) {
-        refill_data(i) := new_data(i)
+        refill_and_store_data(i) := new_data(i)
       }
       w_grantlast := true.B
       hasData := false.B
@@ -280,10 +337,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   def should_merge(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match &&
-    (before_read_sent_can_merge(new_req) ||
-      before_data_refill_can_merge(new_req))
+    (
+      before_read_sent_can_merge(new_req) ||
+      before_data_refill_can_merge(new_req)
+    )
   }
 
+  // store can be merged before io.mem_acquire.fire()
+  // store can not be merged the cycle that io.mem_acquire.fire()
+  // load can be merged before io.mem_grant.fire()
+  //
+  // TODO: merge store if possible? mem_acquire may need to be re-issued,
+  // but sbuffer entry can be freed
   def should_reject(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
@@ -305,7 +370,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
 
   val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
-    val data = refill_data.asUInt
+    val data = refill_and_store_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
   io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
@@ -370,9 +435,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   refill.wmask := Mux(
     hasData || req.isLoad,
     ~0.U(DCacheBanks.W),
-    VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req.store_mask).orR)).asUInt
+    VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req_store_mask).orR)).asUInt
   )
-  refill.data := refill_data.asTypeOf((new RefillPipeReq).data)
+  refill.data := refill_and_store_data.asTypeOf((new RefillPipeReq).data)
   refill.miss_id := io.id
   refill.id := req.id
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
@@ -404,7 +469,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.main_pipe_req.bits.cmd := req.cmd
   io.main_pipe_req.bits.vaddr := req.vaddr
   io.main_pipe_req.bits.addr := req.addr
-  io.main_pipe_req.bits.store_data := refill_data.asUInt
+  io.main_pipe_req.bits.store_data := refill_and_store_data.asUInt
   io.main_pipe_req.bits.store_mask := ~0.U(blockBytes.W)
   io.main_pipe_req.bits.word_idx := req.word_idx
   io.main_pipe_req.bits.amo_data := req.amo_data
@@ -486,6 +551,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge)))
 
+  val req_data_gen = io.req.bits.toMissReqStoreData()
+  val req_data_buffer = RegEnable(req_data_gen, io.req.valid)
+
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val secondary_ready_vec = entries.map(_.io.secondary_ready)
   val secondary_reject_vec = entries.map(_.io.secondary_reject)
@@ -533,6 +601,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         !former_primary_ready &&
         e.io.primary_ready
       e.io.req.bits := io.req.bits
+      e.io.req_data := req_data_buffer
 
       e.io.mem_grant.valid := false.B
       e.io.mem_grant.bits := DontCare
