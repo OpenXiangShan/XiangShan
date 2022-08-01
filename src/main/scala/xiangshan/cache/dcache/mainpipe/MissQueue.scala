@@ -83,6 +83,25 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out.store_mask := store_mask
     out
   }
+
+  def toMissReqWoStoreData(): MissReqWoStoreData = {
+    val out = Wire(new MissReqWoStoreData)
+    out.source := source
+    out.cmd := cmd
+    out.addr := addr
+    out.vaddr := vaddr
+    out.way_en := way_en
+    out.full_overwrite := full_overwrite
+    out.word_idx := word_idx
+    out.amo_data := amo_data
+    out.amo_mask := amo_mask
+    out.req_coh := req_coh
+    out.replace_coh := replace_coh
+    out.replace_tag := replace_tag
+    out.id := id
+    out.cancel := cancel
+    out
+  }
 }
 
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
@@ -91,7 +110,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
     // MSHR update request, MSHR state and addr will be updated when req.fire()
-    val req = Flipped(ValidIO(new MissReq))
+    val req = Flipped(ValidIO(new MissReqWoStoreData))
     // store data and mask will be write to miss queue entry 1 cycle after req.fire()
     val req_data = Input(new MissReqStoreData)
     // allocate this entry for new req
@@ -133,7 +152,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
 
-  val req = Reg(new MissReq)
+  val req = Reg(new MissReqWoStoreData)
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
@@ -327,15 +346,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     w_mainpipe_resp := true.B
   }
 
-  def before_read_sent_can_merge(new_req: MissReq): Bool = {
+  def before_read_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
     acquire_not_sent && req.isLoad && (new_req.isLoad || new_req.isStore)
   }
 
-  def before_data_refill_can_merge(new_req: MissReq): Bool = {
+  def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
     data_not_refilled && (req.isLoad || req.isStore) && new_req.isLoad
   }
 
-  def should_merge(new_req: MissReq): Bool = {
+  def should_merge(new_req: MissReqWoStoreData): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match &&
     (
@@ -350,7 +369,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   //
   // TODO: merge store if possible? mem_acquire may need to be re-issued,
   // but sbuffer entry can be freed
-  def should_reject(new_req: MissReq): Bool = {
+  def should_reject(new_req: MissReqWoStoreData): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
 
@@ -605,7 +624,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         !reject && 
         !former_primary_ready &&
         e.io.primary_ready
-      e.io.req.bits := io.req.bits
+      e.io.req.bits := io.req.bits.toMissReqWoStoreData()
       e.io.req_data := req_data_buffer
 
       e.io.mem_grant.valid := false.B
