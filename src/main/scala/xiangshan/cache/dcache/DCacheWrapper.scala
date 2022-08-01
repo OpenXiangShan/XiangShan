@@ -37,7 +37,7 @@ case class DCacheParameters
 (
   nSets: Int = 256,
   nWays: Int = 8,
-  rowBits: Int = 128,
+  rowBits: Int = 64,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
@@ -117,10 +117,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // banked dcache support
   val DCacheSets = cacheParams.nSets
   val DCacheWays = cacheParams.nWays
-  val DCacheBanks = 8
-  val DCacheSRAMRowBits = 64 // hardcoded
+  val DCacheBanks = 8 // hardcoded
+  val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
+  require(DCacheSRAMRowBits == 64)
 
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
   val DCacheSizeBytes = DCacheSizeBits / 8
@@ -136,7 +137,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
-  val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)
