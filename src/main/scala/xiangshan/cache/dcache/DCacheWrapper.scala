@@ -185,7 +185,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def arbiter_with_pipereg_N_dup[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
-    dups: Seq[T],
+    dups: Seq[Valid[T]],
     name: Option[String] = None): Unit = {
     val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
@@ -194,7 +194,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     }
     AddPipelineReg(arb.io.out, out, false.B)
     for (dup <- dups) {
-      dup := RegEnable(arb.io.out.bits, arb.io.out.fire())
+      val valid = RegInit(false.B)
+      when(out.fire()) { valid := false.B }
+      when(arb.io.out.fire()) { valid := true.B }
+      dup.valid := valid
+      dup.bits := RegEnable(arb.io.out.bits, arb.io.out.fire())
     }
   }
 
@@ -303,6 +307,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
+  val data_dup_0 = UInt(DataBits.W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -542,10 +547,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
-
     ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
+  })
+
+  (0 until (LoadPipelineWidth / 2)).map(i => {
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
+  })
+
+  ((LoadPipelineWidth / 2) until LoadPipelineWidth).map(i => {
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp_dup_0
   })
 
   //----------------------------------------
@@ -640,11 +651,39 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
+  val refillShouldBeBlocked_dup_0 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_0.bits.idx) ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid &&
+        s.bits.set === missQueue.io.refill_pipe_req_dup_0.bits.idx &&
+        s.bits.way_en === missQueue.io.refill_pipe_req_dup_0.bits.way_en
+    )).orR
+  val refillShouldBeBlocked_dup_1 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_1.bits.idx) ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid &&
+        s.bits.set === missQueue.io.refill_pipe_req_dup_1.bits.idx &&
+        s.bits.way_en === missQueue.io.refill_pipe_req_dup_1.bits.way_en
+    )).orR
+  val refillShouldBeBlocked_dup_2 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_2.bits.idx) ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid &&
+        s.bits.set === missQueue.io.refill_pipe_req_dup_2.bits.idx &&
+        s.bits.way_en === missQueue.io.refill_pipe_req_dup_2.bits.way_en
+    )).orR
+  val refillShouldBeBlocked_dup_3 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_3.bits.idx) ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid &&
+        s.bits.set === missQueue.io.refill_pipe_req_dup_3.bits.idx &&
+        s.bits.way_en === missQueue.io.refill_pipe_req_dup_3.bits.way_en
+    )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
-  refillPipe.io.req_dup_0 := missQueue.io.refill_pipe_req_dup_0
-  refillPipe.io.req_dup_1 := missQueue.io.refill_pipe_req_dup_1
-  refillPipe.io.req_dup_2 := missQueue.io.refill_pipe_req_dup_2
-  refillPipe.io.req_dup_3 := missQueue.io.refill_pipe_req_dup_3
+  refillPipe.io.req_dup_0.bits := missQueue.io.refill_pipe_req_dup_0.bits
+  refillPipe.io.req_dup_1.bits := missQueue.io.refill_pipe_req_dup_1.bits
+  refillPipe.io.req_dup_2.bits := missQueue.io.refill_pipe_req_dup_2.bits
+  refillPipe.io.req_dup_3.bits := missQueue.io.refill_pipe_req_dup_3.bits
+  refillPipe.io.req_dup_0.valid := missQueue.io.refill_pipe_req_dup_0.valid && !refillShouldBeBlocked_dup_0
+  refillPipe.io.req_dup_1.valid := missQueue.io.refill_pipe_req_dup_1.valid && !refillShouldBeBlocked_dup_1
+  refillPipe.io.req_dup_2.valid := missQueue.io.refill_pipe_req_dup_2.valid && !refillShouldBeBlocked_dup_2
+  refillPipe.io.req_dup_3.valid := missQueue.io.refill_pipe_req_dup_3.valid && !refillShouldBeBlocked_dup_3
   missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
@@ -730,8 +769,21 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
   cacheOpDecoder.io.csr <> io.csr
-  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache_req_dup_0
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  // dup cacheOp_req_valid
+  bankedDataArray.io.cacheOp_req_dup_0 := cacheOpDecoder.io.cache_req_dup_0
+  bankedDataArray.io.cacheOp_req_dup_1 := cacheOpDecoder.io.cache_req_dup_1
+  // dup cacheOp_req_bits_opCode
+  bankedDataArray.io.cacheOp_req_bits_opCode_dup_0 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_0
+  bankedDataArray.io.cacheOp_req_bits_opCode_dup_1 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_1
+
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  // dup cacheOp_req_valid
+  tagArray.io.cacheOp_req_dup_0 := cacheOpDecoder.io.cache_req_dup_0
+  tagArray.io.cacheOp_req_dup_1 := cacheOpDecoder.io.cache_req_dup_1
+  // dup cacheOp_req_bits_opCode
+  tagArray.io.cacheOp_req_bits_opCode_dup_0 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_0
+  tagArray.io.cacheOp_req_bits_opCode_dup_1 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_1
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(

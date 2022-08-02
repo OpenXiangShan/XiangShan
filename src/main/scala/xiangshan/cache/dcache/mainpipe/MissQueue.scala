@@ -459,10 +459,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
-    val refill_pipe_req_dup_0 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_1 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_2 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_3 = Output(new RefillPipeReq)
+    val refill_pipe_req_dup_0 = Output(Valid(new RefillPipeReq))
+    val refill_pipe_req_dup_1 = Output(Valid(new RefillPipeReq))
+    val refill_pipe_req_dup_2 = Output(Valid(new RefillPipeReq))
+    val refill_pipe_req_dup_3 = Output(Valid(new RefillPipeReq))
     val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
