@@ -260,17 +260,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       dataModule.io.mask.waddr(i) := stWbIndex
       dataModule.io.mask.wdata(i) := io.storeIn(i).bits.mask
-      dataModule.io.mask.wen(i) := addr_valid
+      dataModule.io.mask.wen(i) := true.B
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
-      paddrModule.io.wen(i) := addr_valid
+      paddrModule.io.wen(i) := true.B
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
       vaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
-      vaddrModule.io.wen(i) := addr_valid
+      vaddrModule.io.wen(i) := true.B
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
 
