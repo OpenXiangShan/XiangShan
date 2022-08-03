@@ -316,7 +316,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     preDecoderIn.pc  := f2_pc
   }
 
-  val f2_expd_instr     = preDecoderOut.expInstr
+  //val f2_expd_instr     = preDecoderOut.expInstr
+  val f2_instr          = preDecoderOut.instr
   val f2_pd             = preDecoderOut.pd
   val f2_jump_offset    = preDecoderOut.jumpOffset
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
@@ -353,17 +354,24 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_except_af      = RegEnable(f2_except_af,  f2_fire)
   val f3_mmio           = RegEnable(f2_mmio   ,  f2_fire)
 
-  val f3_expd_instr     = RegEnable(f2_expd_instr,   f2_fire)
-  val f3_pd             = RegEnable(f2_pd,           f2_fire)
-  val f3_jump_offset    = RegEnable(f2_jump_offset,  f2_fire)
-  val f3_af_vec         = RegEnable(f2_af_vec,       f2_fire)
-  val f3_pf_vec         = RegEnable(f2_pf_vec ,      f2_fire)
-  val f3_pc             = RegEnable(f2_pc,           f2_fire)
-  val f3_half_snpc        = RegEnable(f2_half_snpc,  f2_fire)
-  val f3_instr_range    = RegEnable(f2_instr_range,  f2_fire)
-  val f3_foldpc         = RegEnable(f2_foldpc,       f2_fire)
-  val f3_crossPageFault = RegEnable(f2_crossPageFault,       f2_fire)
-  val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,       f2_fire)
+  //val f3_expd_instr     = RegEnable(next = f2_expd_instr,  enable = f2_fire)
+  val f3_instr          = RegEnable(next = f2_instr, enable = f2_fire)
+  val f3_expd_instr     = VecInit((0 until PredictWidth).map{ i => 
+    val expander       = Module(new RVCExpander)
+    expander.io.in := f3_instr(i)
+    expander.io.out.bits
+  })
+
+  val f3_pd             = RegEnable(next = f2_pd,          enable = f2_fire)
+  val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
+  val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
+  val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
+  val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
+  val f3_half_snpc        = RegEnable(next = f2_half_snpc, enable = f2_fire)
+  val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
+  val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
+  val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
+  val f3_hasHalfValid   = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
   val f3_pAddrs   = RegEnable(f2_paddrs,  f2_fire)
