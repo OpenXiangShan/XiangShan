@@ -61,6 +61,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
+    val primary_ready_dup = Vec(4, Output(Bool()))
     // this entry is busy, but it can merge the new req
     val secondary_valid = Input(Bool())
     val secondary_ready = Output(Bool())
@@ -86,6 +87,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state = RegInit(s_invalid)
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
+  val state_dup_for_mp = RegInit(VecInit(Seq.fill(4)(s_invalid)))
 
   // internal regs
   // remaining beats
@@ -130,10 +132,12 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       state := s_sleep
       state_dup_0 := s_sleep
       state_dup_1 := s_sleep
+      state_dup_for_mp.foreach(_ := s_sleep)
     }.otherwise {
       state := s_release_req
       state_dup_0 := s_release_req
       state_dup_1 := s_release_req
+      state_dup_for_mp.foreach(_ := s_release_req)
       remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     }
   }
@@ -155,6 +159,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       state := s_release_req
       state_dup_0 := s_release_req
       state_dup_1 := s_release_req
+      state_dup_for_mp.foreach(_ := s_release_req)
       req.voluntary := false.B
       req.param := req.param
       req.hasData := req.hasData || io.req.bits.hasData
@@ -172,6 +177,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       state := s_release_req
       state_dup_0 := s_release_req
       state_dup_1 := s_release_req
+      state_dup_for_mp.foreach(_ := s_release_req)
       req.delay_release := false.B
       remain_set := Mux(
         req.hasData || update && io.release_update.bits.mask.orR || merge && io.req.bits.hasData,
@@ -281,6 +287,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
         state := s_release_resp
         state_dup_0 := s_release_resp
         state_dup_1 := s_release_resp
+        state_dup_for_mp.foreach(_ := s_release_resp)
       }
       // merge a ProbeAck
       when (merge) {
@@ -328,6 +335,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
           state := s_sleep
           state_dup_0 := s_sleep
           state_dup_1 := s_sleep
+          state_dup_for_mp.foreach(_ := s_sleep)
           req := io.req.bits
           release_later := false.B
         }.elsewhen (release_later) {
@@ -346,6 +354,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
             s_release_req,
             s_sleep
           )
+          state_dup_for_mp.foreach(_ := Mux(
+            io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release,
+            s_release_req,
+            s_sleep
+          ))
           req := req_later.toWritebackReq
           when (io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id) {
             req.delay_release := false.B
@@ -355,6 +368,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
           state := s_invalid
           state_dup_0 := s_invalid
           state_dup_1 := s_invalid
+          state_dup_for_mp.foreach(_ := s_invalid)
           release_later := false.B
         }
       }
@@ -384,6 +398,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
         state := s_release_req
         state_dup_0 := s_release_req
         state_dup_1 := s_release_req
+        state_dup_for_mp.foreach(_ := s_release_req)
         req := io.req.bits
         remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
@@ -391,6 +406,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
         state := s_release_req
         state_dup_0 := s_release_req
         state_dup_1 := s_release_req
+        state_dup_for_mp.foreach(_ := s_release_req)
         req := req_later.toWritebackReq
         remain_set := Mux(req_later.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
@@ -398,6 +414,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
         state := s_invalid
         state_dup_0 := s_invalid
         state_dup_1 := s_invalid
+        state_dup_for_mp.foreach(_ := s_invalid)
         release_later := false.B
       }
     }
@@ -409,6 +426,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //    and a probe req with the same addr comes. In this case we merge probe with release,
   //    handle this probe, so we don't need another release.
   io.primary_ready := state_dup_1 === s_invalid
+  io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid }
   io.secondary_ready := state_dup_1 =/= s_invalid && io.req.bits.addr === req.addr
 
   // performance counters
@@ -422,6 +440,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
+    val req_ready_dup = Vec(4, Output(Bool()))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
@@ -481,6 +500,11 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.release_wakeup := io.release_wakeup
       entry.io.release_update := io.release_update
   }
+
+  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
+    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR
+  }
+
   assert(RegNext(!(io.mem_grant.valid && !io.mem_grant.ready)))
   io.mem_grant.ready := true.B
 

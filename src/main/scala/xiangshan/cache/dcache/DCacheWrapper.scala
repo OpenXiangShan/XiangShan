@@ -185,21 +185,17 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def arbiter_with_pipereg_N_dup[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
-    dups: Seq[Valid[T]],
+    dups: Seq[DecoupledIO[T]],
     name: Option[String] = None): Unit = {
     val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
     }
-    AddPipelineReg(arb.io.out, out, false.B)
     for (dup <- dups) {
-      val valid = RegInit(false.B)
-      when(out.fire()) { valid := false.B }
-      when(arb.io.out.fire()) { valid := true.B }
-      dup.valid := valid
-      dup.bits := RegEnable(arb.io.out.bits, arb.io.out.fire())
+      AddPipelineReg(arb.io.out, dup, false.B)
     }
+    AddPipelineReg(arb.io.out, out, false.B)
   }
 
   def rrArbiter[T <: Bundle](
@@ -651,39 +647,48 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
-  val refillShouldBeBlocked_dup_0 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_0.bits.idx) ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req_dup_0.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req_dup_0.bits.way_en
-    )).orR
-  val refillShouldBeBlocked_dup_1 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_1.bits.idx) ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req_dup_1.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req_dup_1.bits.way_en
-    )).orR
-  val refillShouldBeBlocked_dup_2 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_2.bits.idx) ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req_dup_2.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req_dup_2.bits.way_en
-    )).orR
-  val refillShouldBeBlocked_dup_3 = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req_dup_3.bits.idx) ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req_dup_3.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req_dup_3.bits.way_en
-    )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
-  refillPipe.io.req_dup_0.bits := missQueue.io.refill_pipe_req_dup_0.bits
-  refillPipe.io.req_dup_1.bits := missQueue.io.refill_pipe_req_dup_1.bits
-  refillPipe.io.req_dup_2.bits := missQueue.io.refill_pipe_req_dup_2.bits
-  refillPipe.io.req_dup_3.bits := missQueue.io.refill_pipe_req_dup_3.bits
-  refillPipe.io.req_dup_0.valid := missQueue.io.refill_pipe_req_dup_0.valid && !refillShouldBeBlocked_dup_0
-  refillPipe.io.req_dup_1.valid := missQueue.io.refill_pipe_req_dup_1.valid && !refillShouldBeBlocked_dup_1
-  refillPipe.io.req_dup_2.valid := missQueue.io.refill_pipe_req_dup_2.valid && !refillShouldBeBlocked_dup_2
-  refillPipe.io.req_dup_3.valid := missQueue.io.refill_pipe_req_dup_3.valid && !refillShouldBeBlocked_dup_3
+
+  val nDupDataWriteReady = 4
+  val nDupTagWriteReady = 4
+  val nDupStatus = nDupDataWriteReady + nDupTagWriteReady
+  val mpStatus_dup = mainPipe.io.status_dup
+  val mq_refill_dup = missQueue.io.refill_pipe_req_dup
+  val refillShouldBeBlocked_dup = VecInit((0 until nDupStatus).map { case i =>
+    mpStatus_dup(i).s1.valid && mpStatus_dup(i).s1.bits.set === mq_refill_dup(i).bits.idx ||
+    Cat(Seq(mpStatus_dup(i).s2, mpStatus_dup(i).s3).map(s =>
+      s.valid &&
+        s.bits.set === mq_refill_dup(i).bits.idx &&
+        s.bits.way_en === mq_refill_dup(i).bits.way_en
+    )).orR
+  })
+  dontTouch(refillShouldBeBlocked_dup)
+
+  refillPipe.io.req_dup_0.bits := mq_refill_dup(0).bits
+  refillPipe.io.req_dup_1.bits := mq_refill_dup(1).bits
+  refillPipe.io.req_dup_2.bits := mq_refill_dup(2).bits
+  refillPipe.io.req_dup_3.bits := mq_refill_dup(3).bits
+  refillPipe.io.req_dup_0.valid := mq_refill_dup(0).valid && !refillShouldBeBlocked_dup(0)
+  refillPipe.io.req_dup_1.valid := mq_refill_dup(1).valid && !refillShouldBeBlocked_dup(1)
+  refillPipe.io.req_dup_2.valid := mq_refill_dup(2).valid && !refillShouldBeBlocked_dup(2)
+  refillPipe.io.req_dup_3.valid := mq_refill_dup(3).valid && !refillShouldBeBlocked_dup(3)
+
+  val refillPipe_io_req_valid_dup = VecInit(mq_refill_dup.zip(refillShouldBeBlocked_dup).map(
+    x => x._1.valid && !x._2
+  ))
+  val refillPipe_io_data_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(0, nDupDataWriteReady))
+  val refillPipe_io_tag_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(nDupDataWriteReady, nDupDataWriteReady + nDupTagWriteReady))
+  dontTouch(refillPipe_io_req_valid_dup)
+  dontTouch(refillPipe_io_data_write_valid_dup)
+  dontTouch(refillPipe_io_tag_write_valid_dup)
+  mainPipe.io.data_write_ready_dup := VecInit(refillPipe_io_data_write_valid_dup.map(v => !v))
+  mainPipe.io.tag_write_ready_dup := VecInit(refillPipe_io_tag_write_valid_dup.map(v => !v))
+  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
+
+  mq_refill_dup.zip(refillShouldBeBlocked_dup).foreach { case (r, block) =>
+    r.ready := refillPipe.io.req.ready && !block
+  }
+
   missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
