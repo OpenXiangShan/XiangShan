@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut
 import huancun.DirtyKey
 import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
 
-class WritebackReq(implicit p: Parameters) extends DCacheBundle {
+class WritebackReqWodata(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val addr_dup_0 = UInt(PAddrBits.W)
   val addr_dup_1 = UInt(PAddrBits.W)
@@ -32,14 +32,46 @@ class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val voluntary = Bool()
   val hasData = Bool()
   val dirty = Bool()
-  val data = UInt((cfg.blockBytes * 8).W)
 
   val delay_release = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
 
   def dump() = {
+    XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
+      addr, param, voluntary, hasData)
+  }
+}
+
+class WritebackReqData(implicit p: Parameters) extends DCacheBundle {
+  val data = UInt((cfg.blockBytes * 8).W)
+}
+
+class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
+  val data = UInt((cfg.blockBytes * 8).W)
+
+  override def dump() = {
     XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
       addr, param, voluntary, hasData, data)
+  }
+
+  def toWritebackReqWodata(): WritebackReqWodata = {
+    val out = Wire(new WritebackReqWodata)
+    out.addr := addr
+    out.addr_dup_0 := addr_dup_0
+    out.addr_dup_1 := addr_dup_1
+    out.param := param
+    out.voluntary := voluntary
+    out.hasData := hasData
+    out.dirty := dirty
+    out.delay_release := delay_release
+    out.miss_id := miss_id
+    out
+  }
+
+  def toWritebackReqData(): WritebackReqData = {
+    val out = Wire(new WritebackReqData)
+    out.data := data
+    out
   }
 }
 
@@ -51,6 +83,16 @@ class ReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val mask = UInt(DCacheBanks.W)
   val data = UInt((cfg.blockBytes * 8).W)
+}
+
+// To reduce fanout, miss queue entry data is updated 1 cycle
+// after ReleaseUpdate.fire()
+class MissQueueEntryReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
+  // only consider store here
+  val addr = UInt(PAddrBits.W)
+  val mask_delayed = UInt(DCacheBanks.W)
+  val data_delayed = UInt((cfg.blockBytes * 8).W)
+  val mask_orr = Bool()
 }
 
 class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
@@ -65,7 +107,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // this entry is busy, but it can merge the new req
     val secondary_valid = Input(Bool())
     val secondary_ready = Output(Bool())
-    val req = Flipped(DecoupledIO(new WritebackReq))
+    val req = Flipped(DecoupledIO(new WritebackReqWodata))
+    val req_data = Input(new WritebackReqData)
 
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
@@ -73,7 +116,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val block_addr  = Output(Valid(UInt()))
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
-    val release_update = Flipped(ValidIO(new ReleaseUpdate))
+    val release_update = Flipped(ValidIO(new MissQueueEntryReleaseUpdate))
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
@@ -100,9 +143,19 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   remain_dup_0 := (remain_dup_0 | remain_set) & ~remain_clr
   remain_dup_1 := (remain_dup_1 | remain_set) & ~remain_clr
 
-  val busy = remain.orR
+  // writeback queue data
+  val data = Reg(UInt((cfg.blockBytes * 8).W))
 
-  val req  = Reg(new WritebackReq)
+  // pending data write
+  // !s_data_override means there is an in-progress data write
+  val s_data_override = RegInit(true.B) 
+  // !s_data_merge means there is an in-progress data merge
+  val s_data_merge = RegInit(true.B) 
+
+  // there are valid request that can be sent to release bus
+  val busy = remain.orR && s_data_override && s_data_merge // have remain beats and data write finished
+
+  val req  = Reg(new WritebackReqWodata)
 
   // assign default signals to output signals
   io.req.ready := false.B
@@ -111,6 +164,9 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_grant.ready   := false.B
   io.block_addr.valid  := state =/= s_invalid
   io.block_addr.bits   := req.addr
+
+  s_data_override := true.B // data_override takes only 1 cycle
+  s_data_merge := true.B // data_merge takes only 1 cycle
 
 
   when (state =/= s_invalid) {
@@ -128,6 +184,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   when (io.req.valid && io.primary_valid && io.primary_ready) {
     assert (remain === 0.U)
     req := io.req.bits
+    s_data_override := false.B
     when (io.req.bits.delay_release) {
       state := s_sleep
       state_dup_0 := s_sleep
@@ -152,9 +209,9 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val update = io.release_update.valid && io.release_update.bits.addr === req.addr
     when (update) {
-      req.hasData := req.hasData || io.release_update.bits.mask.orR
-      req.dirty := req.dirty || io.release_update.bits.mask.orR
-      req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
+      req.hasData := req.hasData || io.release_update.bits.mask_orr
+      req.dirty := req.dirty || io.release_update.bits.mask_orr
+      s_data_merge := false.B
     }.elsewhen (merge) {
       state := s_release_req
       state_dup_0 := s_release_req
@@ -164,11 +221,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       req.param := req.param
       req.hasData := req.hasData || io.req.bits.hasData
       req.dirty := req.dirty || io.req.bits.dirty
-      req.data := Mux(
-        io.req.bits.hasData,
-        io.req.bits.data,
-        req.data
-      )
+      s_data_override := !io.req.bits.hasData // update data when io.req.bits.hasData
       req.delay_release := false.B
       remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     }
@@ -180,7 +233,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       state_dup_for_mp.foreach(_ := s_release_req)
       req.delay_release := false.B
       remain_set := Mux(
-        req.hasData || update && io.release_update.bits.mask.orR || merge && io.req.bits.hasData,
+        req.hasData || update && io.release_update.bits.mask_orr || merge && io.req.bits.hasData,
         ~0.U(refillCycles.W),
         1.U(refillCycles.W)
       )
@@ -194,7 +247,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   val beat_data = Wire(Vec(refillCycles, UInt(beatBits.W)))
   for (i <- 0 until refillCycles) {
-    beat_data(i) := req.data((i + 1) * beatBits - 1, i * beatBits)
+    beat_data(i) := data((i + 1) * beatBits - 1, i * beatBits)
   }
 
   val probeResponse = edge.ProbeAck(
@@ -261,7 +314,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     def toWritebackReq = {
       val r = Wire(new WritebackReq())
-      r.data := req.data
+      r.data := data
       r.addr := req.addr
       r.addr_dup_0 := req.addr_dup_0
       r.addr_dup_1 := req.addr_dup_1
@@ -305,11 +358,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
           req.voluntary := false.B
           req.hasData := req.hasData || io.req.bits.hasData
           req.dirty := req.dirty || io.req.bits.dirty
-          req.data := Mux(
-            io.req.bits.hasData,
-            io.req.bits.data,
-            req.data
-          )
+          s_data_override := false.B
           req.delay_release := false.B
           remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         }
@@ -429,6 +478,17 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid }
   io.secondary_ready := state_dup_1 =/= s_invalid && io.req.bits.addr === req.addr
 
+  // data update logic
+  when (!s_data_merge) {
+    data := mergeData(data, io.release_update.bits.data_delayed, io.release_update.bits.mask_delayed)
+  }
+
+  when (!s_data_override) {
+    data := io.req_data.data
+  }
+
+  assert(!RegNext(!s_data_merge && !s_data_override))
+
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
   XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
@@ -467,6 +527,16 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
 
+  // dalay data write in miss queue release update for 1 cycle
+  val release_update_bits_for_entry = Wire(new MissQueueEntryReleaseUpdate)
+  release_update_bits_for_entry.addr := io.release_update.bits.addr
+  release_update_bits_for_entry.mask_delayed := RegEnable(io.release_update.bits.mask, io.release_update.valid)
+  release_update_bits_for_entry.data_delayed := RegEnable(io.release_update.bits.data, io.release_update.valid)
+  release_update_bits_for_entry.mask_orr := io.release_update.bits.mask.orR
+
+  // delay data write in miss queue req for 1 cycle
+  val req_data = RegEnable(io.req.bits.toWritebackReqData(), io.req.valid)
+
   require(isPow2(cfg.nMissEntries))
   val grant_source = io.mem_grant.bits.source
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
@@ -485,6 +555,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       primary_ready_vec(i)   := entry.io.primary_ready
       secondary_ready_vec(i) := entry.io.secondary_ready
       entry.io.req.bits  := io.req.bits
+      entry.io.req_data  := req_data
 
       entry.io.primary_valid := alloc &&
         !former_primary_ready &&
@@ -493,12 +564,10 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
       entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
       entry.io.mem_grant.bits  := io.mem_grant.bits
-//      when (entry_id === grant_source) {
-//        io.mem_grant.ready := entry.io.mem_grant.ready
-//      }
 
       entry.io.release_wakeup := io.release_wakeup
-      entry.io.release_update := io.release_update
+      entry.io.release_update.valid := io.release_update.valid
+      entry.io.release_update.bits := release_update_bits_for_entry // data write delayed
   }
 
   io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>

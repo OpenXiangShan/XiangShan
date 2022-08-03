@@ -271,7 +271,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   s0_can_go      := !missSwitchBit && s1_ready && sram_ready
-  s0_slot_fire   := tlb_slot.valid && tlb_all_resp && s0_can_go
+  s0_slot_fire   := tlb_slot.valid && (tlb_all_resp || tlb_slot.has_latch_resp) && s0_can_go
   s0_fetch_fire  := s0_valid && !tlb_slot.valid && s0_can_go
   s0_fire        := s0_slot_fire || s0_fetch_fire
 
