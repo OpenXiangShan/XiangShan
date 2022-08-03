@@ -27,6 +27,7 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
@@ -970,7 +971,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
     ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
-  val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
+  val debugIntrSync = AsyncResetSynchronizerShiftReg(csrio.externalInterrupt.debug, 3)
+  val debugIntr = debugIntrSync & debugIntrEnable
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))

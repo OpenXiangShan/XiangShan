@@ -59,16 +59,17 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
   for (i <- 0 until numRead) {
     val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
     val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
+    val w_bypassed = RegNext(io.waddr === io.raddr(i) && io.wen)
+    val last_wdata = RegEnable(io.wdata, io.waddr === io.raddr(i) && io.wen)
     for (j <- 0 until numDup) {
       bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
       for (k <- 0 until numBanks) {
-        data_read(j)(k) := Mux(io.wen && (io.waddr === io.raddr(i)),
-          io.wdata, dataBanks(k)(bankOffset(io.raddr(i))))
+        data_read(j)(k) := dataBanks(k)(bankOffset(io.raddr(i)))
       }
     }
-    // next cycle48G
+    // next cycle
     for (j <- 0 until numDup) {
-      io.rdata(i)(j) := Mux1H(bank_index(j), data_read(j))
+      io.rdata(i)(j) := Mux(w_bypassed, last_wdata, Mux1H(bank_index(j), data_read(j)))
     }
   }
 
