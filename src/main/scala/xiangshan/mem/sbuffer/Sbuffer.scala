@@ -212,6 +212,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val accessIdx = Wire(Vec(StorePipelineWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
   val replaceIdx = plru.way
+  val replaceIdxOH = UIntToOH(plru.way)
   plru.access(accessIdx)
 
   //-------------------------cohCount-----------------------------
@@ -220,10 +221,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // if cohCount(EvictCountBits-1)==1, evict
   val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
+  val cohTimeOutOH = PriorityEncoderOH(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
-  val (missqReplayTimeOutIdx, missqReplayMayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
-  val missqReplayHasTimeOut = RegNext(missqReplayMayHasTimeOut) && !RegNext(sbuffer_out_s0_fire)
-  val missqReplayTimeOutIdxReg = RegEnable(missqReplayTimeOutIdx, missqReplayMayHasTimeOut)
+  val (missqReplayTimeOutIdxGen, missqReplayHasTimeOutGen) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
+  val missqReplayHasTimeOut = RegNext(missqReplayHasTimeOutGen) && !RegNext(sbuffer_out_s0_fire)
+  val missqReplayTimeOutIdx = RegEnable(missqReplayTimeOutIdxGen, missqReplayHasTimeOutGen)
 
   //-------------------------sbuffer enqueue-----------------------------
 
@@ -513,7 +515,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
-    missqReplayTimeOutIdxReg,
+    missqReplayTimeOutIdx,
     Mux(need_drain,
       drainIdx,
       Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
@@ -537,10 +539,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // ---------------------------------------------------------------------------
 
   // TODO: use EnsbufferWidth
-  val shouldWaitWriteFinish = VecInit((0 until StorePipelineWidth).map{i =>
-    (RegNext(writeReq(i).bits.wvec).asUInt & UIntToOH(RegNext(sbuffer_out_s0_evictionIdx))).asUInt.orR &&
-    RegNext(writeReq(i).valid)
-  }).asUInt.orR
+  val shouldWaitWriteFinish = RegNext(VecInit((0 until StorePipelineWidth).map{i =>
+    (writeReq(i).bits.wvec.asUInt & UIntToOH(sbuffer_out_s0_evictionIdx).asUInt).orR &&
+    writeReq(i).valid
+  }).asUInt.orR)
   // block dcache write if read / write hazard
   val blockDcacheWrite = shouldWaitWriteFinish
 
@@ -670,10 +672,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))
   for ((forward, i) <- io.forward.zipWithIndex) {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
-    val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
+    // ptag_matches uses paddr from dtlb, which is far from sbuffer
+    val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), forward.valid) === RegEnable(getPTag(forward.paddr), forward.valid)))
     val tag_matches = vtag_matches
     val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
-      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((activeMask(w) || inflightMask(w)))
+      RegNext(vtag_matches(w)) =/= ptag_matches(w) && RegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
