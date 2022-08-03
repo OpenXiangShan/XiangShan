@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
+import huancun.utils.{ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._

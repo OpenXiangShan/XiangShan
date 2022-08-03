@@ -36,6 +36,7 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
+import huancun.utils.ResetGen
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
