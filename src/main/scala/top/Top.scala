@@ -142,9 +142,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
     })
+
+    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
-    childReset := io.reset
+    childReset := reset_sync
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
@@ -174,7 +177,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock
-    misc.module.debug_module_io.reset := io.reset
+    misc.module.debug_module_io.reset := reset_sync
 
     // TODO: use synchronizer?
     misc.module.debug_module_io.debugIO.reset := io.systemjtag.reset
@@ -190,11 +193,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, io.reset) {
+    withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
-      ResetGen(resetChain, io.reset, !debugOpts.FPGAPlatform)
+      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
 
   }

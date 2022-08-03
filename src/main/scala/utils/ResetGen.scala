@@ -36,6 +36,10 @@ case class ModuleNode(mod: MultiIOModule) extends ResetNode
 case class ResetGenNode(children: Seq[ResetNode]) extends ResetNode
 
 object ResetGen {
+  def apply(SYNC_NUM: Int = 2): AsyncReset = {
+    val resetSync = Module(new ResetGen(SYNC_NUM))
+    resetSync.o_reset
+  }
 
   def apply(resetTree: ResetNode, reset: Reset, sim: Boolean): Unit = {
     if(!sim) {
