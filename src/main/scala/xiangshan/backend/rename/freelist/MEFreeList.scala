@@ -25,8 +25,8 @@ import utils._
 
 class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
   val freeList = RegInit(VecInit(
-    // originally {32, 33, ..., size - 1} are free. Register 0-31 are mapped to x0-x31.
-    Seq.tabulate(size - 32)(i => (i + 32).U(PhyRegIdxWidth.W)) ++ Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+    // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
+    Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
 
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false, 0))
