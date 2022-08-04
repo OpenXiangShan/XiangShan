@@ -181,6 +181,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
+  val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
   s2_ready := true.B
 
   val s2_fire = s2_valid
@@ -225,6 +226,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val banked_data_resp = io.banked_data_resp
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
+  val banked_data_resp_word_dup_0 = Mux1H(s2_bank_oh_dup_0, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
   dontTouch(s2_bank_addr)
 
   val s2_instrtype = s2_req.instrtype
@@ -263,6 +265,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits := DontCare
   // resp.bits.data := s2_word_decoded
   resp.bits.data := banked_data_resp_word.raw_data
+  resp.bits.data_dup_0 := banked_data_resp_word_dup_0.raw_data
   // * on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request

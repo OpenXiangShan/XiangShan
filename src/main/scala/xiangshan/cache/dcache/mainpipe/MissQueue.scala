@@ -542,10 +542,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
-    val refill_pipe_req_dup_0 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_1 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_2 = Output(new RefillPipeReq)
-    val refill_pipe_req_dup_3 = Output(new RefillPipeReq)
+    // val refill_pipe_req_dup_0 = Output(Valid(new RefillPipeReq))
+    // val refill_pipe_req_dup_1 = Output(Valid(new RefillPipeReq))
+    // val refill_pipe_req_dup_2 = Output(Valid(new RefillPipeReq))
+    // val refill_pipe_req_dup_3 = Output(Valid(new RefillPipeReq))
+    // Why is 8?
+    // 4 for data_write.valid, meta_write.valid, tag_write.valid, error_flag_write.valid depending on data_write.ready
+    // 4 for data_write.valid, meta_write.valid, tag_write.valid, error_flag_write.valid depending on tag_write.ready
+    // Since meta array is always ready, we do not need to consider meta_write.ready
+    val refill_pipe_req_dup = Vec(8, DecoupledIO(new RefillPipeReq))
     val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
@@ -646,8 +651,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  arbiter_with_pipereg_N_dup(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, 
-  dups=Seq(io.refill_pipe_req_dup_0, io.refill_pipe_req_dup_1, io.refill_pipe_req_dup_2, io.refill_pipe_req_dup_3), 
+  arbiter_with_pipereg_N_dup(entries.map(_.io.refill_pipe_req), io.refill_pipe_req,
+  io.refill_pipe_req_dup,
   Some("refill_pipe_req"))
 
   arbiter_with_pipereg(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
