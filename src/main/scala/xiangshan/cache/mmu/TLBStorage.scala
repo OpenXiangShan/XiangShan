@@ -55,12 +55,19 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
     Mem(bankEntries, gen)
   })
 
+  // delay one cycle for write, so there will be one inflight entry.
+  // The inflight entry is transparent('already writen') for outside
+  val last_wen = RegNext(io.wen, false.B)
+  val last_wdata = RegEnable(io.wdata, io.wen)
+  val last_wdata2 = RegEnable(last_wdata, last_wen)
+  val last_waddr = RegEnable(io.waddr, io.wen)
+
   // async read, but regnext
   for (i <- 0 until numRead) {
     val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
     val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
     val w_bypassed = RegNext(io.waddr === io.raddr(i) && io.wen)
-    val last_wdata = RegEnable(io.wdata, io.waddr === io.raddr(i) && io.wen)
+    val w_bypassed2 = RegNext(last_waddr === io.raddr(i) && last_wen)
     for (j <- 0 until numDup) {
       bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
       for (k <- 0 until numBanks) {
@@ -69,14 +76,15 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
     }
     // next cycle
     for (j <- 0 until numDup) {
-      io.rdata(i)(j) := Mux(w_bypassed, last_wdata, Mux1H(bank_index(j), data_read(j)))
+      io.rdata(i)(j) := Mux(w_bypassed || w_bypassed2, Mux(w_bypassed2, last_wdata2, last_wdata),
+        Mux1H(bank_index(j), data_read(j)))
     }
   }
 
   // write
   for (i <- 0 until numBanks) {
-    when (io.wen && (bankIndex(io.waddr) === i.U)) {
-      dataBanks(i)(bankOffset(io.waddr)) := io.wdata
+    when (last_wen && (bankIndex(last_waddr) === i.U)) {
+      dataBanks(i)(bankOffset(last_waddr)) := last_wdata
     }
   }
 }
