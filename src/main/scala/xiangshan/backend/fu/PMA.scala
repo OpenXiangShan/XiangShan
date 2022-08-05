@@ -19,8 +19,10 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
-import utils.{ParallelPriorityMux, ZeroExt, ValidHold}
+import utils.{ParallelPriorityMux, ValidHold, ZeroExt}
 import xiangshan.cache.mmu.TlbCmd
+
+import scala.collection.mutable.ListBuffer
 
 /* Memory Mapped PMA */
 case class MMPMAConfig
@@ -120,92 +122,67 @@ trait PMAMethod extends PMAConst {
    */
 
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
-    // the init value is zero
-    // from 0 to num(default 16) - 1, lower priority
-    // according to simple map, 9 entries is needed, pick 6-14, leave 0-5 & 15 unusedcfgMerged.map(_ := 0.U)
+    def genAddr(init_addr: BigInt) = {
+      init_addr.U((PMPAddrBits - PMPOffBits).W)
+    }
+    def genMask(init_addr: BigInt, a: BigInt) = {
+      val match_mask_addr = (init_addr << 1) | (a & 0x1) | (((1 << PlatformGrain) - 1) >> PMPOffBits)
+      val mask = ((match_mask_addr & ~(match_mask_addr + 1)) << PMPOffBits) | ((1 << PMPOffBits) - 1)
+      mask.U(PMPAddrBits.W)
+    }
 
     val num = NumPMA
     require(num >= 16)
-    val cfg = WireInit(0.U.asTypeOf(Vec(num, new PMPConfig())))
 
-    val addr = Wire(Vec(num, UInt((PMPAddrBits-PMPOffBits).W)))
-    val mask = Wire(Vec(num, UInt(PMPAddrBits.W)))
-    addr := DontCare
-    mask := DontCare
+    val cfg_list = ListBuffer[UInt]()
+    val addr_list = ListBuffer[UInt]()
+    val mask_list = ListBuffer[UInt]()
+    def addPMA(base_addr: BigInt,
+               range: BigInt = 0L, // only use for napot mode
+               l: Boolean = false,
+               c: Boolean = false,
+               atomic: Boolean = false,
+               a: Int = 0,
+               x: Boolean = false,
+               w: Boolean = false,
+               r: Boolean = false) = {
+      val addr = if (a < 2) { shift_addr(base_addr) }
+        else { get_napot(base_addr, range) }
+      cfg_list.append(PMPConfigUInt(l, c, atomic, a, x, w, r))
+      addr_list.append(genAddr(addr))
+      mask_list.append(genMask(addr, a))
+    }
 
-    var idx = num-1
+    addPMA(0x0L, range = 0x1000000000L, c = true, atomic = true, a = 3, x = true, w = true, r = true)
+    addPMA(0x0L, range = 0x80000000L, a = 3, w = true, r = true)
+    addPMA(0x3C000000L, a = 1)
+    addPMA(0x3A001000L, a = 1, w = true, r = true)
+    addPMA(0x3A000000L, a = 1)
+    addPMA(0x39002000L, a = 1, w = true, r = true)
+    addPMA(0x39000000L, a = 1)
+    addPMA(0x38022000L, a = 1, w = true, r = true)
+    addPMA(0x38021000L, a = 1, x = true, w = true, r = true)
+    addPMA(0x38020000L, a = 1, w = true, r = true)
+    addPMA(0x30050000L, a = 1, w = true, r = true) // FIXME: GPU space is cacheable?
+    addPMA(0x30010000L, a = 1, w = true, r = true)
+    addPMA(0x20000000L, a = 1, x = true, w = true, r = true)
+    addPMA(0x10000000L, a = 1, w = true, r = true)
+    addPMA(0)
+    while (cfg_list.length < 16) {
+      addPMA(0)
+    }
 
-    // TODO: turn to napot to save entries
-    // use tor instead of napot, for napot may be confusing and hard to understand
-    // NOTE: all the addr space are default set to DDR, RWXCA
-    idx = idx - 1
-    addr(idx) := shift_addr(0xFFFFFFFFFL) // all the addr are default ddr, whicn means rwxca
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
-    mask(idx) := match_mask(addr(idx), cfg(idx))
-    idx = idx - 1
-
-    // NOTE: (0x0_0000_0000L, 0x0_8000_0000L) are default set to MMIO, only RW
-    addr(idx) := get_napot(0x00000000L, 0x80000000L)
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    mask(idx) := match_mask(addr(idx), cfg(idx))
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x3C000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x3A001000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x3A000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x39002000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x39000000)
-    cfg(idx).a := 1.U
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x38022000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x38021000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr(0x38020000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr( 0x30050000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr( 0x30010000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr( 0x20000000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr( 0x10000000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-    
-    require(idx >= 0)
-    addr(idx) := shift_addr(0)
-
-    val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(PMXLEN.W)))
-    (cfgInitMerge, addr, mask)
+    val cfgInitMerge = Seq.tabulate(num / 8)(i => {
+      cfg_list.reverse.drop(8 * i).take(8).foldRight(BigInt(0L)) { case (a, result) =>
+        (result << a.getWidth) | a.litValue
+      }.U(PMXLEN.W)
+    })
+    val addr = addr_list.reverse
+    val mask = mask_list.reverse
+    (VecInit(cfgInitMerge), VecInit(addr), VecInit(mask))
   }
 
-  def get_napot(base: BigInt, range: BigInt) = {
+  def get_napot(base: BigInt, range: BigInt): BigInt = {
     val PlatformGrainBytes = (1 << PlatformGrain)
     if ((base % PlatformGrainBytes) != 0) {
       println("base:%x", base)
@@ -216,7 +193,7 @@ trait PMAMethod extends PMAConst {
     require((base % PlatformGrainBytes) == 0)
     require((range % PlatformGrainBytes) == 0)
 
-    ((base + (range/2 - 1)) >> PMPOffBits).U
+    ((base + (range/2 - 1)) >> PMPOffBits)
   }
 
   def match_mask(paddr: UInt, cfg: PMPConfig) = {
@@ -225,7 +202,7 @@ trait PMAMethod extends PMAConst {
   }
 
   def shift_addr(addr: BigInt) = {
-    (addr >> 2).U
+    addr >> 2
   }
 }
 

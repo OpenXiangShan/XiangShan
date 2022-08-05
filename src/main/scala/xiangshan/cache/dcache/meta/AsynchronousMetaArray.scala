@@ -55,10 +55,7 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
   })
 
-  val meta_array = Reg(Vec(nSets, Vec(nWays, new Meta)))
-  when (reset.asBool()) {
-    meta_array := 0.U.asTypeOf(meta_array.cloneType)
-  }
+  val meta_array = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(0.U.asTypeOf(new Meta))))))
 
   (io.read.zip(io.resp)).zipWithIndex.foreach {
     case ((read, resp), i) =>
@@ -87,10 +84,7 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
     // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
-  val meta_array = Reg(Vec(nSets, Vec(nWays, Bool())))
-  when (reset.asBool()) {
-    meta_array := 0.U.asTypeOf(meta_array.cloneType)
-  }
+  val meta_array = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
 
   io.read.zip(io.resp).foreach {
     case (read, resp) =>

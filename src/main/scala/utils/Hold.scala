@@ -20,7 +20,10 @@ import chisel3._
 import chisel3.util._
 
 object HoldUnless {
-  def apply[T <: Data](x: T, en: Bool): T = Mux(en, x, RegEnable(x, 0.U.asTypeOf(x), en))
+  def apply[T <: Data](x: T, en: Bool, init: Option[T] = None): T = {
+    val hold_data = if (init.isDefined) RegEnable(x, init.get, en) else RegEnable(x, en)
+    Mux(en, x, hold_data)
+  }
 }
 
 object ReadAndHold {

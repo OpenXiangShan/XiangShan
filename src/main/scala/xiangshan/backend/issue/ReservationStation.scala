@@ -419,7 +419,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
     statusUpdate.enable := uop.valid
     statusUpdate.addr := s1_allocatePtrOH(i)
-    statusUpdate.data.valid := true.B
     statusUpdate.data.scheduled := s1_delayedSrc(i).asUInt.orR
     statusUpdate.data.blocked := params.checkWaitBit.B && uop.bits.cf.loadWaitBit
     val credit = if (params.delayedFpRf) 2 else 1
