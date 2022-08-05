@@ -301,9 +301,8 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = withReset(reset.asBool || io.update.reset_u.reduce(_||_)) {
-      Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
-  }
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -506,8 +505,7 @@ class TageTable
   }
 
   // ------------------------------Debug-------------------------------------
-  val valids = Reg(Vec(nRows, Bool()))
-  when (reset.asBool) { valids.foreach(r => r := false.B) }
+  val valids = RegInit(VecInit(Seq.fill(nRows)(false.B)))
   when (io.update.mask.reduce(_||_)) { valids(update_idx) := true.B }
   XSDebug("Table usage:------------------------\n")
   XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
