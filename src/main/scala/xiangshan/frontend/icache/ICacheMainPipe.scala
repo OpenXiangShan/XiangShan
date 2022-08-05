@@ -259,8 +259,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).map{i => 
     when(RegNext(tlb_resp(i)) && !s0_can_go){
       tlb_slot.tlb_resp_paddr(i) := fromITLB(i + PortNumber).bits.paddr(0)
-      tlb_slot.tlb_resp_pf(i)    := fromITLB(i + PortNumber).bits.excp(0).pf.instr && fromITLB(i).valid
-      tlb_slot.tlb_resp_af(i)    := fromITLB(i + PortNumber).bits.excp(0).af.instr && fromITLB(i).valid
+      tlb_slot.tlb_resp_pf(i)    := fromITLB(i + PortNumber).bits.excp(0).pf.instr && fromITLB(i + PortNumber).valid
+      tlb_slot.tlb_resp_af(i)    := fromITLB(i + PortNumber).bits.excp(0).af.instr && fromITLB(i + PortNumber).valid
     }
   }
   when(tlb_slot.valid && tlb_all_resp && !s0_can_go) { tlb_slot.has_latch_resp := true.B }
