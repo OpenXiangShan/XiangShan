@@ -128,7 +128,9 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   LoadQueueSize: Int = 80,
+  LoadQueueNWriteBanks: Int = 8,
   StoreQueueSize: Int = 64,
+  StoreQueueNWriteBanks: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -361,7 +363,9 @@ trait HasXSParameter {
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
+  val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
