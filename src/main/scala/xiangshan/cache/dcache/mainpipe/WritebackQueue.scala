@@ -358,7 +358,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
           req.voluntary := false.B
           req.hasData := req.hasData || io.req.bits.hasData
           req.dirty := req.dirty || io.req.bits.dirty
-          s_data_override := false.B
+          // s_data_override := false.B
           req.delay_release := false.B
           remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         }
@@ -483,7 +483,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     data := mergeData(data, io.release_update.bits.data_delayed, io.release_update.bits.mask_delayed)
   }
 
-  when (!s_data_override) {
+  when (!s_data_override && req.hasData) {
     data := io.req_data.data
   }
 
