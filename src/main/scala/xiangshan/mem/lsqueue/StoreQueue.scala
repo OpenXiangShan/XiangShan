@@ -68,6 +68,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
+    val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -257,10 +258,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       addrvalid(stWbIndex) := addr_valid //!io.storeIn(i).bits.mmio
       // pending(stWbIndex) := io.storeIn(i).bits.mmio
 
-      dataModule.io.mask.waddr(i) := stWbIndex
-      dataModule.io.mask.wdata(i) := io.storeIn(i).bits.mask
-      dataModule.io.mask.wen(i) := true.B
-
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
@@ -301,12 +298,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Write data to sq
+  // Now store data pipeline is actually 2 stages
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.data.wen(i) := false.B
     val stWbIndex = io.storeDataIn(i).bits.uop.sqIdx.value
+    // sq data write takes 2 cycles:
+    // sq data write s0
     when (io.storeDataIn(i).fire()) {
-      datavalid(stWbIndex) := true.B
-
+      // send data write req to data module
       dataModule.io.data.waddr(i) := stWbIndex
       dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero,
         0.U,
@@ -322,6 +321,24 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         io.storeDataIn(i).bits.data,
         dataModule.io.data.wdata(i)
       )
+    }
+    // sq data write s1
+    when (
+      RegNext(io.storeDataIn(i).fire())
+      // && !RegNext(io.storeDataIn(i).bits.uop).robIdx.needFlush(io.brqRedirect)
+    ) {
+      datavalid(RegNext(stWbIndex)) := true.B
+    }
+  }
+
+  // Write mask to sq
+  for (i <- 0 until StorePipelineWidth) {
+    // sq mask write s0
+    when (io.storeMaskIn(i).fire()) {
+      // send data write req to data module
+      dataModule.io.mask.waddr(i) := io.storeMaskIn(i).bits.sqIdx.value
+      dataModule.io.mask.wdata(i) := io.storeMaskIn(i).bits.mask
+      dataModule.io.mask.wen(i) := true.B
     }
   }
 
