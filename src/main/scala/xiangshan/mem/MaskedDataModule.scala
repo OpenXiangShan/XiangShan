@@ -130,20 +130,20 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     val s0_bank_waddr_dec = waddr_dec.map(a => selectBankMask(a, bank))
     val s0_bank_write_en = io.wen.zip(s0_bank_waddr_dec).map(w => w._1 && w._2.orR)
     s0_bank_waddr_dec.zipWithIndex.map(a =>
-      a._1.suggestName("s0_bank_waddr_dec_" + bank + "_" + a._2)
+      a._1.suggestName("s0_bank_waddr_dec" + bank + "_" + a._2)
     )
     s0_bank_write_en.zipWithIndex.map(a =>
-      a._1.suggestName("s0_bank_write_en_" + bank + "_" + a._2)
+      a._1.suggestName("s0_bank_write_en" + bank + "_" + a._2)
     )
     // s1: write data to entries
     val s1_bank_waddr_dec = s0_bank_waddr_dec.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
-    val s1_wen = RegNext(io.wen)
+    val s1_bank_wen = RegNext(VecInit(s0_bank_write_en))
     val s1_wdata = io.wdata.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
     s1_bank_waddr_dec.zipWithIndex.map(a =>
       a._1.suggestName("s1_bank_waddr_dec" + bank + "_" + a._2)
     )
-    s1_wen.zipWithIndex.map(a =>
-      a._1.suggestName("s1_wen" + bank + "_" + a._2)
+    s1_bank_wen.zipWithIndex.map(a =>
+      a._1.suggestName("s1_bank_wen" + bank + "_" + a._2)
     )
     s1_wdata.zipWithIndex.map(a =>
       a._1.suggestName("s1_wdata" + bank + "_" + a._2)
@@ -151,7 +151,7 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     // masked write ports
     // s0: write to bank level buffer
     val s0_bank_mwmask = io.mwmask.map(a => selectBankMask(a.asUInt, bank))
-    val s0_bank_mwrite_en = io.wen.zip(s0_bank_mwmask).map(w => w._1 && w._2.orR)
+    val s0_bank_mwrite_en = s0_bank_mwmask.map(w => w.orR)
     s0_bank_mwmask.zipWithIndex.map(a =>
       a._1.suggestName("s0_bank_mwmask" + bank + "_" + a._2)
     )
@@ -159,7 +159,7 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
       a._1.suggestName("s0_bank_mwrite_en" + bank + "_" + a._2)
     )
     // s1: write data to entries
-    val s1_bank_mwmask = s0_bank_mwmask.zip(s0_bank_mwrite_en).map(w => RegEnable(w._1, w._2))
+    val s1_bank_mwmask = s0_bank_mwmask.map(a => RegNext(a))
     val s1_mwdata = io.mwdata.zip(s0_bank_mwrite_en).map(w => RegEnable(w._1, w._2))
     s1_bank_mwmask.zipWithIndex.map(a =>
       a._1.suggestName("s1_bank_mwmask" + bank + "_" + a._2)
@@ -171,27 +171,27 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     // entry write
     for (entry <- 0 until numEntryPerBank) {
       // write ports
-      val s1_bank_write_en_vec = s1_wen.zip(s1_bank_waddr_dec).map(w => w._1 && w._2(entry))
-      val s1_bank_write_en = VecInit(s1_bank_write_en_vec).asUInt.orR
-      val s1_bank_write_data = Mux1H(s1_bank_write_en_vec, s1_wdata)
+      val s1_entry_write_en_vec = s1_bank_wen.zip(s1_bank_waddr_dec).map(w => w._1 && w._2(entry))
+      val s1_entry_write_en = VecInit(s1_entry_write_en_vec).asUInt.orR
+      val s1_entry_write_data = Mux1H(s1_entry_write_en_vec, s1_wdata)
       // masked write ports
       val s1_bank_mwrite_en_vec = s1_bank_mwmask.map(_(entry))
       val s1_bank_mwrite_en = VecInit(s1_bank_mwrite_en_vec).asUInt.orR
       val s1_bank_mwrite_data = Mux1H(s1_bank_mwrite_en_vec, s1_mwdata)
-      when (s1_bank_write_en || s1_bank_mwrite_en) {
+      when (s1_entry_write_en || s1_bank_mwrite_en) {
         data(bank * numEntryPerBank + entry) := Mux1H(
-          Seq(s1_bank_write_en, s1_bank_mwrite_en), 
-          Seq(s1_bank_write_data, s1_bank_mwrite_data)
+          Seq(s1_entry_write_en, s1_bank_mwrite_en), 
+          Seq(s1_entry_write_data, s1_bank_mwrite_data)
         )
       }
-      s1_bank_write_en_vec.zipWithIndex.map(a =>
-        a._1.suggestName("s1_bank_write_en_vec" + bank + "_" + entry + "_" + a._2)
+      s1_entry_write_en_vec.zipWithIndex.map(a =>
+        a._1.suggestName("s1_entry_write_en_vec" + bank + "_" + entry + "_" + a._2)
       )
       s1_bank_mwrite_en_vec.zipWithIndex.map(a =>
         a._1.suggestName("s1_bank_mwrite_en_vec" + bank + "_" + entry + "_" + a._2)
       )
-      s1_bank_write_en.suggestName("s1_bank_write_en" + bank + "_" + entry)
-      s1_bank_write_data.suggestName("s1_bank_write_data" + bank + "_" + entry)
+      s1_entry_write_en.suggestName("s1_entry_write_en" + bank + "_" + entry)
+      s1_entry_write_data.suggestName("s1_entry_write_data" + bank + "_" + entry)
       s1_bank_mwrite_en.suggestName("s1_bank_mwrite_en" + bank + "_" + entry)
       s1_bank_mwrite_data.suggestName("s1_bank_mwrite_data" + bank + "_" + entry)
     }
