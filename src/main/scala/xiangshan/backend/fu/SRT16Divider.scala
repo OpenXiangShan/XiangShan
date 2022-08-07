@@ -49,7 +49,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val quot_neg_2 :: quot_neg_1 :: quot_0 :: quot_pos_1 :: quot_pos_2 :: Nil = Enum(5)
 
 
-  val state = RegInit(UIntToOH(s_idle, 7))
+  val state = RegInit((1 << s_idle.litValue.toInt).U(7.W))
 
   // reused wires
 //  val aNormAbs = Wire(UInt((len + 1).W)) // Inputs of xNormAbs regs below

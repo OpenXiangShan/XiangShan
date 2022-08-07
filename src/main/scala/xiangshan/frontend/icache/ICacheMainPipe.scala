@@ -259,8 +259,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).map{i => 
     when(RegNext(tlb_resp(i)) && !s0_can_go){
       tlb_slot.tlb_resp_paddr(i) := fromITLB(i + PortNumber).bits.paddr(0)
-      tlb_slot.tlb_resp_pf(i)    := fromITLB(i + PortNumber).bits.excp(0).pf.instr && fromITLB(i).valid
-      tlb_slot.tlb_resp_af(i)    := fromITLB(i + PortNumber).bits.excp(0).af.instr && fromITLB(i).valid
+      tlb_slot.tlb_resp_pf(i)    := fromITLB(i + PortNumber).bits.excp(0).pf.instr && fromITLB(i + PortNumber).valid
+      tlb_slot.tlb_resp_af(i)    := fromITLB(i + PortNumber).bits.excp(0).af.instr && fromITLB(i + PortNumber).valid
     }
   }
   when(tlb_slot.valid && tlb_all_resp && !s0_can_go) { tlb_slot.has_latch_resp := true.B }
@@ -271,7 +271,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   s0_can_go      := !missSwitchBit && s1_ready && sram_ready
-  s0_slot_fire   := tlb_slot.valid && tlb_all_resp && s0_can_go
+  s0_slot_fire   := tlb_slot.valid && (tlb_all_resp || tlb_slot.has_latch_resp) && s0_can_go
   s0_fetch_fire  := s0_valid && !tlb_slot.valid && s0_can_go
   s0_fire        := s0_slot_fire || s0_fetch_fire
 
