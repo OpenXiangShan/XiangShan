@@ -208,6 +208,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle)
     val lsq_replenish = Output(new LsPipelineBundle())
     val stout = DecoupledIO(new ExuOutput) // writeback store
+    // store mask, send to sq in store_s0
+    val storeMaskOut = Valid(new StoreMaskBundle)
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -219,6 +221,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
+
+  io.storeMaskOut.valid := store_s0.io.in.valid
+  io.storeMaskOut.bits.mask := store_s0.io.out.bits.mask
+  io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 

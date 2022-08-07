@@ -81,7 +81,8 @@ class PreDecodeInfo extends Bundle {  // 8 bit
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val hasHalfValid = Vec(PredictWidth, Bool())
-  val expInstr = Vec(PredictWidth, UInt(32.W))
+  //val expInstr = Vec(PredictWidth, UInt(32.W))
+  val instr      = Vec(PredictWidth, UInt(32.W))
   val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
 //  val hasLastHalf = Bool()
   val triggered    = Vec(PredictWidth, new TriggerCf)
@@ -103,10 +104,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
   for (i <- 0 until PredictWidth) {
     val inst           =WireInit(rawInsts(i))
-    val expander       = Module(new RVCExpander)
+    //val expander       = Module(new RVCExpander)
     val currentIsRVC   = isRVC(inst)
     val currentPC      = io.in.pc(i)
-    expander.io.in             := inst
+    //expander.io.in             := inst
 
     val brType::isCall::isRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC)
@@ -134,7 +135,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pd(i).isCall        := isCall
     io.out.pd(i).isRet         := isRet
 
-    io.out.expInstr(i)         := expander.io.out.bits
+    //io.out.expInstr(i)         := expander.io.out.bits
+    io.out.instr(i)              :=inst
     io.out.jumpOffset(i)       := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
   }
 
@@ -142,7 +144,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
-      p"instr ${Hexadecimal(io.out.expInstr(i))}, " +
+      p"instr ${Hexadecimal(io.out.instr(i))}, " +
         p"validStart ${Binary(validStart(i))}, " +
         p"validEnd ${Binary(validEnd(i))}, " +
         p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +

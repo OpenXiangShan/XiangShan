@@ -35,7 +35,6 @@ class StatusArrayUpdateIO(params: RSParams)(implicit p: Parameters) extends Bund
 
 class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   // states
-  val valid = Bool()
   val scheduled = Bool()
   val blocked = Bool()
   val credit = UInt(4.W)
@@ -67,7 +66,7 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   }
 
   override def toPrintable: Printable = {
-    p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $robIdx"
+    p"$scheduled, ${Binary(srcState.asUInt)}, $psrc, $robIdx"
   }
 }
 
@@ -100,12 +99,12 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val memWaitUpdateReq = if (params.checkWaitBit) Flipped(new MemWaitUpdateReq) else null
   })
 
+  val statusArrayValid = RegInit(VecInit(Seq.fill(params.numEntries)(false.B)))
+  val statusArrayValidNext = WireInit(statusArrayValid)
   val statusArray = Reg(Vec(params.numEntries, new StatusEntry(params)))
   val statusArrayNext = WireInit(statusArray)
+  statusArrayValid := statusArrayValidNext
   statusArray := statusArrayNext
-  when (reset.asBool) {
-    statusArray.map(_.valid := false.B)
-  }
 
   // instruction is ready for issue
   val readyVec = VecInit(statusArray.map(_.canIssue))
@@ -148,15 +147,15 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   val deqResp = statusArray.indices.map(deqRespSel)
 
   val is_issued = Wire(Vec(params.numEntries, Bool()))
-  for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
+  for ((((statusValid, status), (statusNextValid, statusNext)), i) <- statusArrayValid.zip(statusArray).zip(statusArrayValidNext.zip(statusArrayNext)).zipWithIndex) {
     // valid: when the entry holds a valid instruction, mark it true.
     // Set when (1) not (flushed or deq); AND (2) update.
-    val realValid = updateValid(i) || status.valid
+    val realValid = updateValid(i) || statusValid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
     flushedVec(i) := (realValid && isFlushed) || (deqRespValid && deqRespSucc)
-    statusNext.valid := realValid && !(isFlushed || (deqRespValid && deqRespSucc))
-    XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
+    statusNextValid := realValid && !(isFlushed || (deqRespValid && deqRespSucc))
+    XSError(updateValid(i) && statusValid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
     if (params.hasFeedback) {
       XSError(deqRespValid && !statusArray(i).scheduled, p"should not deq an un-scheduled entry $i\n")
@@ -170,13 +169,13 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     statusNext.scheduled := false.B
     if (params.needScheduledBit) {
       // An entry keeps in the scheduled state until its credit comes to zero or deqFailed.
-      val noCredit = status.valid && status.credit === 1.U
+      val noCredit = statusValid && status.credit === 1.U
       val keepScheduled = status.scheduled && !deqNotGranted && !noCredit
       // updateValid may arrive at the same cycle as hasIssued.
       statusNext.scheduled := hasIssued || Mux(updateValid(i), updateVal(i).scheduled, keepScheduled)
     }
     XSError(hasIssued && !realValid, p"should not issue an invalid entry $i\n")
-    is_issued(i) := status.valid && hasIssued
+    is_issued(i) := statusValid && hasIssued
 
     // blocked: indicate whether the entry is blocked for issue until certain conditions meet.
     statusNext.blocked := false.B
@@ -204,7 +203,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
         statusNext.blocked := true.B
         statusNext.waitForSqIdx := deqRespDataInvalidSqIdx
         statusNext.waitForStoreData := true.B
-        XSError(status.valid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
+        XSError(statusValid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
           "Previous store instructions are all issued. Should not trigger dataInvalid.\n")
       }
     }
@@ -212,12 +211,12 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // credit: the number of cycles this entry needed until it can be scheduled
     val creditStep = Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
     statusNext.credit := Mux(updateValid(i), updateVal(i).credit, creditStep)
-    XSError(status.valid && status.credit > 0.U && !status.scheduled,
+    XSError(statusValid && status.credit > 0.U && !status.scheduled,
       p"instructions $i with credit ${status.credit} must not be scheduled\n")
 
     // srcState: indicate whether the operand is ready for issue
     val (stateWakeupEn, dataWakeupEnVec) = statusNext.psrc.zip(statusNext.srcType).map(wakeupMatch).unzip
-    io.wakeupMatch(i) := dataWakeupEnVec.map(en => Mux(updateValid(i) || status.valid, en, 0.U))
+    io.wakeupMatch(i) := dataWakeupEnVec.map(en => Mux(updateValid(i) || statusValid, en, 0.U))
     // For best timing of srcState, we don't care whether the instruction is valid or not.
     // We also don't care whether the instruction can really enqueue.
     statusNext.srcState := VecInit(status.srcState.zip(updateVal(i).srcState).zip(stateWakeupEn).map {
@@ -238,24 +237,24 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // When the entry is not granted to issue, set isFirstIssue to false.B
     statusNext.isFirstIssue := Mux(hasIssued, false.B, updateValid(i) || status.isFirstIssue)
 
-    XSDebug(status.valid, p"entry[$i]: $status\n")
+    XSDebug(statusValid, p"entry[$i]: $status\n")
   }
 
-  io.isValid := VecInit(statusArray.map(_.valid)).asUInt
-  io.isValidNext := VecInit(statusArrayNext.map(_.valid)).asUInt
-  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
+  io.isValid := statusArrayValid.asUInt
+  io.isValidNext := statusArrayValidNext.asUInt
+  io.canIssue := VecInit(statusArrayValidNext.zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
 
-  val validEntries = PopCount(statusArray.map(_.valid))
+  val validEntries = PopCount(statusArrayValid)
   XSPerfHistogram("valid_entries", validEntries, true.B, 0, params.numEntries, 1)
   for (i <- 0 until params.numSrc) {
     val waitSrc = statusArray.map(_.srcState).map(s => Cat(s.zipWithIndex.filter(_._2 != i).map(_._1)).andR && !s(i))
-    val srcBlockIssue = statusArray.zip(waitSrc).map{ case (s, w) => s.valid && !s.scheduled && !s.blocked && w }
+    val srcBlockIssue = statusArrayValid.zip(statusArray).zip(waitSrc).map{ case ((v, s), w) => v && !s.scheduled && !s.blocked && w }
     XSPerfAccumulate(s"wait_for_src_$i", PopCount(srcBlockIssue))
     for (j <- 0 until params.allWakeup) {
-      val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
+      val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArrayValid).map(p => p._1 && p._2)
       XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
       val criticalWakeup = srcBlockIssue.zip(wakeup_j_i).map(x => x._1 && x._2)
       XSPerfAccumulate(s"critical_wakeup_${j}_$i", PopCount(criticalWakeup))
@@ -268,9 +267,9 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   }
   val canIssueEntries = PopCount(io.canIssue)
   XSPerfHistogram("can_issue_entries", canIssueEntries, true.B, 0, params.numEntries, 1)
-  val isBlocked = PopCount(statusArray.map(s => s.valid && s.blocked))
+  val isBlocked = PopCount(statusArrayValid.zip(statusArray).map(s => s._1 && s._2.blocked))
   XSPerfAccumulate("blocked_entries", isBlocked)
-  val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
+  val isScheduled = PopCount(statusArrayValid.zip(statusArray).map(s => s._1 && s._2.scheduled))
   XSPerfAccumulate("scheduled_entries", isScheduled)
   val notSelected = RegNext(PopCount(io.canIssue)) - PopCount(is_issued)
   XSPerfAccumulate("not_selected_entries", notSelected)
