@@ -208,28 +208,28 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     val xsl2_ultiscan = IO(core_with_l2.head.module.ultiscanIO.cloneType)
     dontTouch(xsl2_ultiscan)
-
-    core_with_l2.head.module.ultiscanIO <> xsl2_ultiscan
-    core_with_l2.head.module.xsx_ultiscan_in.bypsel := xsx_fscan.ram.bypsel
-    core_with_l2.head.module.xsx_ultiscan_in.wdis_b := xsx_fscan.ram.wrdis_b
-    core_with_l2.head.module.xsx_ultiscan_in.rdis_b := xsx_fscan.ram.rddis_b
-    core_with_l2.head.module.xsx_ultiscan_in.init_en := xsx_fscan.ram.init_en
-    core_with_l2.head.module.xsx_ultiscan_in.init_val := xsx_fscan.ram.init_val
-
-    core_with_l2.head.module.mbist_extra_core_sram <> mem.core_sram
-    core_with_l2.head.module.mbist_extra_core_rf <> mem.core_rf
-    core_with_l2.head.module.mbist_extra_l2_sram <> mem.l2_sram
-    core_with_l2.head.module.mbist_extra_l2_rf <> mem.l2_rf
-
-    core_with_l2.head.module.hd2prf_in <> hd2prf_in
-    core_with_l2.head.module.hsuspsr_in <> hsuspsr_in
-    core_with_l2.head.module.uhdusplr_in <> uhdusplr_in
-    core_with_l2.head.module.hduspsr_in <> hduspsr_in
-
-
     val l1l2_mbist_sram_jtag = IO(core_with_l2.head.module.mbist_ijtag.cloneType)
     dontTouch(l1l2_mbist_sram_jtag)
-    core_with_l2.head.module.mbist_ijtag <> l1l2_mbist_sram_jtag
+    for(core <- core_with_l2){
+      core.module.ultiscanIO <> xsl2_ultiscan
+      core.module.xsx_ultiscan_in.bypsel := xsx_fscan.ram.bypsel
+      core.module.xsx_ultiscan_in.wdis_b := xsx_fscan.ram.wrdis_b
+      core.module.xsx_ultiscan_in.rdis_b := xsx_fscan.ram.rddis_b
+      core.module.xsx_ultiscan_in.init_en := xsx_fscan.ram.init_en
+      core.module.xsx_ultiscan_in.init_val := xsx_fscan.ram.init_val
+
+      core.module.mbist_extra_core_sram <> mem.core_sram
+      core.module.mbist_extra_core_rf <> mem.core_rf
+      core.module.mbist_extra_l2_sram <> mem.l2_sram
+      core.module.mbist_extra_l2_rf <> mem.l2_rf
+
+      core.module.hd2prf_in <> hd2prf_in
+      core.module.hsuspsr_in <> hsuspsr_in
+      core.module.uhdusplr_in <> uhdusplr_in
+      core.module.hduspsr_in <> hduspsr_in
+
+      core.module.mbist_ijtag <> l1l2_mbist_sram_jtag
+    }
 
     val l3SliceNum = l3cacheOpt.get.module.mbist_jtag.get.length
     val l3_sram_mbist = if(l3cacheOpt.nonEmpty) Some(IO(Vec(l3SliceNum, new JTAGInterface))) else None
