@@ -261,7 +261,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.debug_module_io.reset := childReset
 
     // TODO: use synchronizer?
-    misc.module.debug_module_io.debugIO.reset := jtag_reset_sync
+    misc.module.debug_module_io.debugIO.reset := childReset
     misc.module.debug_module_io.debugIO.clock := childClock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
