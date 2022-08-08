@@ -326,13 +326,13 @@ class TageTable
   val s1_tag = RegEnable(s0_tag, io.req.fire)
   val s1_pc  = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
-  val s1_bank_has_write_last_cycle = RegNext(VecInit(table_banks.map(_.io.w.req.valid)))
+  val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
   
   val tables_r = table_banks.map(_.io.r.resp.data) // s1
   
   val resp_selected = Mux1H(s1_bank_req_1h, tables_r)
-  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_last_cycle)
+  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
 
 
   val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), resp_selected)))
