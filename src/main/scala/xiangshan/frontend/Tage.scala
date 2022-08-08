@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
-import huancun.utils.{SRAMTemplate, FoldedSRAMTemplate}
+import huancun.utils.{SRAMTemplate, FoldedSRAMTemplate, HoldUnless}
 import utils._
 import xiangshan._
 import huancun.mbist.MBISTPipeline.placePipelines
@@ -148,7 +148,7 @@ class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends 
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, parentName = parentName + "bt_"))
+  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, bypassWrite = true, parentName = parentName + "bt_"))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -159,7 +159,7 @@ class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends 
   bt.io.r.req.valid := io.s0_fire
   bt.io.r.req.bits.setIdx := s0_idx
 
-  val s1_read = bt.io.r.resp.data
+  val s1_read = HoldUnless(bt.io.r.resp.data, RegNext(io.s0_fire))
   val s1_idx = RegEnable(s0_idx, io.s0_fire)
 
 
