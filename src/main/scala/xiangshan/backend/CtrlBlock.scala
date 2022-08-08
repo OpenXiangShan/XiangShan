@@ -202,6 +202,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val cpu_halt = Output(Bool())
+    val cpu_trap = Output(Bool())
     val frontend = Flipped(new FrontendToCtrlIO)
     // to exu blocks
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
@@ -502,6 +503,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
+  io.cpu_trap := DelayN(rob.io.cpu_trap, 5)
   rob.io.redirect <> stage2Redirect
   outer.rob.generateWritebackIO(Some(outer), Some(this))
 

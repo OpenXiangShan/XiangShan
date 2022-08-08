@@ -246,6 +246,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val cpu_halt = Output(Bool())
+    val cpu_trap = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -267,6 +268,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   outer.wbArbiter.module.io.hartId := io.hartId
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
+  io.cpu_trap := ctrlBlock.io.cpu_trap
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback

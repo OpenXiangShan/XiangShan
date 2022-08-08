@@ -286,6 +286,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val csr = new RobCSRIO
     val robFull = Output(Bool())
     val cpu_halt = Output(Bool())
+    val cpu_trap = Output(Bool())
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -1104,6 +1105,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
     difftest.io.hasWFI   := hasWFI
+    io.cpu_trap := RegNext(hitTrap)
   }
   else if (env.AlwaysBasicDiff) {
     val dt_isXSTrap = Mem(RobSize, Bool())
@@ -1120,6 +1122,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.valid    := hitTrap
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+    io.cpu_trap := RegNext(hitTrap)
   }
 
   val validEntries = PopCount((0 until RobSize).map(valid(_)))
