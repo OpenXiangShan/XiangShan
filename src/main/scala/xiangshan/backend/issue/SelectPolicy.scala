@@ -70,7 +70,7 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
     val isOverrided = Vec(params.numDeq, Output(Bool()))
   })
 
-  val oldestMatchVec = VecInit(io.in.map(i => i.valid && OHToUInt(i.bits) === OHToUInt(io.oldest.bits)))
+  val oldestMatchVec = VecInit(io.in.map(i => i.valid && (i.bits & io.oldest.bits).asUInt.orR))
   io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
     // When the oldest is not matched with io.in(i), we always select the oldest.
     // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.

@@ -6,11 +6,12 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyRawModuleImp}
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.mbist._
 import huancun.utils.ResetGen
 import huancun.{HCCacheParamsKey, HuanCun}
+import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils._
@@ -108,20 +109,29 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     buffer
   }
 
-  val l1i_to_l2_buffer = LazyModule(new TLBuffer)
+  def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
+    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
+    buffers.zipWithIndex.foreach{ case (b, i) => {
+      b.suggestName(s"${n}_${i}")
+    }}
+    val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
+    (buffers, node)
+  }
+
+  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(5, "l1i_to_l2_buffer")
   misc.busPMU :=
     TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-    l1i_to_l2_buffer.node :=
+    l1i_to_l2_buf_node :=
     core.frontend.icache.clientNode
 
-  val ptw_to_l2_bufferOpt = if (!coreParams.softPTW) {
-    val buffer = LazyModule(new TLBuffer)
+  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
+    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
     misc.busPMU :=
       TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-      buffer.node :=
+      buf_node :=
       core.ptw_to_l2_buffer.node
-    Some(buffer)
-  } else None
+    buffers
+  } else Seq()
 
   l2cache match {
     case Some(l2) =>
@@ -444,9 +454,11 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       //             v
       // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
       val resetChain = Seq(
-        Seq(misc.module, core.module, l1i_to_l2_buffer.module) ++
-          l2cache.map(_.module) ++
-          l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
+        Seq(misc.module, core.module) ++
+          l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+          ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+          l1d_to_l2_bufferOpt.map(_.module) ++
+          l2cache.map(_.module)
       )
       ResetGen(resetChain, childReset, !debugOpts.FPGAPlatform, dfx_reset)
     }

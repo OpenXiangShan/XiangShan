@@ -39,7 +39,7 @@ case class DCacheParameters
 (
   nSets: Int = 256,
   nWays: Int = 8,
-  rowBits: Int = 128,
+  rowBits: Int = 64,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
@@ -119,10 +119,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // banked dcache support
   val DCacheSets = cacheParams.nSets
   val DCacheWays = cacheParams.nWays
-  val DCacheBanks = 8
-  val DCacheSRAMRowBits = 64 // hardcoded
+  val DCacheBanks = 8 // hardcoded
+  val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
+  require(DCacheSRAMRowBits == 64)
 
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
   val DCacheSizeBytes = DCacheSizeBits / 8
@@ -138,7 +139,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
-  val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)
@@ -187,17 +187,17 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def arbiter_with_pipereg_N_dup[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
-    dups: Seq[T],
+    dups: Seq[DecoupledIO[T]],
     name: Option[String] = None): Unit = {
     val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
     }
-    AddPipelineReg(arb.io.out, out, false.B)
     for (dup <- dups) {
-      dup := RegEnable(arb.io.out.bits, arb.io.out.fire())
+      AddPipelineReg(arb.io.out, dup, false.B)
     }
+    AddPipelineReg(arb.io.out, out, false.B)
   }
 
   def rrArbiter[T <: Bundle](
@@ -305,6 +305,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
+  val data_dup_0 = UInt(DataBits.W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -545,10 +546,16 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
-
     ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
+  })
+
+  (0 until (LoadPipelineWidth / 2)).map(i => {
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
+  })
+
+  ((LoadPipelineWidth / 2) until LoadPipelineWidth).map(i => {
+    ldu(i).io.banked_data_resp := bankedDataArray.io.resp_dup_0
   })
 
   //----------------------------------------
@@ -644,10 +651,47 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
-  refillPipe.io.req_dup_0 := missQueue.io.refill_pipe_req_dup_0
-  refillPipe.io.req_dup_1 := missQueue.io.refill_pipe_req_dup_1
-  refillPipe.io.req_dup_2 := missQueue.io.refill_pipe_req_dup_2
-  refillPipe.io.req_dup_3 := missQueue.io.refill_pipe_req_dup_3
+
+  val nDupDataWriteReady = 4
+  val nDupTagWriteReady = 4
+  val nDupStatus = nDupDataWriteReady + nDupTagWriteReady
+  val mpStatus_dup = mainPipe.io.status_dup
+  val mq_refill_dup = missQueue.io.refill_pipe_req_dup
+  val refillShouldBeBlocked_dup = VecInit((0 until nDupStatus).map { case i =>
+    mpStatus_dup(i).s1.valid && mpStatus_dup(i).s1.bits.set === mq_refill_dup(i).bits.idx ||
+    Cat(Seq(mpStatus_dup(i).s2, mpStatus_dup(i).s3).map(s =>
+      s.valid &&
+        s.bits.set === mq_refill_dup(i).bits.idx &&
+        s.bits.way_en === mq_refill_dup(i).bits.way_en
+    )).orR
+  })
+  dontTouch(refillShouldBeBlocked_dup)
+
+  refillPipe.io.req_dup_0.bits := mq_refill_dup(0).bits
+  refillPipe.io.req_dup_1.bits := mq_refill_dup(1).bits
+  refillPipe.io.req_dup_2.bits := mq_refill_dup(2).bits
+  refillPipe.io.req_dup_3.bits := mq_refill_dup(3).bits
+  refillPipe.io.req_dup_0.valid := mq_refill_dup(0).valid && !refillShouldBeBlocked_dup(0)
+  refillPipe.io.req_dup_1.valid := mq_refill_dup(1).valid && !refillShouldBeBlocked_dup(1)
+  refillPipe.io.req_dup_2.valid := mq_refill_dup(2).valid && !refillShouldBeBlocked_dup(2)
+  refillPipe.io.req_dup_3.valid := mq_refill_dup(3).valid && !refillShouldBeBlocked_dup(3)
+
+  val refillPipe_io_req_valid_dup = VecInit(mq_refill_dup.zip(refillShouldBeBlocked_dup).map(
+    x => x._1.valid && !x._2
+  ))
+  val refillPipe_io_data_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(0, nDupDataWriteReady))
+  val refillPipe_io_tag_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(nDupDataWriteReady, nDupDataWriteReady + nDupTagWriteReady))
+  dontTouch(refillPipe_io_req_valid_dup)
+  dontTouch(refillPipe_io_data_write_valid_dup)
+  dontTouch(refillPipe_io_tag_write_valid_dup)
+  mainPipe.io.data_write_ready_dup := VecInit(refillPipe_io_data_write_valid_dup.map(v => !v))
+  mainPipe.io.tag_write_ready_dup := VecInit(refillPipe_io_tag_write_valid_dup.map(v => !v))
+  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
+
+  mq_refill_dup.zip(refillShouldBeBlocked_dup).foreach { case (r, block) =>
+    r.ready := refillPipe.io.req.ready && !block
+  }
+
   missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
@@ -733,8 +777,21 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
   cacheOpDecoder.io.csr <> io.csr
-  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache_req_dup_0
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  // dup cacheOp_req_valid
+  bankedDataArray.io.cacheOp_req_dup_0 := cacheOpDecoder.io.cache_req_dup_0
+  bankedDataArray.io.cacheOp_req_dup_1 := cacheOpDecoder.io.cache_req_dup_1
+  // dup cacheOp_req_bits_opCode
+  bankedDataArray.io.cacheOp_req_bits_opCode_dup_0 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_0
+  bankedDataArray.io.cacheOp_req_bits_opCode_dup_1 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_1
+
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  // dup cacheOp_req_valid
+  tagArray.io.cacheOp_req_dup_0 := cacheOpDecoder.io.cache_req_dup_0
+  tagArray.io.cacheOp_req_dup_1 := cacheOpDecoder.io.cache_req_dup_1
+  // dup cacheOp_req_bits_opCode
+  tagArray.io.cacheOp_req_bits_opCode_dup_0 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_0
+  tagArray.io.cacheOp_req_bits_opCode_dup_1 := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup_1
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(

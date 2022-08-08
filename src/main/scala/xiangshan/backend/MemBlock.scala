@@ -71,7 +71,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-    val delayedLoadError = Vec(exuParameters.LduCnt, Output(Bool()))
+    val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -162,8 +162,12 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   atomicsUnit.io.hartId := io.hartId
 
   // dtlb
-  val sfence = RegNext(RegNext(io.sfence))
-  val tlbcsr = RegNext(RegNext(io.tlbCsr))
+  val NUMSfenceDup = 3
+  val NUMTlbCsrDup = 8
+  val sfence_tmp = RegNext(io.sfence)
+  val tlbcsr_tmp = RegNext(io.tlbCsr)
+  val sfence_dup = Seq.fill(NUMSfenceDup)(RegNext(sfence_tmp))
+  val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(tlbcsr_tmp))
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd", exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
@@ -175,10 +179,11 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val dtlb = dtlb_ld ++ dtlb_st
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
+  dtlb.zip(sfence_dup.take(2)).map{ case (d,s) => d.sfence := s }
+  dtlb.zip(tlbcsr_dup.take(2)).map{ case (d,c) => d.csr := c }
 
   val (memBlockMbistPipelineSram,memBlockMbistPipelineRf,memBlockMbistPipelineSramRepair,memBlockMbistPipelineRfRepair) = placePipelines(level = 3,infoName = s"MBISTPipeline_memBlock")
-  dtlb.map(_.sfence := sfence)
-  dtlb.map(_.csr := tlbcsr)
+
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)
@@ -197,7 +202,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   }
 
   val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
-  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
+  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(sfence_dup(2).valid && tlbcsr_dup(7).satp.changed), init = false.B)
   io.ptw.resp.ready := true.B
 
   (dtlb.map(a => a.ptw.req.map(b => b)))
@@ -209,7 +214,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
       else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
     io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.entry.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
+      ptw_resp_next.data.entry.hit(tlb.bits.vpn, tlbcsr_dup(i).satp.asid, allType = true, ignoreAsid = true))
   }
   dtlb.map(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -225,12 +230,13 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
-  for ((p,d) <- pmp_check zip dtlb_pmps) {
-    p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
+  val tlbcsr_pmp = tlbcsr_dup.drop(2)
+  for (((p,d),i) <- (pmp_check zip dtlb_pmps) zipWithIndex) {
+    p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
   val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-  pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
+  pmp_check_ptw.io.apply(tlbcsr_pmp(4).priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
     Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt)
   dtlb.map(_.ptw_replenish := pmp_check_ptw.io.resp)
 
@@ -282,15 +288,16 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
-    lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.s2_load_data_forwarded(i) <> loadUnits(i).io.lsq.s2_load_data_forwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // passdown to lsq (load s3)
-    lsq.io.dcacheRequireReplay(i) <> loadUnits(i).io.lsq.dcacheRequireReplay
-    lsq.io.delayedLoadError(i) <> loadUnits(i).io.delayedLoadError
+    lsq.io.s2_dcache_require_replay(i) <> loadUnits(i).io.lsq.s2_dcache_require_replay
+    lsq.io.s3_replay_from_fetch(i) <> loadUnits(i).io.lsq.s3_replay_from_fetch
+    lsq.io.s3_delayed_load_error(i) <> loadUnits(i).io.s3_delayed_load_error
 
     // alter writeback exception info
-    io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
+    io.s3_delayed_load_error(i) := loadUnits(i).io.lsq.s3_delayed_load_error
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
@@ -354,8 +361,12 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
-    // Lsq to load unit's rs
+    // Lsq to sta unit
+    lsq.io.storeMaskIn(i) <> stu.io.storeMaskOut
+
+    // Lsq to std unit's rs
     lsq.io.storeDataIn(i) := stData(i)
+
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
