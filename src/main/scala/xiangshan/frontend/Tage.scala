@@ -301,9 +301,8 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = withReset(reset.asBool || io.update.reset_u.reduce(_||_)) {
-      Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
-  }
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -327,13 +326,13 @@ class TageTable
   val s1_tag = RegEnable(s0_tag, io.req.fire)
   val s1_pc  = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
-  val s1_bank_has_write_last_cycle = RegNext(VecInit(table_banks.map(_.io.w.req.valid)))
+  val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
   
   val tables_r = table_banks.map(_.io.r.resp.data) // s1
   
   val resp_selected = Mux1H(s1_bank_req_1h, tables_r)
-  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_last_cycle)
+  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
 
 
   val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), resp_selected)))
@@ -506,8 +505,7 @@ class TageTable
   }
 
   // ------------------------------Debug-------------------------------------
-  val valids = Reg(Vec(nRows, Bool()))
-  when (reset.asBool) { valids.foreach(r => r := false.B) }
+  val valids = RegInit(VecInit(Seq.fill(nRows)(false.B)))
   when (io.update.mask.reduce(_||_)) { valids(update_idx) := true.B }
   XSDebug("Table usage:------------------------\n")
   XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)

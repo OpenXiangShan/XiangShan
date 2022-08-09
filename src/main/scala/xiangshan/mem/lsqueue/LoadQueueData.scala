@@ -216,7 +216,9 @@ class LQDataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     val refillData = Input(UInt(l1BusDataWidth.W))
   })
 
-  val data8 = Seq.fill(8)(Module(new MaskedSyncDataModuleTemplate(UInt(8.W), numEntries, numRead, numWrite, numMWrite = refillWords)))
+  val data8 = Seq.fill(8)(Module(new MaskedBankedSyncDataModuleTemplate(
+    UInt(8.W), numEntries, numRead, numWrite, numMWrite = refillWords, numWBanks = LoadQueueNWriteBanks
+  )))
   val fwdMask = Reg(Vec(numEntries, UInt(8.W)))
   val wordIndex = Reg(Vec(numEntries, UInt((refillOffBits - wordOffBits).W)))
 

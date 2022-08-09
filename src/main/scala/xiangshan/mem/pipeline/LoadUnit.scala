@@ -375,7 +375,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // data merge
   val rdataVec = VecInit((0 until XLEN / 8).map(j =>
-    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))))
+    if(j < XLEN / 16) {
+      Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))
+    }else {
+      Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data_dup_0(8*(j+1)-1, 8*j))
+    }
+    ))
   val rdata = rdataVec.asUInt
   val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),

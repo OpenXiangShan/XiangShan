@@ -9,9 +9,10 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
+import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{ResetGen, TLClientsMerger, TLEdgeBuffer, IntBuffer}
+import utils.{TLClientsMerger, TLEdgeBuffer, IntBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -91,7 +92,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_sink = IntIdentityNode()
   val debug_int_sink = IntIdentityNode()
   val beu_int_source = IntIdentityNode()
-  val core_reset_sink = BundleBridgeSink(Some(() => Bool()))
+  val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
 
   core.clint_int_sink :*= IntBuffer() :*= IntBuffer() :*= clint_int_sink
   core.plic_int_sink :*= IntBuffer() :*= IntBuffer() :*= plic_int_sink
@@ -179,6 +180,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
-    ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }
 }
