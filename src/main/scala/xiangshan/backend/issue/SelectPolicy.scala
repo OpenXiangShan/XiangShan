@@ -86,6 +86,7 @@ class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
+    // NOTE: deq and enq may come at the same cycle.
     val enq = Vec(numEnq, Input(UInt(numEntries.W)))
     val deq = Input(UInt(numEntries.W))
     val out = Output(UInt(numEntries.W))
@@ -96,29 +97,39 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
   val nextAge = Seq.fill(numEntries)(Seq.fill(numEntries)(Wire(Bool())))
 
   // to reduce reg usage, only use upper matrix
-  def get_age(row: Int, col: Int) = if (row <= col) age(row)(col) else !age(col)(row)
-  def get_next_age(row: Int, col: Int) = if (row <= col) nextAge(row)(col) else !nextAge(col)(row)
+  def get_age(row: Int, col: Int): Bool = if (row <= col) age(row)(col) else !age(col)(row)
+  def get_next_age(row: Int, col: Int): Bool = if (row <= col) nextAge(row)(col) else !nextAge(col)(row)
+  def isFlushed(i: Int): Bool = io.deq(i)
+  def isEnqueued(i: Int, numPorts: Int = -1): Bool = {
+    val takePorts = if (numPorts == -1) io.enq.length else numPorts
+    takePorts match {
+      case 0 => false.B
+      case 1 => io.enq.head(i) && !isFlushed(i)
+      case n => VecInit(io.enq.take(n).map(_(i))).asUInt.orR && !isFlushed(i)
+    }
+  }
 
   for ((row, i) <- nextAge.zipWithIndex) {
-    // (1) when entry i is flushed or dequeues, set row(i) to false.B
-    val thisFlushed = io.deq(i)
-    val thisEnqueue = VecInit(io.enq.map(_(i))).asUInt.orR
-    val thisValid = get_age(i, i) || thisEnqueue
+    val thisValid = get_age(i, i) || isEnqueued(i)
     for ((elem, j) <- row.zipWithIndex) {
-      // (2) when entry j is flushed or dequeues, set column(j) to validVec
-      val otherFlushed = io.deq(j)
-      when (thisFlushed) {
+      when (isFlushed(i)) {
+        // (1) when entry i is flushed or dequeues, set row(i) to false.B
         elem := false.B
-      }.elsewhen (otherFlushed) {
+      }.elsewhen (isFlushed(j)) {
+        // (2) when entry j is flushed or dequeues, set column(j) to validVec
         elem := thisValid
+      }.elsewhen (isEnqueued(i)) {
+        // (3) when entry i enqueues from port k,
+        // (3.1) if entry j enqueues from previous ports, set to false
+        // (3.2) otherwise, set to true if and only of entry j is invalid
+        // overall: !jEnqFromPreviousPorts && !jIsValid
+        val sel = io.enq.map(_(i))
+        val result = (0 until numEnq).map(k => isEnqueued(j, k))
+        // why ParallelMux: sel must be one-hot since enq is one-hot
+        elem := !get_age(j, j) && !ParallelMux(sel, result)
       }.otherwise {
+        // default: unchanged
         elem := get_age(i, j)
-        for (k <- 0 until numEnq) {
-          when (io.enq(k)(i)) {
-            // (3) when enqueue, set age to ~validVec or enqueueFromPreviousPorts
-            elem := !get_age(j, j) && (if (k > 0) !VecInit(io.enq.take(k).map(_(j))).asUInt.orR else true.B)
-          }
-        }
       }
       age(i)(j) := elem
     }
@@ -138,8 +149,8 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
 object AgeDetector {
   def apply(numEntries: Int, enq: Vec[UInt], deq: UInt, canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
     val age = Module(new AgeDetector(numEntries, enq.length, regOut = false))
-    age.io.enq := enq.map(_ & (~deq).asUInt)
-    age.io.deq := deq & (~enq.reduce(_ | _)).asUInt
+    age.io.enq := enq
+    age.io.deq := deq
     val out = Wire(Valid(UInt(deq.getWidth.W)))
     out.valid := (canIssue & age.io.out).orR
     out.bits := age.io.out
