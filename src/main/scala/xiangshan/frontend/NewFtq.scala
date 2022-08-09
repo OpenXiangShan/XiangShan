@@ -579,18 +579,37 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex)
   val last_cycle_bpu_in_stage = RegNext(bpu_in_stage)
 
-  val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))
+  def extra_copyNum_for_commitStateQueue = 2
+  val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum+extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_fire)))
+  val copied_last_cycle_bpu_in_ptr_for_ftq = VecInit(Seq.fill(extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_resp_ptr)))
 
   when (last_cycle_bpu_in) {
     entry_fetch_status(last_cycle_bpu_in_idx) := f_to_send
     commitStateQueue(last_cycle_bpu_in_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     cfiIndex_vec(last_cycle_bpu_in_idx) := last_cycle_cfiIndex
-    mispredict_vec(last_cycle_bpu_in_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     pred_stage(last_cycle_bpu_in_idx) := last_cycle_bpu_in_stage
 
     update_target(last_cycle_bpu_in_idx) := last_cycle_bpu_target // TODO: remove this
     newest_entry_target := last_cycle_bpu_target
     newest_entry_ptr := last_cycle_bpu_in_ptr
+  }
+
+  // reduce fanout by delay write for a cycle
+  when (RegNext(last_cycle_bpu_in)) {
+    mispredict_vec(RegNext(last_cycle_bpu_in_idx)) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
+  }
+  
+  // reduce fanout using copied last_cycle_bpu_in and copied last_cycle_bpu_in_ptr
+  val copied_last_cycle_bpu_in_for_ftq = copied_last_cycle_bpu_in.takeRight(extra_copyNum_for_commitStateQueue)
+  copied_last_cycle_bpu_in_for_ftq.zip(copied_last_cycle_bpu_in_ptr_for_ftq).zipWithIndex.map {
+    case ((in, ptr), i) =>
+      when (in) {
+        val perSetEntries = FtqSize / extra_copyNum_for_commitStateQueue // 32
+        require(FtqSize % extra_copyNum_for_commitStateQueue == 0)
+        for (j <- 0 until perSetEntries) {
+          commitStateQueue(i*perSetEntries+j) := VecInit(Seq.fill(PredictWidth)(c_invalid))
+        }
+      }
   }
 
   // num cycle is fixed
