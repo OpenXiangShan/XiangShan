@@ -170,14 +170,10 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
       - name: clean up
         run: |
+          mkdir -p $WAVE_HOME
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Remote Connection Test
         run: |
@@ -188,12 +184,9 @@ jobs:
       - name: Build SIMV on Remote
         run: |
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
-      # - name: Basic Test - cputest
-      #   run: |
-      #     ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
-      # - name: Simple Test - CoreMark
-      #   run: |
-      #     ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 1800" 2> /dev/zero
+      - name: Simple Test - CoreMark
+        run: |
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --timeout 3600" 2> /dev/zero
       - name: System Test - Linux
         run: |
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 7200" 2> /dev/zero
