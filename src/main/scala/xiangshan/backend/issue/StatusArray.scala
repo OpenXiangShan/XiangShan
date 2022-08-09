@@ -131,7 +131,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val successVec = io.deqResp.map(_.bits.success)
     val respTypeVec = io.deqResp.map(_.bits.resptype)
     val dataInvalidSqIdxVec = io.deqResp.map(_.bits.dataInvalidSqIdx)
-    (deqValid, Mux1H(mask, successVec), Mux1H(mask, respTypeVec), Mux1H(mask, dataInvalidSqIdxVec))
+    (deqValid, ParallelMux(mask, successVec), Mux1H(mask, respTypeVec), Mux1H(mask, dataInvalidSqIdxVec))
   }
 
   def enqUpdate(i: Int): (Bool, StatusEntry) = {
@@ -153,8 +153,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val realValid = updateValid(i) || statusValid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
-    flushedVec(i) := (realValid && isFlushed) || (deqRespValid && deqRespSucc)
-    statusNextValid := realValid && !(isFlushed || (deqRespValid && deqRespSucc))
+    flushedVec(i) := (realValid && isFlushed) || deqRespSucc
+    statusNext.valid := realValid && !(isFlushed || deqRespSucc)
     XSError(updateValid(i) && statusValid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
     if (params.hasFeedback) {

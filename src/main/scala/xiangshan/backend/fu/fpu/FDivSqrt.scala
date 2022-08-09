@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
+import utils.MaskExpand
 
 import scala.collection.mutable
 
@@ -62,7 +63,8 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val src2 = FPU.unbox(io.in.src(1), tag)
 
   val typeSel = VecInit(FPU.ftypes.zipWithIndex.map(_._2.U === tag))
-  val outSel = RegEnable(typeSel, VecInit(Seq.fill(typeSel.length)(true.B)), in_fire)  // inelegant
+  val outSel = RegEnable(typeSel, VecInit.fill(typeSel.length)(true.B), in_fire)  // inelegant
+  val outDataSel = RegEnable(MaskExpand(typeSel, 64), in_fire)
 
   val divSqrt = FPU.ftypes.map{ t =>
     val fdiv = FDivGen(t)
@@ -78,9 +80,9 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
 
   in_ready := divSqrt.map(_.io.specialIO.in_ready).foldRight(true.B)(_ && _)
   out_valid := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
-  io.out.data := Mux1H(outSel, divSqrt.zip(FPU.ftypes).map{
+  io.out.data := outDataSel.zip(divSqrt.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
-  })
+  }).map(x => x._1 & x._2).reduce(_ | _)
   fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
 }
 
