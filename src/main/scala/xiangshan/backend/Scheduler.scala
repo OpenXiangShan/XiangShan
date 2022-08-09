@@ -288,14 +288,17 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
 
+  // To reduce fanout, we add registers here for redirect.
+  val redirect = RegNextWithEnable(io.redirect)
+
   val dispatch2 = outer.dispatch2.map(_.module)
-  dispatch2.foreach(_.io.redirect := io.redirect)
+  dispatch2.foreach(_.io.redirect := redirect)
   io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
 
   // dirty code for ls dp
   dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
     val lsqCtrl = Module(new LsqEnqCtrl)
-    lsqCtrl.io.redirect <> io.redirect
+    lsqCtrl.io.redirect <> redirect
     lsqCtrl.io.enq <> dp.io.enqLsq.get
     lsqCtrl.io.lcommit := io.extra.lcommit
     lsqCtrl.io.scommit := io.extra.scommit
