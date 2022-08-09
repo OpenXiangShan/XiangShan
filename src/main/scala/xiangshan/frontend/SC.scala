@@ -103,7 +103,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int,parentName:Stri
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
 
-  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(x => HoldUnless(VecInit(x), io.req.valid))
+  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(x => HoldUnless(VecInit(x), RegNext(io.req.valid)))
   val per_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
     UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
     per_br_ctrs_unshuffled
