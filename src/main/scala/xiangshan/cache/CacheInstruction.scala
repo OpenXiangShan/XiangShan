@@ -28,7 +28,7 @@ object CacheRegMap{
   }
 }
 
-trait CacheControlConst{
+trait CacheControlConst{ 
   def maxDataRowSupport = 8
 }
 
@@ -141,8 +141,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
-    val cache_req_dup_0 = Valid(new CacheCtrlReqInfo)
-    val cache_req_dup_1 = Valid(new CacheCtrlReqInfo)
+    val cache_req_dups = Vec(8, Valid(new CacheCtrlReqInfo))
     val cacheOp_req_bits_opCode_dups = Output(Vec(8, UInt(XLEN.W)))
     val error = Flipped(new L1CacheErrorInfo)
   })
@@ -205,11 +204,9 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Send cache op to cache
   io.cache.req.valid := RegNext(cache_op_start)
-  io.cache_req_dup_0.valid := RegNext(cache_op_start)
-  io.cache_req_dup_1.valid := RegNext(cache_op_start)
+  io.cache_req_dups.map( dup => dup.valid := RegNext(cache_op_start) )
   io.cache.req.bits := translated_cache_req
-  io.cache_req_dup_0.bits := translated_cache_req
-  io.cache_req_dup_1.bits := translated_cache_req
+  io.cache_req_dups.map( dup => dup.bits := translated_cache_req )
   when(io.cache.req.fire()){
     wait_cache_op_resp := true.B
   }
