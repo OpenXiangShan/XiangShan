@@ -28,6 +28,7 @@ import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LqWriteBundle)
+  val loadPaddrIn = ValidIO(new LqPaddrWriteBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val s2_load_data_forwarded = Output(Bool())
   val s3_delayed_load_error = Output(Bool())
@@ -610,6 +611,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B,
     load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect) || cancelPointerChasing)
+
+  // provide paddr for lq
+  io.lsq.loadPaddrIn.valid := load_s1.io.out.valid
+  io.lsq.loadPaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
+  io.lsq.loadPaddrIn.bits.paddr := load_s1.io.lsuPAddr
 
   // load s2
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
