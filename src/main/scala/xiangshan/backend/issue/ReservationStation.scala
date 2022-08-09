@@ -157,7 +157,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     })
     val io = IO(new ReservationStationIO(params)(updatedP))
 
-    rs.foreach(_.io.redirect <> io.redirect)
+    rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
     if (io.fpRegValue.isDefined) {

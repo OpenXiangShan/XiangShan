@@ -81,11 +81,9 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   })
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.fuWriteback))
 
-  val redirect = RegNextWithEnable(io.redirect)
-
   // IO for the scheduler
   scheduler.io.hartId := io.hartId
-  scheduler.io.redirect <> redirect
+  scheduler.io.redirect <> io.redirect
   scheduler.io.allocPregs <> io.allocPregs
   scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
@@ -103,9 +101,12 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   }
 
   // IO for the function units
-  fuBlock.io.redirect <> redirect
+  fuBlock.io.redirect <> io.redirect
   fuBlock.io.writeback <> io.fuWriteback
   fuBlock.io.extra <> io.fuExtra
+
+  // To reduce fanout, we add registers here for redirect.
+  val redirect = RegNextWithEnable(io.redirect)
 
   val flattenFuConfigs = fuConfigs.flatMap(c => Seq.fill(c._2)(c._1))
   require(flattenFuConfigs.length == fuBlock.io.writeback.length)
