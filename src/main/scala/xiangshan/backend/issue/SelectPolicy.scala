@@ -33,7 +33,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     val grantBalance = Output(Bool())
   })
 
-  val enqPolicy = if (params.numEnq > 2) "oddeven" else "circ"
+  val enqPolicy = if (params.numEnq > 2) "oddeven" else if (params.numEnq == 2) "center" else "circ"
   val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
   val allocate = SelectOne(enqPolicy, emptyVec, params.numEnq)
   for (i <- 0 until params.numEnq) {
@@ -43,7 +43,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
 
     XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
       p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
-    XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
+    XSDebug(io.allocate(i).fire, p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
   val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
@@ -63,21 +63,24 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
 }
 
 class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
+  val io = IO(new Bundle {
     val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
     val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
     val canOverride = Vec(params.numDeq, Input(Bool()))
     val isOverrided = Vec(params.numDeq, Output(Bool()))
   })
 
-  val oldestMatchVec = VecInit(io.in.map(i => i.valid && OHToUInt(i.bits) === OHToUInt(io.oldest.bits)))
+  val oldestMatchVec = VecInit(io.in.map(i => i.valid && (i.bits & io.oldest.bits).asUInt.orR))
   io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
     // When the oldest is not matched with io.in(i), we always select the oldest.
     // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.
     val oldestMatchIn = if (params.numDeq > 1) {
       VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
     } else false.B
-    canDo && io.oldest.valid && !oldestMatchIn
+    val isOverrided = canDo && io.oldest.valid && !oldestMatchIn
+    XSPerfAccumulate(s"oldest_override_$i", isOverrided)
+    XSPerfAccumulate(s"oldest_same_as_selected_$i", oldestMatchIn)
+    isOverrided
   }
 }
 

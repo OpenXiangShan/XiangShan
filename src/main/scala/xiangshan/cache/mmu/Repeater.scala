@@ -225,6 +225,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val enqPtrVec = VecInit((0 until Width).map(i => enqPtrVecInit(accumEnqNum(i))))
   val enqNum = PopCount(reqs.map(_.valid))
   val canEnqueue = counter +& enqNum <= Size.U
+  // tlb req flushed by ptw resp: last ptw resp && current ptw resp
+  // the flushed tlb req will fakely enq, with a false valid
+  val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && io.ptw.resp.bits.entry.hit(a.bits.vpn, 0.U, true, true))
 
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
   io.tlb.resp.valid := ptwResp_valid
@@ -241,7 +244,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   reqs.zipWithIndex.map{
     case (req, i) =>
       when (req.valid && canEnqueue) {
-        v(enqPtrVec(i)) := true.B
+        v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }

@@ -35,40 +35,77 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val full = Output(Bool())
 }
 
+class IBufEntry(implicit p: Parameters) extends XSBundle {
+  val inst = UInt(32.W)
+  val pc = UInt(VAddrBits.W)
+  val foldpc = UInt(MemPredPCWidth.W)
+  val pd = new PreDecodeInfo
+  val pred_taken = Bool()
+  val ftqPtr = new FtqPtr
+  val ftqOffset = UInt(log2Ceil(PredictWidth).W)
+  val ipf = Bool()
+  val acf = Bool()
+  val crossPageIPFFix = Bool()
+  val triggered = new TriggerCf
+
+  def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
+    inst   := fetch.instrs(i)
+    pc     := fetch.pc(i)
+    foldpc := fetch.foldpc(i)
+    pd     := fetch.pd(i)
+    pred_taken := fetch.ftqOffset(i).valid
+    ftqPtr := fetch.ftqPtr
+    ftqOffset := fetch.ftqOffset(i).bits
+    ipf := fetch.ipf(i)
+    acf := fetch.acf(i)
+    crossPageIPFFix := fetch.crossPageIPFFix(i)
+    triggered := fetch.triggered(i)
+    this
+  }
+
+  def toCtrlFlow: CtrlFlow = {
+    val cf = Wire(new CtrlFlow)
+    cf.instr := inst
+    cf.pc := pc
+    cf.foldpc := foldpc
+    cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+    cf.exceptionVec(instrPageFault) := ipf
+    cf.exceptionVec(instrAccessFault) := acf
+    cf.trigger := triggered
+    cf.pd := pd
+    cf.pred_taken := pred_taken
+    cf.crossPageIPFFix := crossPageIPFFix
+    cf.storeSetHit := DontCare
+    cf.waitForRobIdx := DontCare
+    cf.loadWaitBit := DontCare
+    cf.loadWaitStrict := DontCare
+    cf.ssid := DontCare
+    cf.ftqPtr := ftqPtr
+    cf.ftqOffset := ftqOffset
+    cf
+  }
+}
+
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
-  class IBufEntry(implicit p: Parameters) extends XSBundle {
-    val inst = UInt(32.W)
-    val pc = UInt(VAddrBits.W)
-    val foldpc = UInt(MemPredPCWidth.W)
-    val pd = new PreDecodeInfo
-    val pred_taken = Bool()
-    val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-    val ipf = Bool()
-    val acf = Bool()
-    val crossPageIPFFix = Bool()
-    val triggered = new TriggerCf
-  }
+  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth, "IBuffer"))
 
-  for(out <- io.out) {
-    out.bits.intrVec := DontCare
-  }
+  val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
+  val deqPtrVecNext = Wire(Vec(2 * DecodeWidth, new IbufPtr))
+  deqPtrVec := deqPtrVecNext
+  val deqPtr = deqPtrVec(0)
 
-  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth, "IBuffer"))
-  ibuf.io.wdata.map(w => dontTouch(w.ftqOffset))
-  val head_vec = RegInit(VecInit((0 until DecodeWidth).map(_.U.asTypeOf(new IbufPtr))))
-  val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
-  val head_ptr = head_vec(0)
-  val tail_ptr = tail_vec(0)
+  val enqPtrVec = RegInit(VecInit.tabulate(PredictWidth)(_.U.asTypeOf(new IbufPtr)))
+  val enqPtr = enqPtrVec(0)
 
-  val validEntries = distanceBetween(tail_ptr, head_ptr)
+  val validEntries = distanceBetween(enqPtr, deqPtr)
   val allowEnq = RegInit(true.B)
 
   val numEnq = Mux(io.in.fire, PopCount(io.in.bits.valid), 0.U)
   val numTryDeq = Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries)
-  val numDeq = PopCount(io.out.map(_.fire))
+  val numDeq = Mux(io.out.head.ready, numTryDeq, 0.U)
+  deqPtrVecNext := Mux(io.out.head.ready, VecInit(deqPtrVec.map(_ + numTryDeq)), deqPtrVec)
 
   val numAfterEnq = validEntries +& numEnq
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
@@ -77,79 +114,57 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Enque
   io.in.ready := allowEnq
 
-  val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
-  for(i <- 0 until PredictWidth) {
-    if (i == 0) {
-      offset(i) := 0.U
-    } else {
-      offset(i) := PopCount(io.in.bits.valid(i-1, 0))
-    }
-  }
-
+  val enqOffset = Seq.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
+  val enqData = Seq.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
   for (i <- 0 until PredictWidth) {
-    val inWire = Wire(new IBufEntry)
-    inWire.inst   := io.in.bits.instrs(i)
-    inWire.pc     := io.in.bits.pc(i)
-    inWire.pd     := io.in.bits.pd(i)
-    inWire.foldpc := io.in.bits.foldpc(i)
-    inWire.pred_taken := io.in.bits.ftqOffset(i).valid
-    inWire.ftqPtr := io.in.bits.ftqPtr
-    inWire.ftqOffset := io.in.bits.ftqOffset(i).bits
-    inWire.ipf := io.in.bits.ipf(i)
-    inWire.acf := io.in.bits.acf(i)
-    inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
-
-    inWire.triggered := io.in.bits.triggered(i)
-
-//    dontTouch(inWire.triggered)
-
-    ibuf.io.waddr(i) := tail_vec(offset(i)).value
-    ibuf.io.wdata(i) := inWire
+    ibuf.io.waddr(i) := enqPtrVec(enqOffset(i)).value
+    ibuf.io.wdata(i) := enqData(i)
     ibuf.io.wen(i)   := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
   }
 
   when (io.in.fire && !io.flush) {
-    tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.enqEnable)))
+    enqPtrVec := VecInit(enqPtrVec.map(_ + PopCount(io.in.bits.enqEnable)))
   }
 
   // Dequeue
-  val validVec = Mux(validEntries >= DecodeWidth.U, ((1 << DecodeWidth) - 1).U, UIntToMask(validEntries, DecodeWidth))
+  val validVec = Mux(validEntries >= DecodeWidth.U,
+    ((1 << DecodeWidth) - 1).U,
+    UIntToMask(validEntries(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
+  )
+  val deqData = Reg(Vec(DecodeWidth, new IBufEntry))
   for (i <- 0 until DecodeWidth) {
     io.out(i).valid := validVec(i)
-
-    val outWire = ibuf.io.rdata(i)
-
-    io.out(i).bits.instr := outWire.inst
-    io.out(i).bits.pc := outWire.pc
-    io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
-    io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
-    io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
-    io.out(i).bits.pd := outWire.pd
-    io.out(i).bits.pred_taken := outWire.pred_taken
-    io.out(i).bits.ftqPtr := outWire.ftqPtr
-    io.out(i).bits.ftqOffset := outWire.ftqOffset
-    io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
-    io.out(i).bits.foldpc := outWire.foldpc
-    io.out(i).bits.loadWaitBit := DontCare
-    io.out(i).bits.waitForRobIdx := DontCare
-    io.out(i).bits.storeSetHit := DontCare
-    io.out(i).bits.loadWaitStrict := DontCare
-    io.out(i).bits.ssid := DontCare
-    io.out(i).bits.replayInst := false.B
-    io.out(i).bits.trigger := outWire.triggered
+    // by default, all bits are from the data module (slow path)
+    io.out(i).bits := ibuf.io.rdata(i).toCtrlFlow
+    // some critical bits are from the fast path
+    val fastData = deqData(i).toCtrlFlow
+    io.out(i).bits.instr := fastData.instr
+    io.out(i).bits.exceptionVec := fastData.exceptionVec
+    XSError(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
   }
-  val next_head_vec = VecInit(head_vec.map(_ + numDeq))
-  ibuf.io.raddr := VecInit(next_head_vec.map(_.value))
-  head_vec := next_head_vec
+  val nextStepData = Wire(Vec(2 * DecodeWidth, new IBufEntry))
+  val ptrMatch = new QPtrMatchMatrix(deqPtrVec, enqPtrVec)
+  for (i <- 0 until 2 * DecodeWidth) {
+    val enqMatchVec = VecInit(ptrMatch(i))
+    val enqBypassEnVec = io.in.bits.valid.asBools.zip(enqOffset).map{ case (v, o) => v && enqMatchVec(o) }
+    val enqBypassEn = io.in.fire && VecInit(enqBypassEnVec).asUInt.orR
+    val enqBypassData = Mux1H(enqBypassEnVec, enqData)
+    val readData = if (i < DecodeWidth) deqData(i) else ibuf.io.rdata(i)
+    nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
+  }
+  val deqEnable_n = io.out.map(o => !o.fire) :+ true.B
+  for (i <- 0 until DecodeWidth) {
+    deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1))
+  }
+  ibuf.io.raddr := VecInit(deqPtrVecNext.map(_.value))
 
   // Flush
   when (io.flush) {
     allowEnq := true.B
-    head_vec := VecInit((0 until DecodeWidth).map(_.U.asTypeOf(new IbufPtr)))
-    tail_vec := VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr)))
+    deqPtrVec := deqPtrVec.indices.map(_.U.asTypeOf(new IbufPtr))
+    enqPtrVec := enqPtrVec.indices.map(_.U.asTypeOf(new IbufPtr))
   }
   io.full := !allowEnq
-
 
   // Debug info
   XSDebug(io.flush, "IBuffer Flushed\n")
@@ -163,15 +178,15 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   }
 
   for (i <- 0 until DecodeWidth) {
-    XSDebug(io.out(i).fire(), p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
+    XSDebug(io.out(i).fire,
+      p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)}" +
+      p"v=${io.out(i).valid} r=${io.out(i).ready} " +
       p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
   }
 
   XSDebug(p"ValidEntries: ${validEntries}\n")
   XSDebug(p"EnqNum: ${numEnq}\n")
   XSDebug(p"DeqNum: ${numDeq}\n")
-
-
 
   val afterInit = RegInit(false.B)
   val headBubble = RegInit(false.B)

@@ -30,12 +30,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
     // to Rename
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
-    val fusionInfo = Vec(DecodeWidth - 1, new FusionDecodeInfo)
     // RAT read
     val intRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort)))
     val fpRat = Vec(RenameWidth, Vec(4, Flipped(new RatReadPort)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    // perf only
+    val fusion = Vec(DecodeWidth - 1, Input(Bool()))
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
@@ -64,45 +65,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.fpRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
-  // instruction fusion
-  val fusionDecoder = Module(new FusionDecoder())
-  fusionDecoder.io.in.zip(io.in).foreach{ case (d, in) =>
-    // TODO: instructions with exceptions should not be considered fusion
-    d.valid := in.valid && !(in.bits.exceptionVec(instrPageFault) || in.bits.exceptionVec(instrAccessFault))
-    d.bits := in.bits.instr
-  }
-  fusionDecoder.io.dec := decoders.map(_.io.deq.cf_ctrl.ctrl)
-  fusionDecoder.io.out.zip(io.out.dropRight(1)).zipWithIndex.foreach{ case ((d, out), i) =>
-    d.ready := out.ready
-    when (d.valid && !io.csrCtrl.singlestep) { // TODO && nosinglestep
-      out.bits.ctrl := d.bits
-      // TODO: remove this
-      // Dirty code for ftq update
-      val sameFtqPtr = out.bits.cf.ftqPtr.value === io.out(i + 1).bits.cf.ftqPtr.value
-      val ftqOffset0 = out.bits.cf.ftqOffset
-      val ftqOffset1 = io.out(i + 1).bits.cf.ftqOffset
-      val ftqOffsetDiff = ftqOffset1 - ftqOffset0
-      val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
-      val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
-      val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
-      val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
-      out.bits.ctrl.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
-      XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
-    }
-  }
-  fusionDecoder.io.clear.zip(io.out.map(_.valid)).foreach{ case (c, v) =>
-    when (c) {
-      v := false.B
-    }
-  }
-  io.fusionInfo := fusionDecoder.io.info
-
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
 
-  val fusionValid = RegNext(VecInit(fusionDecoder.io.out.map(_.fire)))
+  val fusionValid = RegNext(io.fusion)
   val inFire = io.in.map(in => RegNext(in.valid && !in.ready))
   val perfEvents = Seq(
     ("decoder_fused_instr", PopCount(fusionValid)       ),

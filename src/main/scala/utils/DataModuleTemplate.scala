@@ -58,7 +58,8 @@ class SyncDataModuleTemplate[T <: Data](
   numRead: Int,
   numWrite: Int,
   parentModule: String,
-  concatData: Boolean = false
+  concatData: Boolean = false,
+  perReadPortBypassEnable: Option[Seq[Boolean]] = None
 ) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
@@ -82,34 +83,50 @@ class SyncDataModuleTemplate[T <: Data](
     else 0.U
   }
 
+  // if use bypassEnable to control bypass of each port,
+  // then we should have a separate bit for each read port
+  perReadPortBypassEnable.map(en_vec => require(en_vec.length == numRead))
+
   val dataBanks = Seq.tabulate(numBanks)(i => {
     val bankEntries = if (i < numBanks - 1) maxBankEntries else numEntries - (i * maxBankEntries)
-    Module(new NegedgeDataModuleTemplate(dataType, bankEntries, numRead, numWrite, parentModule))
-  })
+    val dataBank = Module(new NegedgeDataModuleTemplate(dataType, bankEntries, numRead, numWrite, parentModule, perReadPortBypassEnable))
 
-  // delay one clock
-  val raddr = RegNext(io.raddr)
-  val wen = RegNext(io.wen)
-  val waddr = io.wen.zip(io.waddr).map(w => RegEnable(w._2, w._1))
-  val wdata = if (concatData) RegNext(VecInit(io.wdata.map(w => w.asTypeOf(dataType)))) else RegNext(io.wdata)
+    // delay one clock
+    val raddr = RegNext(io.raddr)
+    val wen = RegNext(io.wen)
+    val waddr = io.wen.zip(io.waddr).map(w => RegEnable(w._2, w._1))
 
-  // input
-  for ((dataBank, i) <- dataBanks.zipWithIndex) {
+    // input
     dataBank.io.raddr := raddr.map(bankOffset)
     dataBank.io.wen := wen.zip(waddr).map{ case (en, addr) => en && bankIndex(addr) === i.U }
     dataBank.io.waddr := waddr.map(bankOffset)
-    dataBank.io.wdata := wdata
-  }
+    if (concatData) {
+      dataBank.io.wdata := io.wen.zip(io.wdata).map(w => RegEnable(w._2.asTypeOf(dataType), w._1))
+    }
+    else {
+      dataBank.io.wdata := io.wen.zip(io.wdata).map(w => RegEnable(w._2, w._1))
+    }
+
+    dataBank
+  })
 
   // output
   val rdata = if (concatData) dataBanks.map(_.io.rdata.map(_.asTypeOf(gen))) else dataBanks.map(_.io.rdata)
   for (j <- 0 until numRead) {
-    val index_dec = UIntToOH(bankIndex(raddr(j)), numBanks)
+    val raddr = RegNext(io.raddr(j))
+    val index_dec = UIntToOH(bankIndex(raddr), numBanks)
     io.rdata(j) := Mux1H(index_dec, rdata.map(_(j)))
   }
 }
 
-class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, parentModule: String) extends Module {
+class NegedgeDataModuleTemplate[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  parentModule: String,
+  perReadPortBypassEnable: Option[Seq[Boolean]] = None
+) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Ceil(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -121,9 +138,13 @@ class NegedgeDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int
   override def desiredName: String = s"NegedgeDataModule_${parentModule}_${numEntries}entry"
   val data = Reg(Vec(numEntries, gen))
 
+  // if use bypassEnable to control bypass of each port,
+  // then we should have a separate bit for each read port
+  perReadPortBypassEnable.map(en_vec => require(en_vec.length == numRead))
   // read ports
   for (i <- 0 until numRead) {
-    val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i))
+    val bypass_en = perReadPortBypassEnable.map(_(i)).getOrElse(true)
+    val read_by = io.wen.zip(io.waddr).map(w => w._1 && w._2 === io.raddr(i) && bypass_en.B)
     val addr_dec = UIntToOH(io.raddr(i), numEntries)
     when (VecInit(read_by).asUInt.orR) {
       io.rdata(i) := Mux1H(read_by, io.wdata)

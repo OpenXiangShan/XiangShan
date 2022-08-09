@@ -73,6 +73,32 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val isFirstIssue = Bool()
 }
 
+class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  // queue entry data, except flag bits, will be updated if writeQueue is true,
+  // valid bit in LqWriteBundle will be ignored
+  val lq_data_wen_dup = Vec(6, Bool()) // dirty reg dup
+
+  def fromLsPipelineBundle(input: LsPipelineBundle) = {
+    vaddr := input.vaddr
+    paddr := input.paddr
+    mask := input.mask
+    data := input.data
+    uop := input.uop
+    wlineflag := input.wlineflag
+    miss := input.miss
+    tlbMiss := input.tlbMiss
+    ptwBack := input.ptwBack
+    mmio := input.mmio
+    rsIdx := input.rsIdx
+    forwardMask := input.forwardMask
+    forwardData := input.forwardData
+    isSoftPrefetch := input.isSoftPrefetch
+    isFirstIssue := input.isFirstIssue
+
+    lq_data_wen_dup := DontCare
+  }
+}
+
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
@@ -134,6 +160,11 @@ class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
 class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new LoadViolationQueryReq)
   val resp = Flipped(Valid(new LoadViolationQueryResp))
+}
+
+class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
+  val sqIdx = new SqPtr
+  val mask = UInt(8.W)
 }
 
 // Bundle for load / store wait waking up

@@ -6,11 +6,12 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyRawModuleImp}
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.mbist._
 import huancun.utils.ResetGen
 import huancun.{HCCacheParamsKey, HuanCun}
+import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils._
@@ -108,20 +109,29 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     buffer
   }
 
-  val l1i_to_l2_buffer = LazyModule(new TLBuffer)
+  def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
+    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
+    buffers.zipWithIndex.foreach{ case (b, i) => {
+      b.suggestName(s"${n}_${i}")
+    }}
+    val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
+    (buffers, node)
+  }
+
+  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(5, "l1i_to_l2_buffer")
   misc.busPMU :=
     TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-    l1i_to_l2_buffer.node :=
+    l1i_to_l2_buf_node :=
     core.frontend.icache.clientNode
 
-  val ptw_to_l2_bufferOpt = if (!coreParams.softPTW) {
-    val buffer = LazyModule(new TLBuffer)
+  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
+    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
     misc.busPMU :=
       TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-      buffer.node :=
+      buf_node :=
       core.ptw_to_l2_buffer.node
-    Some(buffer)
-  } else None
+    buffers
+  } else Seq()
 
   l2cache match {
     case Some(l2) =>
@@ -213,6 +223,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             isSRAM = true,
             1
           )))
+          responseMbistPipeline.genCSV(intf.get.info)
           intf.get.extra := DontCare
           intf.get.clock := childClock
           intf.get.toPipeline.head <> l2cache.get.module.mbist_sram.get
@@ -238,6 +249,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
             isSRAM = false,
             1
           )))
+          responseMbistPipeline.genCSV(intf.get.info)
           intf.get.extra := DontCare
           intf.get.clock := childClock
           intf.get.toPipeline.head <> l2cache.get.module.mbist_rf.get
@@ -262,6 +274,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         isSRAM = true,
         1
       ))
+      core.module.coreMbistPipelineSram.get.genCSV(mbistInterfaceCoreSRAM.info)
       mbistInterfaceCoreSRAM.extra := DontCare
       mbistInterfaceCoreSRAM.clock := childClock
       mbistInterfaceCoreSRAM.toPipeline.head <> core.module.mbist_sram
@@ -278,6 +291,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         isSRAM = false,
         1
       ))
+      core.module.coreMbistPipelineRf.get.genCSV(mbistInterfaceCoreRF.info)
       mbistInterfaceCoreRF.extra := DontCare
       mbistInterfaceCoreRF.clock := childClock
       mbistInterfaceCoreRF.toPipeline.head <> core.module.mbist_rf
@@ -383,6 +397,8 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
           mbistControllerCoreWithL2.io.uhdusplr_out <> mbistInterfaceL2SRAM.get.uhdusplr_fuse
           mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceL2SRAM.get.hduspsr_fuse
         }
+
+        l2cache.get.module.io.dfx_reset := dfx_reset.get
       }
       else{
         mbistControllerCoreWithL2.mbist(0) <> mbistInterfaceCoreSRAM.mbist
@@ -438,11 +454,13 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
       //             v
       // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
       val resetChain = Seq(
-        Seq(misc.module, core.module, l1i_to_l2_buffer.module) ++
-          l2cache.map(_.module) ++
-          l1d_to_l2_bufferOpt.map(_.module) ++ ptw_to_l2_bufferOpt.map(_.module)
+        Seq(misc.module, core.module) ++
+          l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+          ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+          l1d_to_l2_bufferOpt.map(_.module) ++
+          l2cache.map(_.module)
       )
-      ResetGen(resetChain, (childReset.asBool || core_soft_rst.asBool).asAsyncReset, !debugOpts.FPGAPlatform, dfx_reset)
+      ResetGen(resetChain, childReset, !debugOpts.FPGAPlatform, dfx_reset)
     }
   }
 }

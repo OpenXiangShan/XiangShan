@@ -34,15 +34,16 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   val ctrl = io.in.fpCtrl
 
   // stage 1: unbox inputs
-  val src1_d = RegEnable(FPU.unbox(src1, ctrl.typeTagIn), regEnables(0))
-  val src2_d = RegEnable(FPU.unbox(src2, ctrl.typeTagIn), regEnables(0))
+  val src1_d_s1 = FPU.unbox(src1, ctrl.typeTagIn)
+  val src2_d_s1 = FPU.unbox(src2, ctrl.typeTagIn)
+
+  val src1_d = RegEnable(src1_d_s1, regEnables(0))
+  val src2_d = RegEnable(src2_d_s1, regEnables(0))
   val ctrl_reg = RegEnable(ctrl, regEnables(0))
   val rm_reg = RegEnable(rm, regEnables(0))
 
-  // stage2
-
-  val src1_ieee = src1_d
-  val move_out = Mux(ctrl_reg.typeTagIn === FPU.S,
+  val src1_ieee = src1_d_s1
+  val move_out = Mux(ctrl.typeTagIn === FPU.S,
     src1_ieee(FPU.f32.len - 1, 0),
     src1_ieee
   )
@@ -65,10 +66,36 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
     )
   }
 
-  val classify_out = Mux(ctrl_reg.typeTagIn === FPU.S,
-    classify(src1_d(31, 0), FPU.f32),
-    classify(src1_d, FPU.f64)
+  val classify_out = Mux(ctrl.typeTagIn === FPU.S,
+    classify(src1_d_s1(31, 0), FPU.f32),
+    classify(src1_d_s1, FPU.f64)
   )
+
+  val mv_cls_out = RegEnable(Mux(rm(0), classify_out, move_out), regEnables(0))
+
+  val s2i_s1 = Module(new fudian.FPToInt_s1(FPU.f32.expWidth, FPU.f32.precision))
+  val d2i_s1 = Module(new fudian.FPToInt_s1(FPU.f64.expWidth, FPU.f64.precision))
+
+  for(f2i <- Seq(s2i_s1, d2i_s1)){
+    f2i.io.a := src1_d_s1
+    f2i.io.rm := rm
+    f2i.io.op := Cat(
+      ctrl.typ(1),
+      !ctrl.typ(0)
+    )
+  }
+  val s2i_s1_to_s2 = RegEnable(s2i_s1.io.to_s2, regEnables(0))
+  val d2i_s1_to_s2 = RegEnable(d2i_s1.io.to_s2, regEnables(0))
+
+  // stage2
+  val mv_cls_out_s2 = RegEnable(mv_cls_out, regEnables(1))
+
+  val s2i_s2 = Module(new fudian.FPToInt_s2(FPU.f32.expWidth, FPU.f32.precision))
+  val d2i_s2 = Module(new fudian.FPToInt_s2(FPU.f64.expWidth, FPU.f64.precision))
+
+  s2i_s2.io.s1 := s2i_s1_to_s2
+  d2i_s2.io.s1 := d2i_s1_to_s2
+
 
   val scmp = Module(new FCMP(FPU.f32.expWidth, FPU.f32.precision))
   val dcmp = Module(new FCMP(FPU.f64.expWidth, FPU.f64.precision))
@@ -87,45 +114,39 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
     dcmp.io.eq
   )
 
-  val cmp_out = ((~rm_reg).asUInt() & Cat(lt, eq)).orR()
-  val cmp_exc = Mux(ctrl_reg.typeTagIn === FPU.S,
+  val cmp_out = RegEnable(((~rm_reg).asUInt() & Cat(lt, eq)).orR(), regEnables(1))
+  val cmp_exc = RegEnable(Mux(ctrl_reg.typeTagIn === FPU.S,
     scmp.io.fflags,
     dcmp.io.fflags
-  )
-
-  val s2i = Module(new fudian.FPToInt(FPU.f32.expWidth, FPU.f32.precision))
-  val d2i = Module(new fudian.FPToInt(FPU.f64.expWidth, FPU.f64.precision))
-
-  for(f2i <- Seq(s2i, d2i)){
-    f2i.io.a := src1_d
-    f2i.io.rm := rm_reg
-    f2i.io.op := Cat(
-      ctrl_reg.typ(1),
-      !ctrl_reg.typ(0)
-    )
-  }
-
-  val conv_out = Mux(ctrl_reg.typeTagIn === FPU.S,
-    s2i.io.result,
-    d2i.io.result
-  )
-  val conv_exc = Mux(ctrl_reg.typeTagIn === FPU.S,
-    s2i.io.fflags,
-    d2i.io.fflags
-  )
-
-  val intData = Wire(UInt(XLEN.W))
-  intData := Mux(ctrl_reg.wflags,
-    Mux(ctrl_reg.fcvt, conv_out, cmp_out),
-    Mux(rm_reg(0), classify_out, move_out)
-  )
-  val long = Mux(ctrl_reg.fcvt, ctrl_reg.typ(1), ctrl_reg.fmt(0))
-  val intValue = RegEnable(Mux(long,
-    SignExt(intData, XLEN),
-    SignExt(intData(31, 0), XLEN)
   ), regEnables(1))
 
-  val exc = RegEnable(Mux(ctrl_reg.fcvt, conv_exc, cmp_exc), regEnables(1))
+
+
+  val conv_out = RegEnable(Mux(ctrl_reg.typeTagIn === FPU.S,
+    s2i_s2.io.result,
+    d2i_s2.io.result
+  ), regEnables(1))
+  val conv_exc = RegEnable(Mux(ctrl_reg.typeTagIn === FPU.S,
+    s2i_s2.io.fflags,
+    d2i_s2.io.fflags
+  ), regEnables(1))
+
+  val ctrl_reg_s2 = RegEnable(ctrl_reg, regEnables(1))
+
+  // stage3
+
+  val intData = Wire(UInt(XLEN.W))
+  intData := Mux(ctrl_reg_s2.wflags,
+    Mux(ctrl_reg_s2.fcvt, conv_out, cmp_out),
+    mv_cls_out_s2
+  )
+  val long = Mux(ctrl_reg_s2.fcvt, ctrl_reg_s2.typ(1), ctrl_reg_s2.fmt(0))
+  val intValue = Mux(long,
+    SignExt(intData, XLEN),
+    SignExt(intData(31, 0), XLEN)
+  )
+
+  val exc = Mux(ctrl_reg_s2.fcvt, conv_exc, cmp_exc)
 
   io.out.data := intValue
   fflags := exc

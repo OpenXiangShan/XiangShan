@@ -27,6 +27,7 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
@@ -520,7 +521,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.dsid := sdsid
 
   // slvpredctl: load violation predict settings
-  val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
+  // Default reset period: 2^16
+  // Why this number: reset more frequently while keeping the overhead low
+  // Overhead: extra two redirections in every 64K cycles => ~0.1% overhead
+  val slvpredctl = RegInit(UInt(XLEN.W), "h60".U)
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.storeset_wait_store := slvpredctl(2)
@@ -970,7 +974,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
     ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
-  val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
+  val debugIntrSync = AsyncResetSynchronizerShiftReg(csrio.externalInterrupt.debug, 3)
+  val debugIntr = debugIntrSync & debugIntrEnable
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))

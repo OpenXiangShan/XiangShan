@@ -89,7 +89,8 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
   io.read.zip(io.resp).foreach {
     case (read, resp) =>
       read.ready := true.B
-      resp := RegEnable(meta_array(read.bits.idx), read.valid)
+      // resp := RegEnable(meta_array(read.bits.idx), read.valid)
+      resp := meta_array(RegEnable(read.bits.idx, read.valid))
   }
 
   io.write.foreach {

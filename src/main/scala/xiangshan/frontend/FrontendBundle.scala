@@ -20,19 +20,22 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.chiselName
 import xiangshan._
-import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.icache._
 import utils._
 import scala.math._
 
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+
+  //fast path: Timing critical
   val startAddr       = UInt(VAddrBits.W)
   val nextlineStart   = UInt(VAddrBits.W)
+  val nextStartAddr   = UInt(VAddrBits.W)
+  //slow path
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val nextStartAddr   = UInt(VAddrBits.W)
 
-  def crossCacheline = startAddr(blockOffBits - 1) === 1.U
+  def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
@@ -55,6 +58,28 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
       p" offset: ${ftqOffset.bits}\n"
   }
 }
+
+class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val startAddr           = UInt(VAddrBits.W)
+  val nextlineStart       = UInt(VAddrBits.W)
+  def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
+  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+    this.startAddr := b.startAddr
+    this.nextlineStart := b.nextLineAddr
+    this
+  }
+}
+
+class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val icacheReady       = Output(Bool())
+  val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+}
+
+class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
+  val pcMemRead           = Vec(5, new FtqICacheInfo)
+  val readValid           = Vec(5, Bool())
+}
+
 
 class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val pc           = Vec(PredictWidth, UInt(VAddrBits.W))

@@ -132,7 +132,7 @@ class Scheduler(
 )(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbHelper {
   val numDpPorts = dpPorts.length
   val dpExuConfigs = dpPorts.map(port => port.map(_._1).map(configs(_)._1))
-  def getDispatch2 = {
+  def getDispatch2: Seq[Dispatch2Rs] = {
     if (dpExuConfigs.length > exuParameters.AluCnt) {
       val intDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.take(exuParameters.AluCnt)))
       val lsDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.drop(exuParameters.AluCnt)))
@@ -233,6 +233,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   class SchedulerExtraIO extends XSBundle {
+    // feedback to dispatch
+    val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Output(Bool()))
     // feedback ports
     val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, Flipped(new MemRSFeedbackIO()(updatedP)))) else None
     // special ports for RS that needs to read from other schedulers
@@ -285,6 +287,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   val dispatch2 = outer.dispatch2.map(_.module)
   dispatch2.foreach(_.io.redirect := io.redirect)
+  io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
 
   // dirty code for ls dp
   dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
@@ -411,7 +414,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     issueIdx += issueWidth
 
     if (rs.io.jump.isDefined) {
-      rs.io.jump.get.jumpPc := io.extra.jumpPc
+      val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
+      rs.io.jump.get.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
       rs.io.jump.get.jalr_target := io.extra.jalr_target
     }
     if (rs.io.checkwait.isDefined) {
@@ -521,13 +525,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
-  XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
+  XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
 
+  val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
+  val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))
   val schedulerPerf = Seq(
-    ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))),
-    ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))  )
+    ("sche_allocate_fire", PopCount(lastCycleAllocate)),
+    ("sche_issue_fire",    PopCount(lastCycleIssue)   )
   )
   val intBtPerf = if (intBusyTable.isDefined) intBusyTable.get.getPerfEvents else Seq()
   val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()

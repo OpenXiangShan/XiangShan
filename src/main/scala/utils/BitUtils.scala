@@ -18,7 +18,22 @@ package utils
 
 import chisel3._
 import chisel3.util._
+
 import scala.math.min
+
+object RegNextWithEnable {
+  def apply[T <: Data](data: Valid[T], hasInit: Boolean = true): Valid[T] = {
+    val next = Wire(data.cloneType)
+    if (hasInit) {
+      next.valid := RegNext(data.valid, false.B)
+    }
+    else {
+      next.valid := RegNext(data.valid)
+    }
+    next.bits := RegEnable(data.bits, data.valid)
+    next
+  }
+}
 
 class CircularShift(data: UInt) {
   private def helper(step: Int, isLeft: Boolean): UInt = {
@@ -190,7 +205,7 @@ object GetOddBits {
 object XORFold {
   def apply(input: UInt, resWidth: Int): UInt = {
     require(resWidth > 0)
-    val fold_range = input.getWidth / resWidth
+    val fold_range = (input.getWidth + resWidth - 1) / resWidth
     val value = ZeroExt(input, fold_range * resWidth)
     ParallelXOR((0 until fold_range).map(i => value(i*resWidth+resWidth-1, i*resWidth)))
   }
@@ -203,6 +218,9 @@ object OnesMoreThan {
     }
     else if (input.length < thres) {
       false.B
+    }
+    else if (thres == 1) {
+      VecInit(input).asUInt.orR
     }
     else {
       val tail = input.drop(1)
@@ -310,12 +328,26 @@ class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   }
 }
 
+class CenterSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  require(max_sel == 2, "only 2 is supported!")
+  val n_bits = bits.length
+  val half_index = (bits.length + 1) / 2
+  def centerReverse(data: Seq[Bool]): Seq[Bool] = data.take(half_index).reverse ++ data.drop(half_index).reverse
+  val select = new CircSelectOne(centerReverse(bits), max_sel)
+
+  def getNthOH(n: Int, need_balance: Boolean): (Bool, Vec[Bool]) = {
+    val selected = select.getNthOH(n)
+    (selected._1, VecInit(centerReverse(selected._2)))
+  }
+}
+
 object SelectOne {
   def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = {
     policy.toLowerCase match {
       case "naive" => new NaiveSelectOne(bits, max_sel)
       case "circ" => new CircSelectOne(bits, max_sel)
       case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+      case "center" => new CenterSelectOne(bits, max_sel)
       case _ => throw new IllegalArgumentException(s"unknown select policy")
     }
   }

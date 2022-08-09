@@ -35,7 +35,7 @@ class RatWritePort(implicit p: Parameters) extends XSBundle {
 }
 
 class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
+  val io = IO(new Bundle {
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
@@ -43,10 +43,11 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   })
 
   // speculative rename table
-  val spec_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
+  val rename_table_init = VecInit.tabulate(32)(i => (if (float) i else 0).U(PhyRegIdxWidth.W))
+  val spec_table = RegInit(rename_table_init)
   val spec_table_next = WireInit(spec_table)
   // arch state rename table
-  val arch_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
+  val arch_table = RegInit(rename_table_init)
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
@@ -104,13 +105,13 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   intRat.io.readPorts <> io.intReadPorts.flatten
   val intDestValid = io.robCommits.info.map(_.rfWen)
   for ((arch, i) <- intRat.io.archWritePorts.zipWithIndex) {
-    arch.wen  := !io.robCommits.isWalk && io.robCommits.valid(i) && intDestValid(i)
+    arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && intDestValid(i)
     arch.addr := io.robCommits.info(i).ldest
     arch.data := io.robCommits.info(i).pdest
     XSError(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
-    spec.wen  := io.robCommits.isWalk && io.robCommits.valid(i) && intDestValid(i)
+    spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && intDestValid(i)
     spec.addr := io.robCommits.info(i).ldest
     spec.data := io.robCommits.info(i).old_pdest
     XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
@@ -127,12 +128,12 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   fpRat.io.debug_rdata <> io.debug_fp_rat
   fpRat.io.readPorts <> io.fpReadPorts.flatten
   for ((arch, i) <- fpRat.io.archWritePorts.zipWithIndex) {
-    arch.wen  := !io.robCommits.isWalk && io.robCommits.valid(i) && io.robCommits.info(i).fpWen
+    arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && io.robCommits.info(i).fpWen
     arch.addr := io.robCommits.info(i).ldest
     arch.data := io.robCommits.info(i).pdest
   }
   for ((spec, i) <- fpRat.io.specWritePorts.zipWithIndex) {
-    spec.wen  := io.robCommits.isWalk && io.robCommits.valid(i) && io.robCommits.info(i).fpWen
+    spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && io.robCommits.info(i).fpWen
     spec.addr := io.robCommits.info(i).ldest
     spec.data := io.robCommits.info(i).old_pdest
   }

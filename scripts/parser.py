@@ -114,10 +114,10 @@ class VModule(object):
 
     def get_instance(self):
         return self.instance
-    
+
     def add_submodule(self, name):
         self.submodule[name] = self.submodule.get(name, 0) + 1
-        
+
     def add_instance(self, name, instance_name):
         self.instance.add((name, instance_name))
 
@@ -274,14 +274,14 @@ class VCollection(object):
                 for module in modules:
                     f.writelines(module.get_lines())
         return True
-    
+
     def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True, try_prefix=None):
         print("Dump negedge module {} to {}...".format(name, output_dir))
         negedge_modules = []
         self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule=with_submodule, try_prefix=try_prefix)
         negedge_modules_sort = []
         for negedge in negedge_modules:
-            re_degits = re.compile(r".*[0-9]$")  
+            re_degits = re.compile(r".*[0-9]$")
             if re_degits.match(negedge):
                 negedge_module, num = negedge.rsplit("_", 1)
             else:
@@ -379,7 +379,7 @@ def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
 
 
 class SRAMConfiguration(object):
-    ARRAY_NAME = "sram_array_\d+_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
+    ARRAY_NAME = "sram_array_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
 
     SINGLE_PORT = 0
     SINGLE_PORT_MASK = 1
@@ -511,6 +511,11 @@ class SRAMConfiguration(object):
         if self.has_repair:
             foundry_ports["ROW_REPAIR_IN"] = "repair_rowRepair"
             foundry_ports["COL_REPAIR_IN"] = "repair_colRepair"
+            foundry_ports["io_bisr_shift_en"] = "mbist_bisr_shift_en"
+            foundry_ports["io_bisr_clock"] = "mbist_bisr_clock"
+            foundry_ports["io_bisr_reset"] = "mbist_bisr_reset"
+            foundry_ports["u_mem_bisr_inst_SI"] = "mbist_bisr_scan_in"
+            foundry_ports["u_mem_bisr_inst_SO"] = "mbist_bisr_scan_out"
         if self.is_single_port():
             func_ports = {
                 "CK"  : "RW0_clk",
@@ -535,6 +540,8 @@ class SRAMConfiguration(object):
             }
             if self.mask_width() > 1:
                 func_ports["WM"] = "W0_mask"
+        if self.width > 256:
+            func_ports["MBIST_SELECTEDOH"] = "mbist_selectedOH"
         verilog_lines = []
         verilog_lines.append(f"  {wrapper_module} {wrapper_instance} (\n")
         connected_pins = []
@@ -552,7 +559,7 @@ def generate_sram_conf(collection, module_prefix, out_dir):
     sram_conf = []
     sram_array_name = module_prefix + SRAMConfiguration.ARRAY_NAME
     modules = collection.get_all_modules(match=sram_array_name)
-    for module in sorted(modules, key=lambda m: int(m.get_name().replace(module_prefix, "").split("_")[2])):
+    for module in modules:
         conf = SRAMConfiguration()
         conf.from_module_name(module.get_name()[len(module_prefix):])
         sram_conf.append(conf)

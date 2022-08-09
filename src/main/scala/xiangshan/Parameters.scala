@@ -136,7 +136,9 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   LoadQueueSize: Int = 80,
+  LoadQueueNWriteBanks: Int = 8,
   StoreQueueSize: Int = 64,
+  StoreQueueNWriteBanks: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -182,25 +184,25 @@ case class XSCoreParameters
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
-    normalNSets = 128,
+    normalNSets = 64,
     normalNWays = 1,
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
-    superNWays = 8,
+    superNWays = 16,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
-    normalNSets = 128,
+    normalNSets = 64,
     normalNWays = 1,
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
-    superNWays = 8,
+    superNWays = 16,
     normalAsVictim = true,
-    outReplace = true,
+    outReplace = false,
     partialStaticPMP = true,
     saveLevel = true
   ),
@@ -350,7 +352,7 @@ trait HasXSParameter {
     }.reduce(_++_) ++
       Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
     ).toList
-  
+
 
 
   val CacheLineSize = coreParams.CacheLineSize
@@ -368,7 +370,9 @@ trait HasXSParameter {
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
+  val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
@@ -408,7 +412,7 @@ trait HasXSParameter {
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
-  // for constrained LR/SC loop 
+  // for constrained LR/SC loop
   val LRSCCycles = 64
   // for lr storm
   val LRSCBackOff = 8

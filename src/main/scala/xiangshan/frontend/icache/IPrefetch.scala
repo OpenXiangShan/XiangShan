@@ -43,7 +43,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromFtq         = Flipped(new FtqPrefechBundle)
   val iTLBInter       = new BlockTlbRequestIO
   val pmp             =   new ICachePMPBundle
-  val toIMeta         = Decoupled(new ICacheReadBundle)
+  val toIMeta         = DecoupledIO(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
   val toMissUnit      = new IPrefetchToMissUnit
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
@@ -94,7 +94,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   toIMeta.valid     := p0_valid
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
-
   toIMeta.bits.vSetIdx(1) := DontCare
   toIMeta.bits.isDoubleLine := false.B
 
@@ -119,12 +118,12 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   //tlb resp
   val tlb_resp_valid = RegInit(false.B)
-  when(p0_fire) {tlb_resp_valid := true.B} 
+  when(p0_fire) {tlb_resp_valid := true.B}
   .elsewhen(tlb_resp_valid && (p1_fire || p1_discard)) {tlb_resp_valid := false.B}
 
-  val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr)
-  val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.pf.instr && tlb_resp_valid)
-  val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.af.instr && tlb_resp_valid)
+  val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr(0))
+  val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instr && tlb_resp_valid)
+  val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).af.instr && tlb_resp_valid)
 
   val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)

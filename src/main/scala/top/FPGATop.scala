@@ -259,6 +259,9 @@ class FPGATop()(implicit p: Parameters) extends RawModule {
   top.hduspsr_in := DontCare
   top.mem := DontCare
   top.l1l2_mbist_sram_jtag := DontCare
+  if (top.bisr_mem_chain_select.isDefined) {
+    top.bisr_mem_chain_select.get := DontCare
+  }
   if (top.l3_sram_mbist.isDefined) {
     top.L3_BISR.get := DontCare
     top.l3_sram_mbist.get.foreach(_ := DontCare)

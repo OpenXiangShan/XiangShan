@@ -31,8 +31,8 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
-  val io = IO(new TlbIO(Width, q))
+class TLB(parentName: String = "Unknown", Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
+  val io = IO(new TlbIO(Width, nRespDups, q))
 
   require(q.superAssociative == "fa")
   if (q.sameCycle || q.missSameCycle) {
@@ -43,6 +43,8 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
   val pmp = io.pmp
+  val ptw_resp = if (q.sameCycle) RegNext(ptw.resp.bits) else ptw.resp.bits
+  val ptw_resp_v = if (q.sameCycle) RegNext(ptw.resp.valid, init = false.B) else ptw.resp.valid
 
   val sfence = io.sfence
   val csr = io.csr
@@ -65,27 +67,24 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
 
   // Normal page && Super page
   val normalPage = TlbStorage(
-    parentName = parentName + "normalPage_",
     name = "normal",
     associative = q.normalAssociative,
     sameCycle = q.sameCycle,
     ports = Width,
     nSets = q.normalNSets,
     nWays = q.normalNWays,
-    sramSinglePort = sramSinglePort,
+    nDups = nRespDups,
     saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
   )
   val superPage = TlbStorage(
-    parentName = parentName + "superPage_",
     name = "super",
     associative = q.superAssociative,
     sameCycle = q.sameCycle,
     ports = Width,
     nSets = q.superNSets,
     nWays = q.superNWays,
-    sramSinglePort = sramSinglePort,
     saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
@@ -115,6 +114,7 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
   normalPage.csr <> io.csr
   superPage.csr <> io.csr
 
+  val refill_now = ptw_resp_v
   def TLBNormalRead(i: Int) = {
     val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
     val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
@@ -122,11 +122,6 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
-    val ppn = Mux(super_hit, super_ppn, normal_ppn)
-    val perm = Mux(super_hit, super_perm, normal_perm)
-
-    val pf = perm.pf
-    val af = perm.af
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -135,57 +130,64 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     val fast_miss = !super_hit && vmEnable
-    val miss_sameCycle = !hit_sameCycle && vmEnable
+    val miss_sameCycle = (!hit_sameCycle || refill_now) && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
-    XSDebug(validReg, p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn)} perm:${perm}\n")
-
-    val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
-    val refill_reg = RegNext(io.ptw.resp.valid)
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
-    resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else (miss || refill_reg) }
-    resp(i).bits.fast_miss := fast_miss || refill_reg
-    resp(i).bits.ptwBack := io.ptw.resp.fire()
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
+    resp(i).bits.fast_miss := fast_miss
+    resp(i).bits.ptwBack := ptw.resp.fire()
 
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
-    val pmp_paddr = Mux(vmEnable, Cat(super_ppn, offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
+    val pmp_paddr = Mux(vmEnable, Cat(super_ppn(0), offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
     pmp(i).valid := resp(i).valid
     pmp(i).bits.addr := pmp_paddr
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
-    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
-    val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
-    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
-    val stPermFail = !(modeCheck && perm.w)
-    val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
-    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
-    val fault_valid = vmEnable
-    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
-    resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
-    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
-    // NOTE: pf need && with !af, page fault has higher priority than access fault
-    // but ptw may also have access fault, then af happens, the translation is wrong.
-    // In this case, pf has lower priority than af
+    resp(i).bits.static_pm.valid := !super_hit && vmEnable && q.partialStaticPMP.B // ls/st unit should use this mmio, not the result from pmp
+    resp(i).bits.static_pm.bits := !normal_perm(0).pm.c
 
-    val spm = normal_perm.pm // static physical memory protection or attribute
-    val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
-    // for tlb without sram, tlb will miss, pm should be ignored outsize
-    resp(i).bits.excp.af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
-    resp(i).bits.excp.af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
-    resp(i).bits.excp.af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
-    resp(i).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
-    resp(i).bits.static_pm.bits := !spm.c
+    // duplicate resp part
+    for (d <- 0 until nRespDups) {
+      val ppn = Mux(super_hit, super_ppn(0), normal_ppn(d))
+      val perm = Mux(super_hit, super_perm(0), normal_perm(d))
+
+      val pf = perm.pf
+      val af = perm.af
+      val paddr = Cat(ppn, offReg)
+      resp(i).bits.paddr(d) := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+
+      val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+      val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+      val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
+      val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
+      val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+      val stPermFail = !(modeCheck && perm.w)
+      val instrPermFail = !(modeCheck && perm.x)
+      val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
+      val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+      val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+      val fault_valid = vmEnable
+      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
+      resp(i).bits.excp(d).pf.st := (stPf || stUpdate) && fault_valid && !af
+      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+      // NOTE: pf need && with !af, page fault has higher priority than access fault
+      // but ptw may also have access fault, then af happens, the translation is wrong.
+      // In this case, pf has lower priority than af
+
+      val spm = normal_perm(d).pm // static physical memory protection or attribute
+      val spm_v = !super_hit && vmEnable && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+      // for tlb without sram, tlb will miss, pm should be ignored outsize
+      resp(i).bits.excp(d).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
+      resp(i).bits.excp(d).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
+      resp(i).bits.excp(d).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmdReg) && fault_valid
+    }
 
     (hit, miss, validReg)
   }
@@ -205,7 +207,7 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
 
   val normal_refill_idx = if (q.outReplace) {
     io.replace.normalPage.access <> normalPage.access
-    io.replace.normalPage.chosen_set := get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
+    io.replace.normalPage.chosen_set := get_set_idx(ptw_resp.entry.tag, q.normalNSets)
     io.replace.normalPage.refillIdx
   } else if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
@@ -214,7 +216,7 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
     re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
-    re.way(get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
+    re.way(get_set_idx(ptw_resp.entry.tag, q.normalNSets))
   }
 
   val super_refill_idx = if (q.outReplace) {
@@ -227,27 +229,27 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
+  val refill = ptw_resp_v && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
-    else refill && ptw.resp.bits.entry.level.get === 2.U },
+    else refill && ptw_resp.entry.is_normalentry()},
     wayIdx = normal_refill_idx,
-    data = ptw.resp.bits,
+    data = ptw_resp,
     data_replenish = io.ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
-    else refill && ptw.resp.bits.entry.level.get =/= 2.U },
+    else refill && !ptw_resp.entry.is_normalentry()},
     wayIdx = super_refill_idx,
-    data = ptw.resp.bits,
+    data = ptw_resp,
     data_replenish = io.ptw_replenish
   )
 
   // if sameCycle, just req.valid
-  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext 
+  // if !sameCycle, add one more RegNext based on !sameCycle's RegNext
   // because sram is too slow and dtlb is too distant from dtlbRepeater
   for (i <- 0 until Width) {
-    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) && 
+    io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) &&
       !RegNext(refill, init = false.B) &&
       param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
     io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
@@ -303,9 +305,9 @@ class TLB(parentName:String = "Unknown",Width: Int, q: TLBParameters)(implicit p
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
   XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
+    XSDebug(ptw.req(i).fire(), p"L2TLB req:${ptw.req(i).bits}\n")
   }
-  XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
+  XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
   println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
 
@@ -357,13 +359,14 @@ object TLB {
     sfence: SfenceBundle,
     csr: TlbCsrBundle,
     width: Int,
+    nRespDups: Int = 1,
     shouldBlock: Boolean,
     q: TLBParameters,
     parentName:String = "Unknown"
   )(implicit p: Parameters) = {
     require(in.length == width)
 
-    val tlb = Module(new TLB(parentName, width, q))
+    val tlb = Module(new TLB(parentName, width, nRespDups, q))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr

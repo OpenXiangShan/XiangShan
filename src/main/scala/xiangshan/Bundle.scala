@@ -113,7 +113,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
-  val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
@@ -128,9 +127,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  // This inst will flush all the pipe when it is the oldest inst in ROB,
-  // then replay from this inst itself
-  val replayInst = Bool()
 }
 
 
@@ -190,6 +186,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   }
 
   def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
+  def isSoftPrefetch: Bool = {
+    fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+  }
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -271,6 +270,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
     wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
   }
+  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
@@ -382,15 +382,17 @@ class RobCommitInfo(implicit p: Parameters) extends RobDispatchData {
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Output(Bool())
+  val commitValid = Vec(CommitWidth, Output(Bool()))
+
   val isWalk = Output(Bool())
-  val valid = Vec(CommitWidth, Output(Bool()))
   // valid bits optimized for walk
   val walkValid = Vec(CommitWidth, Output(Bool()))
+
   val info = Vec(CommitWidth, Output(new RobCommitInfo))
 
-  def hasWalkInstr = isWalk && valid.asUInt.orR
-
-  def hasCommitInstr = !isWalk && valid.asUInt.orR
+  def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
+  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {

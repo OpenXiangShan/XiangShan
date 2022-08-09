@@ -122,11 +122,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // update cf according to waittable result
     uops(i).cf.loadWaitBit := io.waittable(i)
 
-    val inValid = io.in(i).valid
-
     // alloc a new phy reg
-    needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
-    needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
+    needFpDest(i) := io.in(i).valid && needDestReg(fp = true, io.in(i).bits)
+    needIntDest(i) := io.in(i).valid && needDestReg(fp = false, io.in(i).bits)
     fpFreeList.io.allocateReq(i) := needFpDest(i)
     intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
 
@@ -160,8 +158,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
+    // dirty code for fence. The lsrc is passed by imm.
     when (io.out(i).bits.ctrl.fuType === FuType.fence) {
       io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
+    }
+    // dirty code for SoftPrefetch (prefetch.r/prefetch.w)
+    when (io.in(i).bits.ctrl.isSoftPrefetch) {
+      io.out(i).bits.ctrl.fuType := FuType.ldu
+      io.out(i).bits.ctrl.fuOpType := Mux(io.in(i).bits.ctrl.lsrc(1) === 1.U, LSUOpType.prefetch_r, LSUOpType.prefetch_w)
+      io.out(i).bits.ctrl.selImm := SelImm.IMM_S
+      io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.imm(io.in(i).bits.ctrl.imm.getWidth - 1, 5), 0.U(5.W))
     }
 
     // write speculative rename table
@@ -224,7 +230,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // For fused-lui-load, load.src(0) is replaced by the imm.
     val last_is_lui = io.in(i - 1).bits.ctrl.selImm === SelImm.IMM_U && io.in(i - 1).bits.ctrl.srcType(0) =/= SrcType.pc
-    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu && !LSUOpType.isPrefetch(io.in(i).bits.ctrl.fuOpType)
+    val this_is_load = io.in(i).bits.ctrl.fuType === FuType.ldu
     val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
     val fused_lui_load = last_is_lui && this_is_load && lui_to_load
     when (fused_lui_load) {
@@ -247,12 +253,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     * Instructions commit: update freelist and rename table
     */
   for (i <- 0 until CommitWidth) {
+    val commitValid = io.robCommits.isCommit && io.robCommits.commitValid(i)
+    val walkValid = io.robCommits.isWalk && io.robCommits.walkValid(i)
 
     Seq((io.intRenamePorts, false), (io.fpRenamePorts, true)) foreach { case (rat, fp) =>
-      // is valid commit req and given instruction has destination register
-      val commitDestValid = io.robCommits.valid(i) && needDestRegCommit(fp, io.robCommits.info(i))
-      XSDebug(p"isFp[${fp}]index[$i]-commitDestValid:$commitDestValid,isWalk:${io.robCommits.isWalk}\n")
-
       /*
       I. RAT Update
        */
@@ -273,14 +277,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
       II. Free List Update
        */
       if (fp) { // Float Point free list
-        fpFreeList.io.freeReq(i)  := commitDestValid && !io.robCommits.isWalk
+        fpFreeList.io.freeReq(i)  := commitValid && needDestRegCommit(fp, io.robCommits.info(i))
         fpFreeList.io.freePhyReg(i) := io.robCommits.info(i).old_pdest
       } else { // Integer free list
         intFreeList.io.freeReq(i) := intRefCounter.io.freeRegs(i).valid
         intFreeList.io.freePhyReg(i) := intRefCounter.io.freeRegs(i).bits
       }
     }
-    intRefCounter.io.deallocate(i).valid := io.robCommits.valid(i) && needDestRegCommit(false, io.robCommits.info(i))
+
+    intRefCounter.io.deallocate(i).valid := (commitValid || walkValid) && needDestRegCommit(false, io.robCommits.info(i))
     intRefCounter.io.deallocate(i).bits := Mux(io.robCommits.isWalk, io.robCommits.info(i).pdest, io.robCommits.info(i).old_pdest)
   }
 
@@ -302,10 +307,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   XSDebug(io.robCommits.isWalk, p"Walk Recovery Enabled\n")
-  XSDebug(io.robCommits.isWalk, p"validVec:${Binary(io.robCommits.valid.asUInt)}\n")
+  XSDebug(io.robCommits.isWalk, p"validVec:${Binary(io.robCommits.walkValid.asUInt)}\n")
   for (i <- 0 until CommitWidth) {
     val info = io.robCommits.info(i)
-    XSDebug(io.robCommits.isWalk && io.robCommits.valid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
+    XSDebug(io.robCommits.isWalk && io.robCommits.walkValid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
       p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} " +
       p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
   }
@@ -320,8 +325,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
-  XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
-  val is_fused_lui_load = io.out.map(o => o.fire() && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
+  XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire && out.bits.ctrl.isMove)))
+  val is_fused_lui_load = io.out.map(o => o.fire && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   
