@@ -62,7 +62,8 @@ object WordShift {
 }
 
 object MaskExpand {
- def apply(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
+  def apply(m: UInt, maskWidth: Int = 8): UInt = Cat(m.asBools.map(Fill(maskWidth, _)).reverse)
+  def apply(m: Seq[Bool], maskWidth: Int): Vec[UInt] = VecInit(m.map(Fill(maskWidth, _)))
 }
 
 object MaskData {
