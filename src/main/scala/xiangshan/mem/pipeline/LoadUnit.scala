@@ -28,6 +28,7 @@ import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LqWriteBundle)
+  val loadPaddrIn = ValidIO(new LqPaddrWriteBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val s2_load_data_forwarded = Output(Bool())
   val s3_delayed_load_error = Output(Bool())
@@ -555,6 +556,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   load_s1.io.loadViolationQueryReq <> io.lsq.loadViolationQuery.req
   load_s1.io.dcacheBankConflict <> io.dcache.s1_bank_conflict
   load_s1.io.csrCtrl <> io.csrCtrl
+
+  // provide paddr for lq
+  io.lsq.loadPaddrIn.valid := load_s1.io.out.valid
+  io.lsq.loadPaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
+  io.lsq.loadPaddrIn.bits.paddr := load_s1.io.lsuPAddr
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect), moduleName = Some("s1_s2_pipe"))
 

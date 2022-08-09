@@ -79,7 +79,7 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   }
 
   for ((exu, i) <- exeUnits.zipWithIndex) {
-    exu.io.redirect <> io.redirect
+    exu.io.redirect <> RegNextWithEnable(io.redirect)
 
     if (exu.csrio.isDefined) {
       exu.csrio.get <> io.extra.csrio.get
