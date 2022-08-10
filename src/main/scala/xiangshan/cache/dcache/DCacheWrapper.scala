@@ -776,15 +776,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   cacheOpDecoder.io.csr <> io.csr
   bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   // dup cacheOp_req_valid
-  bankedDataArray.io.cacheOp_req_dups.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dups(i) }
+  bankedDataArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
   // dup cacheOp_req_bits_opCode
-  bankedDataArray.io.cacheOp_req_bits_opCode_dups.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dups(i) }
+  bankedDataArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
 
   tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   // dup cacheOp_req_valid
-  tagArray.io.cacheOp_req_dups.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dups(i) }
+  tagArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
   // dup cacheOp_req_bits_opCode
-  tagArray.io.cacheOp_req_bits_opCode_dups.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dups(i) }
+  tagArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
 
   cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
     tagArray.io.cacheOp.resp.valid
