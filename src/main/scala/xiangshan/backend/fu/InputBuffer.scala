@@ -32,19 +32,23 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   })
 
   val data = Reg(Vec(numEntries, new FunctionUnitInput(XLEN)))
-  val emptyVec = RegInit(VecInit(Seq.fill(numEntries)(true.B)))
+  val emptyVec = RegInit(VecInit.fill(numEntries)(true.B))
+  val emptyVecNext = WireInit(emptyVec)
+  emptyVec := emptyVecNext
 
   val selectEnq = SelectOne("naive", emptyVec, 1).getNthOH(1)
-  io.in.ready := emptyVec.asUInt.orR
+  val hasEmpty = RegInit(true.B)
+  hasEmpty := emptyVecNext.asUInt.orR
+  io.in.ready := hasEmpty
   val enqVec = selectEnq._2
 
   // enqueue
-  val doEnqueue = io.in.fire() && !io.in.bits.uop.robIdx.needFlush(io.redirect)
+  val doEnqueue = io.in.fire && !io.in.bits.uop.robIdx.needFlush(io.redirect)
   when (doEnqueue) {
     for (i <- 0 until numEntries) {
       when (enqVec(i)) {
         data(i) := io.in.bits
-        emptyVec(i) := false.B
+        emptyVecNext(i) := false.B
       }
     }
   }
@@ -53,12 +57,14 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val age = Module(new AgeDetector(numEntries, 1))
   age.io.enq(0) := Mux(doEnqueue, enqVec.asUInt, 0.U)
 
-  io.out.valid := !emptyVec.asUInt.andR
+  val isEmpty = RegInit(false.B)
+  isEmpty := !emptyVecNext.asUInt.andR
+  io.out.valid := isEmpty
   io.out.bits := Mux1H(age.io.out, data)
   when (io.out.fire) {
     for (i <- 0 until numEntries) {
       when (age.io.out(i)) {
-        emptyVec(i) := true.B
+        emptyVecNext(i) := true.B
         XSError(emptyVec(i), "should not deq an empty entry\n")
       }
     }
@@ -68,7 +74,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val flushVec = data.map(_.uop.robIdx).zip(emptyVec).map{ case (r, e) => !e && r.needFlush(io.redirect) }
   for (i <- 0 until numEntries) {
     when (flushVec(i)) {
-      emptyVec(i) := true.B
+      emptyVecNext(i) := true.B
     }
   }
 
