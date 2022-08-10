@@ -74,11 +74,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   difftestIO <> DontCare
 
-  val sfence = DelayN(io.sfence, 2)
-  val csr    = DelayN(io.csr.tlb, 2)
-  val satp   = csr.satp
-  val priv   = csr.priv
-  val flush  = sfence.valid || csr.satp.changed
+  val sfence_tmp = DelayN(io.sfence, 1)
+  val csr_tmp    = DelayN(io.csr.tlb, 1)
+  val sfence_dup = Seq.fill(8)(RegNext(sfence_tmp))
+  val csr_dup = Seq.fill(7)(RegNext(csr_tmp))
+  val satp   = csr_dup(0).satp
+  val priv   = csr_dup(0).priv
+  val flush  = sfence_dup(0).valid || satp.changed
 
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
@@ -118,8 +120,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit  ||
       recv.bits.prefetch) && recv.bits.isFirst
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
-    prefetch.io.sfence := sfence
-    prefetch.io.csr := csr
+    prefetch.io.sfence := sfence_dup(0)
+    prefetch.io.csr := csr_dup(0)
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
   }
   arb2.io.out.ready := cache.io.req.ready
@@ -132,16 +134,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_arb.io.in(LLPTWARB_CACHE).bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw_arb.io.in(LLPTWARB_PTW) <> ptw.io.llptw
   llptw.io.in <> llptw_arb.io.out
-  llptw.io.sfence := sfence
-  llptw.io.csr := csr
+  llptw.io.sfence := sfence_dup(1)
+  llptw.io.csr := csr_dup(1)
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.req.bits.bypassed.map(_ := false.B)
-  cache.io.sfence := sfence
-  cache.io.csr := csr
+  cache.io.sfence := sfence_dup(2)
+  cache.io.csr := csr_dup(2)
+  cache.io.sfence_dup.zip(sfence_dup.drop(2).take(4)).map(s => s._1 := s._2)
+  cache.io.csr_dup.zip(csr_dup.drop(2).take(3)).map(c => c._1 := c._2)
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
@@ -152,16 +156,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !from_pre(cache.io.resp.bits.req_info.source) &&
     (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
   missQueue.io.in.bits := cache.io.resp.bits.req_info
-  missQueue.io.sfence  := sfence
-  missQueue.io.csr := csr
+  missQueue.io.sfence  := sfence_dup(6)
+  missQueue.io.csr := csr_dup(5)
 
   // NOTE: missQueue req has higher priority
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
-  ptw.io.csr := csr
-  ptw.io.sfence := sfence
+  ptw.io.sfence := sfence_dup(7)
+  ptw.io.csr := csr_dup(6)
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
   // mem req
@@ -194,15 +198,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem_arb.io.out.ready := mem.a.ready && !flush
 
   // assert, should not send mem access at same addr for twice.
-  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info.vpn, cache.io.refill.valid)
-  val last_resp_level = RegEnable(cache.io.refill.bits.level, cache.io.refill.valid)
+  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
+  val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
   val last_resp_v = RegInit(false.B)
   val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
   when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
   when (flush) { last_resp_v := false.B }
   XSError(last_resp_v && cache.io.refill.valid &&
-    (cache.io.refill.bits.req_info.vpn === last_resp_vpn) &&
-    (cache.io.refill.bits.level === last_resp_level),
+    (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
+    (cache.io.refill.bits.level_dup(0) === last_resp_level),
     "l2tlb should not access mem at same addr for twice")
   // ATTENTION: this may wronngly assert when: a ptes is l2, last part is valid,
   // but the current part is invalid, so one more mem access happened
@@ -252,12 +256,19 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
   ptw.io.mem.resp.bits := resp_pte.last
   // mem -> cache
-  val refill_from_mq = RegNext(mem_resp_from_mq)
-  cache.io.refill.valid := RegNext(mem_resp_done && !flush && !flush_latch(mem.d.bits.source))
+  val refill_from_mq = mem_resp_from_mq
+  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
+  val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
+  // Assume mem.resp.data will arrive (255, 0) first and then (511, 256).
+  val refill_data_tmp = WireInit(refill_data)
+  refill_data_tmp(refill_helper._4) := mem.d.bits.data
+
+  cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
-  cache.io.refill.bits.req_info  := Mux(refill_from_mq, llptw_mem.refill, ptw.io.refill.req_info)
-  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire()))
-  cache.io.refill.bits.addr_low := RegNext(req_addr_low(mem.d.bits.source))
+  cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_mq, llptw_mem.refill, ptw.io.refill.req_info), refill_valid))
+  cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
+  cache.io.refill.bits.levelOH(refill_level, refill_valid)
+  cache.io.refill.bits.sel_pte_dup.map(_ := RegNext(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source))))
 
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
@@ -332,7 +343,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   for (i <- 0 until PtwWidth) {
     XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
   }
-  XSDebug(p"[sfence] ${sfence}\n")
+  XSDebug(p"[sfence] ${io.sfence}\n")
   XSDebug(p"[io.csr.tlb] ${io.csr.tlb}\n")
 
   for (i <- 0 until PtwWidth) {
