@@ -58,33 +58,34 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
   // delay one cycle for write, so there will be one inflight entry.
   // The inflight entry is transparent('already writen') for outside
   val last_wen = RegNext(io.wen, false.B)
-  val last_wdata = RegEnable(io.wdata, io.wen)
-  val last_wdata2 = RegEnable(last_wdata, last_wen)
   val last_waddr = RegEnable(io.waddr, io.wen)
+  val last_wdata_dup = RegEnable(io.wdata, io.wen)
 
   // async read, but regnext
   for (i <- 0 until numRead) {
-    val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
-    val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
-    val w_bypassed = RegNext(io.waddr === io.raddr(i) && io.wen)
-    val w_bypassed2 = RegNext(last_waddr === io.raddr(i) && last_wen)
+    val data_read_dup = Reg(Vec(numDup, Vec(numBanks, gen)))
+    val bank_index_dup = Reg(Vec(numDup, UInt(numBanks.W)))
+    val w_bypassed_dup = Seq.fill(numDup)(RegNext(io.waddr === io.raddr(i) && io.wen))
+    val w_bypassed2_dup = Seq.fill(numDup)(RegNext(last_waddr === io.raddr(i) && last_wen))
+    val last_wdata_dup = Seq.fill(numDup)(RegEnable(io.wdata, io.wen))
+    val last_wdata2_dup = Seq.fill(numDup)(RegEnable(last_wdata_dup.head, last_wen))
     for (j <- 0 until numDup) {
-      bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
+      bank_index_dup(j) := UIntToOH(bankIndex(io.raddr(i)))
       for (k <- 0 until numBanks) {
-        data_read(j)(k) := dataBanks(k)(bankOffset(io.raddr(i)))
+        data_read_dup(j)(k) := dataBanks(k)(bankOffset(io.raddr(i)))
       }
     }
     // next cycle
     for (j <- 0 until numDup) {
-      io.rdata(i)(j) := Mux(w_bypassed || w_bypassed2, Mux(w_bypassed2, last_wdata2, last_wdata),
-        Mux1H(bank_index(j), data_read(j)))
+      io.rdata(i)(j) := Mux(w_bypassed_dup(j) || w_bypassed2_dup(j), Mux(w_bypassed2_dup(j), last_wdata2_dup(j), last_wdata_dup(j)),
+        Mux1H(bank_index_dup(j), data_read_dup(j)))
     }
   }
 
   // write
   for (i <- 0 until numBanks) {
     when (last_wen && (bankIndex(last_waddr) === i.U)) {
-      dataBanks(i)(bankOffset(last_waddr)) := last_wdata
+      dataBanks(i)(bankOffset(last_waddr)) := last_wdata_dup
     }
   }
 }
