@@ -141,8 +141,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
-    val cache_req_dups = Vec(8, Valid(new CacheCtrlReqInfo))
-    val cacheOp_req_bits_opCode_dups = Output(Vec(8, UInt(XLEN.W)))
+    val cache_req_dups = Vec(11, Valid(new CacheCtrlReqInfo))
+    val cacheOp_req_bits_opCode_dups = Output(Vec(11, UInt(XLEN.W)))
     val error = Flipped(new L1CacheErrorInfo)
   })
 
@@ -157,7 +157,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Translate CSR write to cache op
   val translated_cache_req = Reg(new CacheCtrlReqInfo)
-  val translated_cache_req_opCode_dups = Reg(Vec(8, UInt(XLEN.W)))
+  val translated_cache_req_opCode_dups = Reg(Vec(11, UInt(XLEN.W)))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
