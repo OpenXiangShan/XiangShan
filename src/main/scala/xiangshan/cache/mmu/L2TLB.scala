@@ -29,7 +29,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
-class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -38,15 +38,15 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     ))
   )))
 
-  lazy val module = new L2TLBImp(this)
+  lazy val module = new PTWImp(this)
 }
 
 @chiselName
-class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
+class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
-  val io = IO(new L2TLBIO)
+  val io = IO(new PtwIO)
   val difftestIO = IO(new Bundle() {
     val ptwResp = Output(Bool())
     val ptwAddr = Output(UInt(64.W))
@@ -87,7 +87,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
-  val ptw = Module(new PTW)
+  val ptw = Module(new PtwFsm)
   val llptw = Module(new LLPTW)
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
@@ -372,7 +372,7 @@ class PTEHelper() extends ExtModule {
 }
 
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
-  val io = IO(new L2TLBIO)
+  val io = IO(new PtwIO)
 
   for (i <- 0 until PtwWidth) {
     io.tlb(i).req(0).ready := true.B
@@ -397,16 +397,16 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
-  val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null
+  val ptw = if (!useSoftPTW) LazyModule(new PTW()) else null
   if (!useSoftPTW) {
     node := ptw.node
   }
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents {
-    val io = IO(new L2TLBIO)
+    val io = IO(new PtwIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
