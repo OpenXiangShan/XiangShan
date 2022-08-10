@@ -557,6 +557,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   bankedDataArray.io.write <> dataWriteArb.io.out
 
+  for (bank <- 0 until DCacheBanks) {
+    val dataWriteArb_dup = Module(new Arbiter(new L1BankedDataWriteReqCtrl, 2))
+    dataWriteArb_dup.io.in(0).valid := refillPipe.io.data_write_dup(bank).valid
+    dataWriteArb_dup.io.in(0).bits := refillPipe.io.data_write_dup(bank).bits
+    dataWriteArb_dup.io.in(1).valid := mainPipe.io.data_write_dup(bank).valid
+    dataWriteArb_dup.io.in(1).bits := mainPipe.io.data_write_dup(bank).bits
+
+    bankedDataArray.io.write_dup(bank) <> dataWriteArb_dup.io.out
+  }
+
   bankedDataArray.io.readline <> mainPipe.io.data_read
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
@@ -684,11 +694,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   })
   dontTouch(refillShouldBeBlocked_dup)
 
-  refillPipe.io.req_dup_for_data_w.bits := mq_refill_dup(dataWritePort).bits
+  refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
+    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits 
+  }
   refillPipe.io.req_dup_for_meta_w.bits := mq_refill_dup(metaWritePort).bits
   refillPipe.io.req_dup_for_tag_w.bits := mq_refill_dup(tagWritePort).bits
   refillPipe.io.req_dup_for_err_w.bits := mq_refill_dup(errWritePort).bits
-  refillPipe.io.req_dup_for_data_w.valid := mq_refill_dup(dataWritePort).valid && !refillShouldBeBlocked_dup(dataWritePort)
+  refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
+    r.valid := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).valid &&
+      !(refillShouldBeBlocked_dup.drop(dataWritePort).take(DCacheBanks))(i)
+  }
   refillPipe.io.req_dup_for_meta_w.valid := mq_refill_dup(metaWritePort).valid && !refillShouldBeBlocked_dup(metaWritePort)
   refillPipe.io.req_dup_for_tag_w.valid := mq_refill_dup(tagWritePort).valid && !refillShouldBeBlocked_dup(tagWritePort)
   refillPipe.io.req_dup_for_err_w.valid := mq_refill_dup(errWritePort).valid && !refillShouldBeBlocked_dup(errWritePort)

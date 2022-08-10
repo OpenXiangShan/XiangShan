@@ -58,13 +58,15 @@ class RefillPipeReq(implicit p: Parameters) extends RefillPipeReqCtrl {
 class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new RefillPipeReq))
-    val req_dup_for_data_w = Input(Valid(new RefillPipeReqCtrl))
+    // val req_dup_for_data_w = Input(Valid(new RefillPipeReqCtrl))
+    val req_dup_for_data_w = Vec(DCacheBanks, Input(Valid(new RefillPipeReqCtrl)))
     val req_dup_for_meta_w = Input(Valid(new RefillPipeReqCtrl))
     val req_dup_for_tag_w = Input(Valid(new RefillPipeReqCtrl))
     val req_dup_for_err_w = Input(Valid(new RefillPipeReqCtrl))
     val resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
 
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
+    val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
     val meta_write = DecoupledIO(new MetaWriteReq)
     val error_flag_write = DecoupledIO(new ErrorWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
@@ -80,7 +82,6 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val refill_w_valid = io.req.valid
   val refill_w_req = io.req.bits
 
-  val req_dup_for_data_w = io.req_dup_for_data_w.bits
   val req_dup_for_meta_w = io.req_dup_for_meta_w.bits
   val req_dup_for_err_w = io.req_dup_for_err_w.bits
   val req_dup_for_tag_w = io.req_dup_for_tag_w.bits
@@ -92,11 +93,17 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val idx = refill_w_req.idx
   val tag = get_tag(refill_w_req.addr)
 
-  io.data_write.valid := io.req_dup_for_data_w.valid
-  io.data_write.bits.addr := req_dup_for_data_w.paddrWithVirtualAlias
-  io.data_write.bits.way_en := req_dup_for_data_w.way_en
+  io.data_write.valid := io.req_dup_for_data_w(0).valid
+  io.data_write.bits.addr := io.req_dup_for_data_w(0).bits.paddrWithVirtualAlias
+  io.data_write.bits.way_en := io.req_dup_for_data_w(0).bits.way_en
   io.data_write.bits.wmask := refill_w_req.wmask
   io.data_write.bits.data := refill_w_req.data
+
+  io.data_write_dup.zipWithIndex.foreach { case (w, bank) =>
+    w.valid := io.req_dup_for_data_w(bank).valid
+    w.bits.addr := io.req_dup_for_data_w(bank).bits.paddrWithVirtualAlias
+    w.bits.way_en := io.req_dup_for_data_w(bank).bits.way_en
+  }
 
   io.meta_write.valid := io.req_dup_for_meta_w.valid
   io.meta_write.bits.idx := req_dup_for_meta_w.idx
