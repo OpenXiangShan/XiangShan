@@ -548,11 +548,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_false_snpc          = f3_half_snpc(f3_last_validIdx)
 
   val f3_lastHalf_mask    = VecInit((0 until PredictWidth).map( i => if(i ==0) false.B else true.B )).asUInt()
+  val f3_lastHalf_disable = RegInit(false.B)
 
   when (f3_flush) {
     f3_lastHalf.valid := false.B
   }.elsewhen (f3_fire) {
-    f3_lastHalf.valid := f3_hasLastHalf
+    f3_lastHalf.valid := f3_hasLastHalf && !f3_lastHalf_disable
     f3_lastHalf.middlePC := f3_ftq_req.nextStartAddr
   }
 
@@ -674,8 +675,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
-  when(wb_valid && RegNext(f3_hasLastHalf) && wb_check_result_stage2.fixedMissPred(PredictWidth - 1)){
-    f3_lastHalf.valid := false.B
+  /** if a req with a last half but miss predicted enters in wb stage, and this cycle f3 stalls,  
+    * we set a flag to notify f3 that the last half flag need not to be set.
+    */
+  when(wb_valid && RegNext(f3_hasLastHalf) 
+        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) 
+        && !f3_lastHalf.valid && !f3_fire
+      ){
+    f3_lastHalf_disable := true.B
   }
 
   val checkFlushWb = Wire(Valid(new PredecodeWritebackBundle))
