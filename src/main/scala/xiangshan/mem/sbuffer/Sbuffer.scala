@@ -37,6 +37,10 @@ trait HasSbufferConst extends HasXSParameter {
   val EvictCountBits = log2Up(EvictCycles+1)
   val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
+  // dcache write hit resp has 2 sources
+  // refill pipe resp and main pipe resp
+  val NumDcacheWriteResp = 2 // hardcoded
+
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = ptag + offset
   val CacheLineBytes: Int = CacheLineSize / 8
@@ -70,20 +74,48 @@ class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   val mask = UInt((DataBits/8).W)
   val data = UInt(DataBits.W)
   val wordOffset = UInt(WordOffsetWidth.W)
-  val wline = Bool() // write whold cacheline
-  // 1 cycle update
-  val cleanMask = Bool() // set whole line's mask to 0
+  val wline = Bool() // write full cacheline
+}
+
+class MaskFlushReq(implicit p: Parameters) extends SbufferBundle {
+  // univerisal writemask
+  val wvec = UInt(StoreBufferSize.W)
 }
 
 class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle(){
+    // update data and mask when alloc or merge
     val writeReq = Vec(EnsbufferWidth, Flipped(ValidIO(new DataWriteReq)))
+    // clean mask when deq
+    val maskFlushReq = Vec(NumDcacheWriteResp, Flipped(ValidIO(new MaskFlushReq)))
     val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
     val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   })
 
   val data = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
-  val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+  // val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+  val mask = RegInit(
+    VecInit(Seq.fill(StoreBufferSize)(
+      VecInit(Seq.fill(CacheLineWords)(
+        VecInit(Seq.fill(DataBytes)(false.B))
+      ))
+    ))
+  )
+
+  // 2 cycle line mask clean
+  for(line <- 0 until StoreBufferSize){
+    val line_mask_clean_flag = RegNext(
+      io.maskFlushReq.map(a => a.valid && a.bits.wvec(line)).reduce(_ || _)
+    )
+    line_mask_clean_flag.suggestName("line_mask_clean_flag_"+line)
+    when(line_mask_clean_flag){
+      for(word <- 0 until CacheLineWords){
+        for(byte <- 0 until DataBytes){
+          mask(line)(word)(byte) := false.B
+        }
+      }
+    }
+  }
 
   // 2 cycle data / mask update
   for(i <- 0 until EnsbufferWidth) {
@@ -117,28 +149,28 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   }
 
   // 1 cycle line mask clean
-  for(i <- 0 until EnsbufferWidth) {
-    val req = io.writeReq(i)
-    when(req.valid){
-      for(line <- 0 until StoreBufferSize){
-        when(
-          req.bits.wvec(line) && 
-          req.bits.cleanMask
-        ){
-          for(word <- 0 until CacheLineWords){
-            for(byte <- 0 until DataBytes){
-              mask(line)(word)(byte) := false.B
-              val debug_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
-                req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) || 
-                req.bits.wline
-              ))
-              assert(!debug_last_cycle_write_byte)
-            }
-          }
-        }
-      }
-    }
-  }
+  // for(i <- 0 until EnsbufferWidth) {
+  //   val req = io.writeReq(i)
+  //   when(req.valid){
+  //     for(line <- 0 until StoreBufferSize){
+  //       when(
+  //         req.bits.wvec(line) && 
+  //         req.bits.cleanMask
+  //       ){
+  //         for(word <- 0 until CacheLineWords){
+  //           for(byte <- 0 until DataBytes){
+  //             mask(line)(word)(byte) := false.B
+  //             val debug_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
+  //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) || 
+  //               req.bits.wline
+  //             ))
+  //             assert(!debug_last_cycle_write_byte)
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   io.dataOut := data
   io.maskOut := mask
@@ -331,8 +363,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     reqvtag: UInt,
     insertIdx: UInt,
     insertVec: UInt,
-    wordOffset: UInt,
-    flushMask: Bool
+    wordOffset: UInt
   ): Unit = {
     assert(UIntToOH(insertIdx) === insertVec)
     val sameBlockInflightMask = genSameBlockInflightMask(reqptag)
@@ -384,12 +415,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
-    writeReq(i).bits.cleanMask := false.B
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
     assert(!((PopCount(insertVec) > 1.U) && in.fire()))
     val insertIdx = OHToUInt(insertVec)
-    val flushMask = if(i == 0) true.B else !sameTag
     accessIdx(i).valid := RegNext(in.fire())
     accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
     when(in.fire()){
@@ -399,8 +428,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         XSDebug(p"merge req $i to line [${mergeIdx(i)}]\n")
       }.otherwise({
         writeReq(i).bits.wvec := insertVec
-        writeReq(i).bits.cleanMask := flushMask
-        wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, wordOffset, flushMask)
+        wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, wordOffset)
         XSDebug(p"insert req $i to line[$insertIdx]\n")
         assert(debug_insertIdx === insertIdx)
       })
@@ -632,6 +660,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     })
   })
 
+  io.dcache.hit_resps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
+    maskFlush.valid := resp.fire()
+    maskFlush.bits.wvec := UIntToOH(resp.bits.id)
+  }}
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
