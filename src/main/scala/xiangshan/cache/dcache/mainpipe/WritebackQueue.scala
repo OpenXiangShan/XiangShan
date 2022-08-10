@@ -176,7 +176,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     req := io.req.bits
     s_data_override := false.B
     when (io.req.bits.delay_release) {
-      state_dup.foreach(_ := s_release_req)
+      state_dup.foreach(_ := s_sleep)
       state_dup_for_mp.foreach(_ := s_sleep)
     }.otherwise {
       state_dup.foreach(_ := s_release_req)
