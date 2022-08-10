@@ -107,8 +107,8 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     val write = Flipped(DecoupledIO(new TagWriteReq))
     // customized cache op port
     val cacheOp = Flipped(new L1CacheInnerOpIO)
-    val cacheOp_req_dups = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
-    val cacheOp_req_bits_opCode_dups = Input(Vec(11, UInt(XLEN.W)))
+    val cacheOp_req_dup = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
+    val cacheOp_req_bits_opCode_dup = Input(Vec(11, UInt(XLEN.W)))
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
@@ -152,7 +152,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(0).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dups(0))) {
+  when (io.cacheOp_req_dup(0).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(0))) {
     for (i <- 0 until (readPorts / 3)) {
       array(i).io.ecc_read.valid := true.B
       array(i).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
@@ -160,7 +160,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(1).valid && isWriteTag(io.cacheOp_req_bits_opCode_dups(1))){
+  when (io.cacheOp_req_dup(1).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(1))){
     for (i <- 0 until (readPorts / 3)) {
       array(i).io.write.valid := true.B
       array(i).io.write.bits.idx := io.cacheOp.req.bits.index
@@ -169,7 +169,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(2).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dups(2))){
+  when(io.cacheOp_req_dup(2).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(2))){
     for (i <- 0 until (readPorts / 3)) {
       array(i).io.ecc_write.valid := true.B
       array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
@@ -180,7 +180,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   }
   
 
-  when (io.cacheOp_req_dups(3).valid && isReadTag(io.cacheOp_req_bits_opCode_dups(3))){
+  when (io.cacheOp_req_dup(3).valid && isReadTag(io.cacheOp_req_bits_opCode_dup(3))){
     for (i <- (readPorts / 3) until ((readPorts / 3) * 2)) {
       array(i).io.read.valid := true.B
       array(i).io.read.bits.idx := io.cacheOp.req.bits.index
@@ -188,7 +188,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(4).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dups(4))) {
+  when (io.cacheOp_req_dup(4).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(4))) {
     for (i <- (readPorts / 3) until ((readPorts / 3) * 2)) {
       array(i).io.ecc_read.valid := true.B
       array(i).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
@@ -196,7 +196,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(5).valid && isWriteTag(io.cacheOp_req_bits_opCode_dups(5))){
+  when (io.cacheOp_req_dup(5).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(5))){
     for (i <- (readPorts / 3) until ((readPorts / 3) * 2)) {
       array(i).io.write.valid := true.B
       array(i).io.write.bits.idx := io.cacheOp.req.bits.index
@@ -205,7 +205,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(6).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dups(6))){
+  when(io.cacheOp_req_dup(6).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(6))){
     for (i <- (readPorts / 3) until ((readPorts / 3) * 2)) {
       array(i).io.ecc_write.valid := true.B
       array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
@@ -215,7 +215,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     cacheOpShouldResp := true.B
   }
 
-  when (io.cacheOp_req_dups(7).valid && isReadTag(io.cacheOp_req_bits_opCode_dups(7))){
+  when (io.cacheOp_req_dup(7).valid && isReadTag(io.cacheOp_req_bits_opCode_dup(7))){
     for (i <- ((readPorts / 3) * 2) until readPorts) {
       array(i).io.read.valid := true.B
       array(i).io.read.bits.idx := io.cacheOp.req.bits.index
@@ -223,7 +223,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(8).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dups(8))) {
+  when (io.cacheOp_req_dup(8).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(8))) {
     for (i <- ((readPorts / 3) * 2) until readPorts) {
       array(i).io.ecc_read.valid := true.B
       array(i).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
@@ -231,7 +231,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(9).valid && isWriteTag(io.cacheOp_req_bits_opCode_dups(9))){
+  when (io.cacheOp_req_dup(9).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(9))){
     for (i <- ((readPorts / 3) * 2) until readPorts) {
       array(i).io.write.valid := true.B
       array(i).io.write.bits.idx := io.cacheOp.req.bits.index
@@ -240,7 +240,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(10).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dups(10))){
+  when(io.cacheOp_req_dup(10).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(10))){
     for (i <- ((readPorts / 3) * 2) until readPorts) {
       array(i).io.ecc_write.valid := true.B
       array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index

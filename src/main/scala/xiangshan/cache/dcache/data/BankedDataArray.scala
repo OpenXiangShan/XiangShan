@@ -87,8 +87,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     // customized cache op port 
     val cacheOp = Flipped(new L1CacheInnerOpIO)
-    val cacheOp_req_dups = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
-    val cacheOp_req_bits_opCode_dups = Input(Vec(11, UInt(XLEN.W)))
+    val cacheOp_req_dup = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
+    val cacheOp_req_bits_opCode_dup = Input(Vec(11, UInt(XLEN.W)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
@@ -421,7 +421,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(0).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dups(0))) {
+  when (io.cacheOp_req_dup(0).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(0))) {
     for (bank_index <- 0 until (DCacheBanks / 3)) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.r.req.valid := true.B
@@ -429,7 +429,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(1).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dups(1))){
+  when(io.cacheOp_req_dup(1).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(1))){
     for (bank_index <- 0 until (DCacheBanks / 3)) {
       val data_bank = data_banks(bank_index)
       data_bank.io.w.en := true.B
@@ -439,7 +439,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(2).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dups(2))){
+  when(io.cacheOp_req_dup(2).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(2))){
     for (bank_index <- 0 until (DCacheBanks / 3)) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.w.req.valid := true.B
@@ -453,7 +453,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   
 
-  when (io.cacheOp_req_dups(3).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dups(3))) { 
+  when (io.cacheOp_req_dup(3).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(3))) { 
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
       val data_bank = data_banks(bank_index)
       data_bank.io.r.en := true.B
@@ -462,7 +462,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(4).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dups(4))) {
+  when (io.cacheOp_req_dup(4).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(4))) {
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.r.req.valid := true.B
@@ -470,7 +470,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(5).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dups(5))){
+  when(io.cacheOp_req_dup(5).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(5))){
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
       val data_bank = data_banks(bank_index)
       data_bank.io.w.en := true.B
@@ -480,7 +480,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(6).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dups(6))){
+  when(io.cacheOp_req_dup(6).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(6))){
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.w.req.valid := true.B
@@ -493,7 +493,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     cacheOpShouldResp := true.B
   }
 
-  when (io.cacheOp_req_dups(7).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dups(7))) { 
+  when (io.cacheOp_req_dup(7).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(7))) { 
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
       val data_bank = data_banks(bank_index)
       data_bank.io.r.en := true.B
@@ -502,7 +502,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when (io.cacheOp_req_dups(8).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dups(8))) {
+  when (io.cacheOp_req_dup(8).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(8))) {
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.r.req.valid := true.B
@@ -510,7 +510,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
       cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(9).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dups(9))){
+  when(io.cacheOp_req_dup(9).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(9))){
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
       val data_bank = data_banks(bank_index)
       data_bank.io.w.en := true.B
@@ -520,7 +520,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
     cacheOpShouldResp := true.B
   }
-  when(io.cacheOp_req_dups(10).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dups(10))){
+  when(io.cacheOp_req_dup(10).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(10))){
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
       val ecc_bank = ecc_banks(bank_index)
       ecc_bank.io.w.req.valid := true.B
