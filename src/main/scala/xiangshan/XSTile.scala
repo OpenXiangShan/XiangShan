@@ -96,10 +96,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
   val beu_int_source = IntIdentityNode()
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
 
-  core.clint_int_sink :*= IntBuffer() :*= IntBuffer() :*= clint_int_sink
-  core.plic_int_sink :*= IntBuffer() :*= IntBuffer() :*= plic_int_sink
-  core.debug_int_sink :*= IntBuffer() :*= IntBuffer() :*= debug_int_sink
-  beu_int_source :*= IntBuffer() :*= IntBuffer() :*= misc.beu.intNode
+  core.clint_int_sink :*= IntBuffer() :*= clint_int_sink
+  core.plic_int_sink :*= IntBuffer() :*= plic_int_sink
+  core.debug_int_sink :*= IntBuffer() :*= debug_int_sink
+  beu_int_source :*= IntBuffer() :*= misc.beu.intNode
 
 
 
