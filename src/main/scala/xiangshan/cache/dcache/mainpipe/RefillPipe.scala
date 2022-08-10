@@ -20,13 +20,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 
-class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
+class RefillPipeReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
   val addr = UInt(PAddrBits.W)
   val way_en = UInt(DCacheWays.W)
-  val wmask = UInt(DCacheBanks.W)
-  val data = Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))
-  val meta = new Meta
   val alias = UInt(2.W) // TODO: parameterize
 
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
@@ -40,13 +37,31 @@ class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
   def idx: UInt = get_idx(paddrWithVirtualAlias)
 }
 
+class RefillPipeReq(implicit p: Parameters) extends RefillPipeReqCtrl {
+  val wmask = UInt(DCacheBanks.W)
+  val data = Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))
+  val meta = new Meta
+
+  def getCtrl = {
+    val ctrl = Wire(new RefillPipeReqCtrl)
+    ctrl.source := source
+    ctrl.addr := addr
+    ctrl.way_en := way_en
+    ctrl.alias := alias
+    ctrl.miss_id := miss_id
+    ctrl.id := id
+    ctrl.error := error
+    ctrl
+  }
+}
+
 class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new RefillPipeReq))
-    val req_dup_0 = Input(Valid(new RefillPipeReq))
-    val req_dup_1 = Input(Valid(new RefillPipeReq))
-    val req_dup_2 = Input(Valid(new RefillPipeReq))
-    val req_dup_3 = Input(Valid(new RefillPipeReq))
+    val req_dup_for_data_w = Input(Valid(new RefillPipeReqCtrl))
+    val req_dup_for_meta_w = Input(Valid(new RefillPipeReqCtrl))
+    val req_dup_for_tag_w = Input(Valid(new RefillPipeReqCtrl))
+    val req_dup_for_err_w = Input(Valid(new RefillPipeReqCtrl))
     val resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
 
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
@@ -65,10 +80,10 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val refill_w_valid = io.req.valid
   val refill_w_req = io.req.bits
 
-  val req_dup_0 = io.req_dup_0.bits
-  val req_dup_1 = io.req_dup_1.bits
-  val req_dup_2 = io.req_dup_2.bits
-  val req_dup_3 = io.req_dup_3.bits
+  val req_dup_for_data_w = io.req_dup_for_data_w.bits
+  val req_dup_for_meta_w = io.req_dup_for_meta_w.bits
+  val req_dup_for_err_w = io.req_dup_for_err_w.bits
+  val req_dup_for_tag_w = io.req_dup_for_tag_w.bits
 
   io.req.ready := true.B
   io.resp.valid := io.req.fire()
@@ -77,25 +92,25 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val idx = refill_w_req.idx
   val tag = get_tag(refill_w_req.addr)
 
-  io.data_write.valid := io.req_dup_0.valid
-  io.data_write.bits.addr := req_dup_0.paddrWithVirtualAlias
-  io.data_write.bits.way_en := req_dup_0.way_en
+  io.data_write.valid := io.req_dup_for_data_w.valid
+  io.data_write.bits.addr := req_dup_for_data_w.paddrWithVirtualAlias
+  io.data_write.bits.way_en := req_dup_for_data_w.way_en
   io.data_write.bits.wmask := refill_w_req.wmask
   io.data_write.bits.data := refill_w_req.data
 
-  io.meta_write.valid := io.req_dup_1.valid
-  io.meta_write.bits.idx := req_dup_1.idx
-  io.meta_write.bits.way_en := req_dup_1.way_en
+  io.meta_write.valid := io.req_dup_for_meta_w.valid
+  io.meta_write.bits.idx := req_dup_for_meta_w.idx
+  io.meta_write.bits.way_en := req_dup_for_meta_w.way_en
   io.meta_write.bits.meta := refill_w_req.meta
 
-  io.error_flag_write.valid := io.req_dup_2.valid
-  io.error_flag_write.bits.idx := req_dup_2.idx
-  io.error_flag_write.bits.way_en := req_dup_2.way_en
+  io.error_flag_write.valid := io.req_dup_for_err_w.valid
+  io.error_flag_write.bits.idx := req_dup_for_err_w.idx
+  io.error_flag_write.bits.way_en := req_dup_for_err_w.way_en
   io.error_flag_write.bits.error := refill_w_req.error
 
-  io.tag_write.valid := io.req_dup_3.valid
-  io.tag_write.bits.idx := req_dup_3.idx
-  io.tag_write.bits.way_en := req_dup_3.way_en
+  io.tag_write.valid := io.req_dup_for_tag_w.valid
+  io.tag_write.bits.idx := req_dup_for_tag_w.idx
+  io.tag_write.bits.way_en := req_dup_for_tag_w.way_en
   io.tag_write.bits.tag := tag
 
   io.store_resp.valid := refill_w_valid && refill_w_req.source === STORE_SOURCE.U
