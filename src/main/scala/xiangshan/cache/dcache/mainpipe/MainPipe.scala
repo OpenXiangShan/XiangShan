@@ -1453,8 +1453,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     ) && need_wb_dup_for_wb_valid
 
   io.wb.bits.addr := get_block_addr(Cat(s3_tag_dup_for_wb_valid, get_untag(s3_req.vaddr)))
-  io.wb.bits.addr_dup_0 := get_block_addr(Cat(s3_tag_dup_for_wb_valid, get_untag(s3_req_vaddr_dup_for_wb)))
-  io.wb.bits.addr_dup_1 := get_block_addr(Cat(s3_tag_dup_for_wb_valid, get_untag(s3_req_vaddr_dup_for_wb)))
   io.wb.bits.param := writeback_param_dup_for_wb_valid
   io.wb.bits.voluntary := s3_req_miss_dup_for_wb_valid || s3_req_replace_dup_for_wb_valid
   io.wb.bits.hasData := writeback_data_dup_for_wb_valid
