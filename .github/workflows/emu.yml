@@ -186,7 +186,7 @@ jobs:
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
       - name: Simple Test - CoreMark
         run: |
-          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --timeout 3600" 2> /dev/zero
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark" 2> /dev/zero
       - name: System Test - Linux
         run: |
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello --timeout 7200" 2> /dev/zero
