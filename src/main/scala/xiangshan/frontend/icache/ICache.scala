@@ -303,6 +303,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     val read     = Flipped(DecoupledIO(Vec(partWayNum, new ICacheReadBundle)))
     val readResp = Output(new ICacheDataRespBundle)
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
+    val cache_req_dup = Vec(4, Flipped(Valid(new CacheCtrlReqInfo)))
   }}
 
   val write_data_bits = Wire(UInt(blockBits.W))
@@ -328,7 +329,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     dataArray.io.read.req(1).bits.ridx := bank_1_idx_vec(i)(highestIdxBit,1)
 
 
-    dataArray.io.write.valid         := io.write.valid
+    dataArray.io.write.valid         := io.write.bits.writeEn(i)
     dataArray.io.write.bits.wdata    := write_data_bits
     dataArray.io.write.bits.widx     := io.write.bits.virIdx(highestIdxBit,1)
     dataArray.io.write.bits.wbankidx := io.write.bits.bankIdx
@@ -410,29 +411,28 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   val cacheOpShouldResp = WireInit(false.B) 
   val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
   dataresp := DontCare
-  when(io.cacheOp.req.valid){
-    when(
-      CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode)
-    ){
-      for (i <- 0 until partWayNum) {
-        dataArrays(i).io.read.req.zipWithIndex.map{ case(port,i) =>
-          if(i ==0) port.valid     := !io.cacheOp.req.bits.bank_num(0)
-          else      port.valid     :=  io.cacheOp.req.bits.bank_num(0)
-          port.bits.ridx := io.cacheOp.req.bits.index(highestIdxBit,1)
+
+  for (w <- 0 until partWayNum) {
+    when(io.cache_req_dup(w).valid){
+      when(
+        CacheInstrucion.isReadData(io.cache_req_dup(w).bits.opCode)
+      ){
+        dataArrays(w).io.read.req.zipWithIndex.map{ case(port,i) =>
+          if(i ==0) port.valid     := !io.cache_req_dup(w).bits.bank_num(0)
+          else      port.valid     :=  io.cache_req_dup(w).bits.bank_num(0)
+          port.bits.ridx := io.cache_req_dup(w).bits.index(highestIdxBit,1)
         }
+        cacheOpShouldResp := dataArrays.head.io.read.req.map(_.fire()).reduce(_||_)
+        dataresp :=Mux(io.cache_req_dup(w).bits.bank_num(0).asBool,  read_datas(1),  read_datas(0))
       }
-      cacheOpShouldResp := dataArrays.head.io.read.req.map(_.fire()).reduce(_||_)
-      dataresp :=Mux(io.cacheOp.req.bits.bank_num(0).asBool,  read_datas(1),  read_datas(0))
-    }
-    when(CacheInstrucion.isWriteData(io.cacheOp.req.bits.opCode)){
-      for (i <- 0 until partWayNum) {
-        dataArrays(i).io.write.valid := true.B
-        dataArrays(i).io.write.bits.wdata := io.cacheOp.req.bits.write_data_vec.asTypeOf(write_data.cloneType)
-        dataArrays(i).io.write.bits.wbankidx := io.cacheOp.req.bits.bank_num(0)
-        dataArrays(i).io.write.bits.widx := io.cacheOp.req.bits.index(highestIdxBit,1)
-        dataArrays(i).io.write.bits.wmask  := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0)).asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
+      when(CacheInstrucion.isWriteData(io.cache_req_dup(w).bits.opCode)){
+        dataArrays(w).io.write.valid         := true.B
+        dataArrays(w).io.write.bits.wdata    := io.cache_req_dup(w).bits.write_data_vec.asTypeOf(write_data.cloneType)
+        dataArrays(w).io.write.bits.wbankidx := io.cache_req_dup(w).bits.bank_num(0)
+        dataArrays(w).io.write.bits.widx     := io.cache_req_dup(w).bits.index(highestIdxBit,1)
+        dataArrays(w).io.write.bits.wmask    := UIntToOH(io.cache_req_dup(w).bits.wayNum(4, 0)).asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(w)
+        cacheOpShouldResp := true.B
       }
-      cacheOpShouldResp := true.B
     }
   }
   
@@ -679,6 +679,11 @@ class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModule
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  dataArray.io.cache_req_dup(0) := cacheOpDecoder.io.cache_req_dup_0
+  dataArray.io.cache_req_dup(1) := cacheOpDecoder.io.cache_req_dup_1
+  dataArray.io.cache_req_dup(2) := cacheOpDecoder.io.cache_req_dup_2
+  dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup_3
+
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||

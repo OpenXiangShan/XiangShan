@@ -119,8 +119,8 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
   io.ptw <> TLB(
     //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
     in = Seq(itlb_requestors(0),itlb_requestors(1),itlb_requestors(2),itlb_requestors(3),itlb_requestors(4),itlb_requestors(5)),
-    sfence = sfence,
-    csr = tlbCsr,
+    sfence = DelayN(io.sfence, 1),
+    csr = DelayN(io.tlbCsr, 1),
     width = 6,
     nRespDups = 1,
     shouldBlock = true,
