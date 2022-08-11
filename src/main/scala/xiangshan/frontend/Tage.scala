@@ -312,10 +312,10 @@ class TageTable
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
   val s0_bank_req_1h = get_bank_mask(s0_idx)
 
-  for (b <- 0 until nBanks) {
-    table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
-    table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
-  }
+    for (b <- 0 until nBanks) {
+      table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
+      table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+    }
 
   us.io.r.req.valid := io.req.fire
   us.io.r.req.bits.setIdx := s0_idx
@@ -378,7 +378,7 @@ class TageTable
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
-      valid   = io.update.mask.reduce(_||_) && update_req_bank_1h(b) && per_bank_not_silent_update(b).reduce(_||_),
+      valid   = per_bank_update_way_mask(b).orR && update_req_bank_1h(b),
       data    = per_bank_update_wdata(b),
       setIdx  = update_idx_in_bank,
       waymask = per_bank_update_way_mask(b)
@@ -414,7 +414,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRowsPerBr/nBanks), tagWidth=tagLen))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, 1, tagWidth=tagLen))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
@@ -426,16 +426,17 @@ class TageTable
       val wrbypass_io = Mux1H(UIntToOH(br_lidx, numBr), bank_wrbypasses(b).map(_.io))
       val wrbypass_hit = wrbypass_io.hit
       val wrbypass_ctr = wrbypass_io.hit_data(0).bits
+      val wrbypass_data_valid = wrbypass_hit && wrbypass_io.hit_data(0).valid
       update_wdata.ctr :=
         Mux(io.update.alloc(br_lidx),
           Mux(io.update.takens(br_lidx), 4.U, 3.U),
-          Mux(wrbypass_hit,
+          Mux(wrbypass_data_valid,
             inc_ctr(wrbypass_ctr,               io.update.takens(br_lidx)),
             inc_ctr(io.update.oldCtrs(br_lidx), io.update.takens(br_lidx))
           )
         )
       not_silent_update(pi) :=
-        Mux(wrbypass_hit,
+        Mux(wrbypass_data_valid,
           !silentUpdate(wrbypass_ctr,               io.update.takens(br_lidx)),
           !silentUpdate(io.update.oldCtrs(br_lidx), io.update.takens(br_lidx))) ||
         io.update.alloc(br_lidx)
