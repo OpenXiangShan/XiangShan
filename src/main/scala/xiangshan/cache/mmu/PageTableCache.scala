@@ -117,7 +117,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
   val sfence_dup = io.sfence_dup
   val refill = io.refill.bits
   val refill_prefetch_dup = io.refill.bits.req_info_dup.map(a => from_pre(a.source))
-  val flush_dup = sfence_dup.zip(io.csr_dup).map(f => f._1.valid && f._2.satp.changed)
+  val flush_dup = sfence_dup.zip(io.csr_dup).map(f => f._1.valid || f._2.satp.changed)
   val flush = flush_dup(0)
 
   // when refill, refuce to accept new req
