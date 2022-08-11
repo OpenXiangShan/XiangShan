@@ -141,7 +141,7 @@ abstract class XSCoreBase(parentName:String = "Unknown")(implicit p: config.Para
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend(parentName + "frontend_")(p))
-  val ptw = LazyModule(new L2TLBWrapper(parentName + "ptw_")(p))
+  val ptw = LazyModule(new PTWWrapper(parentName + "ptw_")(p))
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 

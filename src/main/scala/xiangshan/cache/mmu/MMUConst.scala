@@ -229,6 +229,11 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     (source === prefetchID.U)
   }
 
+  def sel_data(data: UInt, index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+
   def printVec[T <: Data](x: Seq[T]): Printable = {
     (0 until x.length).map(i => p"(${i.U})${x(i)} ").reduce(_+_)
   }

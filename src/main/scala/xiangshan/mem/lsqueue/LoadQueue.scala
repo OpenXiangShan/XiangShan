@@ -69,6 +69,11 @@ class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
 }
 
+class LqPaddrWriteBundle(implicit p: Parameters) extends XSBundle {
+  val paddr = Output(UInt(PAddrBits.W))
+  val lqIdx = Output(new LqPtr)
+}
+
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {
   val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
   val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
@@ -84,6 +89,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
+    val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
@@ -187,6 +193,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
+    dataModule.io.paddr.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
 
     // most lq status need to be updated immediately after load writeback to lq
@@ -287,10 +294,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     when(io.loadIn(i).bits.lq_data_wen_dup(4)){
       uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
     }
-    when(io.loadIn(i).bits.lq_data_wen_dup(5)){
-      vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
-      vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
-      vaddrTriggerResultModule.io.wen(i) := true.B
+
+    when(io.loadPaddrIn(i).valid) {
+      dataModule.io.paddr.wen(i) := true.B
+      dataModule.io.paddr.waddr(i) := io.loadPaddrIn(i).bits.lqIdx.value
+      dataModule.io.paddr.wdata(i) := io.loadPaddrIn(i).bits.paddr
     }
 
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
@@ -299,7 +307,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire())
     vaddrTriggerResultModule.io.waddr(i) := RegNext(loadWbIndex)
     vaddrTriggerResultModule.io.wdata(i) := RegNext(io.trigger(i).hitLoadAddrTriggerHitVec)
-    vaddrTriggerResultModule.io.wen(i) := RegNext(io.loadIn(i).fire())
+    vaddrTriggerResultModule.io.wen(i) := RegNext(io.loadIn(i).bits.lq_data_wen_dup(5))
   }
 
   when(io.dcache.valid) {

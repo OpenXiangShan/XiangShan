@@ -108,7 +108,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def SOFT_PREFETCH = 3
 
   // each source use a id to distinguish its multiple reqs
-  def reqIdWidth = 64
+  def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
 
   require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
