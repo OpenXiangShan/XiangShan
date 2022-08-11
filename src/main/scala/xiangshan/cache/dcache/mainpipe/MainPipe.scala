@@ -517,20 +517,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   }
   val miss_new_coh = ClientMetadata(missCohGen(s3_req_cmd_dup(2), s3_req.miss_param, s3_req.miss_dirty))
 
-  val new_coh = Mux(
-    miss_update_meta,
-    miss_new_coh,
-    Mux(
-      probe_update_meta,
-      probe_new_coh,
-      Mux(
-        store_update_meta || amo_update_meta,
-        s3_new_hit_coh,
-        ClientMetadata.onReset
-      )
-    )
-  )
-
   // LR, SC and AMO
   val debug_sc_fail_addr = RegInit(0.U)
   val debug_sc_fail_cnt  = RegInit(0.U(8.W))
@@ -598,22 +584,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
 
   val banked_amo_wmask = UIntToOH(s3_req.word_idx)
-//  val banked_wmask = s3_banked_store_wmask
-  val banked_wmask = Mux(
-    s3_req_miss_dup(1),
-    banked_full_wmask,
-    Mux(
-      s3_store_hit,
-      s3_banked_store_wmask,
-      Mux(
-        s3_can_do_amo_write,
-        banked_amo_wmask,
-        banked_none_wmask
-      )
-    )
-  )
   val update_data = s3_req_miss_dup(2) || s3_store_hit_dup(0) || s3_can_do_amo_write
-  assert(!(s3_valid && banked_wmask.orR && !update_data))
 
   // generate write data
   // AMO hits
@@ -638,7 +609,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       0.U(wordBytes.W)
     )
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
-//    s3_sc_data_merged(i) := amo_bitmask & s3_req.amo_data | ~amo_bitmask & old_data
     s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
       Mux(s3_req_word_idx_dup(i) === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
     )
@@ -768,6 +738,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_fire_dup_for_meta_w_valid = s3_valid_dup_for_meta_w_valid && s3_can_go_dup_for_meta_w_valid
   when (do_amoalu_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := true.B }
   when (s3_fire_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := false.B }
+
+  val new_coh = Mux(
+    miss_update_meta_dup_for_meta_w_valid,
+    miss_new_coh,
+    Mux(
+      probe_update_meta,
+      probe_new_coh_dup_for_meta_w_valid,
+      Mux(
+        store_update_meta_dup_for_meta_w_valid || amo_update_meta_dup_for_meta_w_valid,
+        s3_new_hit_coh_dup_for_meta_w_valid,
+        ClientMetadata.onReset
+      )
+    )
+  )
   // -------------------------------------------------------------------------------------
 
   // ---------------- duplicate regs for err_write.valid to solve fanout -----------------
@@ -1043,6 +1027,37 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_fire_dup_for_data_w_valid = s3_valid_dup_for_data_w_valid && s3_can_go_dup_for_data_w_valid
   when (do_amoalu_dup_for_data_w_valid) { s3_s_amoalu_dup_for_data_w_valid := true.B }
   when (s3_fire_dup_for_data_w_valid) { s3_s_amoalu_dup_for_data_w_valid := false.B }
+
+  val s3_banked_store_wmask_dup_for_data_w_valid = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
+  val s3_req_word_idx_dup_for_data_w_valid = RegEnable(s2_req.word_idx, s2_fire_to_s3)
+  val banked_wmask = Mux(
+    s3_req_miss_dup_for_data_w_valid,
+    banked_full_wmask,
+    Mux(
+      s3_store_hit_dup_for_data_w_valid,
+      s3_banked_store_wmask_dup_for_data_w_valid,
+      Mux(
+        s3_can_do_amo_write_dup_for_data_w_valid,
+        UIntToOH(s3_req_word_idx_dup_for_data_w_valid),
+        banked_none_wmask
+      )
+    )
+  )
+  assert(!(s3_valid && banked_wmask.orR && !update_data))
+
+  val s3_sc_data_merged_dup_for_data_w_valid = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+  val s3_req_amo_data_dup_for_data_w_valid = RegEnable(s2_req.amo_data, s2_fire_to_s3)
+  val s3_req_amo_mask_dup_for_data_w_valid = RegEnable(s2_req.amo_mask, s2_fire_to_s3)
+  for (i <- 0 until DCacheBanks) {
+    val old_data = s3_store_data_merged(i)
+    s3_sc_data_merged_dup_for_data_w_valid(i) := mergePutData(old_data, s3_req_amo_data_dup_for_data_w_valid,
+      Mux(
+        s3_req_word_idx_dup_for_data_w_valid === i.U && !s3_sc_fail_dup_for_data_w_valid,
+        s3_req_amo_mask_dup_for_data_w_valid,
+        0.U(wordBytes.W)
+      )
+    )
+  }
   // -------------------------------------------------------------------------------------
 
   val s3_fire = s3_valid_dup(4) && s3_can_go
@@ -1183,11 +1198,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.data_write.bits.addr := s3_req_vaddr_dup_for_data_write
   io.data_write.bits.wmask := banked_wmask
   io.data_write.bits.data := Mux(
-    amo_wait_amoalu, 
+    amo_wait_amoalu_dup_for_data_w_valid, 
     s3_amo_data_merged_reg, 
     Mux(
-      s3_sc,
-      s3_sc_data_merged,
+      s3_sc_dup_for_data_w_valid,
+      s3_sc_data_merged_dup_for_data_w_valid,
       s3_store_data_merged
     )
   )
@@ -1209,8 +1224,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     ) && need_wb
 
   io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
-  io.wb.bits.addr_dup_0 := get_block_addr(Cat(s3_tag, get_untag(s3_req_vaddr_dup_for_wb)))
-  io.wb.bits.addr_dup_1 := get_block_addr(Cat(s3_tag, get_untag(s3_req_vaddr_dup_for_wb)))
   io.wb.bits.param := writeback_param
   io.wb.bits.voluntary := s3_req_miss_dup(9) || s3_req_replace_dup(5)
   io.wb.bits.hasData := writeback_data

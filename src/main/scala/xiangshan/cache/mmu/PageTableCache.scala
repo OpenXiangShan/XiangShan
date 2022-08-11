@@ -83,10 +83,26 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   })
   val refill = Flipped(ValidIO(new Bundle {
     val ptes = UInt(blockBits.W)
-    val req_info = new L2TlbInnerBundle()
-    val level = UInt(log2Up(Level).W)
-    val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
+    val levelOH = new Bundle {
+      // NOTE: levelOH has (Level+1) bits, each stands for page cache entries
+      val sp = Bool()
+      val l3 = Bool()
+      val l2 = Bool()
+      val l1 = Bool()
+      def apply(levelUInt: UInt, valid: Bool) = {
+        sp := RegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
+        l3 := RegNext((levelUInt === 2.U) & valid, false.B)
+        l2 := RegNext((levelUInt === 1.U) & valid, false.B)
+        l1 := RegNext((levelUInt === 0.U) & valid, false.B)
+      }
+    }
+    // duplicate level and sel_pte for each page caches, for better fanout
+    val req_info_dup = Vec(3, new L2TlbInnerBundle())
+    val level_dup = Vec(3, UInt(log2Up(Level).W))
+    val sel_pte_dup = Vec(3, UInt(XLEN.W))
   }))
+  val sfence_dup = Vec(4, Input(new SfenceBundle()))
+  val csr_dup = Vec(3, Input(new TlbCsrBundle()))
 }
 
 @chiselName
@@ -99,10 +115,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // TODO: four caches make the codes dirty, think about how to deal with it
 
-  val sfence = io.sfence
+  val sfence_dup = io.sfence_dup
   val refill = io.refill.bits
-  val refill_prefetch = from_pre(io.refill.bits.req_info.source)
-  val flush = sfence.valid || io.csr.satp.changed
+  val refill_prefetch_dup = io.refill.bits.req_info_dup.map(a => from_pre(a.source))
+  val flush_dup = sfence_dup.zip(io.csr_dup).map(f => f._1.valid || f._2.satp.changed)
+  val flush = flush_dup(0)
 
   // when refill, refuce to accept new req
   val rwHarzad = if (sramSinglePort) io.refill.valid else false.B
@@ -193,7 +210,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   val stageDelay_valid_1cycle = OneCycleValid(stageReq.fire, flush)      // catch ram data
   val stageCheck_valid_1cycle = OneCycleValid(stageDelay(1).fire, flush) // replace & perf counter
-  val stageResp_valid_1cycle = OneCycleValid(stageCheck(1).fire, flush)  // ecc flush
+  val stageResp_valid_1cycle_dup = Wire(Vec(2, Bool()))
+  stageResp_valid_1cycle_dup.map(_ := OneCycleValid(stageCheck(1).fire, flush))  // ecc flush
 
 
   def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
@@ -201,13 +219,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int) = {
-    io.refill.valid && (level.U === io.refill.bits.level) && vpn_match(io.refill.bits.req_info.vpn, vpn, level),
+    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level),
   }
 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr.satp.asid) && l1v(i) }
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && l1v(i) }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
 
     // stageDelay, but check for l1
@@ -219,7 +237,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l1Size) {
-      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(stageReq.bits.req_info.vpn, io.csr.satp.asid)}\n")
+      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid)}\n")
     }
     XSDebug(stageReq.fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
@@ -250,7 +268,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
     val hitVec = VecInit(ramDatas.zip(vVec).map { case (wayData, v) =>
-      wayData.entries.hit(check_vpn, io.csr.satp.asid) && v })
+      wayData.entries.hit(check_vpn, io.csr_dup(1).satp.asid) && v })
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
@@ -293,7 +311,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
     val hitVec = VecInit(ramDatas.zip(vVec).map{ case (wayData, v) =>
-      wayData.entries.hit(check_vpn, io.csr.satp.asid) && v })
+      wayData.entries.hit(check_vpn, io.csr_dup(2).satp.asid) && v })
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
@@ -324,7 +342,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre, spValid) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr.satp.asid) && spv(i) }
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && spv(i) }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec)
@@ -333,7 +351,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && stageDelay_valid_1cycle }
     for (i <- 0 until l2tlbParams.spSize) {
-      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(stageReq.bits.req_info.vpn, io.csr.satp.asid)} spv:${spv(i)}\n")
+      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid)} spv:${spv(i)}\n")
     }
     XSDebug(stageDelay_valid_1cycle, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
 
@@ -374,7 +392,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
   io.resp.bits.toTlb.tag   := stageResp.bits.req_info.vpn
-  io.resp.bits.toTlb.asid  := io.csr.satp.asid // DontCare
+  io.resp.bits.toTlb.asid  := io.csr_dup(0).satp.asid // DontCare
   io.resp.bits.toTlb.ppn   := Mux(resp_res.l3.hit, resp_res.l3.ppn, resp_res.sp.ppn)
   io.resp.bits.toTlb.perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm, resp_res.sp.perm))
   io.resp.bits.toTlb.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
@@ -400,153 +418,145 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   l2.io.w.req.valid := false.B
   l3.io.w.req.valid := false.B
 
-  def get_part(data: UInt, index: UInt): UInt = {
-    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
-    inner_data(index)
-  }
-
   val memRdata = refill.ptes
-  val memSelData = get_part(memRdata, refill.addr_low)
   val memPtes = (0 until (l2tlbParams.blockBytes/(XLEN/8))).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
-  val memPte = memSelData.asTypeOf(new PteBundle)
-
-  memPte.suggestName("memPte")
+  val memSelData = io.refill.bits.sel_pte_dup
+  val memPte = memSelData.map(a => a.asTypeOf(new PteBundle))
 
   // TODO: handle sfenceLatch outsize
-  when (io.refill.valid && !memPte.isPf(refill.level) && !flush ) {
-    when (refill.level === 0.U && !memPte.isLeaf()) {
-      // val refillIdx = LFSR64()(log2Up(l2tlbParams.l1Size)-1,0) // TODO: may be LRU
-      val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
-      refillIdx.suggestName(s"PtwL1RefillIdx")
-      val rfOH = UIntToOH(refillIdx)
-      l1(refillIdx).refill(
-        refill.req_info.vpn,
-        io.csr.satp.asid,
-        memSelData,
-        0.U,
-        refill_prefetch
-      )
-      ptwl1replace.access(refillIdx)
-      l1v := l1v | rfOH
-      l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
+  when (!flush_dup(0) && refill.levelOH.l1 && !memPte(0).isLeaf() && !memPte(0).isPf(refill.level_dup(0))) {
+    // val refillIdx = LFSR64()(log2Up(l2tlbParams.l1Size)-1,0) // TODO: may be LRU
+    val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
+    refillIdx.suggestName(s"PtwL1RefillIdx")
+    val rfOH = UIntToOH(refillIdx)
+    l1(refillIdx).refill(
+      refill.req_info_dup(0).vpn,
+      io.csr_dup(0).satp.asid,
+      memSelData(0),
+      0.U,
+      refill_prefetch_dup(0)
+    )
+    ptwl1replace.access(refillIdx)
+    l1v := l1v | rfOH
+    l1g := (l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U)
 
-      for (i <- 0 until l2tlbParams.l1Size) {
-        l1RefillPerf(i) := i.U === refillIdx
-      }
-
-      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, 0.U, prefetch = refill_prefetch)}\n")
-      XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
-
-      refillIdx.suggestName(s"l1_refillIdx")
-      rfOH.suggestName(s"l1_rfOH")
+    for (i <- 0 until l2tlbParams.l1Size) {
+      l1RefillPerf(i) := i.U === refillIdx
     }
 
-    when (refill.level === 1.U && !memPte.isLeaf()) {
-      val refillIdx = genPtwL2SetIdx(refill.req_info.vpn)
-      val victimWay = replaceWrapper(getl2vSet(refill.req_info.vpn), ptwl2replace.way(refillIdx))
-      val victimWayOH = UIntToOH(victimWay)
-      val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
-      val wdata = Wire(l2EntryType)
-      wdata.gen(
-        vpn = refill.req_info.vpn,
-        asid = io.csr.satp.asid,
-        data = memRdata,
-        levelUInt = 1.U,
-        refill_prefetch
-      )
-      l2.io.w.apply(
-        valid = true.B,
-        setIdx = refillIdx,
-        data = wdata,
-        waymask = victimWayOH
-      )
-      ptwl2replace.access(refillIdx, victimWay)
-      l2v := l2v | rfvOH
-      l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+    XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), 0.U, prefetch = refill_prefetch_dup(0))}\n")
+    XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
 
-      for (i <- 0 until l2tlbParams.l2nWays) {
-        l2RefillPerf(i) := i.U === victimWay
-      }
-
-      XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
-      XSDebug(p"[l2 refill] refilldata:0x${wdata}\n")
-      XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
-      XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
-
-      refillIdx.suggestName(s"l2_refillIdx")
-      victimWay.suggestName(s"l2_victimWay")
-      victimWayOH.suggestName(s"l2_victimWayOH")
-      rfvOH.suggestName(s"l2_rfvOH")
-    }
-
-    when (refill.level === 2.U && memPte.isLeaf()) {
-      val refillIdx = genPtwL3SetIdx(refill.req_info.vpn)
-      val victimWay = replaceWrapper(getl3vSet(refill.req_info.vpn), ptwl3replace.way(refillIdx))
-      val victimWayOH = UIntToOH(victimWay)
-      val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
-      val wdata = Wire(l3EntryType)
-      wdata.gen(
-        vpn = refill.req_info.vpn,
-        asid = io.csr.satp.asid,
-        data = memRdata,
-        levelUInt = 2.U,
-        refill_prefetch
-      )
-      l3.io.w.apply(
-        valid = true.B,
-        setIdx = refillIdx,
-        data = wdata,
-        waymask = victimWayOH
-      )
-      ptwl3replace.access(refillIdx, victimWay)
-      l3v := l3v | rfvOH
-      l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
-
-      for (i <- 0 until l2tlbParams.l3nWays) {
-        l3RefillPerf(i) := i.U === victimWay
-      }
-
-      XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
-      XSDebug(p"[l3 refill] refilldata:0x${wdata}\n")
-      XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
-      XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
-
-      refillIdx.suggestName(s"l3_refillIdx")
-      victimWay.suggestName(s"l3_victimWay")
-      victimWayOH.suggestName(s"l3_victimWayOH")
-      rfvOH.suggestName(s"l3_rfvOH")
-    }
+    refillIdx.suggestName(s"l1_refillIdx")
+    rfOH.suggestName(s"l1_rfOH")
   }
 
+  when (!flush_dup(1) && refill.levelOH.l2 && !memPte(1).isLeaf() && !memPte(1).isPf(refill.level_dup(1))) {
+    val refillIdx = genPtwL2SetIdx(refill.req_info_dup(1).vpn)
+    val victimWay = replaceWrapper(getl2vSet(refill.req_info_dup(1).vpn), ptwl2replace.way(refillIdx))
+    val victimWayOH = UIntToOH(victimWay)
+    val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
+    val wdata = Wire(l2EntryType)
+    wdata.gen(
+      vpn = refill.req_info_dup(1).vpn,
+      asid = io.csr_dup(1).satp.asid,
+      data = memRdata,
+      levelUInt = 1.U,
+      refill_prefetch_dup(1)
+    )
+    l2.io.w.apply(
+      valid = true.B,
+      setIdx = refillIdx,
+      data = wdata,
+      waymask = victimWayOH
+    )
+    ptwl2replace.access(refillIdx, victimWay)
+    l2v := l2v | rfvOH
+    l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+    for (i <- 0 until l2tlbParams.l2nWays) {
+      l2RefillPerf(i) := i.U === victimWay
+    }
+
+    XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
+    XSDebug(p"[l2 refill] refilldata:0x${wdata}\n")
+    XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
+    XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+
+    refillIdx.suggestName(s"l2_refillIdx")
+    victimWay.suggestName(s"l2_victimWay")
+    victimWayOH.suggestName(s"l2_victimWayOH")
+    rfvOH.suggestName(s"l2_rfvOH")
+  }
+
+  when (!flush_dup(2) && refill.levelOH.l3) {
+    val refillIdx = genPtwL3SetIdx(refill.req_info_dup(2).vpn)
+    val victimWay = replaceWrapper(getl3vSet(refill.req_info_dup(2).vpn), ptwl3replace.way(refillIdx))
+    val victimWayOH = UIntToOH(victimWay)
+    val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
+    val wdata = Wire(l3EntryType)
+    wdata.gen(
+      vpn = refill.req_info_dup(2).vpn,
+      asid = io.csr_dup(2).satp.asid,
+      data = memRdata,
+      levelUInt = 2.U,
+      refill_prefetch_dup(2)
+    )
+    l3.io.w.apply(
+      valid = true.B,
+      setIdx = refillIdx,
+      data = wdata,
+      waymask = victimWayOH
+    )
+    ptwl3replace.access(refillIdx, victimWay)
+    l3v := l3v | rfvOH
+    l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+    for (i <- 0 until l2tlbParams.l3nWays) {
+      l3RefillPerf(i) := i.U === victimWay
+    }
+
+    XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
+    XSDebug(p"[l3 refill] refilldata:0x${wdata}\n")
+    XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
+    XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+
+    refillIdx.suggestName(s"l3_refillIdx")
+    victimWay.suggestName(s"l3_victimWay")
+    victimWayOH.suggestName(s"l3_victimWayOH")
+    rfvOH.suggestName(s"l3_rfvOH")
+  }
+
+
   // misc entries: super & invalid
-  when (io.refill.valid && !flush && (refill.level === 0.U || refill.level === 1.U) && (memPte.isLeaf() || memPte.isPf(refill.level))) {
+  when (!flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0)))) {
     val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
     val rfOH = UIntToOH(refillIdx)
     sp(refillIdx).refill(
-      refill.req_info.vpn,
-      io.csr.satp.asid,
-      memSelData,
-      refill.level,
-      refill_prefetch,
-      !memPte.isPf(refill.level),
+      refill.req_info_dup(0).vpn,
+      io.csr_dup(0).satp.asid,
+      memSelData(0),
+      refill.level_dup(2),
+      refill_prefetch_dup(0),
+      !memPte(0).isPf(refill.level_dup(0)),
     )
     spreplace.access(refillIdx)
     spv := spv | rfOH
-    spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
+    spg := spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U)
 
     for (i <- 0 until l2tlbParams.spSize) {
       spRefillPerf(i) := i.U === refillIdx
     }
 
-    XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info.vpn, io.csr.satp.asid, memSelData, refill.level, refill_prefetch)}\n")
-    XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), refill.level_dup(0), refill_prefetch_dup(0))}\n")
+    XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
 
     refillIdx.suggestName(s"sp_refillIdx")
     rfOH.suggestName(s"sp_rfOH")
   }
 
-  val l2eccFlush = resp_res.l2.ecc && stageResp_valid_1cycle // RegNext(l2eccError, init = false.B)
-  val l3eccFlush = resp_res.l3.ecc && stageResp_valid_1cycle // RegNext(l3eccError, init = false.B)
+  val l2eccFlush = resp_res.l2.ecc && stageResp_valid_1cycle_dup(0) // RegNext(l2eccError, init = false.B)
+  val l3eccFlush = resp_res.l3.ecc && stageResp_valid_1cycle_dup(1) // RegNext(l3eccError, init = false.B)
   val eccVpn = stageResp.bits.req_info.vpn
 
   XSError(l2eccFlush, "l2tlb.cache.l2 ecc error. Should not happen at sim stage")
@@ -566,24 +576,51 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // sfence
-  when (sfence.valid) {
-    val l1asidhit = VecInit(l1asids.map(_ === sfence.bits.asid)).asUInt
-    val spasidhit = VecInit(spasids.map(_ === sfence.bits.asid)).asUInt
-    val sfence_vpn = sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)
+  when (sfence_dup(3).valid) {
+    val sfence_vpn = sfence_dup(3).bits.addr(sfence_dup(3).bits.addr.getWidth-1, offLen)
 
-    when (sfence.bits.rs1/*va*/) {
-      when (sfence.bits.rs2) {
+    when (sfence_dup(3).bits.rs1/*va*/) {
+      when (sfence_dup(3).bits.rs2) {
+        // all va && all asid
+        l3v := 0.U
+      } .otherwise {
+        // all va && specific asid except global
+        l3v := l3v & l3g
+      }
+    } .otherwise {
+      // val flushMask = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+      val flushSetIdxOH = UIntToOH(genPtwL3SetIdx(sfence_vpn))
+      // val flushMask = VecInit(flushSetIdxOH.asBools.map(Fill(l2tlbParams.l3nWays, _.asUInt))).asUInt
+      val flushMask = VecInit(flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l3nWays, a.asUInt) }).asUInt
+      flushSetIdxOH.suggestName(s"sfence_nrs1_flushSetIdxOH")
+      flushMask.suggestName(s"sfence_nrs1_flushMask")
+
+      when (sfence_dup(3).bits.rs2) {
+        // specific leaf of addr && all asid
+        l3v := l3v & ~flushMask
+      } .otherwise {
+        // specific leaf of addr && specific asid
+        l3v := l3v & (~flushMask | l3g)
+      }
+    }
+  }
+
+  when (sfence_dup(0).valid) {
+    val l1asidhit = VecInit(l1asids.map(_ === sfence_dup(0).bits.asid)).asUInt
+    val spasidhit = VecInit(spasids.map(_ === sfence_dup(0).bits.asid)).asUInt
+    val sfence_vpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth-1, offLen)
+
+    when (sfence_dup(0).bits.rs1/*va*/) {
+      when (sfence_dup(0).bits.rs2) {
         // all va && all asid
         l1v := 0.U
         l2v := 0.U
-        l3v := 0.U
         spv := 0.U
       } .otherwise {
         // all va && specific asid except global
 
         l1v := l1v & (~l1asidhit | l1g)
         l2v := l2v & l2g
-        l3v := l3v & l3g
         spv := spv & (~spasidhit | spg)
       }
     } .otherwise {
@@ -594,14 +631,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       flushSetIdxOH.suggestName(s"sfence_nrs1_flushSetIdxOH")
       flushMask.suggestName(s"sfence_nrs1_flushMask")
 
-      when (sfence.bits.rs2) {
+      when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
-        l3v := l3v & ~flushMask
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence.bits.asid, ignoreAsid = true))).asUInt | spg)
+        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.asid, ignoreAsid = true))).asUInt | spg)
       } .otherwise {
         // specific leaf of addr && specific asid
-        l3v := l3v & (~flushMask | l3g)
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence.bits.asid))).asUInt | spg)
+        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.asid))).asUInt | spg)
       }
     }
   }
@@ -693,24 +728,24 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSPerfAccumulate("l2Refill", Cat(l2RefillPerf).orR)
   XSPerfAccumulate("l3Refill", Cat(l3RefillPerf).orR)
   XSPerfAccumulate("spRefill", Cat(spRefillPerf).orR)
-  XSPerfAccumulate("l1Refill_pre", Cat(l1RefillPerf).orR && refill_prefetch)
-  XSPerfAccumulate("l2Refill_pre", Cat(l2RefillPerf).orR && refill_prefetch)
-  XSPerfAccumulate("l3Refill_pre", Cat(l3RefillPerf).orR && refill_prefetch)
-  XSPerfAccumulate("spRefill_pre", Cat(spRefillPerf).orR && refill_prefetch)
+  XSPerfAccumulate("l1Refill_pre", Cat(l1RefillPerf).orR && refill_prefetch_dup(0))
+  XSPerfAccumulate("l2Refill_pre", Cat(l2RefillPerf).orR && refill_prefetch_dup(0))
+  XSPerfAccumulate("l3Refill_pre", Cat(l3RefillPerf).orR && refill_prefetch_dup(0))
+  XSPerfAccumulate("spRefill_pre", Cat(spRefillPerf).orR && refill_prefetch_dup(0))
 
   // debug
-  XSDebug(sfence.valid, p"[sfence] original v and g vector:\n")
-  XSDebug(sfence.valid, p"[sfence] l1v:${Binary(l1v)}\n")
-  XSDebug(sfence.valid, p"[sfence] l2v:${Binary(l2v)}\n")
-  XSDebug(sfence.valid, p"[sfence] l3v:${Binary(l3v)}\n")
-  XSDebug(sfence.valid, p"[sfence] l3g:${Binary(l3g)}\n")
-  XSDebug(sfence.valid, p"[sfence] spv:${Binary(spv)}\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] new v and g vector:\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] l1v:${Binary(l1v)}\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] l2v:${Binary(l2v)}\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] l3v:${Binary(l3v)}\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] l3g:${Binary(l3g)}\n")
-  XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] original v and g vector:\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] l1v:${Binary(l1v)}\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] l2v:${Binary(l2v)}\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] l3v:${Binary(l3v)}\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] l3g:${Binary(l3g)}\n")
+  XSDebug(sfence_dup(0).valid, p"[sfence] spv:${Binary(spv)}\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] new v and g vector:\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] l1v:${Binary(l1v)}\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] l2v:${Binary(l2v)}\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] l3v:${Binary(l3v)}\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] l3g:${Binary(l3g)}\n")
+  XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] spv:${Binary(spv)}\n")
 
   val perfEvents = Seq(
     ("access           ", base_valid_access_0             ),

@@ -163,10 +163,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   val NUMSfenceDup = 3
   val NUMTlbCsrDup = 8
-  val sfence_tmp = RegNext(io.sfence)
-  val tlbcsr_tmp = RegNext(io.tlbCsr)
-  val sfence_dup = Seq.fill(NUMSfenceDup)(RegNext(sfence_tmp))
-  val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(tlbcsr_tmp))
+  val sfence_dup = Seq.fill(NUMSfenceDup)(RegNext(io.sfence))
+  val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLB(exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
@@ -198,7 +196,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
-  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(sfence_dup(2).valid && tlbcsr_dup(7).satp.changed), init = false.B)
+  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(RegNext(sfence_dup(2).valid && tlbcsr_dup(7).satp.changed)), init = false.B)
   io.ptw.resp.ready := true.B
 
   (dtlb.map(a => a.ptw.req.map(b => b)))
@@ -210,7 +208,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
     io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.entry.hit(tlb.bits.vpn, tlbcsr_dup(i).satp.asid, allType = true, ignoreAsid = true))
+      ptw_resp_next.data.entry.hit(tlb.bits.vpn, RegNext(tlbcsr_dup(i).satp.asid), allType = true, ignoreAsid = true))
   }
   dtlb.map(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -226,7 +224,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
-  val tlbcsr_pmp = tlbcsr_dup.drop(2)
+  val tlbcsr_pmp = tlbcsr_dup.drop(2).map(RegNext(_))
   for (((p,d),i) <- (pmp_check zip dtlb_pmps) zipWithIndex) {
     p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -280,6 +278,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     // Lsq to load unit's rs
+
+    // passdown to lsq (load s1)
+    lsq.io.loadPaddrIn(i) <> loadUnits(i).io.lsq.loadPaddrIn
 
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn

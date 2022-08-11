@@ -71,7 +71,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val (toData, dataResp) =  (io.data_read, io.data_response.datas(0))
   val (metaError, codeResp) = (io.meta_response.errors(0), io.data_response.codes(0))
 
-  val r0_ready, r1_ready, r2_ready = WireInit(false.B)
+  val r0_ready, r1_ready, r2_ready, r3_ready = WireInit(false.B)
   val r0_fire,  r1_fire , r2_fire, r3_fire  = WireInit(false.B)
 
   /**
@@ -147,12 +147,19 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     */
     
   val r2_valid          = generatePipeControl(lastFire = r1_fire, thisFire = r2_fire, thisFlush = false.B, lastFlush = false.B)
+  val r2_valid_dup_1    = generatePipeControl(lastFire = r1_fire, thisFire = r2_fire, thisFlush = false.B, lastFlush = false.B)
+  val r2_valid_dup_2    = generatePipeControl(lastFire = r1_fire, thisFire = r2_fire, thisFlush = false.B, lastFlush = false.B)
+  val r2_valid_dup_3    = generatePipeControl(lastFire = r1_fire, thisFire = r2_fire, thisFlush = false.B, lastFlush = false.B)
 
-  r2_ready      := r2_valid && io.release_req.ready  || !r2_valid
-  r2_fire       := r2_valid && io.release_req.ready
+
+  r2_ready      := r2_fire  || !r2_valid
+  r2_fire       := r2_valid && io.release_req.ready && r3_ready
 
   val r2_req = RegEnable(next = r1_req, enable = r1_fire)
   val r2_data_cacheline = RegEnable(next = r1_data_cacheline, enable = r1_fire)
+  val r2_req_is_probe_dup_0 = RegEnable(next = r1_req.isProbe, enable = r1_fire)
+  val r2_req_is_probe_dup_1 = RegEnable(next = r1_req.isProbe, enable = r1_fire)
+  val r2_req_is_probe_dup_2 = RegEnable(next = r1_req.isProbe, enable = r1_fire)
 
   /*** for Probe hit mux ***/
   val r2_probe_hit_ptag =   RegEnable(next = probe_phy_tag, enable = r1_fire)
@@ -192,8 +199,8 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.error.source.l2            := false.B
   io.error.opType               := DontCare
   io.error.opType.fetch         := true.B
-  io.error.opType.release       := RegNext(RegNext(r2_req.isRelease))
-  io.error.opType.probe         := RegNext(RegNext(r2_req.isProbe))
+  io.error.opType.release       := RegNext(RegNext(!r2_req_is_probe_dup_1))
+  io.error.opType.probe         := RegNext(RegNext(r2_req_is_probe_dup_1))
 
   XSError(r2_parity_error && RegNext(RegNext(r1_fire)), "ICache has parity error in ReplacePipe!")
 
@@ -209,17 +216,17 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val (release_has_dirty_data, release_shrink_param, release_new_coh) = r2_release_coh.onCacheControl(M_FLUSH)
 
   /*** to Release Unit ***/
-  val r2_paddr = Mux(r2_req.isProbe, r2_req.paddr , r2_release_addr)
-  val r2_param = Mux(r2_req.isProbe, probe_shrink_param , release_shrink_param)
-  val r2_hasData = r2_req.isProbe && r2_probe_hit_coh.isValid() && (r2_req.needData || probe_has_dirty_data) || r2_req.isRelease
-  val r2_data  = Mux(r2_req.isProbe, r2_probe_hit_data , r2_release_data)
+  val r2_paddr = Mux(r2_req_is_probe_dup_0, r2_req.paddr , r2_release_addr)
+  val r2_param = Mux(r2_req_is_probe_dup_0, probe_shrink_param , release_shrink_param)
+  val r2_hasData = r2_req_is_probe_dup_1 && r2_probe_hit_coh.isValid() && (r2_req.needData || probe_has_dirty_data) || r2_req.isRelease
+  val r2_data  = Mux(r2_req_is_probe_dup_1, r2_probe_hit_data , r2_release_data)
 
-  val r2_write_tag = Mux(r2_req.isProbe, r2_probe_hit_ptag , r2_release_ptag)
-  val r2_write_coh = Mux(r2_req.isProbe, probe_new_coh , release_new_coh)
-  val r2_write_waymask = Mux(r2_req.isProbe, r2_probe_hit_vec.asUInt , r2_req.waymask)
+  val r2_write_tag = Mux(r2_req_is_probe_dup_0, r2_probe_hit_ptag , r2_release_ptag)
+  val r2_write_coh = Mux(r2_req_is_probe_dup_1, probe_new_coh , release_new_coh)
+  val r2_write_waymask = Mux(r2_req_is_probe_dup_1, r2_probe_hit_vec.asUInt , r2_req.waymask)
 
   //release not write back
-  io.meta_write.valid := r2_fire && r2_req.isProbe
+  io.meta_write.valid := r2_fire && r2_req_is_probe_dup_0
   io.meta_write.bits.generate(tag = r2_probe_hit_ptag, coh = probe_new_coh, idx = r2_req.vidx, waymask = r2_probe_hit_vec.asUInt, bankIdx = r2_req.vidx(0))
 
   //NToN Release should not been send to slave
@@ -249,6 +256,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r3_valid          = generatePipeControl(lastFire = r2_fire && r2_req.isRelease, thisFire = r3_fire, thisFlush = false.B, lastFlush = false.B)
   val r3_release_need_send = RegEnable(next = release_need_send, enable = r2_fire && r2_req.isRelease)
 
+  r3_ready      := r3_fire  || !r3_valid
   r3_fire       := (r3_valid && RegNext(io.release_finish) && r3_release_need_send) || (r3_valid && !r3_release_need_send) 
 
   val r3_req = RegEnable(next = r2_req, enable = r2_fire && r2_req.isRelease)
