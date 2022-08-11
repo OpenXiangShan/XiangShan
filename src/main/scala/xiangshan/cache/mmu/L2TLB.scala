@@ -164,9 +164,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.sfence := sfence
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
-  // assert that cache.resp should enter only one of "ptw,llptw,missqueue"
-  XSError(PopCount(Seq(llptw_arb.io.in(LLPTWARB_CACHE).valid, missQueue.io.in.valid, ptw.io.req.valid)) > 1.U, "l2tlb.cache resp enter more than one unit")
-
   // mem req
   def blockBytes_align(addr: UInt) = {
     Cat(addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W))
