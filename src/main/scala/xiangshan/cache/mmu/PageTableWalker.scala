@@ -38,7 +38,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
   * only take 1GB and 2MB page walks
   * or in other words, except the last level(leaf)
   **/
-class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
+class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
     val l1Hit = Bool()
@@ -68,8 +68,8 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 }
 
 @chiselName
-class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
-  val io = IO(new PTWIO)
+class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+  val io = IO(new PtwFsmIO)
 
   val sfence = io.sfence
   val mem = io.mem

@@ -55,21 +55,49 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
   })
 
-  val meta_array = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(0.U.asTypeOf(new Meta))))))
+  val meta_array = RegInit(
+    VecInit(Seq.fill(nSets)(
+      VecInit(Seq.fill(nWays)(0.U.asTypeOf(new Meta)))
+    ))
+  )
+
+  val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, new Meta)))
 
   (io.read.zip(io.resp)).zipWithIndex.foreach {
     case ((read, resp), i) =>
       read.ready := true.B
-      resp := RegEnable(meta_array(read.bits.idx), read.valid)
+      (0 until nWays).map(way => {
+        val read_way_bypass = WireInit(false.B)
+        val bypass_data = Wire(new Meta)
+        bypass_data := DontCare
+        (0 until writePorts).map(wport =>
+          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx){
+            read_way_bypass := true.B
+            bypass_data := s1_way_wdata(way)(wport)
+          }
+        )
+        resp(way) := Mux(
+          RegEnable(read_way_bypass, read.valid),
+          RegEnable(bypass_data, read_way_bypass),
+          RegEnable(meta_array(read.bits.idx)(way), read.valid)
+        )
+      })
   }
 
-  io.write.foreach {
-    case write =>
+  io.write.zipWithIndex.foreach {
+    case (write, wport) =>
       write.ready := true.B
       write.bits.way_en.asBools.zipWithIndex.foreach {
-        case (wen, i) =>
-          when (write.valid && wen) {
-            meta_array(write.bits.idx)(i) := write.bits.meta
+        case (wen, way) =>
+          s0_way_wen(way)(wport) := write.valid && wen
+          s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
+          s1_way_waddr(way)(wport) := RegEnable(write.bits.idx, s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(write.bits.meta, s0_way_wen(way)(wport))
+          when (s1_way_wen(way)(wport)) {
+            meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
           }
       }
   }
@@ -84,22 +112,49 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
     // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
-  val meta_array = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
+  val meta_array = RegInit(
+    VecInit(Seq.fill(nSets)(
+      VecInit(Seq.fill(nWays)(0.U.asTypeOf(false.B)))
+    ))
+  )
 
-  io.read.zip(io.resp).foreach {
-    case (read, resp) =>
+  val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, Bool())))
+
+  (io.read.zip(io.resp)).zipWithIndex.foreach {
+    case ((read, resp), i) =>
       read.ready := true.B
-      // resp := RegEnable(meta_array(read.bits.idx), read.valid)
-      resp := meta_array(RegEnable(read.bits.idx, read.valid))
+      (0 until nWays).map(way => {
+        val read_way_bypass = WireInit(false.B)
+        val bypass_data = Wire(Bool())
+        bypass_data := DontCare
+        (0 until writePorts).map(wport =>
+          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx){
+            read_way_bypass := true.B
+            bypass_data := s1_way_wdata(way)(wport)
+          }
+        )
+        resp(way) := Mux(
+          RegEnable(read_way_bypass, read.valid),
+          RegEnable(bypass_data, read_way_bypass),
+          meta_array(RegEnable(read.bits.idx, read.valid))(way)
+        )
+      })
   }
 
-  io.write.foreach {
-    case write =>
+  io.write.zipWithIndex.foreach {
+    case (write, wport) =>
       write.ready := true.B
       write.bits.way_en.asBools.zipWithIndex.foreach {
-        case (wen, i) =>
-          when (write.valid && wen) {
-            meta_array(write.bits.idx)(i) := write.bits.error
+        case (wen, way) =>
+          s0_way_wen(way)(wport) := write.valid && wen
+          s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
+          s1_way_waddr(way)(wport) := RegEnable(write.bits.idx, s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(write.bits.error, s0_way_wen(way)(wport))
+          when (s1_way_wen(way)(wport)) {
+            meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
           }
       }
   }

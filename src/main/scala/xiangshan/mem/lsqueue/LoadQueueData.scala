@@ -26,11 +26,14 @@ import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.mem._
 import xiangshan.backend.rob.RobPtr
 
-class LQDataEntry(implicit p: Parameters) extends XSBundle {
-  val paddr = UInt(PAddrBits.W)
+class LQDataEntryWoPaddr(implicit p: Parameters) extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val fwdMask = Vec(8, Bool())
+}
+
+class LQDataEntry(implicit p: Parameters) extends LQDataEntryWoPaddr {
+  val paddr = UInt(PAddrBits.W)
 }
 
 // Data module define
@@ -42,7 +45,7 @@ class LQDataEntry(implicit p: Parameters) extends XSBundle {
 // * st-ld violation addr cam
 // * data release addr cam
 // * data refill addr cam
-class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numWBanks: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     // normal read/write ports
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
@@ -61,6 +64,11 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
     val refillMmask = Output(Vec(numEntries, Bool()))
   })
 
+  require(isPow2(numWBanks))
+  require(numWBanks >= 2)
+
+  val numEntryPerBank = numEntries / numWBanks
+
   val data = Reg(Vec(numEntries, UInt((PAddrBits).W)))
 
   // read ports
@@ -68,10 +76,50 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
     io.rdata(i) := data(RegNext(io.raddr(i)))
   }
 
-  // below is the write ports (with priorities)
-  for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
-      data(io.waddr(i)) := io.wdata(i)
+  // write ports
+  val waddr_dec = io.waddr.map(a => UIntToOH(a))
+  def selectBankMask(in: UInt, bank: Int): UInt = {
+    in((bank + 1) * numEntryPerBank - 1, bank * numEntryPerBank)
+  }
+  for (bank <- 0 until numWBanks) {
+    // write ports
+    // s0: write to bank level buffer
+    val s0_bank_waddr_dec = waddr_dec.map(a => selectBankMask(a, bank))
+    val s0_bank_write_en = io.wen.zip(s0_bank_waddr_dec).map(w => w._1 && w._2.orR)
+    s0_bank_waddr_dec.zipWithIndex.map(a =>
+      a._1.suggestName("s0_bank_waddr_dec" + bank + "_" + a._2)
+    )
+    s0_bank_write_en.zipWithIndex.map(a =>
+      a._1.suggestName("s0_bank_write_en" + bank + "_" + a._2)
+    )
+    // s1: write data to entries
+    val s1_bank_waddr_dec = s0_bank_waddr_dec.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
+    val s1_bank_wen = RegNext(VecInit(s0_bank_write_en))
+    val s1_wdata = io.wdata.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
+    s1_bank_waddr_dec.zipWithIndex.map(a =>
+      a._1.suggestName("s1_bank_waddr_dec" + bank + "_" + a._2)
+    )
+    s1_bank_wen.zipWithIndex.map(a =>
+      a._1.suggestName("s1_bank_wen" + bank + "_" + a._2)
+    )
+    s1_wdata.zipWithIndex.map(a =>
+      a._1.suggestName("s1_wdata" + bank + "_" + a._2)
+    )
+
+    // entry write
+    for (entry <- 0 until numEntryPerBank) {
+      // write ports
+      val s1_entry_write_en_vec = s1_bank_wen.zip(s1_bank_waddr_dec).map(w => w._1 && w._2(entry))
+      val s1_entry_write_en = VecInit(s1_entry_write_en_vec).asUInt.orR
+      val s1_entry_write_data = Mux1H(s1_entry_write_en_vec, s1_wdata)
+      when (s1_entry_write_en) {
+        data(bank * numEntryPerBank + entry) := s1_entry_write_data
+      }
+      s1_entry_write_en_vec.zipWithIndex.map(a =>
+        a._1.suggestName("s1_entry_write_en_vec" + bank + "_" + entry + "_" + a._2)
+      )
+      s1_entry_write_en.suggestName("s1_entry_write_en" + bank + "_" + entry)
+      s1_entry_write_data.suggestName("s1_entry_write_data" + bank + "_" + entry)
     }
   }
 
@@ -119,10 +167,12 @@ class LQMaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     io.rdata(i) := data(RegNext(io.raddr(i)))
   }
 
-  // below is the write ports (with priorities)
-  for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
-      data(io.waddr(i)) := io.wdata(i)
+  // write ports
+  val waddr_dec = io.waddr.map(a => UIntToOH(a))
+  for (j <- 0 until numEntries) {
+    val write_wen = io.wen.zip(waddr_dec).map(w => w._1 && w._2(j))
+    when (VecInit(write_wen).asUInt.orR) {
+      data(j) := Mux1H(write_wen, io.wdata)
     }
   }
 
@@ -190,6 +240,7 @@ class LQDataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
     }
 
     // write ctrl info
+    // TODO: optimize that
     when (io.wen(i)) {
       fwdMask(io.waddr(i)) := io.fwdMaskWdata(i)
     }
@@ -235,6 +286,11 @@ class LQDataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Par
 // and their interconnect
 class LoadQueueDataWrapper(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val paddr = new Bundle() {
+      val wen = Vec(wbNumWrite, Input(Bool()))
+      val waddr = Input(Vec(wbNumWrite, UInt(log2Up(size).W)))
+      val wdata = Input(Vec(wbNumWrite, UInt(PAddrBits.W)))
+    }
     val wb = new Bundle() {
       val wen = Vec(wbNumWrite, Input(Bool()))
       val waddr = Input(Vec(wbNumWrite, UInt(log2Up(size).W)))
@@ -285,7 +341,7 @@ class LoadQueueDataWrapper(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit 
   })
 
   // data module
-  val paddrModule = Module(new LQPaddrModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth))
+  val paddrModule = Module(new LQPaddrModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth, numWBanks = LoadQueueNWriteBanks))
   val maskModule = Module(new LQMaskModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth))
   val dataModule = Module(new LQDataModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth+1))
 
@@ -319,21 +375,22 @@ class LoadQueueDataWrapper(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit 
     maskModule.io.wen(i) := false.B
     dataModule.io.wen(i) := false.B
 
-    paddrModule.io.waddr(i) := io.wb.waddr(i)
     maskModule.io.waddr(i) := io.wb.waddr(i)
     dataModule.io.waddr(i) := io.wb.waddr(i)
 
-    paddrModule.io.wdata(i) := io.wb.wdata(i).paddr
     maskModule.io.wdata(i) := io.wb.wdata(i).mask
     dataModule.io.wdata(i) := io.wb.wdata(i).data
     dataModule.io.fwdMaskWdata(i) := io.wb.wdata(i).fwdMask.asUInt
     dataModule.io.paddrWdata(i) := io.wb.wdata(i).paddr
 
     when(io.wb.wen(i)){
-      paddrModule.io.wen(i) := true.B
       maskModule.io.wen(i) := true.B
       dataModule.io.wen(i) := true.B
     }
+
+    paddrModule.io.wen(i) := io.paddr.wen(i)
+    paddrModule.io.waddr(i) := io.paddr.waddr(i)
+    paddrModule.io.wdata(i) := io.paddr.wdata(i)
   })
 
   // write port wbNumWrite
