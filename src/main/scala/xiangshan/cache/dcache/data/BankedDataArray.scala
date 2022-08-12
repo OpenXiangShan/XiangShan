@@ -44,6 +44,9 @@ class L1BankedDataWriteReq(implicit p: Parameters) extends L1BankedDataReadReq
   val data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
 }
 
+// cache-block write request without data
+class L1BankedDataWriteReqCtrl(implicit p: Parameters) extends L1BankedDataReadReq
+
 class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
 {
   // you can choose which bank to read to save power
@@ -74,6 +77,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val readline_intend = Input(Bool())
     val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
     val write = Flipped(DecoupledIO(new L1BankedDataWriteReq))
+    val write_dup = Vec(DCacheBanks, Flipped(Decoupled(new L1BankedDataWriteReqCtrl)))
     // data bank read resp (all banks)
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val resp_dup_0 = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
@@ -141,6 +145,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val ReduceReadlineConflict = false
 
   io.write.ready := true.B
+  io.write_dup.foreach(_.ready := true.B)
 
   // wrap data rows of 8 ways
   class DataSRAMBank(index: Int) extends Module {
@@ -380,21 +385,22 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
+  val sram_waddr_dup = io.write_dup.map(x => addr_to_dcache_set(x.bits.addr))
   for (bank_index <- 0 until DCacheBanks) {
     // data write
     val data_bank = data_banks(bank_index)
-    data_bank.io.w.en := io.write.valid && io.write.bits.wmask(bank_index)
-    data_bank.io.w.way_en := io.write.bits.way_en
-    data_bank.io.w.addr := sram_waddr
+    data_bank.io.w.en := io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index)
+    data_bank.io.w.way_en := io.write_dup(bank_index).bits.way_en
+    data_bank.io.w.addr := sram_waddr_dup(bank_index)
     data_bank.io.w.data := io.write.bits.data(bank_index)
 
     // ecc write
     val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.w.req.valid := io.write.valid && io.write.bits.wmask(bank_index)
+    ecc_bank.io.w.req.valid := io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index)
     ecc_bank.io.w.req.bits.apply(
-      setIdx = sram_waddr,
+      setIdx = sram_waddr_dup(bank_index),
       data = getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
-      waymask = io.write.bits.way_en
+      waymask = io.write_dup(bank_index).bits.way_en
     )
     when(ecc_bank.io.w.req.valid) {
       XSDebug("write in ecc sram: bank %x set %x data %x waymask %x\n",

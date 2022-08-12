@@ -19,6 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan._
 import utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.ClientStates._
@@ -26,6 +27,8 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import huancun.utils.FastArbiter
+import mem.{AddPipelineReg}
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -542,15 +545,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
-    // val refill_pipe_req_dup_0 = Output(Valid(new RefillPipeReq))
-    // val refill_pipe_req_dup_1 = Output(Valid(new RefillPipeReq))
-    // val refill_pipe_req_dup_2 = Output(Valid(new RefillPipeReq))
-    // val refill_pipe_req_dup_3 = Output(Valid(new RefillPipeReq))
-    // Why is 8?
-    // 4 for data_write.valid, meta_write.valid, tag_write.valid, error_flag_write.valid depending on data_write.ready
-    // 4 for data_write.valid, meta_write.valid, tag_write.valid, error_flag_write.valid depending on tag_write.ready
-    // Since meta array is always ready, we do not need to consider meta_write.ready
-    val refill_pipe_req_dup = Vec(8, DecoupledIO(new RefillPipeReq))
+    val refill_pipe_req_dup = Vec(nDupStatus, DecoupledIO(new RefillPipeReqCtrl))
     val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
@@ -651,9 +646,19 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  arbiter_with_pipereg_N_dup(entries.map(_.io.refill_pipe_req), io.refill_pipe_req,
-  io.refill_pipe_req_dup,
-  Some("refill_pipe_req"))
+  // arbiter_with_pipereg_N_dup(entries.map(_.io.refill_pipe_req), io.refill_pipe_req,
+  // io.refill_pipe_req_dup,
+  // Some("refill_pipe_req"))
+  val out_refill_pipe_req = Wire(Decoupled(new RefillPipeReq))
+  val out_refill_pipe_req_ctrl = Wire(Decoupled(new RefillPipeReqCtrl))
+  out_refill_pipe_req_ctrl.valid := out_refill_pipe_req.valid
+  out_refill_pipe_req_ctrl.bits := out_refill_pipe_req.bits.getCtrl
+  out_refill_pipe_req.ready := out_refill_pipe_req_ctrl.ready
+  arbiter(entries.map(_.io.refill_pipe_req), out_refill_pipe_req, Some("refill_pipe_req"))
+  for (dup <- io.refill_pipe_req_dup) {
+    AddPipelineReg(out_refill_pipe_req_ctrl, dup, false.B)
+  }
+  AddPipelineReg(out_refill_pipe_req, io.refill_pipe_req, false.B)
 
   arbiter_with_pipereg(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
 
