@@ -96,16 +96,6 @@ class MainPipeStatus(implicit p: Parameters) extends DCacheBundle {
 }
 
 class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
-  val nDupDataWriteReady = 4
-  val nDupTagWriteReady = 4
-  val nDupStatus = nDupDataWriteReady + nDupTagWriteReady
-  val nDupWbReady = 4
-
-  val dataWritePort = 0
-  val metaWritePort = 1
-  val tagWritePort = 2
-  val errWritePort = 3
-
   val io = IO(new Bundle() {
     // probe queue
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
@@ -131,6 +121,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
+    val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
     val data_write_ready_dup = Vec(nDupDataWriteReady, Input(Bool()))
 
     val meta_read = DecoupledIO(new MetaReadReq)
@@ -752,6 +743,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       )
     )
   )
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_meta_w_valid := true.B }
+  .elsewhen (s3_fire_dup_for_meta_w_valid) { s3_valid_dup_for_meta_w_valid := false.B }
   // -------------------------------------------------------------------------------------
 
   // ---------------- duplicate regs for err_write.valid to solve fanout -----------------
@@ -844,6 +838,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_fire_dup_for_err_w_valid = s3_valid_dup_for_err_w_valid && s3_can_go_dup_for_err_w_valid
   when (do_amoalu_dup_for_err_w_valid) { s3_s_amoalu_dup_for_err_w_valid := true.B }
   when (s3_fire_dup_for_err_w_valid) { s3_s_amoalu_dup_for_err_w_valid := false.B }
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_err_w_valid := true.B }
+  .elsewhen (s3_fire_dup_for_err_w_valid) { s3_valid_dup_for_err_w_valid := false.B }
   // -------------------------------------------------------------------------------------
   // ---------------- duplicate regs for tag_write.valid to solve fanout -----------------
   val s3_req_miss_dup_for_tag_w_valid = RegEnable(s2_req.miss, s2_fire_to_s3)
@@ -935,6 +932,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_fire_dup_for_tag_w_valid = s3_valid_dup_for_tag_w_valid && s3_can_go_dup_for_tag_w_valid
   when (do_amoalu_dup_for_tag_w_valid) { s3_s_amoalu_dup_for_tag_w_valid := true.B }
   when (s3_fire_dup_for_tag_w_valid) { s3_s_amoalu_dup_for_tag_w_valid := false.B }
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_tag_w_valid := true.B }
+  .elsewhen (s3_fire_dup_for_tag_w_valid) { s3_valid_dup_for_tag_w_valid := false.B }
   // -------------------------------------------------------------------------------------
   // ---------------- duplicate regs for data_write.valid to solve fanout ----------------
   val s3_req_miss_dup_for_data_w_valid = RegEnable(s2_req.miss, s2_fire_to_s3)
@@ -1058,6 +1058,249 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       )
     )
   }
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_data_w_valid := true.B }
+  .elsewhen (s3_fire_dup_for_data_w_valid) { s3_valid_dup_for_data_w_valid := false.B }
+
+  val s3_valid_dup_for_data_w_bank = RegInit(VecInit(Seq.fill(DCacheBanks)(false.B))) // TODO
+  val data_write_ready_dup_for_data_w_bank = io.data_write_ready_dup.drop(dataWritePort).take(DCacheBanks)
+  val tag_write_ready_dup_for_data_w_bank = io.tag_write_ready_dup.drop(dataWritePort).take(DCacheBanks)
+  val wb_ready_dup_for_data_w_bank = io.wb_ready_dup.drop(dataWritePort).take(DCacheBanks)
+  for (i <- 0 until DCacheBanks) {
+    val s3_req_miss_dup_for_data_w_bank = RegEnable(s2_req.miss, s2_fire_to_s3)
+    val s3_req_probe_dup_for_data_w_bank = RegEnable(s2_req.probe, s2_fire_to_s3)
+    val s3_tag_match_dup_for_data_w_bank = RegEnable(s2_tag_match, s2_fire_to_s3)
+    val s3_coh_dup_for_data_w_bank = RegEnable(s2_coh, s2_fire_to_s3)
+    val s3_req_probe_param_dup_for_data_w_bank = RegEnable(s2_req.probe_param, s2_fire_to_s3)
+    val (_, _, probe_new_coh_dup_for_data_w_bank) = s3_coh_dup_for_data_w_bank.onProbe(s3_req_probe_param_dup_for_data_w_bank)
+    val s3_req_source_dup_for_data_w_bank = RegEnable(s2_req.source, s2_fire_to_s3)
+    val s3_req_cmd_dup_for_data_w_bank = RegEnable(s2_req.cmd, s2_fire_to_s3)
+    val s3_req_replace_dup_for_data_w_bank = RegEnable(s2_req.replace, s2_fire_to_s3)
+    val s3_hit_coh_dup_for_data_w_bank = RegEnable(s2_hit_coh, s2_fire_to_s3)
+    val s3_new_hit_coh_dup_for_data_w_bank = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
+    
+    val miss_update_meta_dup_for_data_w_bank = s3_req_miss_dup_for_data_w_bank
+    val probe_update_meta_dup_for_data_w_bank = s3_req_probe_dup_for_data_w_bank && s3_tag_match_dup_for_data_w_bank && s3_coh_dup_for_data_w_bank =/= probe_new_coh_dup_for_data_w_bank
+    val store_update_meta_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === STORE_SOURCE.U &&
+      !s3_req_probe_dup_for_data_w_bank &&
+      s3_hit_coh_dup_for_data_w_bank =/= s3_new_hit_coh_dup_for_data_w_bank
+    val amo_update_meta_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U &&
+      !s3_req_probe_dup_for_data_w_bank &&
+      s3_hit_coh_dup_for_data_w_bank =/= s3_new_hit_coh_dup_for_data_w_bank
+    val update_meta_dup_for_data_w_bank = (
+      miss_update_meta_dup_for_data_w_bank ||
+      probe_update_meta_dup_for_data_w_bank ||
+      store_update_meta_dup_for_data_w_bank ||
+      amo_update_meta_dup_for_data_w_bank
+    ) && !s3_req_replace_dup_for_data_w_bank
+
+    val s3_amo_hit_dup_for_data_w_bank = RegEnable(s2_amo_hit, s2_fire_to_s3)
+    val s3_s_amoalu_dup_for_data_w_bank = RegInit(false.B)
+    val amo_wait_amoalu_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U &&
+      s3_req_cmd_dup_for_data_w_bank =/= M_XLR &&
+      s3_req_cmd_dup_for_data_w_bank =/= M_XSC
+    val do_amoalu_dup_for_data_w_bank = amo_wait_amoalu_dup_for_data_w_bank && s3_valid_dup_for_data_w_bank(i) && !s3_s_amoalu_dup_for_data_w_bank
+
+    val s3_store_hit_dup_for_data_w_bank = RegEnable(s2_store_hit, s2_fire_to_s3)
+    val s3_req_addr_dup_for_data_w_bank = RegEnable(s2_req.addr, s2_fire_to_s3)
+    val s3_can_do_amo_dup_for_data_w_bank = (s3_req_miss_dup_for_data_w_bank && !s3_req_probe_dup_for_data_w_bank && s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U) ||
+      s3_amo_hit_dup_for_data_w_bank
+
+    val s3_lr_dup_for_data_w_bank = !s3_req_probe_dup_for_data_w_bank && s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U && s3_req_cmd_dup_for_data_w_bank === M_XLR
+    val s3_sc_dup_for_data_w_bank = !s3_req_probe_dup_for_data_w_bank && s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U && s3_req_cmd_dup_for_data_w_bank === M_XSC
+    val lrsc_addr_dup_for_data_w_bank = Reg(UInt())
+    val lrsc_count_dup_for_data_w_bank = RegInit(0.U(log2Ceil(LRSCCycles).W))
+
+    when (s3_valid_dup_for_data_w_bank(i) && (s3_lr_dup_for_data_w_bank || s3_sc_dup_for_data_w_bank)) {
+      when (s3_can_do_amo_dup_for_data_w_bank && s3_lr_dup_for_data_w_bank) {
+        lrsc_count_dup_for_data_w_bank := (LRSCCycles - 1).U
+        lrsc_addr_dup_for_data_w_bank := get_block_addr(s3_req_addr_dup_for_data_w_bank)
+      }.otherwise {
+        lrsc_count_dup_for_data_w_bank := 0.U
+      }
+    }.elsewhen (lrsc_count_dup_for_data_w_bank > 0.U) {
+      lrsc_count_dup_for_data_w_bank := lrsc_count_dup_for_data_w_bank - 1.U
+    }
+
+    val lrsc_valid_dup_for_data_w_bank = lrsc_count_dup_for_data_w_bank > LRSCBackOff.U
+    val s3_lrsc_addr_match_dup_for_data_w_bank = lrsc_valid_dup_for_data_w_bank && lrsc_addr_dup_for_data_w_bank === get_block_addr(s3_req_addr_dup_for_data_w_bank)
+    val s3_sc_fail_dup_for_data_w_bank = s3_sc_dup_for_data_w_bank && !s3_lrsc_addr_match_dup_for_data_w_bank
+    val s3_can_do_amo_write_dup_for_data_w_bank = s3_can_do_amo_dup_for_data_w_bank && isWrite(s3_req_cmd_dup_for_data_w_bank) && !s3_sc_fail_dup_for_data_w_bank
+    val update_data_dup_for_data_w_bank = s3_req_miss_dup_for_data_w_bank || s3_store_hit_dup_for_data_w_bank || s3_can_do_amo_write_dup_for_data_w_bank
+
+    val s3_probe_can_go_dup_for_data_w_bank = s3_req_probe_dup_for_data_w_bank &&
+      wb_ready_dup_for_data_w_bank(i) &&
+      (io.meta_write.ready || !probe_update_meta_dup_for_data_w_bank)
+    val s3_store_can_go_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === STORE_SOURCE.U && !s3_req_probe_dup_for_data_w_bank &&
+      (io.meta_write.ready || !store_update_meta_dup_for_data_w_bank) &&
+      (data_write_ready_dup_for_data_w_bank(i) || !update_data_dup_for_data_w_bank)
+    val s3_amo_can_go_dup_for_data_w_bank = s3_amo_hit_dup_for_data_w_bank &&
+      (io.meta_write.ready || !amo_update_meta_dup_for_data_w_bank) &&
+      (data_write_ready_dup_for_data_w_bank(i) || !update_data_dup_for_data_w_bank) &&
+      (s3_s_amoalu_dup_for_data_w_bank || !amo_wait_amoalu_dup_for_data_w_bank)
+    val s3_miss_can_go_dup_for_data_w_bank = s3_req_miss_dup_for_data_w_bank &&
+      (io.meta_write.ready || !amo_update_meta_dup_for_data_w_bank) &&
+      (data_write_ready_dup_for_data_w_bank(i) || !update_data_dup_for_data_w_bank) &&
+      (s3_s_amoalu_dup_for_data_w_bank || !amo_wait_amoalu_dup_for_data_w_bank) &&
+      tag_write_ready_dup_for_data_w_bank(i) &&
+      wb_ready_dup_for_data_w_bank(i)
+    val s3_replace_can_go_dup_for_data_w_bank = s3_req_replace_dup_for_data_w_bank &&
+      (s3_coh_dup_for_data_w_bank.state === ClientStates.Nothing || wb_ready_dup_for_data_w_bank(i))
+    val s3_can_go_dup_for_data_w_bank = s3_probe_can_go_dup_for_data_w_bank ||
+      s3_store_can_go_dup_for_data_w_bank ||
+      s3_amo_can_go_dup_for_data_w_bank ||
+      s3_miss_can_go_dup_for_data_w_bank ||
+      s3_replace_can_go_dup_for_data_w_bank
+    val s3_update_data_cango_dup_for_data_w_bank = s3_store_can_go_dup_for_data_w_bank || s3_amo_can_go_dup_for_data_w_bank || s3_miss_can_go_dup_for_data_w_bank
+
+    val s3_fire_dup_for_data_w_bank = s3_valid_dup_for_data_w_bank(i) && s3_can_go_dup_for_data_w_bank
+
+    when (do_amoalu_dup_for_data_w_bank) { s3_s_amoalu_dup_for_data_w_bank := true.B }
+    when (s3_fire_dup_for_data_w_bank) { s3_s_amoalu_dup_for_data_w_bank := false.B }
+
+    when (s2_fire_to_s3) { s3_valid_dup_for_data_w_bank(i) := true.B }
+    .elsewhen (s3_fire_dup_for_data_w_bank) { s3_valid_dup_for_data_w_bank(i) := false.B }
+
+    io.data_write_dup(i).valid := s3_valid_dup_for_data_w_bank(i) && s3_update_data_cango_dup_for_data_w_bank && update_data_dup_for_data_w_bank
+    io.data_write_dup(i).bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
+    io.data_write_dup(i).bits.addr := RegEnable(s2_req.vaddr, s2_fire_to_s3)
+  }
+  // -------------------------------------------------------------------------------------
+
+  // ---------------- duplicate regs for wb.valid to solve fanout ----------------
+  val s3_req_miss_dup_for_wb_valid = RegEnable(s2_req.miss, s2_fire_to_s3)
+  val s3_req_probe_dup_for_wb_valid = RegEnable(s2_req.probe, s2_fire_to_s3)
+  val s3_tag_match_dup_for_wb_valid = RegEnable(s2_tag_match, s2_fire_to_s3)
+  val s3_coh_dup_for_wb_valid = RegEnable(s2_coh, s2_fire_to_s3)
+  val s3_req_probe_param_dup_for_wb_valid = RegEnable(s2_req.probe_param, s2_fire_to_s3)
+  val (_, _, probe_new_coh_dup_for_wb_valid) = s3_coh_dup_for_wb_valid.onProbe(s3_req_probe_param_dup_for_wb_valid)
+  val s3_req_source_dup_for_wb_valid = RegEnable(s2_req.source, s2_fire_to_s3)
+  val s3_req_cmd_dup_for_wb_valid = RegEnable(s2_req.cmd, s2_fire_to_s3)
+  val s3_req_replace_dup_for_wb_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
+  val s3_hit_coh_dup_for_wb_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
+  val s3_new_hit_coh_dup_for_wb_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
+  
+  val miss_update_meta_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid
+  val probe_update_meta_dup_for_wb_valid = s3_req_probe_dup_for_wb_valid && s3_tag_match_dup_for_wb_valid && s3_coh_dup_for_wb_valid =/= probe_new_coh_dup_for_wb_valid
+  val store_update_meta_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === STORE_SOURCE.U &&
+    !s3_req_probe_dup_for_wb_valid &&
+    s3_hit_coh_dup_for_wb_valid =/= s3_new_hit_coh_dup_for_wb_valid
+  val amo_update_meta_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === AMO_SOURCE.U &&
+    !s3_req_probe_dup_for_wb_valid &&
+    s3_hit_coh_dup_for_wb_valid =/= s3_new_hit_coh_dup_for_wb_valid
+  val update_meta_dup_for_wb_valid = (
+    miss_update_meta_dup_for_wb_valid ||
+    probe_update_meta_dup_for_wb_valid ||
+    store_update_meta_dup_for_wb_valid ||
+    amo_update_meta_dup_for_wb_valid
+  ) && !s3_req_replace_dup_for_wb_valid
+
+  val s3_valid_dup_for_wb_valid = RegInit(false.B)
+  val s3_amo_hit_dup_for_wb_valid = RegEnable(s2_amo_hit, s2_fire_to_s3)
+  val s3_s_amoalu_dup_for_wb_valid = RegInit(false.B)
+  val amo_wait_amoalu_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === AMO_SOURCE.U &&
+    s3_req_cmd_dup_for_wb_valid =/= M_XLR &&
+    s3_req_cmd_dup_for_wb_valid =/= M_XSC
+  val do_amoalu_dup_for_wb_valid = amo_wait_amoalu_dup_for_wb_valid && s3_valid_dup_for_wb_valid && !s3_s_amoalu_dup_for_wb_valid
+
+  val s3_store_hit_dup_for_wb_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
+  val s3_req_addr_dup_for_wb_valid = RegEnable(s2_req.addr, s2_fire_to_s3)
+  val s3_can_do_amo_dup_for_wb_valid = (s3_req_miss_dup_for_wb_valid && !s3_req_probe_dup_for_wb_valid && s3_req_source_dup_for_wb_valid === AMO_SOURCE.U) ||
+    s3_amo_hit_dup_for_wb_valid
+
+  val s3_lr_dup_for_wb_valid = !s3_req_probe_dup_for_wb_valid && s3_req_source_dup_for_wb_valid === AMO_SOURCE.U && s3_req_cmd_dup_for_wb_valid === M_XLR
+  val s3_sc_dup_for_wb_valid = !s3_req_probe_dup_for_wb_valid && s3_req_source_dup_for_wb_valid === AMO_SOURCE.U && s3_req_cmd_dup_for_wb_valid === M_XSC
+  val lrsc_addr_dup_for_wb_valid = Reg(UInt())
+  val lrsc_count_dup_for_wb_valid = RegInit(0.U(log2Ceil(LRSCCycles).W))
+
+  when (s3_valid_dup_for_wb_valid && (s3_lr_dup_for_wb_valid || s3_sc_dup_for_wb_valid)) {
+    when (s3_can_do_amo_dup_for_wb_valid && s3_lr_dup_for_wb_valid) {
+      lrsc_count_dup_for_wb_valid := (LRSCCycles - 1).U
+      lrsc_addr_dup_for_wb_valid := get_block_addr(s3_req_addr_dup_for_wb_valid)
+    }.otherwise {
+      lrsc_count_dup_for_wb_valid := 0.U
+    }
+  }.elsewhen (lrsc_count_dup_for_wb_valid > 0.U) {
+    lrsc_count_dup_for_wb_valid := lrsc_count_dup_for_wb_valid - 1.U
+  }
+
+  val lrsc_valid_dup_for_wb_valid = lrsc_count_dup_for_wb_valid > LRSCBackOff.U
+  val s3_lrsc_addr_match_dup_for_wb_valid = lrsc_valid_dup_for_wb_valid && lrsc_addr_dup_for_wb_valid === get_block_addr(s3_req_addr_dup_for_wb_valid)
+  val s3_sc_fail_dup_for_wb_valid = s3_sc_dup_for_wb_valid && !s3_lrsc_addr_match_dup_for_wb_valid
+  val s3_can_do_amo_write_dup_for_wb_valid = s3_can_do_amo_dup_for_wb_valid && isWrite(s3_req_cmd_dup_for_wb_valid) && !s3_sc_fail_dup_for_wb_valid
+  val update_data_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid || s3_store_hit_dup_for_wb_valid || s3_can_do_amo_write_dup_for_wb_valid
+
+  val s3_probe_can_go_dup_for_wb_valid = s3_req_probe_dup_for_wb_valid &&
+    io.wb_ready_dup(wbPort) &&
+    (io.meta_write.ready || !probe_update_meta_dup_for_wb_valid)
+  val s3_store_can_go_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === STORE_SOURCE.U && !s3_req_probe_dup_for_wb_valid &&
+    (io.meta_write.ready || !store_update_meta_dup_for_wb_valid) &&
+    (io.data_write_ready_dup(wbPort) || !update_data_dup_for_wb_valid)
+  val s3_amo_can_go_dup_for_wb_valid = s3_amo_hit_dup_for_wb_valid &&
+    (io.meta_write.ready || !amo_update_meta_dup_for_wb_valid) &&
+    (io.data_write_ready_dup(wbPort) || !update_data_dup_for_wb_valid) &&
+    (s3_s_amoalu_dup_for_wb_valid || !amo_wait_amoalu_dup_for_wb_valid)
+  val s3_miss_can_go_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid &&
+    (io.meta_write.ready || !amo_update_meta_dup_for_wb_valid) &&
+    (io.data_write_ready_dup(wbPort) || !update_data_dup_for_wb_valid) &&
+    (s3_s_amoalu_dup_for_wb_valid || !amo_wait_amoalu_dup_for_wb_valid) &&
+    io.tag_write_ready_dup(wbPort) &&
+    io.wb_ready_dup(wbPort)
+  val s3_replace_can_go_dup_for_wb_valid = s3_req_replace_dup_for_wb_valid &&
+    (s3_coh_dup_for_wb_valid.state === ClientStates.Nothing || io.wb_ready_dup(wbPort))
+  val s3_can_go_dup_for_wb_valid = s3_probe_can_go_dup_for_wb_valid ||
+    s3_store_can_go_dup_for_wb_valid ||
+    s3_amo_can_go_dup_for_wb_valid ||
+    s3_miss_can_go_dup_for_wb_valid ||
+    s3_replace_can_go_dup_for_wb_valid
+  val s3_update_data_cango_dup_for_wb_valid = s3_store_can_go_dup_for_wb_valid || s3_amo_can_go_dup_for_wb_valid || s3_miss_can_go_dup_for_wb_valid
+
+  val s3_fire_dup_for_wb_valid = s3_valid_dup_for_wb_valid && s3_can_go_dup_for_wb_valid
+  when (do_amoalu_dup_for_wb_valid) { s3_s_amoalu_dup_for_wb_valid := true.B }
+  when (s3_fire_dup_for_wb_valid) { s3_s_amoalu_dup_for_wb_valid := false.B }
+
+  val s3_banked_store_wmask_dup_for_wb_valid = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
+  val s3_req_word_idx_dup_for_wb_valid = RegEnable(s2_req.word_idx, s2_fire_to_s3)
+  val s3_replace_nothing_dup_for_wb_valid = s3_req_replace_dup_for_wb_valid && s3_coh_dup_for_wb_valid.state === ClientStates.Nothing
+
+  val s3_sc_data_merged_dup_for_wb_valid = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+  val s3_req_amo_data_dup_for_wb_valid = RegEnable(s2_req.amo_data, s2_fire_to_s3)
+  val s3_req_amo_mask_dup_for_wb_valid = RegEnable(s2_req.amo_mask, s2_fire_to_s3)
+  for (i <- 0 until DCacheBanks) {
+    val old_data = s3_store_data_merged(i)
+    s3_sc_data_merged_dup_for_wb_valid(i) := mergePutData(old_data, s3_req_amo_data_dup_for_wb_valid,
+      Mux(
+        s3_req_word_idx_dup_for_wb_valid === i.U && !s3_sc_fail_dup_for_wb_valid,
+        s3_req_amo_mask_dup_for_wb_valid,
+        0.U(wordBytes.W)
+      )
+    )
+  }
+
+  val s3_need_replacement_dup_for_wb_valid = RegEnable(s2_need_replacement, s2_fire_to_s3)
+  val miss_wb_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid && s3_need_replacement_dup_for_wb_valid &&
+    s3_coh_dup_for_wb_valid.state =/= ClientStates.Nothing
+  val need_wb_dup_for_wb_valid = miss_wb_dup_for_wb_valid || s3_req_probe_dup_for_wb_valid || s3_req_replace_dup_for_wb_valid
+
+  val s3_tag_dup_for_wb_valid = RegEnable(s2_tag, s2_fire_to_s3)
+
+  val (_, probe_shrink_param_dup_for_wb_valid, _) = s3_coh_dup_for_wb_valid.onProbe(s3_req_probe_param_dup_for_wb_valid)
+  val (_, miss_shrink_param_dup_for_wb_valid, _) = s3_coh_dup_for_wb_valid.onCacheControl(M_FLUSH)
+  val writeback_param_dup_for_wb_valid = Mux(
+    s3_req_probe_dup_for_wb_valid,
+    probe_shrink_param_dup_for_wb_valid,
+    miss_shrink_param_dup_for_wb_valid
+  )
+  val writeback_data_dup_for_wb_valid = if (dcacheParameters.alwaysReleaseData) {
+    s3_tag_match_dup_for_wb_valid && s3_req_probe_dup_for_wb_valid && RegEnable(s2_req.probe_need_data, s2_fire_to_s3) ||
+      s3_coh_dup_for_wb_valid === ClientStates.Dirty || (miss_wb_dup_for_wb_valid || s3_req_replace_dup_for_wb_valid) && s3_coh_dup_for_wb_valid.state =/= ClientStates.Nothing
+  } else {
+    s3_tag_match_dup_for_wb_valid && s3_req_probe_dup_for_wb_valid && RegEnable(s2_req.probe_need_data, s2_fire_to_s3) || s3_coh_dup_for_wb_valid === ClientStates.Dirty
+  }
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_wb_valid := true.B }
+  .elsewhen (s3_fire_dup_for_wb_valid) { s3_valid_dup_for_wb_valid := false.B }
+  
   // -------------------------------------------------------------------------------------
 
   val s3_fire = s3_valid_dup(4) && s3_can_go
@@ -1065,18 +1308,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     s3_valid := true.B
     s3_valid_dup.foreach(_ := true.B)
     s3_valid_dup_for_status.foreach(_ := true.B)
-    s3_valid_dup_for_data_w_valid := true.B
-    s3_valid_dup_for_meta_w_valid := true.B
-    s3_valid_dup_for_err_w_valid := true.B
-    s3_valid_dup_for_tag_w_valid := true.B
   }.elsewhen (s3_fire) {
     s3_valid := false.B
     s3_valid_dup.foreach(_ := false.B)
     s3_valid_dup_for_status.foreach(_ := false.B)
-    s3_valid_dup_for_data_w_valid := false.B
-    s3_valid_dup_for_meta_w_valid := false.B
-    s3_valid_dup_for_err_w_valid := false.B
-    s3_valid_dup_for_tag_w_valid := false.B
   }
   s3_ready := !s3_valid_dup(5) || s3_can_go
   s3_s0_set_conflict := s3_valid_dup(6) && s3_idx_dup(0) === s0_idx
@@ -1210,26 +1445,26 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   assert(RegNext(!io.tag_write.valid || !s3_req.replace))
   assert(RegNext(!io.data_write.valid || !s3_req.replace))
 
-  io.wb.valid := s3_valid_dup(13) && (
+  io.wb.valid := s3_valid_dup_for_wb_valid && (
     // replace
-    s3_req_replace_dup(4) && !s3_replace_nothing ||
+    s3_req_replace_dup_for_wb_valid && !s3_replace_nothing_dup_for_wb_valid ||
     // probe can go to wbq
-    s3_req_probe_dup(9) && (io.meta_write.ready || !probe_update_meta) ||
+    s3_req_probe_dup_for_wb_valid && (io.meta_write.ready || !probe_update_meta_dup_for_wb_valid) ||
       // amo miss can go to wbq
-      s3_req_miss_dup(8) &&
-        (io.meta_write.ready || !amo_update_meta) &&
-        (io.data_write.ready || !update_data) &&
-        (s3_s_amoalu_dup(2) || !amo_wait_amoalu) &&
-        io.tag_write.ready
-    ) && need_wb
+      s3_req_miss_dup_for_wb_valid &&
+        (io.meta_write.ready || !amo_update_meta_dup_for_wb_valid) &&
+        (io.data_write_ready_dup(wbPort) || !update_data_dup_for_wb_valid) &&
+        (s3_s_amoalu_dup_for_wb_valid || !amo_wait_amoalu_dup_for_wb_valid) &&
+        io.tag_write_ready_dup(wbPort)
+    ) && need_wb_dup_for_wb_valid
 
-  io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
-  io.wb.bits.param := writeback_param
-  io.wb.bits.voluntary := s3_req_miss_dup(9) || s3_req_replace_dup(5)
-  io.wb.bits.hasData := writeback_data
-  io.wb.bits.dirty := s3_coh_dup(5) === ClientStates.Dirty
+  io.wb.bits.addr := get_block_addr(Cat(s3_tag_dup_for_wb_valid, get_untag(s3_req.vaddr)))
+  io.wb.bits.param := writeback_param_dup_for_wb_valid
+  io.wb.bits.voluntary := s3_req_miss_dup_for_wb_valid || s3_req_replace_dup_for_wb_valid
+  io.wb.bits.hasData := writeback_data_dup_for_wb_valid
+  io.wb.bits.dirty := s3_coh_dup_for_wb_valid === ClientStates.Dirty
   io.wb.bits.data := s3_data.asUInt()
-  io.wb.bits.delay_release := s3_req_replace_dup(6)
+  io.wb.bits.delay_release := s3_req_replace_dup_for_wb_valid
   io.wb.bits.miss_id := s3_req.miss_id
 
   io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe)
