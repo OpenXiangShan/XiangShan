@@ -250,7 +250,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // mem -> miss queue
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_mq
-  llptw_mem.resp.bits.id := mem.d.bits.source
+  llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
   // mem -> ptw
   ptw.io.mem.req.ready := mem.a.ready
   ptw.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
