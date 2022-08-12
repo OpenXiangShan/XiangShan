@@ -1294,6 +1294,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   } else {
     s3_tag_match_dup_for_wb_valid && s3_req_probe_dup_for_wb_valid && RegEnable(s2_req.probe_need_data, s2_fire_to_s3) || s3_coh_dup_for_wb_valid === ClientStates.Dirty
   }
+
+  when (s2_fire_to_s3) { s3_valid_dup_for_wb_valid := true.B }
+  .elsewhen (s3_fire_dup_for_wb_valid) { s3_valid_dup_for_wb_valid := false.B }
   
   // -------------------------------------------------------------------------------------
 
