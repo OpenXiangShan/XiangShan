@@ -164,7 +164,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.sfence := sfence
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
-
   // mem req
   def blockBytes_align(addr: UInt) = {
     Cat(addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W))
