@@ -1155,6 +1155,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     val s3_fire_dup_for_data_w_bank = s3_valid_dup_for_data_w_bank(i) && s3_can_go_dup_for_data_w_bank
 
+    when (do_amoalu_dup_for_data_w_bank) { s3_s_amoalu_dup_for_data_w_bank := true.B }
+    when (s3_fire_dup_for_data_w_bank) { s3_s_amoalu_dup_for_data_w_bank := false.B }
+
     when (s2_fire_to_s3) { s3_valid_dup_for_data_w_bank(i) := true.B }
     .elsewhen (s3_fire_dup_for_data_w_bank) { s3_valid_dup_for_data_w_bank(i) := false.B }
 
