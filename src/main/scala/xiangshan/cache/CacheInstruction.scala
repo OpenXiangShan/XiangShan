@@ -28,7 +28,7 @@ object CacheRegMap{
   }
 }
 
-trait CacheControlConst{
+trait CacheControlConst{ 
   def maxDataRowSupport = 8
 }
 
@@ -141,12 +141,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
-    val cache_req_dup_0 = Valid(new CacheCtrlReqInfo)
-    val cache_req_dup_1 = Valid(new CacheCtrlReqInfo)
-    val cache_req_dup_2 = Valid(new CacheCtrlReqInfo)
-    val cache_req_dup_3 = Valid(new CacheCtrlReqInfo)
-    val cacheOp_req_bits_opCode_dup_0 = Output(UInt(XLEN.W))
-    val cacheOp_req_bits_opCode_dup_1 = Output(UInt(XLEN.W))
+    val cache_req_dup = Vec(11, Valid(new CacheCtrlReqInfo))
+    val cacheOp_req_bits_opCode_dup = Output(Vec(11, UInt(XLEN.W)))
     val error = Flipped(new L1CacheErrorInfo)
   })
 
@@ -161,9 +157,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Translate CSR write to cache op
   val translated_cache_req                  = Reg(new CacheCtrlReqInfo)
-  val translated_cache_req_opCode_dup_vec   = Reg(Vec(4, UInt(XLEN.W)))
-  val translated_cache_req_bank_num_dup_vec = Reg(Vec(4, UInt(XLEN.W)))
-  
+  val translated_cache_req_opCode_dup_vec   = Reg(Vec(11, UInt(XLEN.W)))
+  val translated_cache_req_bank_num_dup_vec = Reg(Vec(11, UInt(XLEN.W)))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
@@ -209,35 +204,21 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   // Send cache op to cache
-  io.cache.req.valid       := RegNext(cache_op_start)
-  io.cache_req_dup_0.valid := RegNext(cache_op_start)
-  io.cache_req_dup_1.valid := RegNext(cache_op_start)
-  io.cache_req_dup_2.valid := RegNext(cache_op_start)
-  io.cache_req_dup_3.valid := RegNext(cache_op_start)
-  
-  io.cache.req.bits := translated_cache_req
-  io.cache_req_dup_0.bits := translated_cache_req
-  io.cache_req_dup_1.bits := translated_cache_req
-  io.cache_req_dup_2.bits := translated_cache_req
-  io.cache_req_dup_3.bits := translated_cache_req
+  io.cache.req.valid := RegNext(cache_op_start)
+  io.cache_req_dup.map(dup => dup.valid := RegNext(cache_op_start))
 
+  io.cache.req.bits := translated_cache_req
+  io.cache_req_dup.map(dup => dup.bits := translated_cache_req)
   when(io.cache.req.fire()){
     wait_cache_op_resp := true.B
   }
 
-  io.cacheOp_req_bits_opCode_dup_0 := translated_cache_req_opCode_dup_vec(0)
-  io.cacheOp_req_bits_opCode_dup_1 := translated_cache_req_opCode_dup_vec(1)
+  io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{case (dup, i) => dup := translated_cache_req_opCode_dup_vec(i)}
 
-  io.cache_req_dup_0.bits.opCode := translated_cache_req_opCode_dup_vec(0)
-  io.cache_req_dup_1.bits.opCode := translated_cache_req_opCode_dup_vec(1)
-  io.cache_req_dup_2.bits.opCode := translated_cache_req_opCode_dup_vec(2)
-  io.cache_req_dup_3.bits.opCode := translated_cache_req_opCode_dup_vec(3)
-  
-  io.cache_req_dup_0.bits.bank_num := translated_cache_req_bank_num_dup_vec(0)
-  io.cache_req_dup_1.bits.bank_num := translated_cache_req_bank_num_dup_vec(1)
-  io.cache_req_dup_2.bits.bank_num := translated_cache_req_bank_num_dup_vec(2)
-  io.cache_req_dup_3.bits.bank_num := translated_cache_req_bank_num_dup_vec(3)
-
+  io.cache_req_dup.zipWithIndex.map{case (dup, i) => {
+    dup.bits.opCode := translated_cache_req_opCode_dup_vec(i)
+    dup.bits.bank_num := translated_cache_req_bank_num_dup_vec(i)
+  }}
 
   // Receive cache op resp from cache
   val raw_cache_resp = Reg(new CacheCtrlRespInfo)

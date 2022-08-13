@@ -678,10 +678,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  dataArray.io.cache_req_dup(0) := cacheOpDecoder.io.cache_req_dup_0
-  dataArray.io.cache_req_dup(1) := cacheOpDecoder.io.cache_req_dup_1
-  dataArray.io.cache_req_dup(2) := cacheOpDecoder.io.cache_req_dup_2
-  dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup_3
+  dataArray.io.cache_req_dup(0) := cacheOpDecoder.io.cache_req_dup(0)
+  dataArray.io.cache_req_dup(1) := cacheOpDecoder.io.cache_req_dup(1)
+  dataArray.io.cache_req_dup(2) := cacheOpDecoder.io.cache_req_dup(2)
+  dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup(3)
 
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid := 
