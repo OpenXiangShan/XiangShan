@@ -171,7 +171,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
-  io.block_addr.valid := state_dup(0) =/= s_invalid
+  io.block_addr.valid  := state_dup(0) =/= s_invalid
   io.block_addr.bits   := paddr_dup_0
 
   s_data_override := true.B // data_override takes only 1 cycle
