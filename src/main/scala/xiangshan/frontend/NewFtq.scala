@@ -585,7 +585,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   when (last_cycle_bpu_in) {
     entry_fetch_status(last_cycle_bpu_in_idx) := f_to_send
-    commitStateQueue(last_cycle_bpu_in_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     cfiIndex_vec(last_cycle_bpu_in_idx) := last_cycle_cfiIndex
     pred_stage(last_cycle_bpu_in_idx) := last_cycle_bpu_in_stage
 
@@ -607,7 +606,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         val perSetEntries = FtqSize / extra_copyNum_for_commitStateQueue // 32
         require(FtqSize % extra_copyNum_for_commitStateQueue == 0)
         for (j <- 0 until perSetEntries) {
-          commitStateQueue(i*perSetEntries+j) := VecInit(Seq.fill(PredictWidth)(c_invalid))
+          when (ptr.value === (i*perSetEntries+j).U) {
+            commitStateQueue(i*perSetEntries+j) := VecInit(Seq.fill(PredictWidth)(c_invalid))
+          }
         }
       }
   }
