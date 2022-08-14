@@ -664,7 +664,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     name = Some("main_pipe_atomic_req")
   )
 
-  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr_dup(0) === mainPipe.io.lrsc_locked_block.bits)
+  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
 
   //----------------------------------------
   // replace (main pipe)
@@ -737,7 +737,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wb.io.release_update := mainPipe.io.release_update
 
   io.lsu.release.valid := RegNext(wb.io.req.fire())
-  io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr_dup(0))
+  io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)
   // Note: RegNext() is required by:
   // * load queue released flag update logic
   // * load / load violation check logic

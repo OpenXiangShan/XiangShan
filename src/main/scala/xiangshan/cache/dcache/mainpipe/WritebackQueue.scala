@@ -39,7 +39,7 @@ class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
 
   def dump() = {
     XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
-      addr_dup(0), param, voluntary, hasData)
+      addr, param, voluntary, hasData)
   }
 }
 
@@ -52,7 +52,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
 
   override def dump() = {
     XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
-      addr_dup(0), param, voluntary, hasData, data)
+      addr, param, voluntary, hasData, data)
   }
 
   def toWritebackReqWodata(): WritebackReqWodata = {
@@ -138,7 +138,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //                     or: s_invalid -> s_sleep -> s_release_req -> s_release_resp -> s_release_req
   //                        (send a ProbeAck after Release transaction is over)
   val state_dup = RegInit(VecInit(Seq.fill(4)(s_invalid)))
-  val state_dup_for_mp = RegInit(VecInit(Seq.fill(4)(s_invalid)))
+  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid)))
 
   // internal regs
   // remaining beats
@@ -171,8 +171,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
-  io.block_addr.valid  := state_dup(0) =/= s_invalid
-  io.block_addr.bits   := req.addr_dup(0)
+  io.block_addr.valid := state_dup(0) =/= s_invalid
+  io.block_addr.bits   := paddr_dup_0
 
   s_data_override := true.B // data_override takes only 1 cycle
   s_data_merge := true.B // data_merge takes only 1 cycle
