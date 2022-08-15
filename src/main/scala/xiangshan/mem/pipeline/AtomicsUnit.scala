@@ -49,6 +49,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   val s_invalid :: s_tlb :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
   val state = RegInit(s_invalid)
+  val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
@@ -77,8 +78,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   // assign default value to output signals
   io.in.ready          := false.B
-  io.out.valid         := false.B
-  io.out.bits          := DontCare
 
   io.dcache.req.valid  := false.B
   io.dcache.req.bits   := DontCare
@@ -94,19 +93,19 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   when (state === s_invalid) {
     io.in.ready := true.B
-    when (io.in.fire()) {
+    when (io.in.fire) {
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
       state := s_tlb
     }
   }
 
-  when (io.storeDataIn.fire()) {
+  when (io.storeDataIn.fire) {
     in.src(1) := io.storeDataIn.bits.data
     data_valid := true.B
   }
 
-  assert(!(io.storeDataIn.fire() && data_valid), "atomic unit re-receive data")
+  assert(!(io.storeDataIn.fire && data_valid), "atomic unit re-receive data")
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
@@ -153,6 +152,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
           // if there are exceptions, no need to execute it
           state := s_finish
+          out_valid := true.B
           atom_override_xtval := true.B
         } .otherwise {
           state := s_pm
@@ -176,6 +176,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val exception_pa = pmp.st
     when (exception_va || exception_pa) {
       state := s_finish
+      out_valid := true.B
       atom_override_xtval := true.B
     }.otherwise {
       state := s_flush_sbuffer_req
@@ -228,7 +229,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.id   := DontCare
 
-    when(io.dcache.req.fire()){
+    when(io.dcache.req.fire){
       state := s_cache_resp
       paddr_reg := io.dcache.req.bits.addr
       data_reg := io.dcache.req.bits.data
@@ -239,7 +240,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   when (state === s_cache_resp) {
     io.dcache.resp.ready := data_valid
-    when(io.dcache.resp.fire()) {
+    when(io.dcache.resp.fire) {
       is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
@@ -288,22 +289,26 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
       resp_data := resp_data_wire
       state := s_finish
+      out_valid := true.B
     }
   }
 
+  io.out.valid := out_valid
+  XSError((state === s_finish) =/= out_valid, "out_valid reg error\n")
+  io.out.bits := DontCare
+  io.out.bits.uop := in.uop
+  io.out.bits.uop.cf.exceptionVec := exceptionVec
+  io.out.bits.data := resp_data
+  io.out.bits.redirectValid := false.B
+  io.out.bits.debug.isMMIO := is_mmio
+  io.out.bits.debug.paddr := paddr
+  when (io.out.fire) {
+    XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
+    state := s_invalid
+    out_valid := false.B
+  }
+
   when (state === s_finish) {
-    io.out.valid := true.B
-    io.out.bits.uop := in.uop
-    io.out.bits.uop.cf.exceptionVec := exceptionVec
-    io.out.bits.data := resp_data
-    io.out.bits.redirectValid := false.B
-    io.out.bits.redirect := DontCare
-    io.out.bits.debug.isMMIO := is_mmio
-    io.out.bits.debug.paddr := paddr
-    when (io.out.fire()) {
-      XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
-      state := s_invalid
-    }
     data_valid := false.B
   }
 
@@ -390,7 +395,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
     difftest.io.coreid     := io.hartId
-    difftest.io.atomicResp := io.dcache.resp.fire()
+    difftest.io.atomicResp := io.dcache.resp.fire
     difftest.io.atomicAddr := paddr_reg
     difftest.io.atomicData := data_reg
     difftest.io.atomicMask := mask_reg
