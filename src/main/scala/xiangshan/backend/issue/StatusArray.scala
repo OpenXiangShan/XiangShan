@@ -88,7 +88,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isFirstIssue = Vec(params.numSelect, Output(Bool()))
     val allSrcReady = Vec(params.numSelect, Output(Bool()))
     val updateMidState = Input(UInt(params.numEntries.W))
-    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq
+    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1
     val deqResp = Vec(deqRespWidth, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()

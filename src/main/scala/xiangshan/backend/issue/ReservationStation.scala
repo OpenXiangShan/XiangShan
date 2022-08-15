@@ -531,11 +531,17 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // For FMAs that can be scheduled multiple times, only when
       // all source operands are ready we dequeue the instruction.
       val allSrcReady = if (params.hasMidState) s1_all_src_ready(i) else true.B
-      statusArray.io.deqResp(i).valid := s1_issuePtrOH(i).valid && s1_out(i).ready && allSrcReady
-      statusArray.io.deqResp(i).bits.rsMask := s1_issuePtrOH(i).bits
-      statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
-      statusArray.io.deqResp(i).bits.resptype := DontCare
-      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
+      statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready && allSrcReady
+      statusArray.io.deqResp(2*i).bits.rsMask := s1_in_selectPtrOH(i)
+      statusArray.io.deqResp(2*i).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(2*i).bits.resptype := DontCare
+      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := DontCare
+      val allSrcReady1 = if (params.hasMidState) statusArray.io.update(i).data.allSrcReady else true.B
+      statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready && allSrcReady1
+      statusArray.io.deqResp(2*i+1).bits.rsMask := s1_allocatePtrOH_dup.head(i)
+      statusArray.io.deqResp(2*i+1).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(2*i+1).bits.resptype := DontCare
+      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
     }
 
     if (io.fastWakeup.isDefined) {
@@ -549,6 +555,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       io.fastWakeup.get(i) := wakeupQueue.io.out
       XSPerfAccumulate(s"fast_blocked_$i", s1_issuePtrOH(i).valid && fuCheck && !s1_out(i).ready)
     }
+  }
+  if (!io.feedback.isDefined) {
+    val allSrcReady = if (params.hasMidState) statusArray.io.allSrcReady.last else true.B
+    statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready)) && allSrcReady
+    statusArray.io.deqResp.last.bits.rsMask := s1_in_oldestPtrOH.bits
+    statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
+    statusArray.io.deqResp.last.bits.resptype := DontCare
+    statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
   }
   statusArray.io.updateMidState := 0.U
 
