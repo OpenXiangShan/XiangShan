@@ -530,8 +530,16 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
   meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
 
-  metaArray.io.write <> meta_write_arb.io.out
-  dataArray.io.write <> missUnit.io.data_write
+  //metaArray.io.write <> meta_write_arb.io.out
+  //dataArray.io.write <> missUnit.io.data_write
+
+  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
+  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
+  meta_write_arb.io.out.ready := true.B
+
+  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
+  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
+  missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
   replacePipe.io.csr_parity_enable := io.csr_parity_enable
