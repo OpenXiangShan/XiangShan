@@ -259,16 +259,18 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2.io.r.req.bits.apply(setIdx = ridx)
 
     // delay one cycle after sram read
+    val delay_vpn = stageDelay(0).bits.req_info.vpn
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = DataHoldBypass(getl2vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
+    val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
+      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid) && v })
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = VecInit(ramDatas.zip(vVec).map { case (wayData, v) =>
-      wayData.entries.hit(check_vpn, io.csr_dup(1).satp.asid) && v })
+    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
@@ -301,17 +303,18 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l3.io.r.req.bits.apply(setIdx = ridx)
 
     // delay one cycle after sram read
+    val delay_vpn = stageDelay(0).bits.req_info.vpn
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = DataHoldBypass(getl3vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
-    val bypass_delay = DataHoldBypass(refill_bypass(stageDelay(0).bits.req_info.vpn, 2), stageDelay_valid_1cycle || io.refill.valid)
+    val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
+      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid) && v })
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = VecInit(ramDatas.zip(vVec).map{ case (wayData, v) =>
-      wayData.entries.hit(check_vpn, io.csr_dup(2).satp.asid) && v })
+    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
