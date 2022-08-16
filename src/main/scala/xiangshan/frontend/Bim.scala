@@ -50,14 +50,14 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   val s1_read = bim.io.r.resp.data
 
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 
   val s1_latch_taken_mask = VecInit(Cat((0 until numBr reverse).map(i => s1_read(i)(1))).asBools())
   val s1_latch_meta       = s1_read.asUInt()
   override val meta_size = s1_latch_meta.getWidth
 
-  // io.out.resp.s1.full_pred.br_taken_mask := s1_latch_taken_mask
-  // io.out.resp.s2.full_pred.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
+  // io.out.s1.full_pred.br_taken_mask := s1_latch_taken_mask
+  // io.out.s2.full_pred.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
   io.out.last_stage_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire) // TODO: configurable with total-stages
 

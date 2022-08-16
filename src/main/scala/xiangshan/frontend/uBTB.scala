@@ -162,7 +162,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
 
 
-  // io.out.resp
+  // io.out
   val s1_data_ridx = RegEnable(s0_data_ridx, io.s0_fire)
   // only for timing purposes
   def s0_select_bits = 3
@@ -182,11 +182,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc)}\n")
 
-  io.out.resp.s1.minimal_pred.fromMicroBTBEntry(
+  io.out.s1.minimal_pred.fromMicroBTBEntry(
     resp_valid && shouldNotFallThru && !pred_may_invalid_by_update && io.ctrl.ubtb_enable,
     dataMem.io.r.resp.data(0), s1_pc
   ) // invalid when update
-  io.out.resp.s1.is_minimal := true.B
+  io.out.s1.is_minimal := true.B
 
   outMeta.ftPred := fallThruPredRAM.io.rdata
   io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
@@ -218,7 +218,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
 
   // XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
-  XSDebug("target=%x\n", io.out.resp.s1.getTarget)
+  XSDebug("target=%x\n", io.out.s1.getTarget)
 
   XSDebug(u_valid, "[update]Update from ftq\n")
   XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, ubtbAddr.getTag(u_pc))

@@ -130,28 +130,7 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
 
 
 
-class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasEntry = new RASEntry
-  // val specCnt = Vec(numBr, UInt(10.W))
-  // val ghist = new ShiftingGlobalHistory
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
-
-  val histPtr = new CGHPtr
-
-  def fromBranchPrediction(resp: BranchPredictionBundle) = {
-    assert(!resp.is_minimal)
-    this.rasSp       := resp.spec_info.rasSp
-    this.rasEntry    := resp.spec_info.rasTop
-    this.folded_hist := resp.spec_info.folded_hist
-    this.afhob       := resp.spec_info.afhob
-    this.lastBrNumOH := resp.spec_info.lastBrNumOH
-    this.histPtr     := resp.spec_info.histPtr
-    this
-  }
-}
+class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {}
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val meta = UInt(MaxMetaLength.W)
@@ -538,7 +517,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // these info is intended to enq at the last stage of bpu
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_redirect_sram.io.wdata.fromBranchPrediction(io.fromBpu.resp.bits.lastStage)
+  ftq_redirect_sram.io.wdata := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
   println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
@@ -546,12 +525,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.meta
+  ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1))
   ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.lastStage.ftb_entry
+  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
 
 
   // multi-write
@@ -1104,7 +1083,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.cfi_idx     := commit_cfi
   update.full_target := commit_target
   update.from_stage  := commit_stage
-  update.fromFtqRedirectSram(commit_spec_meta)
+  update.spec_info   := commit_spec_meta
 
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
@@ -1247,17 +1226,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("bpu_to_ifu_bubble", bpuPtr === ifuPtr)
 
   val from_bpu = io.fromBpu.resp.bits
-  def in_entry_len_map_gen(resp: BranchPredictionBundle)(stage: String) = {
-    assert(!resp.is_minimal)
-    val entry_len = (resp.ftb_entry.getFallThrough(resp.pc) - resp.pc) >> instOffsetBits
+  def in_entry_len_map_gen(resp: BpuToFtqBundle)(stage: String) = {
+    val entry_len = (resp.last_stage_ftb_entry.getFallThrough(resp.s3.pc) - resp.s3.pc) >> instOffsetBits
     val entry_len_recording_vec = (1 to PredictWidth+1).map(i => entry_len === i.U)
     val entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.valid)
+      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.s3.valid)
     ).foldLeft(Map[String, UInt]())(_+_)
     entry_len_map
   }
-  val s2_entry_len_map = in_entry_len_map_gen(from_bpu.s2)("s2")
-  val s3_entry_len_map = in_entry_len_map_gen(from_bpu.s3)("s3")
+  val s3_entry_len_map = in_entry_len_map_gen(from_bpu)("s3")
 
   val to_ifu = io.toIfu.req.bits
 
@@ -1363,7 +1340,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
     "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full),
     "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
-  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s2_entry_len_map ++
+  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++
   s3_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map ++
   mispred_stage_map ++ br_mispred_stage_map ++ jalr_mispred_stage_map ++
   correct_stage_map ++ br_correct_stage_map ++ jalr_correct_stage_map

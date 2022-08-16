@@ -588,12 +588,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire)
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire)
 
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
 
-  // val ftb_hit = io.in.bits.resp_in(0).s2.full_pred.hit
-  val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry
-  val resp_s2 = io.out.resp.s2
+  val resp_s2 = io.out.s2
 
   // Update logic
   val u_valid = io.update.valid
@@ -890,7 +888,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
   XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
   XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hits=%b, takens=%b\n",
-    debug_pc_s2, io.out.resp.s2.getTarget, s2_provideds.asUInt, s2_tageTakens.asUInt)
+    debug_pc_s2, io.out.s2.getTarget, s2_provideds.asUInt, s2_tageTakens.asUInt)
 
   for (b <- 0 until TageBanks) {
     for (i <- 0 until TageNTables) {

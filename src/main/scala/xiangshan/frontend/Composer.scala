@@ -26,7 +26,7 @@ import utils._
 @chiselName
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
-  io.out.resp := resp
+  io.out := resp
 
   var metas = 0.U(1.W)
   var meta_sz = 0
