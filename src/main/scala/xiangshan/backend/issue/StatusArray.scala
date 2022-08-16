@@ -154,7 +154,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val realValid = updateValid(i) || status.valid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
-    flushedVec(i) := (realValid && isFlushed) || deqRespSucc
+    flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
     statusNext.valid := realValid && !(isFlushed || deqRespSucc)
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
@@ -243,7 +243,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.isValidNext := VecInit(statusArrayNext.map(_.valid)).asUInt
-  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
+  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => RegNext(v && r) }).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
