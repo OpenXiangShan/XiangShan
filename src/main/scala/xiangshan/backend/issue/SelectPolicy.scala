@@ -135,11 +135,15 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
     }
   }
 
-  val nextBest = VecInit((0 until numEntries).map(i => {
-    VecInit((0 until numEntries).map(j => get_next_age(i, j))).asUInt.andR
-  })).asUInt
+  def getOldest(get: (Int, Int) => Bool): UInt = {
+    VecInit((0 until numEntries).map(i => {
+      VecInit((0 until numEntries).map(j => get(i, j))).asUInt.andR
+    })).asUInt
+  }
+  val best = getOldest(get_age)
+  val nextBest = getOldest(get_next_age)
 
-  io.out := (if (regOut) RegNext(nextBest) else nextBest)
+  io.out := (if (regOut) best else nextBest)
 
   val ageMatrix = VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt
   val symmetricAge = RegNext(nextBest)
@@ -148,7 +152,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
 
 object AgeDetector {
   def apply(numEntries: Int, enq: Vec[UInt], deq: UInt, canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
-    val age = Module(new AgeDetector(numEntries, enq.length, regOut = false))
+    val age = Module(new AgeDetector(numEntries, enq.length, regOut = true))
     age.io.enq := enq
     age.io.deq := deq
     val out = Wire(Valid(UInt(deq.getWidth.W)))

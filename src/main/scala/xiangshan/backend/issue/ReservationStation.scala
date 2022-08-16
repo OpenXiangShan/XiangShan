@@ -341,7 +341,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   select.io.request := statusArray.io.canIssue
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
-  val s0_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
+  val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
 
   // send address to read uop and data
   // For better timing, we read the payload array before we determine which instruction to issue.
@@ -349,7 +349,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     payloadArray.io.read(i).addr := select.io.grant(i).bits
   }
-  payloadArray.io.read.last.addr := s0_oldestSel.bits
+  payloadArray.io.read.last.addr := s1_oldestSel.bits
 
   // For better timing, we add one more read port to data array when oldestFirst is enabled,
   // and select data after the arbiter decides which one to issue.
@@ -357,7 +357,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     dataArray.io.read(i).addr := select.io.grant(i).bits
   }
-  dataArray.io.read.last.addr := s0_oldestSel.bits
+  dataArray.io.read.last.addr := s1_oldestSel.bits
 
   def enqReverse[T <: Data](in: Seq[T]): Seq[T] = {
     if (params.numDeq == 2) {
@@ -377,10 +377,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_enqWakeup = RegNext(VecInit(enqReverse(s0_enqWakeup)))
   val s1_enqDataCapture = RegNext(VecInit(enqReverse(s0_enqDataCapture)))
   val s1_fastWakeup = RegNext(VecInit(enqReverse(s0_fastWakeup)))
-  val s1_in_selectPtr = RegNext(select.io.grant)
+  val s1_in_selectPtr = select.io.grant
   val s1_in_selectPtrValid = s1_in_selectPtr.map(_.valid)
   val s1_in_selectPtrOH = s1_in_selectPtr.map(_.bits)
-  val s1_in_oldestPtrOH = RegNext(s0_oldestSel)
+  val s1_in_oldestPtrOH = s1_oldestSel
   val s1_issue_oldest = Wire(Vec(params.numDeq, Bool()))
   val s1_issue_dispatch = Wire(Vec(params.numDeq, Bool()))
   val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
@@ -675,7 +675,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val dataSelect = Module(new DataSelect)
   dataSelect.io.doOverride := s1_issue_oldest
   dataSelect.io.readData := dataArray.io.read.map(_.data)
-  val dataSlowCaptureAddr = dataArray.io.read.map(r => RegNext(r.addr)) ++ dataArray.io.write.map(_.addr)
+  val dataSlowCaptureAddr = dataArray.io.read.map(_.addr) ++ dataArray.io.write.map(_.addr)
   for ((port, addr) <- dataSelect.io.fromSlowPorts.zip(dataSlowCaptureAddr)) {
     for (j <- 0 until params.numSrc) {
       port(j) := VecInit(dataArray.io.multiWrite.map(w => w.enable && (addr & w.addr(j)).asUInt.orR)).asUInt
