@@ -97,6 +97,7 @@ class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val instrValid    = Vec(PredictWidth, Bool())
   val pds           = Vec(PredictWidth, new PreDecodeInfo)
   val pc            = Vec(PredictWidth, UInt(VAddrBits.W))
+  val fire_in       = Bool()
 }
 
 class FetchToIBufferDB extends Bundle {
@@ -527,7 +528,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  val fromFtqRedirectReg    = RegNext(fromFtq.redirect,init = 0.U.asTypeOf(fromFtq.redirect))
+  // val fromFtqRedirectReg    = RegNext(fromFtq.redirect,init = 0.U.asTypeOf(fromFtq.redirect))
+  val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
+  fromFtqRedirectReg.bits := RegEnable(fromFtq.redirect.bits, 0.U.asTypeOf(fromFtq.redirect.bits), fromFtq.redirect.valid)
+  fromFtqRedirectReg.valid := RegNext(fromFtq.redirect.valid, init = false.B)
   val mmioF3Flush           = RegNext(f3_flush,init = false.B)
   val f3_ftq_flush_self     = fromFtqRedirectReg.valid && RedirectLevel.flushItself(fromFtqRedirectReg.bits.level)
   val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
@@ -677,6 +681,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkerIn.instrValid  := f3_instr_valid.asTypeOf(Vec(PredictWidth, Bool()))
   checkerIn.pds         := f3_pd
   checkerIn.pc          := f3_pc
+  checkerIn.fire_in     := RegNext(f2_fire, init = false.B)
 
   /*** handle half RVI in the last 2 Bytes  ***/
 
@@ -809,21 +814,21 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * - redirect if has false hit last half (last PC is not start + 32 Bytes, but in the midle of an notCFI RVI instruction)
     ******************************************************************************
     */
+  val wb_enable         = RegNext(f2_fire && !f2_flush) && !f3_req_is_mmio && !f3_flush
+  val wb_valid          = RegNext(wb_enable, init = false.B)
+  val wb_ftq_req        = RegEnable(f3_ftq_req, wb_enable)
 
-  val wb_valid          = RegNext(RegNext(f2_fire && !f2_flush) && !f3_req_is_mmio && !f3_flush)
-  val wb_ftq_req        = RegNext(f3_ftq_req)
-
-  val wb_check_result_stage1   = RegNext(checkerOutStage1)
+  val wb_check_result_stage1   = RegEnable(checkerOutStage1, wb_enable)
   val wb_check_result_stage2   = checkerOutStage2
-  val wb_instr_range    = RegNext(io.toIbuffer.bits.enqEnable)
-  val wb_pc             = RegNext(f3_pc)
-  val wb_pd             = RegNext(f3_pd)
-  val wb_instr_valid    = RegNext(f3_instr_valid)
+  val wb_instr_range    = RegEnable(io.toIbuffer.bits.enqEnable, wb_enable)
+  val wb_pc             = RegEnable(f3_pc, wb_enable)
+  val wb_pd             = RegEnable(f3_pd, wb_enable)
+  val wb_instr_valid    = RegEnable(f3_instr_valid, wb_enable)
 
   /* false hit lastHalf */
-  val wb_lastIdx        = RegNext(f3_last_validIdx)
-  val wb_false_lastHalf = RegNext(f3_false_lastHalf) && wb_lastIdx =/= (PredictWidth - 1).U
-  val wb_false_target   = RegNext(f3_false_snpc)
+  val wb_lastIdx        = RegEnable(f3_last_validIdx, wb_enable)
+  val wb_false_lastHalf = RegEnable(f3_false_lastHalf, wb_enable) && wb_lastIdx =/= (PredictWidth - 1).U
+  val wb_false_target   = RegEnable(f3_false_snpc, wb_enable)
 
   val wb_half_flush = wb_false_lastHalf
   val wb_half_target = wb_false_target
