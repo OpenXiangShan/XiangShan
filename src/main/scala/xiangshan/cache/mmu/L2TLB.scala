@@ -241,11 +241,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     assert(mem.d.bits.source <= l2tlbParams.llptwsize.U)
     refill_data(refill_helper._4) := mem.d.bits.data
   }
+  // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
+  val refill_data_tmp = WireInit(refill_data)
+  refill_data_tmp(refill_helper._4) := mem.d.bits.data
+
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until MemReqWidth).map(i =>
-    if (i == l2tlbParams.llptwsize) {DataHoldBypass(get_part(refill_data, req_addr_low(i)), RegNext(mem_resp_done && !mem_resp_from_mq)) }
+    if (i == l2tlbParams.llptwsize) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_mq) }
     else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), llptw_mem.buffer_it(i)) }
+    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
   // mem -> miss queue
@@ -259,9 +264,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_mq = mem_resp_from_mq
   val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
-  // Assume mem.resp.data will arrive (255, 0) first and then (511, 256).
-  val refill_data_tmp = WireInit(refill_data)
-  refill_data_tmp(refill_helper._4) := mem.d.bits.data
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
