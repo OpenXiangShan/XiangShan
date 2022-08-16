@@ -485,7 +485,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSDebug(io.s2_fire, p"hit_taken_jalr:")
 
   when(s3_tageTaken) {
-    io.out.resp.s3.full_pred.jalr_target := s3_tageTarget
+    io.out.s3.full_pred.jalr_target := s3_tageTarget
   }
 
   resp_meta.provider.valid    := s3_provided
@@ -656,7 +656,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b, taken=%b\n",
-      debug_pc_s2, io.out.resp.s2.getTarget, s2_provided, s2_tageTaken)
+      debug_pc_s2, io.out.s2.getTarget, s2_provided, s2_tageTaken)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,

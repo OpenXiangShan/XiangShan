@@ -547,16 +547,6 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val histPtr = new CGHPtr
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
-
-  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    folded_hist := entry.folded_hist
-    afhob := entry.afhob
-    lastBrNumOH := entry.lastBrNumOH
-    histPtr := entry.histPtr
-    rasSp := entry.rasSp
-    rasTop := entry.rasEntry
-    this
-  }
 }
 
 @chiselName
@@ -574,13 +564,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   val minimal_pred = new MinimalBranchPrediction
   val full_pred = new FullBranchPrediction
 
-  val spec_info = new SpeculativeInfo
-
-
-  // val specCnt = Vec(numBr, UInt(10.W))
-  // val meta = UInt(MaxMetaLength.W)
-
-  val ftb_entry = new FTBEntry()
 
   def target(pc: UInt) = Mux(is_minimal, minimal_pred.target(pc),     full_pred.target(pc))
   def cfiIndex         = Mux(is_minimal, minimal_pred.cfiIndex,       full_pred.cfiIndex)
@@ -594,9 +577,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    spec_info.folded_hist.display(cond)
     full_pred.display(cond)
-    ftb_entry.display(cond)
   }
 }
 
@@ -606,6 +587,10 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val last_stage_meta = UInt(MaxMetaLength.W)
+  val last_stage_spec_info = new SpeculativeInfo
+  val last_stage_ftb_entry = new FTBEntry
 
   def selectedResp ={
     val res =
@@ -626,21 +611,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   def lastStage = s3
 }
 
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp with HasBPUConst {
-  val meta = UInt(MaxMetaLength.W)
-}
-
-object BpuToFtqBundle {
-  def apply(resp: BranchPredictionResp)(implicit p: Parameters): BpuToFtqBundle = {
-    val e = Wire(new BpuToFtqBundle())
-    e.s1 := resp.s1
-    e.s2 := resp.s2
-    e.s3 := resp.s3
-
-    e.meta := DontCare
-    e
-  }
-}
+class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc = UInt(VAddrBits.W)
@@ -664,11 +635,6 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
   def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
-
-
-  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    spec_info.fromFtqRedirectSram(entry)
-  }
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")

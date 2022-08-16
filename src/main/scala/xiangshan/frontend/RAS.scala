@@ -195,9 +195,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   s2_spec_push := io.s2_fire && s2_full_pred.hit_taken_on_call && !io.s3_redirect
   s2_spec_pop  := io.s2_fire && s2_full_pred.hit_taken_on_ret  && !io.s3_redirect
 
-  val s2_jalr_target = io.out.resp.s2.full_pred.jalr_target
+  val s2_jalr_target = io.out.s2.full_pred.jalr_target
   val s2_last_target_in = s2_full_pred.targets.last
-  val s2_last_target_out = io.out.resp.s2.full_pred.targets.last
+  val s2_last_target_out = io.out.s2.full_pred.targets.last
   val s2_is_jalr = s2_full_pred.is_jalr
   val s2_is_ret = s2_full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
@@ -211,9 +211,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s3_sp = RegEnable(spec_ras.sp, io.s2_fire)
   val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire)
 
-  val s3_jalr_target = io.out.resp.s3.full_pred.jalr_target
+  val s3_jalr_target = io.out.s3.full_pred.jalr_target
   val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred.targets.last
-  val s3_last_target_out = io.out.resp.s3.full_pred.targets.last
+  val s3_last_target_out = io.out.s3.full_pred.targets.last
   val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred.is_jalr
   val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred.is_ret
   // assert(is_jalr && is_ret || !is_ret)
@@ -229,8 +229,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s3_pop  = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_ret
 
   val s3_recover = io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
-  io.out.resp.s3.spec_info.rasSp  := s3_sp
-  io.out.resp.s3.spec_info.rasTop := s3_top
+  io.out.last_stage_spec_info.rasSp  := s3_sp
+  io.out.last_stage_spec_info.rasTop := s3_top
 
 
   val redirect = RegNext(io.redirect)
@@ -267,11 +267,11 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   }
   XSDebug(s2_spec_push, "s2_spec_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
   s2_spec_new_addr,spec_debug.spec_push_entry.ctr,spec_debug.spec_alloc_new,spec_debug.sp.asUInt)
-  XSDebug(s2_spec_pop, "s2_spec_pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
+  XSDebug(s2_spec_pop, "s2_spec_pop  outAddr: 0x%x \n",io.out.s2.getTarget)
   val s3_recover_entry = spec_debug.recover_push_entry
   XSDebug(s3_recover && s3_push, "s3_recover_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
     s3_recover_entry.retAddr, s3_recover_entry.ctr, spec_debug.recover_alloc_new, s3_sp.asUInt)
-  XSDebug(s3_recover && s3_pop, "s3_recover_pop  outAddr: 0x%x \n",io.out.resp.s3.getTarget)
+  XSDebug(s3_recover && s3_pop, "s3_recover_pop  outAddr: 0x%x \n",io.out.s3.getTarget)
   val redirectUpdate = redirect.bits.cfiUpdate
   XSDebug(do_recover && callMissPred, "redirect_recover_push\n")
   XSDebug(do_recover && retMissPred, "redirect_recover_pop\n")

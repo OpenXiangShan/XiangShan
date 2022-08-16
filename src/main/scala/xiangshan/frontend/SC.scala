@@ -307,13 +307,13 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           s2_agree(w) := s2_tageTakens(w) === pred
           s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
-          // io.out.resp.s2.full_pred.br_taken_mask(w) := pred
+          // io.out.s2.full_pred.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
 
       when (io.ctrl.sc_enable) {
-        io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
+        io.out.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
       }
 
       val updateTageMeta = updateMeta

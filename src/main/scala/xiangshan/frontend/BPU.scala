@@ -156,15 +156,7 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   // val s0_all_ready = Bool()
 }
 
-class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val last_stage_meta = UInt(MaxMetaLength.W) // This is use by composer
-  val resp = new BranchPredictionResp
-
-  // These store in meta, extract in composer
-  // val rasSp = UInt(log2Ceil(RasSize).W)
-  // val rasTop = new RASEntry
-  // val specCnt = Vec(PredictWidth, UInt(10.W))
-}
+class BasePredictorOutput (implicit p: Parameters) extends BranchPredictionResp {}
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
@@ -196,7 +188,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   val spec_meta_size = 0
   val io = IO(new BasePredictorIO())
 
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 
   io.out.last_stage_meta := 0.U
 
@@ -211,9 +203,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
 
-  io.out.resp.s1.pc := s1_pc
-  io.out.resp.s2.pc := s2_pc
-  io.out.resp.s3.pc := s3_pc
+  io.out.s1.pc := s1_pc
+  io.out.s2.pc := s2_pc
+  io.out.s3.pc := s3_pc
 
   val perfEvents: Seq[(String, UInt)] = Seq()
 
@@ -224,7 +216,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
   io.in.ready                 := true.B
   io.out.last_stage_meta      := 0.U
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -304,7 +296,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
-  val resp = predictors.io.out.resp
+  val resp = predictors.io.out
 
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
@@ -377,12 +369,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s1_valid && s2_components_ready && s2_ready ||
     s2_fire && s2_redirect ||
     s3_fire && s3_redirect
-  io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp)
-  io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.last_stage_meta // TODO: change to lastStageMeta
-  io.bpu_to_ftq.resp.bits.s3.spec_info.folded_hist := s3_folded_gh
-  io.bpu_to_ftq.resp.bits.s3.spec_info.histPtr := s3_ghist_ptr
-  io.bpu_to_ftq.resp.bits.s3.spec_info.lastBrNumOH := s3_last_br_num_oh
-  io.bpu_to_ftq.resp.bits.s3.spec_info.afhob := s3_ahead_fh_oldest_bits
+  io.bpu_to_ftq.resp.bits  := predictors.io.out
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.folded_hist := s3_folded_gh
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.lastBrNumOH := s3_last_br_num_oh
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.afhob       := s3_ahead_fh_oldest_bits
 
   npcGen.register(true.B, s0_pc_reg, Some("stallPC"), 0)
   foldedGhGen.register(true.B, s0_folded_gh_reg, Some("stallFGH"), 0)
