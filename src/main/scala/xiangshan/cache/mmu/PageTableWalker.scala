@@ -297,13 +297,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   assert(RegNext(!(dup_req_fire && Cat(dup_vec_wait).orR), init = true.B), "mem req but some entries already waiting, should not happed")
 
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
-  val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
+  val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
     Mux(to_wait, state_mem_waiting, state_addr_check))
+  val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire()) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
     // so 2 + FilterSize is enough to avoid dead-lock
-    state(enq_ptr) := Mux(from_pre(io.in.bits.req_info.source) && enq_state =/= state_addr_check, state_idle, enq_state)
+    state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
     entries(enq_ptr).ppn := io.in.bits.ppn
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
@@ -334,14 +335,15 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem_resp_hit.map(a => when (a) { a := false.B } )
 
   val enq_ptr_reg = RegNext(enq_ptr)
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
+  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
 
-  io.pmp.req.valid := RegNext(enq_state === state_addr_check)
-  io.pmp.req.bits.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).req_info.vpn, 0))
+  io.pmp.req.valid := need_addr_check
+  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
   val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid && (state(enq_ptr_reg) === state_addr_check) &&
-    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
+  when (pmp_resp_valid) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
