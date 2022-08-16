@@ -534,11 +534,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       lrsc_count := 0.U
       lrsc_count_dup.foreach(_ := 0.U)
     }
-  } .elsewhen (io.invalid_resv_set) {
+  }.elsewhen (io.invalid_resv_set) {
     // when we release this block,
     // we invalidate this reservation set
     lrsc_count := 0.U
-  } .elsewhen (lrsc_count > 0.U) {
+    lrsc_count_dup.foreach(_ := 0.U)
+  }.elsewhen (lrsc_count > 0.U) {
     lrsc_count := lrsc_count - 1.U
     lrsc_count_dup.foreach({case cnt =>
       cnt := cnt - 1.U
@@ -553,13 +554,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
   io.update_resv_set := s3_valid_dup(1) && s3_lr && s3_can_do_amo
-
-  // when we release this block,
-  // we invalidate this reservation set
-  when (io.invalid_resv_set) {
-    lrsc_count := 0.U
-    lrsc_count_dup.foreach(_ := 0.U)
-  }
 
   when (s3_valid_dup(2)) {
     when (s3_req_addr_dup(1) === debug_sc_fail_addr) {
@@ -696,6 +690,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     }.otherwise {
       lrsc_count_dup_for_meta_w_valid := 0.U
     }
+  }.elsewhen (io.invalid_resv_set) {
+    lrsc_count_dup_for_meta_w_valid := 0.U
   }.elsewhen (lrsc_count_dup_for_meta_w_valid > 0.U) {
     lrsc_count_dup_for_meta_w_valid := lrsc_count_dup_for_meta_w_valid - 1.U
   }
@@ -805,6 +801,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     }.otherwise {
       lrsc_count_dup_for_err_w_valid := 0.U
     }
+  }.elsewhen (io.invalid_resv_set) {
+    lrsc_count_dup_for_err_w_valid := 0.U
   }.elsewhen (lrsc_count_dup_for_err_w_valid > 0.U) {
     lrsc_count_dup_for_err_w_valid := lrsc_count_dup_for_err_w_valid - 1.U
   }
@@ -899,6 +897,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     }.otherwise {
       lrsc_count_dup_for_tag_w_valid := 0.U
     }
+  }.elsewhen (io.invalid_resv_set) {
+    lrsc_count_dup_for_tag_w_valid := 0.U
   }.elsewhen (lrsc_count_dup_for_tag_w_valid > 0.U) {
     lrsc_count_dup_for_tag_w_valid := lrsc_count_dup_for_tag_w_valid - 1.U
   }
@@ -993,6 +993,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     }.otherwise {
       lrsc_count_dup_for_data_w_valid := 0.U
     }
+  }.elsewhen (io.invalid_resv_set) {
+    lrsc_count_dup_for_data_w_valid := 0.U
   }.elsewhen (lrsc_count_dup_for_data_w_valid > 0.U) {
     lrsc_count_dup_for_data_w_valid := lrsc_count_dup_for_data_w_valid - 1.U
   }
@@ -1122,6 +1124,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       }.otherwise {
         lrsc_count_dup_for_data_w_bank := 0.U
       }
+    }.elsewhen (io.invalid_resv_set) {
+      lrsc_count_dup_for_data_w_bank := 0.U
     }.elsewhen (lrsc_count_dup_for_data_w_bank > 0.U) {
       lrsc_count_dup_for_data_w_bank := lrsc_count_dup_for_data_w_bank - 1.U
     }
@@ -1224,6 +1228,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     }.otherwise {
       lrsc_count_dup_for_wb_valid := 0.U
     }
+  }.elsewhen (io.invalid_resv_set) {
+    lrsc_count_dup_for_wb_valid := 0.U
   }.elsewhen (lrsc_count_dup_for_wb_valid > 0.U) {
     lrsc_count_dup_for_wb_valid := lrsc_count_dup_for_wb_valid - 1.U
   }
