@@ -257,11 +257,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val ridx = genPtwL2SetIdx(stageReq.bits.req_info.vpn)
     l2.io.r.req.valid := stageReq.fire
     l2.io.r.req.bits.apply(setIdx = ridx)
+    val vVec_req = getl2vSet(stageReq.bits.req_info.vpn)
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
-    val vVec_delay = DataHoldBypass(getl2vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
+    val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
       wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid) && v })
 
@@ -301,11 +302,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val ridx = genPtwL3SetIdx(stageReq.bits.req_info.vpn)
     l3.io.r.req.valid := stageReq.fire
     l3.io.r.req.bits.apply(setIdx = ridx)
+    val vVec_req = getl3vSet(stageReq.bits.req_info.vpn)
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
-    val vVec_delay = DataHoldBypass(getl3vSet(stageDelay(0).bits.req_info.vpn), stageDelay_valid_1cycle)
+    val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
       wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid) && v })
 
