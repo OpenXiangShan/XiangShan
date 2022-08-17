@@ -250,7 +250,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
 
   // mem -> miss queue
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_mq
-  llptw_mem.resp.bits.id := mem.d.bits.source
+  llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
   // mem -> ptw
   ptw.io.mem.req.ready := mem.a.ready
   ptw.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
@@ -278,7 +278,6 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
   for (i <- 0 until PtwWidth) {
-    XSError(outArb(i).out.valid && !outArb(i).out.ready, "L2TLB resp but tlb not ready")
     outArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
     outArb(i).in(outArbCachePort).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(outArbCachePort).bits.pf := !cache.io.resp.bits.toTlb.v

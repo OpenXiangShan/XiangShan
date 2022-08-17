@@ -88,7 +88,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isFirstIssue = Vec(params.numSelect, Output(Bool()))
     val allSrcReady = Vec(params.numSelect, Output(Bool()))
     val updateMidState = Input(UInt(params.numEntries.W))
-    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq
+    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1
     val deqResp = Vec(deqRespWidth, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
@@ -153,7 +153,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val realValid = updateValid(i) || statusValid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
-    flushedVec(i) := (realValid && isFlushed) || deqRespSucc
+    flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
     statusNextValid := realValid && !(isFlushed || deqRespSucc)
     XSError(updateValid(i) && statusValid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
@@ -242,7 +242,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
 
   io.isValid := statusArrayValid.asUInt
   io.isValidNext := statusArrayValidNext.asUInt
-  io.canIssue := VecInit(statusArrayValidNext.zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
+  io.canIssue := VecInit(statusArrayValidNext.zip(readyVecNext).map{ case (v, r) => RegNext(v && r) }).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt

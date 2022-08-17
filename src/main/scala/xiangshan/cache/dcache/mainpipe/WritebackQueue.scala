@@ -113,7 +113,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
-    val primary_ready_dup = Vec(4, Output(Bool()))
+    val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
     // this entry is busy, but it can merge the new req
     val secondary_valid = Input(Bool())
     val secondary_ready = Output(Bool())
@@ -140,7 +140,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state = RegInit(s_invalid)
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
-  val state_dup_for_mp = RegInit(VecInit(Seq.fill(4)(s_invalid)))
+  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid)))
 
   // internal regs
   // remaining beats
@@ -515,7 +515,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
-    val req_ready_dup = Vec(4, Output(Bool()))
+    val req_ready_dup = Vec(nDupWbReady, Output(Bool()))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 

@@ -341,7 +341,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   select.io.request := statusArray.io.canIssue
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
-  val s0_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
+  val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
 
   // send address to read uop and data
   // For better timing, we read the payload array before we determine which instruction to issue.
@@ -349,7 +349,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     payloadArray.io.read(i).addr := select.io.grant(i).bits
   }
-  payloadArray.io.read.last.addr := s0_oldestSel.bits
+  payloadArray.io.read.last.addr := s1_oldestSel.bits
 
   // For better timing, we add one more read port to data array when oldestFirst is enabled,
   // and select data after the arbiter decides which one to issue.
@@ -357,7 +357,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     dataArray.io.read(i).addr := select.io.grant(i).bits
   }
-  dataArray.io.read.last.addr := s0_oldestSel.bits
+  dataArray.io.read.last.addr := s1_oldestSel.bits
 
   def enqReverse[T <: Data](in: Seq[T]): Seq[T] = {
     if (params.numDeq == 2) {
@@ -377,10 +377,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_enqWakeup = RegNext(VecInit(enqReverse(s0_enqWakeup)))
   val s1_enqDataCapture = RegNext(VecInit(enqReverse(s0_enqDataCapture)))
   val s1_fastWakeup = RegNext(VecInit(enqReverse(s0_fastWakeup)))
-  val s1_in_selectPtr = RegNext(select.io.grant)
+  val s1_in_selectPtr = select.io.grant
   val s1_in_selectPtrValid = s1_in_selectPtr.map(_.valid)
   val s1_in_selectPtrOH = s1_in_selectPtr.map(_.bits)
-  val s1_in_oldestPtrOH = RegNext(s0_oldestSel)
+  val s1_in_oldestPtrOH = s1_oldestSel
   val s1_issue_oldest = Wire(Vec(params.numDeq, Bool()))
   val s1_issue_dispatch = Wire(Vec(params.numDeq, Bool()))
   val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
@@ -388,7 +388,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_issuePtr = s1_issuePtrOH.map(iss => OHToUInt(iss.bits))
 
   // Allocation: store dispatch uops into payload and data array
-  s1_dispatchUops_dup.map(_.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
+  s1_dispatchUops_dup.foreach(_.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
     val s0_valid = in.fire && !enqReverse(s0_enqFlushed)(i)
     uop.valid := s0_valid
     when (s0_valid) {
@@ -531,11 +531,17 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // For FMAs that can be scheduled multiple times, only when
       // all source operands are ready we dequeue the instruction.
       val allSrcReady = if (params.hasMidState) s1_all_src_ready(i) else true.B
-      statusArray.io.deqResp(i).valid := s1_issuePtrOH(i).valid && s1_out(i).ready && allSrcReady
-      statusArray.io.deqResp(i).bits.rsMask := s1_issuePtrOH(i).bits
-      statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
-      statusArray.io.deqResp(i).bits.resptype := DontCare
-      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
+      statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready && allSrcReady
+      statusArray.io.deqResp(2*i).bits.rsMask := s1_in_selectPtrOH(i)
+      statusArray.io.deqResp(2*i).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(2*i).bits.resptype := DontCare
+      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := DontCare
+      val allSrcReady1 = if (params.hasMidState) statusArray.io.update(i).data.allSrcReady else true.B
+      statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready && allSrcReady1
+      statusArray.io.deqResp(2*i+1).bits.rsMask := s1_allocatePtrOH_dup.head(i)
+      statusArray.io.deqResp(2*i+1).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(2*i+1).bits.resptype := DontCare
+      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
     }
 
     if (io.fastWakeup.isDefined) {
@@ -549,6 +555,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       io.fastWakeup.get(i) := wakeupQueue.io.out
       XSPerfAccumulate(s"fast_blocked_$i", s1_issuePtrOH(i).valid && fuCheck && !s1_out(i).ready)
     }
+  }
+  if (!io.feedback.isDefined) {
+    val allSrcReady = if (params.hasMidState) statusArray.io.allSrcReady.last else true.B
+    statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready)) && allSrcReady
+    statusArray.io.deqResp.last.bits.rsMask := s1_in_oldestPtrOH.bits
+    statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
+    statusArray.io.deqResp.last.bits.resptype := DontCare
+    statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
   }
   statusArray.io.updateMidState := 0.U
 
@@ -619,7 +633,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       val doOverride = Vec(params.numDeq, Input(Bool()))
       val readData = Vec(dataArray.io.read.length, Vec(params.numSrc, Input(UInt(params.dataBits.W))))
       // for data bypass from slowPorts
-      val fromSlowPorts = Vec(params.numDeq, Vec(params.numSrc, Input(UInt(dataArray.io.multiWrite.length.W))))
+      val fromSlowPorts = Vec(dataArray.io.read.length + params.numEnq, Vec(params.numSrc, Input(UInt(dataArray.io.multiWrite.length.W))))
       val slowData = Vec(dataArray.io.multiWrite.length, Input(UInt(params.dataBits.W)))
       // for enq data
       val enqBypass = Vec(params.numDeq, Vec(params.numEnq, Input(Bool())))
@@ -628,17 +642,20 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       val deqData = Vec(params.numDeq, Vec(params.numSrc, Output(UInt(params.dataBits.W))))
     })
 
+    val slowCapture = io.fromSlowPorts.map(_.map(bySlow => (bySlow.orR, Mux1H(bySlow, io.slowData))))
+    val realEnqData = io.enqData.zip(slowCapture.takeRight(params.numEnq)).map{ case (e, c) =>
+      e.zip(c).map(x => Mux(x._2._1, x._2._2, x._1.bits))
+    }
+
     for ((deq, i) <- io.deqData.zipWithIndex) {
-      // default deq data is selected from data array
-      deq := Mux(io.doOverride(i), io.readData.last, io.readData(i))
-      // when instructions are selected for dequeue after enq, we need to bypass data.
-      val bypassData = Mux1H(io.enqBypass(i), io.enqData)
-      io.fromSlowPorts(i).zip(bypassData).zip(io.deqData(i)).foreach{ case ((bySlow, byData), deq) =>
-        when (byData.valid && io.enqBypass(i).asUInt.orR) {
-          deq := byData.bits
-        }
-        when (bySlow.orR) {
-          deq := Mux1H(bySlow, io.slowData)
+      for (j <- 0 until params.numSrc) {
+        // default deq data is selected from data array or from slow
+        val normalData = Mux(slowCapture(i)(j)._1, slowCapture(i)(j)._2, io.readData(i)(j))
+        val oldestData = Mux(slowCapture(params.numDeq)(j)._1, slowCapture(params.numDeq)(j)._2, io.readData.last(j))
+        deq(j) := Mux(io.doOverride(i), oldestData, normalData)
+        // when instructions are selected for dequeue after enq, we need to bypass data.
+        when (io.enqBypass(i).asUInt.orR) {
+          deq(j) := Mux1H(io.enqBypass(i), realEnqData.map(_(j)))
         }
       }
     }
@@ -658,9 +675,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val dataSelect = Module(new DataSelect)
   dataSelect.io.doOverride := s1_issue_oldest
   dataSelect.io.readData := dataArray.io.read.map(_.data)
-  for ((port, issuePtrOH) <- dataSelect.io.fromSlowPorts.zip(s1_issuePtrOH)) {
+  val dataSlowCaptureAddr = dataArray.io.read.map(_.addr) ++ dataArray.io.write.map(_.addr)
+  for ((port, addr) <- dataSelect.io.fromSlowPorts.zip(dataSlowCaptureAddr)) {
     for (j <- 0 until params.numSrc) {
-      port(j) := VecInit(dataArray.io.multiWrite.map(w => w.enable && Mux1H(issuePtrOH.bits, w.addr(j)))).asUInt
+      port(j) := VecInit(dataArray.io.multiWrite.map(w => w.enable && (addr & w.addr(j)).asUInt.orR)).asUInt
     }
   }
   dataSelect.io.slowData := dataArray.io.multiWrite.map(_.data)
