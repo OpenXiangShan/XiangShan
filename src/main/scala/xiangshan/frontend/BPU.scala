@@ -234,7 +234,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
   val s1_ready_dup, s2_ready_dup, s3_ready_dup = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup = dup(Wire(UInt(VAddrBits.W)))
+  val s0_pc_dup = Wire(Vec(numDup, UInt(VAddrBits.W)))
   val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x))
   val reset_vector = DelayN(io.reset_vector, 5)
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
