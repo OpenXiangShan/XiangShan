@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import xiangshan.cache._
 import difftest._
+import freechips.rocketchip.util._
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
