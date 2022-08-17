@@ -272,7 +272,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("blocked_entries", isBlocked)
   val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
   XSPerfAccumulate("scheduled_entries", isScheduled)
-  val notSelected = RegNext(PopCount(io.canIssue)) - PopCount(is_issued)
+  val notSelected = PopCount(io.canIssue) - PopCount(is_issued)
   XSPerfAccumulate("not_selected_entries", notSelected)
   val isReplayed = PopCount(io.deqResp.map(resp => resp.valid && !resp.bits.success))
   XSPerfAccumulate("replayed_entries", isReplayed)
