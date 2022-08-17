@@ -137,6 +137,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.sfence := sfence_dup(1)
   llptw.io.csr := csr_dup(1)
 
+  val mq_arb = Module(new Arbiter(new L2TlbInnerBundle, 2))
+  mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
+    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
+    !from_pre(cache.io.resp.bits.req_info.source) &&
+    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
+  mq_arb.io.in(0).bits :=  cache.io.resp.bits.req_info
+  mq_arb.io.in(1) <> llptw.io.cache
+  missQueue.io.in <> mq_arb.io.out
+  missQueue.io.sfence  := sfence_dup(6)
+  missQueue.io.csr := csr_dup(5)
+
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
@@ -149,15 +160,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
-    Mux(cache.io.resp.bits.bypassed, missQueue.io.in.ready, missQueue.io.in.ready || ptw.io.req.ready)))
-
-  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
-    !from_pre(cache.io.resp.bits.req_info.source) &&
-    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
-  missQueue.io.in.bits := cache.io.resp.bits.req_info
-  missQueue.io.sfence  := sfence_dup(6)
-  missQueue.io.csr := csr_dup(5)
+    Mux(cache.io.resp.bits.bypassed, mq_arb.io.in(0).ready, mq_arb.io.in(0).ready || ptw.io.req.ready)))
 
   // NOTE: missQueue req has higher priority
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
