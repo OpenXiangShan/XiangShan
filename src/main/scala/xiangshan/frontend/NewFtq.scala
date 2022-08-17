@@ -81,12 +81,12 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     def carryPos(addr: UInt) = addr(instOffsetBits+log2Ceil(PredictWidth)+1)
-    this.startAddr := resp.pc
-    this.nextLineAddr := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.startAddr := resp.pc(3)
+    this.nextLineAddr := resp.pc(3) + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
-      (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
+      (resp.pc(3)(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
     ))
-    this.fallThruError := resp.fallThruError
+    this.fallThruError := resp.fallThruError(3)
     this
   }
   override def toPrintable: Printable = {
@@ -132,28 +132,7 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
 
 
 
-class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasEntry = new RASEntry
-  // val specCnt = Vec(numBr, UInt(10.W))
-  // val ghist = new ShiftingGlobalHistory
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
-
-  val histPtr = new CGHPtr
-
-  def fromBranchPrediction(resp: BranchPredictionBundle) = {
-    assert(!resp.is_minimal)
-    this.rasSp := resp.rasSp
-    this.rasEntry := resp.rasTop
-    this.folded_hist := resp.folded_hist
-    this.afhob := resp.afhob
-    this.lastBrNumOH := resp.lastBrNumOH
-    this.histPtr := resp.histPtr
-    this
-  }
-}
+class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {}
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val meta = UInt(MaxMetaLength.W)
@@ -234,6 +213,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     val new_entry = Output(new FTBEntry)
     val new_br_insert_pos = Output(Vec(numBr, Bool()))
     val taken_mask = Output(Vec(numBr, Bool()))
+    val jmp_taken = Output(Bool())
     val mispred_mask = Output(Vec(numBr+1, Bool()))
 
     // for perf counters
@@ -388,6 +368,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.taken_mask := VecInit((io.new_entry.brOffset zip io.new_entry.brValids).map{
     case (off, v) => io.cfiIndex.bits === off && io.cfiIndex.valid && v
   })
+  io.jmp_taken := io.new_entry.jmpValid && io.new_entry.tailSlot.offset === io.cfiIndex.bits
   for (i <- 0 until numBr) {
     io.mispred_mask(i) := io.new_entry.brValids(i) && io.mispredict_vec(io.new_entry.brOffset(i))
   }
@@ -514,15 +495,15 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
   val bpu_s3_resp = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
-  val bpu_s3_redirect = bpu_s3_resp.valid && bpu_s3_resp.hasRedirect
+  val bpu_s2_redirect = bpu_s2_resp.valid(3) && bpu_s2_resp.hasRedirect(3)
+  val bpu_s3_redirect = bpu_s3_resp.valid(3) && bpu_s3_resp.hasRedirect(3)
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire = io.fromBpu.resp.fire() && allowBpuIn // from bpu s1
   val bpu_in_fire = (io.fromBpu.resp.fire() || bpu_s2_redirect || bpu_s3_redirect) && allowBpuIn
 
-  val bpu_in_resp = io.fromBpu.resp.bits.selectedResp
-  val bpu_in_stage = io.fromBpu.resp.bits.selectedRespIdx
+  val bpu_in_resp = io.fromBpu.resp.bits.selectedRespForFtq
+  val bpu_in_stage = io.fromBpu.resp.bits.selectedRespIdxForFtq
   val bpu_in_resp_ptr = Mux(bpu_in_stage === BP_S1, bpuPtr, bpu_in_resp.ftq_idx)
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
@@ -536,27 +517,25 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1, parentName = parentName + "ftqRedirectSram_"))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
+  ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_redirect_sram.io.wdata.fromBranchPrediction(io.fromBpu.resp.bits.lastStage)
+  ftq_redirect_sram.io.wdata := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
   println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1, parentName = parentName + "ftqMeta1rSram_"))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid
+  ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.meta
+  ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1, "FtqEntry"))
-  ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid)
-  ftb_entry_mem.io.waddr(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftq_idx.value)
-  ftb_entry_mem.io.wdata(0) := RegNext(io.fromBpu.resp.bits.lastStage.ftb_entry)
+  ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid(3))
+  ftb_entry_mem.io.waddr(0) := RegEnable(io.fromBpu.resp.bits.lastStage.ftq_idx.value, io.fromBpu.resp.bits.lastStage.valid(3))
+  ftb_entry_mem.io.wdata(0) := RegEnable(io.fromBpu.resp.bits.last_stage_ftb_entry, io.fromBpu.resp.bits.lastStage.valid(3))
 
   //place mbist pipeline
-
   val (ftqMbistPipelineSram,ftqMbistPipelineRf,ftqMbistPipelineSramRepair,ftqMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_ftq")
-
 
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
@@ -581,22 +560,42 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   val last_cycle_bpu_in = RegNext(bpu_in_fire)
   val last_cycle_bpu_in_ptr = RegNext(bpu_in_resp_ptr)
   val last_cycle_bpu_in_idx = last_cycle_bpu_in_ptr.value
-  val last_cycle_bpu_target = RegNext(bpu_in_resp.getTarget)
-  val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex)
+  val last_cycle_bpu_target = RegNext(bpu_in_resp.target(3))
+  val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex(3))
   val last_cycle_bpu_in_stage = RegNext(bpu_in_stage)
 
-  val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))
+  def extra_copyNum_for_commitStateQueue = 2
+  val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum+extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_fire)))
+  val copied_last_cycle_bpu_in_ptr_for_ftq = VecInit(Seq.fill(extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_resp_ptr)))
 
   when (last_cycle_bpu_in) {
     entry_fetch_status(last_cycle_bpu_in_idx) := f_to_send
-    commitStateQueue(last_cycle_bpu_in_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     cfiIndex_vec(last_cycle_bpu_in_idx) := last_cycle_cfiIndex
-    mispredict_vec(last_cycle_bpu_in_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     pred_stage(last_cycle_bpu_in_idx) := last_cycle_bpu_in_stage
 
     update_target(last_cycle_bpu_in_idx) := last_cycle_bpu_target // TODO: remove this
     newest_entry_target := last_cycle_bpu_target
     newest_entry_ptr := last_cycle_bpu_in_ptr
+  }
+
+  // reduce fanout by delay write for a cycle
+  when (RegNext(last_cycle_bpu_in)) {
+    mispredict_vec(RegNext(last_cycle_bpu_in_idx)) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
+  }
+
+  // reduce fanout using copied last_cycle_bpu_in and copied last_cycle_bpu_in_ptr
+  val copied_last_cycle_bpu_in_for_ftq = copied_last_cycle_bpu_in.takeRight(extra_copyNum_for_commitStateQueue)
+  copied_last_cycle_bpu_in_for_ftq.zip(copied_last_cycle_bpu_in_ptr_for_ftq).zipWithIndex.map {
+    case ((in, ptr), i) =>
+      when (in) {
+        val perSetEntries = FtqSize / extra_copyNum_for_commitStateQueue // 32
+        require(FtqSize % extra_copyNum_for_commitStateQueue == 0)
+        for (j <- 0 until perSetEntries) {
+          when (ptr.value === (i*perSetEntries+j).U) {
+            commitStateQueue(i*perSetEntries+j) := VecInit(Seq.fill(PredictWidth)(c_invalid))
+          }
+        }
+      }
   }
 
   // num cycle is fixed
@@ -613,14 +612,14 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   }
 
   // only use ftb result to assign hit status
-  when (bpu_s2_resp.valid) {
-    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred.hit, h_hit, h_not_hit)
+  when (bpu_s2_resp.valid(3)) {
+    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred(3).hit, h_hit, h_not_hit)
   }
 
 
   io.toIfu.flushFromBpu.s2.valid := bpu_s2_redirect
   io.toIfu.flushFromBpu.s2.bits := bpu_s2_resp.ftq_idx
-  when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect) {
+  when (bpu_s2_redirect) {
     bpuPtr := bpu_s2_resp.ftq_idx + 1.U
     copied_bpu_ptr.map(_ := bpu_s2_resp.ftq_idx + 1.U)
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
@@ -633,7 +632,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   io.toIfu.flushFromBpu.s3.valid := bpu_s3_redirect
   io.toIfu.flushFromBpu.s3.bits := bpu_s3_resp.ftq_idx
-  when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect) {
+  when (bpu_s3_redirect) {
     bpuPtr := bpu_s3_resp.ftq_idx + 1.U
     copied_bpu_ptr.map(_ := bpu_s3_resp.ftq_idx + 1.U)
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
@@ -645,7 +644,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   }
 
   XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
-  
+
   (0 until copyNum).map{i =>
     XSError(copied_bpu_ptr(i) =/= bpuPtr, "\ncopiedBpuPtr is different from bpuPtr!\n")
   }
@@ -672,7 +671,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
 
   io.toIfu.req.bits.ftqIdx := ifuPtr
- 
+
   val toICachePcBundle = Wire(Vec(copyNum,new Ftq_RF_Components))
   val toICacheEntryToSend = Wire(Vec(copyNum,Bool()))
   val toIfuPcBundle = Wire(new Ftq_RF_Components)
@@ -686,16 +685,16 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   val copied_ifu_plus1_to_send = VecInit(Seq.fill(copyNum)(RegNext(entry_fetch_status(ifuPtrPlus1.value) === f_to_send) || RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === (ifuPtrPlus1))))
   val copied_ifu_ptr_to_send   = VecInit(Seq.fill(copyNum)(RegNext(entry_fetch_status(ifuPtr.value) === f_to_send) || RegNext(last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr)))
-  
+
   for(i <- 0 until copyNum){
     when(copied_last_cycle_bpu_in(i) && copied_bpu_in_bypass_ptr(i) === copied_ifu_ptr(i)){
       toICachePcBundle(i) := copied_bpu_in_bypass_buf(i)
-      toICacheEntryToSend(i)   := true.B 
+      toICacheEntryToSend(i)   := true.B
     }.elsewhen(copied_last_cycle_to_ifu_fire(i)){
       toICachePcBundle(i) := pc_mem_ifu_plus1_rdata(i)
       toICacheEntryToSend(i)   := copied_ifu_plus1_to_send(i)
     }.otherwise{
-      toICachePcBundle(i) := pc_mem_ifu_ptr_rdata(i) 
+      toICachePcBundle(i) := pc_mem_ifu_ptr_rdata(i)
       toICacheEntryToSend(i)   := copied_ifu_ptr_to_send(i)
     }
   }
@@ -733,7 +732,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   io.toIfu.req.bits.fromFtqPcBundle(toIfuPcBundle)
 
   io.toICache.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
-  io.toICache.req.bits.readValid.zipWithIndex.map{case(copy, i) => copy := toICacheEntryToSend(i) && copied_ifu_ptr(i) =/= copied_bpu_ptr(i)} 
+  io.toICache.req.bits.readValid.zipWithIndex.map{case(copy, i) => copy := toICacheEntryToSend(i) && copied_ifu_ptr(i) =/= copied_bpu_ptr(i)}
   io.toICache.req.bits.pcMemRead.zipWithIndex.map{case(copy,i) => copy.fromFtqPcBundle(toICachePcBundle(i))}
   // io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
@@ -803,8 +802,6 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   ftb_entry_mem.io.raddr.head := ifu_wb_idx
   val has_false_hit = WireInit(false.B)
-  XSError(ftb_entry_mem.io.raddr.head === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
-    hit_pd_valid && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 0 conflicts with write port")
   when (RegNext(hit_pd_valid)) {
     // check for false hit
     val pred_ftb_entry = ftb_entry_mem.io.rdata.head
@@ -857,8 +854,6 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   ftq_redirect_sram.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
 
   ftb_entry_mem.io.raddr.init.last := backendRedirect.bits.ftqIdx.value
-    XSError(ftb_entry_mem.io.raddr.init.last === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
-    backendRedirect.valid && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 1 conflicts with write port")
 
   val stage3CfiInfo = ftq_redirect_sram.io.rdata.init.last
   val fromBackendRedirect = WireInit(backendRedirectReg)
@@ -1037,11 +1032,6 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   ftb_entry_mem.io.raddr.last := commPtr.value
   val commit_ftb_entry = ftb_entry_mem.io.rdata.last
 
-  XSError(ftb_entry_mem.io.raddr.last === io.fromBpu.resp.bits.lastStage.ftq_idx.value &&
-    canCommit && io.fromBpu.resp.bits.lastStage.valid, "ftb_entry_mem read port 2 conflicts with write port")
-  XSError(ftq_pd_mem.io.raddr.last === pdWb.bits.ftqIdx.value &&
-    canCommit && ifu_wb_valid, "ftq_pd_mem read port 0 conflicts with write port")
-
   // need one cycle to read mem and srams
   val do_commit_ptr = RegNext(commPtr)
   val do_commit = RegNext(canCommit, init=false.B)
@@ -1092,9 +1082,10 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   update.false_hit   := commit_hit === h_false_hit
   update.pc          := commit_pc_bundle.startAddr
   update.meta        := commit_meta.meta
+  update.cfi_idx     := commit_cfi
   update.full_target := commit_target
   update.from_stage  := commit_stage
-  update.fromFtqRedirectSram(commit_spec_meta)
+  update.spec_info   := commit_spec_meta
 
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
@@ -1113,15 +1104,16 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   update.mispred_mask      := ftbEntryGen.mispred_mask
   update.old_entry         := ftbEntryGen.is_old_entry
   update.pred_hit          := commit_hit === h_hit || commit_hit === h_false_hit
+  update.br_taken_mask     := ftbEntryGen.taken_mask
+  update.jmp_taken         := ftbEntryGen.jmp_taken
 
-  update.is_minimal := false.B
-  update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
-  update.full_pred.br_taken_mask  := ftbEntryGen.taken_mask
-  update.full_pred.jalr_target := commit_target
-  update.full_pred.hit := true.B
-  when (update.full_pred.is_jalr) {
-    update.full_pred.targets.last := commit_target
-  }
+  // update.is_minimal := false.B
+  // update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
+  // update.full_pred.jalr_target := commit_target
+  // update.full_pred.hit := true.B
+  // when (update.full_pred.is_jalr) {
+  //   update.full_pred.targets.last := commit_target
+  // }
 
   // ****************************************************************
   // *********************** to prefetch ****************************
@@ -1136,11 +1128,11 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
     ftq_pc_mem.io.other_raddrs(0) := prefetchPtr.value
 
-    when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
+    when (bpu_s2_redirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
       prefetchPtr := bpu_s2_resp.ftq_idx
     }
 
-    when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
+    when (bpu_s3_redirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
       prefetchPtr := bpu_s3_resp.ftq_idx
       // XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
     }
@@ -1236,17 +1228,15 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   XSPerfAccumulate("bpu_to_ifu_bubble", bpuPtr === ifuPtr)
 
   val from_bpu = io.fromBpu.resp.bits
-  def in_entry_len_map_gen(resp: BranchPredictionBundle)(stage: String) = {
-    assert(!resp.is_minimal)
-    val entry_len = (resp.ftb_entry.getFallThrough(resp.pc) - resp.pc) >> instOffsetBits
+  def in_entry_len_map_gen(resp: BpuToFtqBundle)(stage: String) = {
+    val entry_len = (resp.last_stage_ftb_entry.getFallThrough(resp.s3.pc(3)) - resp.s3.pc(3)) >> instOffsetBits
     val entry_len_recording_vec = (1 to PredictWidth+1).map(i => entry_len === i.U)
     val entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.valid)
+      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.s3.valid(3))
     ).foldLeft(Map[String, UInt]())(_+_)
     entry_len_map
   }
-  val s2_entry_len_map = in_entry_len_map_gen(from_bpu.s2)("s2")
-  val s3_entry_len_map = in_entry_len_map_gen(from_bpu.s3)("s3")
+  val s3_entry_len_map = in_entry_len_map_gen(from_bpu)("s3")
 
   val to_ifu = io.toIfu.req.bits
 
@@ -1352,7 +1342,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
     "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
     "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full),
     "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
-  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s2_entry_len_map ++
+  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++
   s3_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map ++
   mispred_stage_map ++ br_mispred_stage_map ++ jalr_mispred_stage_map ++
   correct_stage_map ++ br_correct_stage_map ++ jalr_correct_stage_map

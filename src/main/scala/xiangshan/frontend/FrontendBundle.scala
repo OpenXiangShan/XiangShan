@@ -539,48 +539,47 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   }
 }
 
-@chiselName
-class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
+class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
-  // def full_pred_info[T <: Data](x: T) = if (is_minimal) None else Some(x)
-  val pc = UInt(VAddrBits.W)
-
-  val valid = Bool()
-
-  val hasRedirect = Bool()
-  val ftq_idx = new FtqPtr
-  // val hit = Bool()
-  val is_minimal = Bool()
-  val minimal_pred = new MinimalBranchPrediction
-  val full_pred = new FullBranchPrediction
-
-
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
   val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
-  // val specCnt = Vec(numBr, UInt(10.W))
-  // val meta = UInt(MaxMetaLength.W)
+}
 
-  val ftb_entry = new FTBEntry()
+@chiselName
+class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
+  with HasBPUConst with BPUUtils {
 
-  def target(pc: UInt) = Mux(is_minimal, minimal_pred.target(pc),     full_pred.target(pc))
-  def cfiIndex         = Mux(is_minimal, minimal_pred.cfiIndex,       full_pred.cfiIndex)
-  def lastBrPosOH      = Mux(is_minimal, minimal_pred.lastBrPosOH,    full_pred.lastBrPosOH)
-  def brTaken          = Mux(is_minimal, minimal_pred.brTaken,        full_pred.brTaken)
-  def shouldShiftVec   = Mux(is_minimal, minimal_pred.shouldShiftVec, full_pred.shouldShiftVec)
-  def fallThruError    = Mux(is_minimal, minimal_pred.fallThruError,  full_pred.fallThruError)
+  val pc    = Vec(numDup, UInt(VAddrBits.W))
+  val valid = Vec(numDup, Bool())
 
-  def getTarget = target(pc)
-  def taken = cfiIndex.valid
+  val minimal_pred = Vec(numDup, new MinimalBranchPrediction)
+  val full_pred    = Vec(numDup, new FullBranchPrediction)
+  val hasRedirect  = Vec(numDup, Bool())
+  
+  val is_minimal = Bool()
+
+  val ftq_idx = new FtqPtr
+
+
+  def target = Mux(is_minimal,
+    VecInit(minimal_pred.zip(pc).map{case (mp, p) => mp.target(p)}),
+    VecInit(full_pred.zip(pc).map{case (fp, p) => fp.target(p)})
+  )
+  def cfiIndex       = Mux(is_minimal, VecInit(minimal_pred.map(_.cfiIndex)),       VecInit(full_pred.map(_.cfiIndex)))
+  def lastBrPosOH    = Mux(is_minimal, VecInit(minimal_pred.map(_.lastBrPosOH)),    VecInit(full_pred.map(_.lastBrPosOH)))
+  def brTaken        = Mux(is_minimal, VecInit(minimal_pred.map(_.brTaken)),        VecInit(full_pred.map(_.brTaken)))
+  def shouldShiftVec = Mux(is_minimal, VecInit(minimal_pred.map(_.shouldShiftVec)), VecInit(full_pred.map(_.shouldShiftVec)))
+  def fallThruError  = Mux(is_minimal, VecInit(minimal_pred.map(_.fallThruError)),  VecInit(full_pred.map(_.fallThruError)))
+
+  def taken = VecInit(cfiIndex.map(_.valid))
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    folded_hist.display(cond)
-    full_pred.display(cond)
-    ftb_entry.display(cond)
+    XSDebug(cond, p"[pc] ${Hexadecimal(pc(0))}\n")
+    full_pred(0).display(cond)
   }
 }
 
@@ -591,42 +590,39 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
 
-  def selectedResp ={
+  val last_stage_meta = UInt(MaxMetaLength.W)
+  val last_stage_spec_info = new SpeculativeInfo
+  val last_stage_ftb_entry = new FTBEntry
+
+  def selectedRespForFtq ={
     val res =
       PriorityMux(Seq(
-        ((s3.valid && s3.hasRedirect) -> s3),
-        ((s2.valid && s2.hasRedirect) -> s2),
-        (s1.valid -> s1)
+        ((s3.valid(3) && s3.hasRedirect(3)) -> s3),
+        ((s2.valid(3) && s2.hasRedirect(3)) -> s2),
+        (s1.valid(3) -> s1)
       ))
     // println("is minimal: ", res.is_minimal)
     res
   }
-  def selectedRespIdx =
+  def selectedRespIdxForFtq =
     PriorityMux(Seq(
-      ((s3.valid && s3.hasRedirect) -> BP_S3),
-      ((s2.valid && s2.hasRedirect) -> BP_S2),
-      (s1.valid -> BP_S1)
+      ((s3.valid(3) && s3.hasRedirect(3)) -> BP_S3),
+      ((s2.valid(3) && s2.hasRedirect(3)) -> BP_S2),
+      (s1.valid(3) -> BP_S1)
     ))
   def lastStage = s3
 }
 
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp with HasBPUConst {
-  val meta = UInt(MaxMetaLength.W)
-}
+class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
-object BpuToFtqBundle {
-  def apply(resp: BranchPredictionResp)(implicit p: Parameters): BpuToFtqBundle = {
-    val e = Wire(new BpuToFtqBundle())
-    e.s1 := resp.s1
-    e.s2 := resp.s2
-    e.s3 := resp.s3
+class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val pc = UInt(VAddrBits.W)
+  val spec_info = new SpeculativeInfo
+  val ftb_entry = new FTBEntry()
 
-    e.meta := DontCare
-    e
-  }
-}
-
-class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
+  val cfi_idx = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val br_taken_mask = Vec(numBr, Bool())
+  val jmp_taken = Bool()
   val mispred_mask = Vec(numBr+1, Bool())
   val pred_hit = Bool()
   val false_hit = Bool()
@@ -637,21 +633,15 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val from_stage = UInt(2.W)
   val ghist = UInt(HistoryLength.W)
 
-  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    folded_hist := entry.folded_hist
-    afhob := entry.afhob
-    lastBrNumOH := entry.lastBrNumOH
-    histPtr := entry.histPtr
-    rasSp := entry.rasSp
-    rasTop := entry.rasEntry
-    this
-  }
+  def is_jal = ftb_entry.tailSlot.valid && ftb_entry.isJal
+  def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
+  def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
+  def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
 
-  override def display(cond: Bool) = {
+  def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
     XSDebug(cond, p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] $false_hit\n")
     XSDebug(cond, p"[new_br_insert_pos] ${Binary(new_br_insert_pos.asUInt)}\n")
-    super.display(cond)
     XSDebug(cond, p"--------------------------------------------\n")
   }
 }

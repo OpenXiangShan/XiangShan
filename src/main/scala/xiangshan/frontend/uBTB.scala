@@ -25,6 +25,8 @@ import utils._
 import xiangshan._
 import huancun.mbist.MBISTPipeline.placePipelines
 
+import scala.{Tuple2 => &}
+
 trait MicroBTBParams extends HasXSParameter with HasBPUParameter {
   val numEntries = UbtbSize
   val ftPredBits = 1
@@ -43,12 +45,18 @@ class NewMicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBPar
 
   def fromBpuUpdateBundle(u: BranchPredictionUpdate) = {
     // this.valid := true.B
-    assert(!u.is_minimal)
-    this.nextAddr := u.getTarget
-    this.cfiOffset := u.cfiIndex.bits
-    this.taken := u.taken
-    this.takenOnBr := (u.lastBrPosOH.tail zip u.full_pred.br_taken_mask).map{case (a, b) => a && b}.reduce(_||_)
-    this.brNumOH := u.lastBrPosOH.asUInt()
+    this.nextAddr := u.full_target
+    this.cfiOffset := u.cfi_idx.bits
+    this.taken := u.cfi_idx.valid
+    this.takenOnBr := u.br_taken_mask.reduce(_||_)
+    this.brNumOH :=
+      VecInit(!u.ftb_entry.brValids.reduce(_||_) +:
+        (0 until numBr).map(i =>
+          u.ftb_entry.brValids(i) &&
+          !u.br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
+          (u.br_taken_mask(i) || !u.ftb_entry.brValids.drop(i+1).reduceOption(_||_).getOrElse(false.B)) // no brs behind it
+        )
+      ).asUInt
   }
 }
 
@@ -93,7 +101,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     data.io.raddr(0) := io.ridx
     io.rdata := data.io.rdata(0)
 
-    
+
     val wdata = Mux1H(Seq(
       (doing_reset, reset_wdata),
       (!doing_reset && doing_decay, decay_wdata),
@@ -132,59 +140,65 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   println(s"ubtb fh info ${fh_info}")
   def get_ghist_from_fh(afh: AllFoldedHistories) = afh.getHistWithInfo(fh_info)
 
-  val s0_data_ridx = Wire(UInt(log2Ceil(UbtbSize).W))
-  s0_data_ridx := getIdx(s0_pc) ^ get_ghist_from_fh(io.in.bits.folded_hist).folded_hist
+  val s0_data_ridx_dup = dup_wire(UInt(log2Ceil(UbtbSize).W))
+  for (s0_data_ridx & s0_pc & fh <- s0_data_ridx_dup zip s0_pc_dup zip io.in.bits.folded_hist)
+    s0_data_ridx := getIdx(s0_pc) ^ get_ghist_from_fh(fh).folded_hist
   val dataMem = Module(new SRAMTemplate(new NewMicroBTBEntry, set=numEntries, way=1, shouldReset=false, singlePort=true, parentName = parentName + "dataMem_"))
   val fallThruPredRAM = Module(new FallThruPred)
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
 
-  dataMem.io.r.req.valid := io.s0_fire
-  dataMem.io.r.req.bits.setIdx := s0_data_ridx
+  dataMem.io.r.req.valid := io.s0_fire(2)
+  dataMem.io.r.req.bits.setIdx := s0_data_ridx_dup(2)
 
-  fallThruPredRAM.io.ren := io.s0_fire
-  fallThruPredRAM.io.ridx := getFtPredIdx(s0_pc)
+  fallThruPredRAM.io.ren := io.s0_fire(2)
+  fallThruPredRAM.io.ridx := getFtPredIdx(s0_pc_dup(2))
   val shouldNotFallThru = fallThruPredRAM.io.rdata.andR() // only when confident should we not fallThru
 
   val update_valid = Wire(Bool())
-  val pred_may_invalid_by_update = RegInit(false.B)
+  val pred_may_invalid_by_update_dup = dup_seq(RegInit(false.B))
   when (update_valid) {
-    pred_may_invalid_by_update := true.B
-  }.elsewhen (io.s1_fire) {
-    pred_may_invalid_by_update := false.B
+    pred_may_invalid_by_update_dup.map(_ := true.B)
+  }.elsewhen (io.s1_fire(2)) {
+    pred_may_invalid_by_update_dup.map(_ := false.B)
   }
 
 
 
 
-  // io.out.resp
-  val s1_data_ridx = RegEnable(s0_data_ridx, io.s0_fire)
+  // io.out
+  val s1_data_ridx_dup = s0_data_ridx_dup.zip(io.s0_fire).map {case (ridx, f) => RegEnable(ridx, f)}
   // only for timing purposes
   def s0_select_bits = 3
   def s1_select_bits = 5
   require(1 << (s0_select_bits + s1_select_bits) == numEntries)
   // val resp_valid = RegEnable(validArray(s0_data_ridx), io.s0_fire && !update_valid)
   // select using highest bits of s0_ridx
-  val s0_selected_valid_bits = VecInit((0 until (1 << s1_select_bits)).map {i =>
-    validArray(Cat(s0_data_ridx(log2Ceil(UbtbSize)-1, log2Ceil(UbtbSize)-s0_select_bits), i.U(s1_select_bits.W)))
-  })
-  val s1_selected_valid_bits = RegEnable(s0_selected_valid_bits, io.s0_fire)
+  val s0_selected_valid_bits_dup = s0_data_ridx_dup.map(ridx => VecInit((0 until (1 << s1_select_bits)).map {i =>
+    validArray(Cat(ridx(log2Ceil(UbtbSize)-1, log2Ceil(UbtbSize)-s0_select_bits), i.U(s1_select_bits.W)))
+  }))
+  val s1_selected_valid_bits_dup = s0_selected_valid_bits_dup.zip(io.s0_fire).map {case (s0_vb, f) => RegEnable(s0_vb, f)}
   // select using the lower bits of s1_ridx
-  val resp_valid = s1_selected_valid_bits(s1_data_ridx(s1_select_bits-1,0))
+  val resp_valid_dup = s1_selected_valid_bits_dup.zip(s1_data_ridx_dup).map {case (s1_vb, ridx) => s1_vb(ridx(s1_select_bits-1,0))}
 
 
   val outMeta = Wire(new MicroBTBOutMeta)
 
-  XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc)}\n")
+  XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc_dup(2))}\n")
 
-  io.out.resp.s1.minimal_pred.fromMicroBTBEntry(
-    resp_valid && shouldNotFallThru && !pred_may_invalid_by_update && io.ctrl.ubtb_enable,
-    dataMem.io.r.resp.data(0), s1_pc
-  ) // invalid when update
-  io.out.resp.s1.is_minimal := true.B
+  val ubtb_enable_dup = dup_seq(RegNext(io.ctrl.ubtb_enable))
+
+  for (mp & invalid_by_upd & ubtb_enable & s1_pc & resp_valid <-
+    io.out.s1.minimal_pred zip pred_may_invalid_by_update_dup zip ubtb_enable_dup zip s1_pc_dup zip resp_valid_dup) {
+      mp.fromMicroBTBEntry(
+        resp_valid && shouldNotFallThru && !invalid_by_upd && ubtb_enable,
+        dataMem.io.r.resp.data(0), s1_pc
+        ) // invalid when update
+    }
+  io.out.s1.is_minimal := true.B
 
   outMeta.ftPred := fallThruPredRAM.io.rdata
-  io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
+  io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire(2)), io.s2_fire(2))
 
   // Update logic
   val update_mispred = io.update.bits.mispred_mask.reduce(_||_)
@@ -193,11 +207,11 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val u_valid = RegNext(io.update.valid && (update_mispred || update_redirected))
   update_valid := u_valid
   val u_pc = update.pc
-  val u_br_taken_mask = update.full_pred.br_taken_mask
+  val u_br_taken_mask = update.br_taken_mask
   val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
   val u_data = Wire(new NewMicroBTBEntry)
   u_data.fromBpuUpdateBundle(update)
-  val u_idx = getIdx(update.pc) ^ get_ghist_from_fh(update.folded_hist).folded_hist
+  val u_idx = getIdx(update.pc) ^ get_ghist_from_fh(update.spec_info.folded_hist).folded_hist
 
   val u_ftPred = u_meta.ftPred.andR
   val u_ftMisPred = u_ftPred ^ update.pred_hit
@@ -213,7 +227,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
   val (uBTBMbistPipelineSram,uBTBMbistPipelineRf,uBTBMbistPipelineSramRepair,uBTBMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_uBTB")
   // XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
-  XSDebug("target=%x\n", io.out.resp.s1.getTarget)
+  XSDebug("target=%x\n", io.out.s1.target(2))
 
   XSDebug(u_valid, "[update]Update from ftq\n")
   XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, ubtbAddr.getTag(u_pc))
@@ -230,8 +244,8 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   XSPerfAccumulate("ubtb_update_on_redirected_by_s2", u_valid && RegNext(update_redirected))
   XSPerfAccumulate("ubtb_update_eliminated", io.update.valid && !(update_mispred || update_redirected))
 
-  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire && pred_may_invalid_by_update && shouldNotFallThru)
-  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire && !pred_may_invalid_by_update && !shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire(2) && pred_may_invalid_by_update_dup(2) && shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire(2) && !pred_may_invalid_by_update_dup(2) && !shouldNotFallThru)
 
   XSPerfAccumulate("ubtb_update_ft_mispred", RegNext(io.update.valid) && u_ftMisPred)
   XSPerfAccumulate("ubtb_update_ft_pred_correct", RegNext(io.update.valid) && !u_ftMisPred)

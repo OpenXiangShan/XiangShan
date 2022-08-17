@@ -366,7 +366,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
-  io.release_req        <> release_arb.io.out
+  io.release_req    <> release_arb.io.out
 
   (0 until nWays).map{ w =>
     XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)

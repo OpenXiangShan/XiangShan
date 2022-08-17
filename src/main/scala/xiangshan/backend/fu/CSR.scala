@@ -1056,15 +1056,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hasStoreAddrMisaligned
   )).asUInt.orR
   when (RegNext(RegNext(updateTval))) {
-      val tval = RegNext(Mux(
-      RegNext(hasInstrPageFault || hasInstrAccessFault),
-      RegNext(Mux(
-        csrio.exception.bits.uop.cf.crossPageIPFFix,
-        SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
-        iexceptionPC
-      )),
-      memExceptionAddr
-    ))
+      val tval = Mux(
+        RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault)),
+        RegNext(RegNext(Mux(
+          csrio.exception.bits.uop.cf.crossPageIPFFix,
+          SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
+          iexceptionPC
+        ))),
+        memExceptionAddr
+    )
     when (RegNext(priviledgeMode === ModeM)) {
       mtval := tval
     }.otherwise {

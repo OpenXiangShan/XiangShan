@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -120,12 +120,12 @@ case class XSCoreParameters
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
       ubtb.io.in.bits.resp_in(0) := resp_in
-      tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
-      ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
-      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
+      tage.io.in.bits.resp_in(0) := ubtb.io.out
+      ftb.io.in.bits.resp_in(0)  := tage.io.out
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out
+      ras.io.in.bits.resp_in(0) := ittage.io.out
 
-      (preds, ras.io.out.resp)
+      (preds, ras.io.out)
     }),
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,

@@ -23,6 +23,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 
+import scala.{Tuple2 => &}
+
+
 class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
     val ctr = UInt(8.W) // layer of nested call functions
@@ -196,51 +199,66 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   val s2_spec_pop = WireInit(false.B)
   val s2_full_pred = io.in.bits.resp_in(0).s2.full_pred
   // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
-  val s2_spec_new_addr = s2_full_pred.fallThroughAddr + Mux(s2_full_pred.last_may_be_rvi_call, 2.U, 0.U)
+  val s2_spec_new_addr = s2_full_pred(2).fallThroughAddr + Mux(s2_full_pred(2).last_may_be_rvi_call, 2.U, 0.U)
   spec_ras.push_valid := s2_spec_push
   spec_ras.pop_valid  := s2_spec_pop
   spec_ras.spec_new_addr := s2_spec_new_addr
 
   // confirm that the call/ret is the taken cfi
-  s2_spec_push := io.s2_fire && s2_full_pred.hit_taken_on_call && !io.s3_redirect
-  s2_spec_pop  := io.s2_fire && s2_full_pred.hit_taken_on_ret  && !io.s3_redirect
+  s2_spec_push := io.s2_fire(2) && s2_full_pred(2).hit_taken_on_call && !io.s3_redirect(2)
+  s2_spec_pop  := io.s2_fire(2) && s2_full_pred(2).hit_taken_on_ret  && !io.s3_redirect(2)
 
-  val s2_jalr_target = io.out.resp.s2.full_pred.jalr_target
-  val s2_last_target_in = s2_full_pred.targets.last
-  val s2_last_target_out = io.out.resp.s2.full_pred.targets.last
-  val s2_is_jalr = s2_full_pred.is_jalr
-  val s2_is_ret = s2_full_pred.is_ret
+  val s2_jalr_target_dup = io.out.s2.full_pred.map(_.jalr_target)
+  val s2_last_target_in_dup = s2_full_pred.map(_.targets.last)
+  val s2_last_target_out_dup = io.out.s2.full_pred.map(_.targets.last)
+  val s2_is_jalr_dup = s2_full_pred.map(_.is_jalr)
+  val s2_is_ret_dup = s2_full_pred.map(_.is_ret)
   // assert(is_jalr && is_ret || !is_ret)
-  when(s2_is_ret && io.ctrl.ras_enable) {
-    s2_jalr_target := spec_top_addr
-    // FIXME: should use s1 globally
-  }
-  s2_last_target_out := Mux(s2_is_jalr, s2_jalr_target, s2_last_target_in)
+  val ras_enable_dup = dup(RegNext(io.ctrl.ras_enable))
+  for (ras_enable & s2_is_ret & s2_jalr_target <-
+    ras_enable_dup zip s2_is_ret_dup zip s2_jalr_target_dup) {
+      when(s2_is_ret && ras_enable) {
+        s2_jalr_target := spec_top_addr
+        // FIXME: should use s1 globally
+      }
+    }
+  for (s2_lto & s2_is_jalr & s2_jalr_target & s2_lti <-
+    s2_last_target_out_dup zip s2_is_jalr_dup zip s2_jalr_target_dup zip s2_last_target_in_dup) {
+      s2_lto := Mux(s2_is_jalr, s2_jalr_target, s2_lti)
+    }
 
-  val s3_top = RegEnable(spec_ras.top, io.s2_fire)
-  val s3_sp = RegEnable(spec_ras.sp, io.s2_fire)
-  val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire)
+  val s3_top_dup = io.s2_fire.map(f => RegEnable(spec_ras.top, f))
+  val s3_sp = RegEnable(spec_ras.sp, io.s2_fire(2))
+  val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire(2))
 
-  val s3_jalr_target = io.out.resp.s3.full_pred.jalr_target
-  val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred.targets.last
-  val s3_last_target_out = io.out.resp.s3.full_pred.targets.last
-  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred.is_jalr
-  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred.is_ret
+  val s3_full_pred = io.in.bits.resp_in(0).s3.full_pred
+  val s3_jalr_target_dup = io.out.s3.full_pred.map(_.jalr_target)
+  val s3_last_target_in_dup = s3_full_pred.map(_.targets.last)
+  val s3_last_target_out_dup = io.out.s3.full_pred.map(_.targets.last)
+  val s3_is_jalr_dup = s3_full_pred.map(_.is_jalr)
+  val s3_is_ret_dup = s3_full_pred.map(_.is_ret)
   // assert(is_jalr && is_ret || !is_ret)
-  when(s3_is_ret && io.ctrl.ras_enable) {
-    s3_jalr_target := s3_top.retAddr
-    // FIXME: should use s1 globally
-  }
-  s3_last_target_out := Mux(s3_is_jalr, s3_jalr_target, s3_last_target_in)
 
-  val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire)
-  val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire)
-  val s3_push = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_call
-  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_ret
+  for (ras_enable & s3_is_ret & s3_jalr_target & s3_top <-
+    ras_enable_dup zip s3_is_ret_dup zip s3_jalr_target_dup zip s3_top_dup) {
+      when(s3_is_ret && ras_enable) {
+        s3_jalr_target := s3_top.retAddr
+        // FIXME: should use s1 globally
+      }
+    }
+  for (s3_lto & s3_is_jalr & s3_jalr_target & s3_lti <-
+    s3_last_target_out_dup zip s3_is_jalr_dup zip s3_jalr_target_dup zip s3_last_target_in_dup) {
+      s3_lto := Mux(s3_is_jalr, s3_jalr_target, s3_lti)
+    }
 
-  val s3_recover = io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
-  io.out.resp.s3.rasSp  := s3_sp
-  io.out.resp.s3.rasTop := s3_top
+  val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire(2))
+  val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire(2))
+  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call
+  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret
+
+  val s3_recover = io.s3_fire(2) && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
+  io.out.last_stage_spec_info.rasSp  := s3_sp
+  io.out.last_stage_spec_info.rasTop := s3_top_dup(2)
 
 
   val redirect = RegNext(io.redirect)
@@ -256,7 +274,7 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   spec_ras.recover_pop  := Mux(redirect.valid, retMissPred, s3_pop)
 
   spec_ras.recover_sp  := Mux(redirect.valid, recover_cfi.rasSp, s3_sp)
-  spec_ras.recover_top := Mux(redirect.valid, recover_cfi.rasEntry, s3_top)
+  spec_ras.recover_top := Mux(redirect.valid, recover_cfi.rasEntry, s3_top_dup(2))
   spec_ras.recover_new_addr := Mux(redirect.valid, recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U), s3_spec_new_addr)
 
 
@@ -277,11 +295,11 @@ class RAS(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   }
   XSDebug(s2_spec_push, "s2_spec_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
   s2_spec_new_addr,spec_debug.spec_push_entry.ctr,spec_debug.spec_alloc_new,spec_debug.sp.asUInt)
-  XSDebug(s2_spec_pop, "s2_spec_pop  outAddr: 0x%x \n",io.out.resp.s2.getTarget)
+  XSDebug(s2_spec_pop, "s2_spec_pop  outAddr: 0x%x \n",io.out.s2.target(2))
   val s3_recover_entry = spec_debug.recover_push_entry
   XSDebug(s3_recover && s3_push, "s3_recover_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
     s3_recover_entry.retAddr, s3_recover_entry.ctr, spec_debug.recover_alloc_new, s3_sp.asUInt)
-  XSDebug(s3_recover && s3_pop, "s3_recover_pop  outAddr: 0x%x \n",io.out.resp.s3.getTarget)
+  XSDebug(s3_recover && s3_pop, "s3_recover_pop  outAddr: 0x%x \n",io.out.s3.target(2))
   val redirectUpdate = redirect.bits.cfiUpdate
   XSDebug(do_recover && callMissPred, "redirect_recover_push\n")
   XSDebug(do_recover && retMissPred, "redirect_recover_pop\n")

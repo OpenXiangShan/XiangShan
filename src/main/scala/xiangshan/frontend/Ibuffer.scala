@@ -140,6 +140,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val fastData = deqData(i).toCtrlFlow
     io.out(i).bits.instr := fastData.instr
     io.out(i).bits.exceptionVec := fastData.exceptionVec
+    io.out(i).bits.foldpc := fastData.foldpc
     XSError(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
   }
   val nextStepData = Wire(Vec(2 * DecodeWidth, new IBufEntry))

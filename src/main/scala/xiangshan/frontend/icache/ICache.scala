@@ -531,8 +531,16 @@ class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModule
   meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
   meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
 
-  metaArray.io.write <> meta_write_arb.io.out
-  dataArray.io.write <> missUnit.io.data_write
+  //metaArray.io.write <> meta_write_arb.io.out
+  //dataArray.io.write <> missUnit.io.data_write
+
+  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
+  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
+  meta_write_arb.io.out.ready := true.B
+
+  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
+  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
+  missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
   replacePipe.io.csr_parity_enable := io.csr_parity_enable
@@ -679,10 +687,10 @@ class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModule
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  dataArray.io.cache_req_dup(0) := cacheOpDecoder.io.cache_req_dup_0
-  dataArray.io.cache_req_dup(1) := cacheOpDecoder.io.cache_req_dup_1
-  dataArray.io.cache_req_dup(2) := cacheOpDecoder.io.cache_req_dup_2
-  dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup_3
+  dataArray.io.cache_req_dup(0) := cacheOpDecoder.io.cache_req_dup(0)
+  dataArray.io.cache_req_dup(1) := cacheOpDecoder.io.cache_req_dup(1)
+  dataArray.io.cache_req_dup(2) := cacheOpDecoder.io.cache_req_dup(2)
+  dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup(3)
 
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=

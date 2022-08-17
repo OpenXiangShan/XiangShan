@@ -24,6 +24,8 @@ import utils._
 import xiangshan._
 import huancun.mbist.MBISTPipeline.placePipelines
 
+import scala.{Tuple2 => &}
+
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
   val numEntries = FtbSize
@@ -402,41 +404,47 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
 
-  ftbBank.io.req_pc.valid := io.s0_fire
-  ftbBank.io.req_pc.bits := s0_pc
+  ftbBank.io.req_pc.valid := io.s0_fire(0)
+  ftbBank.io.req_pc.bits := s0_pc_dup(0)
 
-  val ftb_entry = RegEnable(ftbBank.io.read_resp, io.s1_fire)
-  val s3_ftb_entry = RegEnable(ftb_entry, io.s2_fire)
+  val btb_enable_dup = dup(RegNext(io.ctrl.btb_enable))
+  val s2_ftb_entry_dup = io.s1_fire.map(f => RegEnable(ftbBank.io.read_resp, f))
+  val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
+
   val s1_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
-  val s2_hit = RegEnable(s1_hit, io.s1_fire)
-  val s3_hit = RegEnable(s2_hit, io.s2_fire)
+  val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, f))
+  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, f)}
   val writeWay = ftbBank.io.read_hits.bits
 
-  val fallThruAddr = getFallThroughAddr(s2_pc, ftb_entry.carry, ftb_entry.pftAddr)
-
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  io.out.resp.s2.full_pred.hit       := s2_hit
-  io.out.resp.s2.pc                  := s2_pc
-  io.out.resp.s2.ftb_entry           := ftb_entry
-  io.out.resp.s2.full_pred.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
-  io.out.resp.s2.is_minimal := false.B
+  io.out.s2.full_pred.zip(s2_hit_dup).map {case (fp, h) => fp.hit := h}
+  for (full_pred & s2_ftb_entry & s2_pc & s1_pc & s1_fire <-
+    io.out.s2.full_pred zip s2_ftb_entry_dup zip s2_pc_dup zip s1_pc_dup zip io.s1_fire) {
+      full_pred.fromFtbEntry(s2_ftb_entry, s2_pc, Some((s1_pc, s1_fire)))
+  }
+  io.out.s2.is_minimal := false.B
 
-  io.out.resp.s3.full_pred.hit := s3_hit
-  io.out.resp.s3.pc                  := s3_pc
-  io.out.resp.s3.ftb_entry           := s3_ftb_entry
-  io.out.resp.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
-  io.out.resp.s3.is_minimal := false.B
+  io.out.s3.full_pred.zip(s3_hit_dup).map {case (fp, h) => fp.hit := h}
+  for (full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
+    io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire)
+      full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, s2_fire)))
+  io.out.s3.is_minimal := false.B
 
-  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
+  io.out.last_stage_ftb_entry := s3_ftb_entry_dup(0)
+  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire(0)), io.s2_fire(0))
 
   // always taken logic
   for (i <- 0 until numBr) {
-    io.out.resp.s2.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s2.full_pred.br_taken_mask(i) || s2_hit && ftb_entry.always_taken(i)
-    io.out.resp.s3.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s3.full_pred.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
+    for (out_fp & in_fp & s2_hit & s2_ftb_entry <-
+      io.out.s2.full_pred zip io.in.bits.resp_in(0).s2.full_pred zip s2_hit_dup zip s2_ftb_entry_dup)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s2_hit && s2_ftb_entry.always_taken(i)
+    for (out_fp & in_fp & s3_hit & s3_ftb_entry <-
+      io.out.s3.full_pred zip io.in.bits.resp_in(0).s3.full_pred zip s3_hit_dup zip s3_ftb_entry_dup)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
   }
 
   // Update logic
@@ -471,20 +479,20 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   ftbBank.io.update_write_way   := Mux(update_now, u_meta.writeWay, RegNext(ftbBank.io.update_hits.bits)) // use it one cycle later
   ftbBank.io.update_write_alloc := Mux(update_now, false.B,         RegNext(!ftbBank.io.update_hits.valid)) // use it one cycle later
   ftbBank.io.update_access := u_valid && !u_meta.hit
-  ftbBank.io.s1_fire := io.s1_fire
+  ftbBank.io.s1_fire := io.s1_fire(0)
 
   val (ftbMbistPipelineSram,ftbMbistPipelineRf,ftbMbistPipelineSramRepair,ftbMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_ftb")
 
-  XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
-  XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
+  XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire(0), s0_pc_dup(0), ftbBank.io.req_pc.ready)
+  XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit_dup(0), writeWay.asUInt)
   XSDebug("s2_br_taken_mask=%b, s2_real_taken_mask=%b\n",
-    io.in.bits.resp_in(0).s2.full_pred.br_taken_mask.asUInt, io.out.resp.s2.full_pred.real_slot_taken_mask().asUInt)
-  XSDebug("s2_target=%x\n", io.out.resp.s2.getTarget)
+    io.in.bits.resp_in(0).s2.full_pred(0).br_taken_mask.asUInt, io.out.s2.full_pred(0).real_slot_taken_mask().asUInt)
+  XSDebug("s2_target=%x\n", io.out.s2.target(0))
 
-  ftb_entry.display(true.B)
+  s2_ftb_entry_dup(0).display(true.B)
 
-  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
-  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire(0)) && s1_hit)
+  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire(0)) && !s1_hit)
 
   XSPerfAccumulate("ftb_commit_hits", io.update.valid && u_meta.hit)
   XSPerfAccumulate("ftb_commit_misses", io.update.valid && !u_meta.hit)
@@ -494,8 +502,8 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   XSPerfAccumulate("ftb_updated", u_valid)
 
   override val perfEvents = Seq(
-    ("ftb_commit_hits            ", RegNext(io.update.valid)  &&  u_meta.hit),
-    ("ftb_commit_misses          ", RegNext(io.update.valid)  && !u_meta.hit),
+    ("ftb_commit_hits            ", io.update.valid  &&  u_meta.hit),
+    ("ftb_commit_misses          ", io.update.valid  && !u_meta.hit),
   )
   generatePerfEvent()
 }
