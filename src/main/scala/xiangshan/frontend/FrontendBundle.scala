@@ -552,32 +552,34 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
 @chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
-  // def full_pred_info[T <: Data](x: T) = if (is_minimal) None else Some(x)
-  val pc = UInt(VAddrBits.W)
 
-  val valid = Bool()
+  val pc    = Vec(numDup, UInt(VAddrBits.W))
+  val valid = Vec(numDup, Bool())
 
-  val hasRedirect = Bool()
-  val ftq_idx = new FtqPtr
-  // val hit = Bool()
+  val minimal_pred = Vec(numDup, new MinimalBranchPrediction)
+  val full_pred    = Vec(numDup, new FullBranchPrediction)
+  val hasRedirect  = Vec(numDup, Bool())
+  
   val is_minimal = Bool()
-  val minimal_pred = new MinimalBranchPrediction
-  val full_pred = new FullBranchPrediction
+
+  val ftq_idx = new FtqPtr
 
 
-  def target(pc: UInt) = Mux(is_minimal, minimal_pred.target(pc),     full_pred.target(pc))
-  def cfiIndex         = Mux(is_minimal, minimal_pred.cfiIndex,       full_pred.cfiIndex)
-  def lastBrPosOH      = Mux(is_minimal, minimal_pred.lastBrPosOH,    full_pred.lastBrPosOH)
-  def brTaken          = Mux(is_minimal, minimal_pred.brTaken,        full_pred.brTaken)
-  def shouldShiftVec   = Mux(is_minimal, minimal_pred.shouldShiftVec, full_pred.shouldShiftVec)
-  def fallThruError    = Mux(is_minimal, minimal_pred.fallThruError,  full_pred.fallThruError)
+  def target = Mux(is_minimal,
+    VecInit(minimal_pred.zip(pc).map{case (mp, p) => mp.target(p)}),
+    VecInit(full_pred.zip(pc).map{case (fp, p) => fp.target(p)})
+  )
+  def cfiIndex       = Mux(is_minimal, VecInit(minimal_pred.map(_.cfiIndex)),       VecInit(full_pred.map(_.cfiIndex)))
+  def lastBrPosOH    = Mux(is_minimal, VecInit(minimal_pred.map(_.lastBrPosOH)),    VecInit(full_pred.map(_.lastBrPosOH)))
+  def brTaken        = Mux(is_minimal, VecInit(minimal_pred.map(_.brTaken)),        VecInit(full_pred.map(_.brTaken)))
+  def shouldShiftVec = Mux(is_minimal, VecInit(minimal_pred.map(_.shouldShiftVec)), VecInit(full_pred.map(_.shouldShiftVec)))
+  def fallThruError  = Mux(is_minimal, VecInit(minimal_pred.map(_.fallThruError)),  VecInit(full_pred.map(_.fallThruError)))
 
-  def getTarget = target(pc)
-  def taken = cfiIndex.valid
+  def taken = VecInit(cfiIndex.map(_.valid))
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    full_pred.display(cond)
+    XSDebug(cond, p"[pc] ${Hexadecimal(pc(0))}\n")
+    full_pred(0).display(cond)
   }
 }
 
@@ -592,21 +594,21 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val last_stage_spec_info = new SpeculativeInfo
   val last_stage_ftb_entry = new FTBEntry
 
-  def selectedResp ={
+  def selectedRespForFtq ={
     val res =
       PriorityMux(Seq(
-        ((s3.valid && s3.hasRedirect) -> s3),
-        ((s2.valid && s2.hasRedirect) -> s2),
-        (s1.valid -> s1)
+        ((s3.valid(3) && s3.hasRedirect(3)) -> s3),
+        ((s2.valid(3) && s2.hasRedirect(3)) -> s2),
+        (s1.valid(3) -> s1)
       ))
     // println("is minimal: ", res.is_minimal)
     res
   }
-  def selectedRespIdx =
+  def selectedRespIdxForFtq =
     PriorityMux(Seq(
-      ((s3.valid && s3.hasRedirect) -> BP_S3),
-      ((s2.valid && s2.hasRedirect) -> BP_S2),
-      (s1.valid -> BP_S1)
+      ((s3.valid(3) && s3.hasRedirect(3)) -> BP_S3),
+      ((s2.valid(3) && s2.hasRedirect(3)) -> BP_S2),
+      (s1.valid(3) -> BP_S1)
     ))
   def lastStage = s3
 }
