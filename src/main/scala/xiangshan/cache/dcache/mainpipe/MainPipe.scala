@@ -469,6 +469,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     } .otherwise {
       lrsc_count := 0.U
     }
+  } .elsewhen (io.invalid_resv_set) {
+    // when we release this block,
+    // we invalidate this reservation set
+    lrsc_count := 0.U
   } .elsewhen (lrsc_count > 0.U) {
     lrsc_count := lrsc_count - 1.U
   }
@@ -481,12 +485,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
   io.update_resv_set := s3_valid && s3_lr && s3_can_do_amo
-
-  // when we release this block,
-  // we invalidate this reservation set
-  when (io.invalid_resv_set) {
-    lrsc_count := 0.U
-  }
 
   when (s3_valid) {
     when (s3_req.addr === debug_sc_fail_addr) {
