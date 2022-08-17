@@ -241,6 +241,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val refill = Output(new L2TlbInnerBundle())
     val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
+  val cache = DecoupledIO(new L2TlbInnerBundle())
   val pmp = new Bundle {
     val req = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
@@ -260,7 +261,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val io = IO(new LLPTWIO())
 
   val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
-  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(5)
+  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(6)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_mems = state.map(_ === state_mem_req)
@@ -270,12 +271,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
-  val mem_ptr = ParallelPriorityEncoder(is_having)
+  val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
   val mem_arb = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     mem_arb.io.in(i).bits := entries(i)
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
+
+  val cache_ptr = ParallelMux(is_mems, (0 until l2tlbParams.llptwsize).map(_.U))
 
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
@@ -291,14 +294,16 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
   val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
-  val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
+  val to_wait = Cat(dup_vec_wait).orR
   val to_mem_out = dup_wait_resp
-  val to_cache_low = Cat(dup_vec_having).orR
-  assert(RegNext(!(dup_req_fire && Cat(dup_vec_wait).orR), init = true.B), "mem req but some entries already waiting, should not happed")
+  val to_cache = Cat(dup_vec_having).orR
+  XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
+  XSError(io.in.fire() && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
-    Mux(to_wait, state_mem_waiting, state_addr_check))
+    Mux(to_wait, state_mem_waiting,
+    Mux(to_cache, state_cache, state_addr_check)))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire()) {
     // if prefetch req does not need mem access, just give it up.
@@ -333,6 +338,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     state(mem_ptr) := state_idle
   }
   mem_resp_hit.map(a => when (a) { a := false.B } )
+
+  when (io.cache.fire) {
+    state(cache_ptr) := state_idle
+  }
+  XSError(io.out.fire && io.cache.fire && (mem_ptr === cache_ptr), "mem resp and cache fire at the same time at same entry")
 
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
@@ -370,6 +380,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
+
+  io.cache.valid := Cat(is_mems).orR
+  io.cache.bits := ParallelMux(is_mems, entries.map(_.req_info))
 
   XSPerfAccumulate("llptw_in_count", io.in.fire())
   XSPerfAccumulate("llptw_in_block", io.in.valid && !io.in.ready)
