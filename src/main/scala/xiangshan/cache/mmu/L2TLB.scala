@@ -141,6 +141,17 @@ class PTWImp(parentName: String = "Unknown", outer: PTW)(implicit p: Parameters)
   llptw.io.sfence := sfence_dup(1)
   llptw.io.csr := csr_dup(1)
 
+  val mq_arb = Module(new Arbiter(new L2TlbInnerBundle, 2))
+  mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
+    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
+    !from_pre(cache.io.resp.bits.req_info.source) &&
+    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
+  mq_arb.io.in(0).bits :=  cache.io.resp.bits.req_info
+  mq_arb.io.in(1) <> llptw.io.cache
+  missQueue.io.in <> mq_arb.io.out
+  missQueue.io.sfence  := sfence_dup(6)
+  missQueue.io.csr := csr_dup(5)
+
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
@@ -153,15 +164,7 @@ class PTWImp(parentName: String = "Unknown", outer: PTW)(implicit p: Parameters)
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
-    Mux(cache.io.resp.bits.bypassed, missQueue.io.in.ready, missQueue.io.in.ready || ptw.io.req.ready)))
-
-  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
-    !from_pre(cache.io.resp.bits.req_info.source) &&
-    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
-  missQueue.io.in.bits := cache.io.resp.bits.req_info
-  missQueue.io.sfence  := sfence_dup(6)
-  missQueue.io.csr := csr_dup(5)
+    Mux(cache.io.resp.bits.bypassed, mq_arb.io.in(0).ready, mq_arb.io.in(0).ready || ptw.io.req.ready)))
 
   // NOTE: missQueue req has higher priority
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
@@ -245,11 +248,16 @@ class PTWImp(parentName: String = "Unknown", outer: PTW)(implicit p: Parameters)
     assert(mem.d.bits.source <= l2tlbParams.llptwsize.U)
     refill_data(refill_helper._4) := mem.d.bits.data
   }
+  // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
+  val refill_data_tmp = WireInit(refill_data)
+  refill_data_tmp(refill_helper._4) := mem.d.bits.data
+
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until MemReqWidth).map(i =>
-    if (i == l2tlbParams.llptwsize) {DataHoldBypass(get_part(refill_data, req_addr_low(i)), RegNext(mem_resp_done && !mem_resp_from_mq)) }
+    if (i == l2tlbParams.llptwsize) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_mq) }
     else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), llptw_mem.buffer_it(i)) }
+    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
   // mem -> miss queue
@@ -263,9 +271,6 @@ class PTWImp(parentName: String = "Unknown", outer: PTW)(implicit p: Parameters)
   val refill_from_mq = mem_resp_from_mq
   val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
-  // Assume mem.resp.data will arrive (255, 0) first and then (511, 256).
-  val refill_data_tmp = WireInit(refill_data)
-  refill_data_tmp(refill_helper._4) := mem.d.bits.data
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
