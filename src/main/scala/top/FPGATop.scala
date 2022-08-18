@@ -56,7 +56,7 @@ class TopIOAdapter(_top: XSTop)(implicit p: Parameters) extends RawModule {
   top := DontCare
   top.clock := io.clock
   withClockAndReset(io.clock, io.reset) {
-    top.clock_div2 := clock // Module(new Pow2ClockDivider(1)).io.clock_out
+    top.clock_div2 := io.clock // Module(new Pow2ClockDivider(1)).io.clock_out
   }
   top.reset := io.reset
   top.extIntrs := io.extIntrs
