@@ -267,6 +267,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
+  val is_cache = state.map(_ === state_cache)
 
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
@@ -278,7 +279,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
 
-  val cache_ptr = ParallelMux(is_mems, (0 until l2tlbParams.llptwsize).map(_.U))
+  val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U))
 
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
@@ -381,8 +382,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
-  io.cache.valid := Cat(is_mems).orR
-  io.cache.bits := ParallelMux(is_mems, entries.map(_.req_info))
+  io.cache.valid := Cat(is_cache).orR
+  io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
 
   XSPerfAccumulate("llptw_in_count", io.in.fire())
   XSPerfAccumulate("llptw_in_block", io.in.valid && !io.in.ready)
