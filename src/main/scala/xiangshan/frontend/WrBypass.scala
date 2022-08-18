@@ -57,12 +57,13 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val data_mem = Mem(numEntries, Vec(numWays, gen))
 
   val valids = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
+  val ever_written = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
   val enq_ptr = RegInit(0.U.asTypeOf(new WrBypassPtr))
   val enq_idx = enq_ptr.value
 
   idx_tag_cam.io.r.req(0)(io.write_idx, io.write_tag.getOrElse(0.U))
-  val hits_oh = idx_tag_cam.io.r.resp(0)
+  val hits_oh = idx_tag_cam.io.r.resp(0).zip(ever_written).map {case (h, ew) => h && ew}
   val hit_idx = OHToUInt(hits_oh)
   val hit = hits_oh.reduce(_||_)
 
@@ -89,6 +90,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
           valids(hit_idx)(i) := true.B
         }
       }.otherwise {
+        ever_written(enq_idx) := true.B
         valids(enq_idx)(i) := false.B
         when (update_way_mask(i)) {
           valids(enq_idx)(i) := true.B
