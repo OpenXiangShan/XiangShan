@@ -630,6 +630,9 @@ def replace_sram(out_dir, sram_conf, top_module, module_prefix):
             if not os.path.exists(sim_sram_path) and module_prefix is not None:
                 sim_sram_path = os.path.join(out_dir, top_module, f"{module_prefix}{conf.name}.v")
                 sim_sram_module.name = f"{module_prefix}{conf.name}"
+            if not os.path.exists(sim_sram_path):
+                print(f"SRAM Replace: does not find {sim_sram_path}. Skipped.")
+                continue
             with open(sim_sram_path, "r") as sim_f:
                 sim_sram_module.add_lines(sim_f.readlines())
             mbist_type = sim_sram_module.get_mbist_type()
