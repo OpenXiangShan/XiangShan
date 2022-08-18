@@ -284,9 +284,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
   // to_cache: the last is back just right now, set to mem_cache
-  def dup(vpn1: UInt, vpn2: UInt): Bool = {
-    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
-  }
   val dup_vec = state.indices.map(i =>
     dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn)
   )
@@ -317,6 +314,24 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).af := false.B
     mem_resp_hit(enq_ptr) := to_mem_out
   }
+
+  val enq_ptr_reg = RegNext(enq_ptr)
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
+  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
+
+  io.pmp.req.valid := need_addr_check
+  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
+  io.pmp.req.bits.cmd := TlbCmd.read
+  io.pmp.req.bits.size := 3.U // TODO: fix it
+  val pmp_resp_valid = io.pmp.req.valid // same cycle
+  when (pmp_resp_valid) {
+    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
+    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
+    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+    entries(enq_ptr_reg).af := accessFault
+    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
+  }
+
   when (mem_arb.io.out.fire()) {
     for (i <- state.indices) {
       when (state(i) =/= state_idle && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
@@ -344,23 +359,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     state(cache_ptr) := state_idle
   }
   XSError(io.out.fire && io.cache.fire && (mem_ptr === cache_ptr), "mem resp and cache fire at the same time at same entry")
-
-  val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
-  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
-
-  io.pmp.req.valid := need_addr_check
-  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
-  io.pmp.req.bits.cmd := TlbCmd.read
-  io.pmp.req.bits.size := 3.U // TODO: fix it
-  val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid) {
-    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
-    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
-    entries(enq_ptr_reg).af := accessFault
-    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
-  }
 
   val flush = io.sfence.valid || io.csr.satp.changed
   when (flush) {

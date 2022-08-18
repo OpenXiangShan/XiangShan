@@ -257,6 +257,12 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     inner_data(index)
   }
 
+  // vpn1 and vpn2 is at same cacheline
+  def dup(vpn1: UInt, vpn2: UInt): Bool = {
+    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
+  }
+
+
   def printVec[T <: Data](x: Seq[T]): Printable = {
     (0 until x.length).map(i => p"(${i.U})${x(i)} ").reduce(_+_)
   }
