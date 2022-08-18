@@ -241,6 +241,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val refill = Output(new L2TlbInnerBundle())
     val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
+  val cache = DecoupledIO(new L2TlbInnerBundle())
   val pmp = new Bundle {
     val req = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
@@ -260,22 +261,25 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val io = IO(new LLPTWIO())
 
   val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
-  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(5)
+  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(6)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
+  val is_cache = state.map(_ === state_cache)
 
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
-  val mem_ptr = ParallelPriorityEncoder(is_having)
+  val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
   val mem_arb = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     mem_arb.io.in(i).bits := entries(i)
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
+
+  val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U))
 
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
@@ -293,17 +297,20 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp
-  val to_cache_low = Cat(dup_vec_having).orR
-  assert(RegNext(!(dup_req_fire && Cat(dup_vec_wait).orR), init = true.B), "mem req but some entries already waiting, should not happed")
+  val to_cache = Cat(dup_vec_having).orR
+  XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
+  XSError(io.in.fire() && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
-  val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
-    Mux(to_wait, state_mem_waiting, state_addr_check))
+  val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
+    Mux(to_wait, state_mem_waiting,
+    Mux(to_cache, state_cache, state_addr_check)))
+  val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire()) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
     // so 2 + FilterSize is enough to avoid dead-lock
-    state(enq_ptr) := Mux(from_pre(io.in.bits.req_info.source) && enq_state =/= state_addr_check, state_idle, enq_state)
+    state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
     entries(enq_ptr).ppn := io.in.bits.ppn
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
@@ -333,15 +340,21 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
   mem_resp_hit.map(a => when (a) { a := false.B } )
 
-  val enq_ptr_reg = RegNext(enq_ptr)
+  when (io.cache.fire) {
+    state(cache_ptr) := state_idle
+  }
+  XSError(io.out.fire && io.cache.fire && (mem_ptr === cache_ptr), "mem resp and cache fire at the same time at same entry")
 
-  io.pmp.req.valid := RegNext(enq_state === state_addr_check)
-  io.pmp.req.bits.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).req_info.vpn, 0))
+  val enq_ptr_reg = RegNext(enq_ptr)
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
+  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
+
+  io.pmp.req.valid := need_addr_check
+  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
   val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid && (state(enq_ptr_reg) === state_addr_check) &&
-    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
+  when (pmp_resp_valid) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
@@ -368,6 +381,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
+
+  io.cache.valid := Cat(is_cache).orR
+  io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
 
   XSPerfAccumulate("llptw_in_count", io.in.fire())
   XSPerfAccumulate("llptw_in_block", io.in.valid && !io.in.ready)
