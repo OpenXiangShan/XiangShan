@@ -239,7 +239,7 @@ class XiangShan(object):
         print("Running XiangShan simv with the following configurations:")
         self.show()
         diff_args = "$NOOP_HOME/"+ args.diff
-        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv +workload={workload} +diff={diff_args}')
+        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv -exitstatus +workload={workload} +diff={diff_args}')
         return return_code
 
     def run(self, args):
