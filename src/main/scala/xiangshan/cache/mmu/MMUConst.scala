@@ -92,7 +92,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 10000
+  val timeOutThreshold = 3000
 
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     require(nSets >= 1)
