@@ -227,7 +227,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
     name: Option[String] = None): Unit = {
-    val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
+    val arb = Module(new RRArbiterInit[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
@@ -403,7 +403,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
   // cycle 2: hit signal
-  val s2_hit = Input(Bool()) // hit signal for lsu, 
+  val s2_hit = Input(Bool()) // hit signal for lsu,
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
@@ -415,7 +415,7 @@ class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
-class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle { 
+class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   // sbuffer will directly send request to dcache main pipe
   val req = Flipped(Decoupled(new DCacheLineReq))
 
@@ -432,7 +432,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
-  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
+  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -502,7 +502,7 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
   missQueue.io.hartId := io.hartId
 
   val errors = ldu.map(_.io.error) ++ // load error
-    Seq(mainPipe.io.error) // store / misc error 
+    Seq(mainPipe.io.error) // store / misc error
   io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
 
   //----------------------------------------
@@ -698,7 +698,7 @@ class DCacheImp(outer: DCache, parentName:String = "Unknown") extends LazyModule
   dontTouch(refillShouldBeBlocked_dup)
 
   refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
-    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits 
+    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits
   }
   refillPipe.io.req_dup_for_meta_w.bits := mq_refill_dup(metaWritePort).bits
   refillPipe.io.req_dup_for_tag_w.bits := mq_refill_dup(tagWritePort).bits

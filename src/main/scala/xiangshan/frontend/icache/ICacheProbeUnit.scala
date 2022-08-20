@@ -19,9 +19,8 @@ package  xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata,TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
-import xiangshan.ValidUndirectioned
+import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLPermissions}
+import utils._
 
 class ProbeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -85,7 +84,7 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
     val pipe_req  = DecoupledIO(new ReplacePipeReq)
   })
 
-  val pipe_req_arb = Module(new RRArbiter(new ReplacePipeReq, cacheParams.nProbeEntries))
+  val pipe_req_arb = Module(new RRArbiterInit(new ReplacePipeReq, cacheParams.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cacheParams.nProbeEntries, Bool()))

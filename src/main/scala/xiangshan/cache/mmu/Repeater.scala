@@ -50,7 +50,7 @@ class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with 
   val req_in = if (Width == 1) {
     io.tlb.req(0)
   } else {
-    val arb = Module(new RRArbiter(io.tlb.req(0).bits.cloneType, Width))
+    val arb = Module(new RRArbiterInit(io.tlb.req(0).bits.cloneType, Width))
     arb.io.in <> io.tlb.req
     arb.io.out
   }
@@ -93,7 +93,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false)(implicit p: Para
   val req_in = if (Width == 1) {
     io.tlb.req(0)
   } else {
-    val arb = Module(new RRArbiter(io.tlb.req(0).bits.cloneType, Width))
+    val arb = Module(new RRArbiterInit(io.tlb.req(0).bits.cloneType, Width))
     arb.io.in <> io.tlb.req
     arb.io.out
   }

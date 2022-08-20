@@ -227,7 +227,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3, leaveHitMux = true)).io))
   val tlbcsr_pmp = tlbcsr_dup.drop(2).map(RegNext(_))
   for (((p,d),i) <- (pmp_check zip dtlb_pmps) zipWithIndex) {
     p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d)
