@@ -129,11 +129,17 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
   val stageDelay = Wire(Vec(2, Decoupled(new PtwCacheReq()))) // page cache resp
   val stageCheck = Wire(Vec(2, Decoupled(new PtwCacheReq()))) // check hit & check ecc
   val stageResp = Wire(Decoupled(new PtwCacheReq()))         // deq stage
+
+  val stageDelay_valid_1cycle = OneCycleValid(stageReq.fire, flush)      // catch ram data
+  val stageCheck_valid_1cycle = OneCycleValid(stageDelay(1).fire, flush) // replace & perf counter
+  val stageResp_valid_1cycle_dup = Wire(Vec(2, Bool()))
+  stageResp_valid_1cycle_dup.map(_ := OneCycleValid(stageCheck(1).fire, flush))  // ecc flush
+
   stageReq <> io.req
   PipelineConnect(stageReq, stageDelay(0), stageDelay(1).ready, flush, rwHarzad, moduleName = Some("s1_s2_pipe"))
-  InsideStageConnect(stageDelay(0), stageDelay(1), stageReq.fire)
+  InsideStageConnect(stageDelay(0), stageDelay(1), stageDelay_valid_1cycle)
   PipelineConnect(stageDelay(1), stageCheck(0), stageCheck(1).ready, flush)
-  InsideStageConnect(stageCheck(0), stageCheck(1), stageDelay(1).fire)
+  InsideStageConnect(stageCheck(0), stageCheck(1), stageCheck_valid_1cycle)
   PipelineConnect(stageCheck(1), stageResp, io.resp.ready, flush, moduleName = Some("s2_s3_pipe"))
   stageResp.ready := !stageResp.valid || io.resp.ready
 
@@ -211,10 +217,6 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
   l3AccessPerf.map(_ := false.B)
   spAccessPerf.map(_ := false.B)
 
-  val stageDelay_valid_1cycle = OneCycleValid(stageReq.fire, flush)      // catch ram data
-  val stageCheck_valid_1cycle = OneCycleValid(stageDelay(1).fire, flush) // replace & perf counter
-  val stageResp_valid_1cycle_dup = Wire(Vec(2, Bool()))
-  stageResp_valid_1cycle_dup.map(_ := OneCycleValid(stageCheck(1).fire, flush))  // ecc flush
 
 
   def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
@@ -649,12 +651,17 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
     }
   }
 
-  def InsideStageConnect(in: DecoupledIO[PtwCacheReq], out: DecoupledIO[PtwCacheReq], InFire: Bool): Unit = {
+  def InsideStageConnect(in: DecoupledIO[PtwCacheReq], out: DecoupledIO[PtwCacheReq], inFire: Bool): Unit = {
     in.ready := !in.valid || out.ready
     out.valid := in.valid
     out.bits := in.bits
     out.bits.bypassed.zip(in.bits.bypassed).zipWithIndex.map{ case (b, i) =>
-      b._1 := b._2 || DataHoldBypass(refill_bypass(in.bits.req_info.vpn, i), OneCycleValid(InFire, false.B) || io.refill.valid)
+      val bypassed_reg = Reg(Bool())
+      val bypassed_wire = refill_bypass(in.bits.req_info.vpn, i) && io.refill.valid
+      when (inFire) { bypassed_reg := bypassed_wire }
+      .elsewhen (io.refill.valid) { bypassed_reg := bypassed_reg || bypassed_wire }
+
+      b._1 := b._2 || (bypassed_wire || (bypassed_reg && !inFire))
     }
   }
 

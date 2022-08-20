@@ -248,8 +248,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.csr.update.w.valid := schedule_csr_op_resp_data || schedule_csr_op_resp_finish
   io.csr.update.w.bits := DontCare
 
-  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req_bank_num_dup_vec(0)))
-  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req_bank_num_dup_vec(0)))
+  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req_opCode_dup_vec(0)))
+  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req_opCode_dup_vec(0)))
   val isReadTag = WireInit(CacheInstrucion.isReadTag(translated_cache_req.opCode))
   val isReadData = WireInit(CacheInstrucion.isReadData(translated_cache_req.opCode))
 
