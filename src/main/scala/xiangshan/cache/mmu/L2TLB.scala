@@ -126,8 +126,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   arb2.io.out.ready := cache.io.req.ready
 
-  val LLPTWARB_CACHE=0
-  val LLPTWARB_PTW=1
+  val LLPTWARB_CACHE=1
+  val LLPTWARB_PTW=0
   val llptw_arb = Module(new Arbiter(new LLPTWInBundle, 2))
   llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   llptw_arb.io.in(LLPTWARB_CACHE).bits.req_info := cache.io.resp.bits.req_info
