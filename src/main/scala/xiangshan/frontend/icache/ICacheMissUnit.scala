@@ -104,7 +104,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val release_id  = Cat(MainPipeKey.U, id.U)
   val req_corrupt = RegInit(false.B)
 
-  io.victimInfor.valid := state_dup(0) === s_send_replace || state_dup(0) === s_wait_replace || state_dup(0) === s_wait_resp
+  io.victimInfor.valid := state_dup(0) === s_send_replace || state_dup(0) === s_wait_replace || state_dup(0) === s_write_back || state_dup(0) === s_wait_resp
   io.victimInfor.vidx  := req_idx
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
