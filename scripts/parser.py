@@ -506,8 +506,8 @@ class SRAMConfiguration(object):
         if self.is_single_port():
             foundry_ports["WRAPPER_CLK_EN"] = "mbist_WRAPPER_CLK_EN"
         else:
-            foundry_ports["WRAPPER_WR_CLK_EN"] = "mbist_WRAPPER_RD_CLK_EN"
-            foundry_ports["WRAPPER_RD_CLK_EN"] = "mbist_WRAPPER_WR_CLK_EN"
+            foundry_ports["WRAPPER_WR_CLK_EN"] = "mbist_WRAPPER_WR_CLK_EN"
+            foundry_ports["WRAPPER_RD_CLK_EN"] = "mbist_WRAPPER_RD_CLK_EN"
         if self.has_repair:
             foundry_ports["ROW_REPAIR_IN"] = "repair_rowRepair"
             foundry_ports["COL_REPAIR_IN"] = "repair_colRepair"
