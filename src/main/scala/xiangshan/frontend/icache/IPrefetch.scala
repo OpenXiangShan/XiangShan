@@ -77,6 +77,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val fromFtq = io.fromFtq
   val (toITLB,  fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
+  io.iTLBInter.req_kill := false.B
   val (toIMeta, fromIMeta) = (io.toIMeta, io.fromIMeta.metaData(0))
   val (toPMP,  fromPMP)   = (io.pmp.req, io.pmp.resp)
   val toMissUnit = io.toMissUnit

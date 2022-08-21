@@ -302,14 +302,14 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // writeback access fault caused by ecc error / bus error
   //
   // * ecc data error is slow to generate, so we will not use it until load stage 3
-  // * in load stage 3, an extra signal io.load_error will be used to 
+  // * in load stage 3, an extra signal io.load_error will be used to
 
   // now cache ecc error will raise an access fault
   // at the same time, error info (including error paddr) will be write to
   // an customized CSR "CACHE_ERROR"
   if (EnableAccurateLoadError) {
     io.delayedLoadError := io.dcacheResp.bits.error_delayed &&
-      io.csrCtrl.cache_error_enable && 
+      io.csrCtrl.cache_error_enable &&
       RegNext(io.out.valid)
   } else {
     io.delayedLoadError := false.B
@@ -488,7 +488,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && ldldVioReplay)
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule 
+class LoadUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
   with HasDCacheParameters
@@ -538,6 +538,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect) && !s0_tryPointerChasing)
 
   load_s1.io.s1_kill := RegEnable(load_s0.io.s0_kill, false.B, load_s0.io.in.valid || io.fastpathIn.valid)
+  io.tlb.req_kill := load_s1.io.s1_kill
   load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill := load_s1.io.dcacheKill
@@ -620,7 +621,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_replay_for_mshrfull = RegNext(!load_s2.io.rsFeedback.bits.hit && load_s2.io.rsFeedback.bits.sourceType === RSFeedbackType.mshrFull)
   val s3_refill_hit_load_paddr = refill_addr_hit(RegNext(load_s2.io.out.bits.paddr), io.refill.bits.addr)
   // update replay request
-  io.feedbackSlow.bits.hit := RegNext(load_s2.io.rsFeedback.bits).hit || 
+  io.feedbackSlow.bits.hit := RegNext(load_s2.io.rsFeedback.bits).hit ||
     s3_refill_hit_load_paddr && s3_replay_for_mshrfull
 
   // feedback bank conflict / ld-vio check struct hazard to rs
@@ -694,7 +695,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val load_wb_reg = RegNext(Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits))
   io.ldout.bits := load_wb_reg
-  io.ldout.valid := RegNext(hitLoadOut.valid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)) || 
+  io.ldout.valid := RegNext(hitLoadOut.valid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)) ||
     RegNext(io.lsq.ldout.valid) && !RegNext(io.lsq.ldout.bits.uop.robIdx.needFlush(io.redirect)) && !RegNext(hitLoadOut.valid)
 
   // io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := load_wb_reg.uop.cf.exceptionVec(loadAccessFault) ||

@@ -123,6 +123,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
   val (checkerIn, checkerOut)         = (predChecker.io.in, predChecker.io.out)
 
+  io.iTLBInter.req_kill := false.B
   io.iTLBInter.resp.ready := true.B
 
   /**

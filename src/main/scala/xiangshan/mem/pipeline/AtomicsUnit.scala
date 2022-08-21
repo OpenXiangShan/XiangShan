@@ -86,6 +86,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  io.dtlb.req_kill     := false.B
   io.dtlb.resp.ready   := true.B
 
   io.flush_sbuffer.valid := false.B

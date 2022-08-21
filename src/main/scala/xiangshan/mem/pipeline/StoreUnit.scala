@@ -218,6 +218,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
+  io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
@@ -228,7 +229,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.lsq <> store_s1.io.lsq
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  
+
   // feedback tlb miss to RS in store_s2
   io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
   io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
