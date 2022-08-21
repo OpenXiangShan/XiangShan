@@ -250,6 +250,9 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     io.ptw.req(i).valid :=  need_RegNextInit(!q.sameCycle, validRegVec(i) && missVec(i), false.B) &&
       !RegNext(refill, init = false.B) &&
       param_choose(!q.sameCycle, !RegNext(RegNext(refill, init = false.B), init = false.B), true.B)
+    when (RegEnable(io.requestor(i).req_kill, RegNext(io.requestor(i).req.fire))) {
+      io.ptw.req(i).valid := false.B
+    }
     io.ptw.req(i).bits.vpn := need_RegNext(!q.sameCycle, need_RegNext(!q.sameCycle, reqAddr(i).vpn))
   }
   io.ptw.resp.ready := true.B
@@ -385,6 +388,7 @@ object TLB {
       (0 until width).map{ i =>
         tlb.io.requestor(i).req.valid := in(i).req.valid
         tlb.io.requestor(i).req.bits := in(i).req.bits
+        tlb.io.requestor(i).req_kill := false.B
         in(i).req.ready := !tlb.io.requestor(i).resp.bits.miss && in(i).resp.ready && tlb.io.requestor(i).req.ready
 
         require(q.missSameCycle || q.sameCycle)

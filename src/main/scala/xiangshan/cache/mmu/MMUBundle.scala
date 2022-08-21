@@ -415,6 +415,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
 
 class TlbRequestIO(nRespDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
+  val req_kill = Output(Bool())
   val resp = Flipped(DecoupledIO(new TlbResp(nRespDups)))
 }
 

@@ -541,6 +541,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
 
   // load s1
   load_s1.io.s1_kill := RegEnable(load_s0.io.s0_kill, false.B, load_s0.io.in.valid || io.fastpathIn.valid)
+  io.tlb.req_kill := load_s1.io.s1_kill
   load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr_dup_lsu <> load_s1.io.lsuPAddr
   io.dcache.s1_paddr_dup_dcache <> load_s1.io.dcachePAddr
