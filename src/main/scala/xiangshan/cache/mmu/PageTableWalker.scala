@@ -260,9 +260,11 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
 
+  val flush = io.sfence.valid || io.csr.satp.changed
   val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
   val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(6)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
+
   val is_emptys = state.map(_ === state_idle)
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
@@ -316,7 +318,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire())
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire() && !flush)
   val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
 
   io.pmp.req.valid := need_addr_check
@@ -360,7 +362,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
   XSError(io.out.fire && io.cache.fire && (mem_ptr === cache_ptr), "mem resp and cache fire at the same time at same entry")
 
-  val flush = io.sfence.valid || io.csr.satp.changed
   when (flush) {
     state.map(_ := state_idle)
   }
