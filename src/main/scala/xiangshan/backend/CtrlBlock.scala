@@ -67,6 +67,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
       val s1_oldest_exu_output = ValidIO(new ExuOutput)
       val s1_real_pc = Input(UInt(VAddrBits.W))
     }
+    val isMisspreRedirect = Output(Bool())
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -115,6 +116,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val jumpOut = io.exuMispredict.head
   val allRedirect = VecInit(io.exuMispredict.map(x => getRedirect(x)) :+ io.loadReplay)
+  val isMisspreRedirect = VecInit(io.exuMispredict.map(x => getRedirect(x).valid)).asUInt.orR
+  io.isMisspreRedirect := isMisspreRedirect
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(io.stage2Redirect) || io.flush))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
@@ -371,6 +374,31 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pendingRedirect := false.B
   }
 
+  val stage2Redirect_valid_when_pending = pendingRedirect && stage2Redirect.valid
+
+  val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
+  val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
+  val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
+  val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
+  
+  when (redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
+  when (flushRedirect.valid)              { RobFlushPending := true.B }
+  when (redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
+  
+  when (RegNext(io.frontend.toFtq.redirect.valid)) {
+    when(pendingRedirect){                            stage2_redirect_cycles := true.B}
+    when(MissPredPending){MissPredPending := false.B; branch_resteers_cycles := true.B}
+    when(RobFlushPending){RobFlushPending := false.B; robFlush_bubble_cycles := true.B}
+    when(LdReplayPending){LdReplayPending := false.B; ldReplay_bubble_cycles := true.B}
+  }
+
+  when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
+    when(stage2_redirect_cycles){stage2_redirect_cycles := false.B}
+    when(branch_resteers_cycles){branch_resteers_cycles := false.B}
+    when(robFlush_bubble_cycles){robFlush_bubble_cycles := false.B}
+    when(ldReplay_bubble_cycles){ldReplay_bubble_cycles := false.B}
+  }
+
   decode.io.in <> io.frontend.cfVec
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
@@ -421,6 +449,13 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
       stage2Redirect.valid || pendingRedirect)
   }
+
+  XSPerfAccumulate("stage2_redirect_cycles", stage2_redirect_cycles)
+  XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
+  XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
+  XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
+
+  XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
 
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
