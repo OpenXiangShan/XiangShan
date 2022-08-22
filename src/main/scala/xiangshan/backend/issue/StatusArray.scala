@@ -89,7 +89,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isFirstIssue = Vec(params.numSelect, Output(Bool()))
     val allSrcReady = Vec(params.numSelect, Output(Bool()))
     val updateMidState = Input(UInt(params.numEntries.W))
-    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq
+    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1
     val deqResp = Vec(deqRespWidth, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
@@ -154,7 +154,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val realValid = updateValid(i) || status.valid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
-    flushedVec(i) := (realValid && isFlushed) || deqRespSucc
+    flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
     statusNext.valid := realValid && !(isFlushed || deqRespSucc)
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
@@ -243,7 +243,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.isValidNext := VecInit(statusArrayNext.map(_.valid)).asUInt
-  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
+  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => RegNext(v && r) }).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
@@ -272,7 +272,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("blocked_entries", isBlocked)
   val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
   XSPerfAccumulate("scheduled_entries", isScheduled)
-  val notSelected = RegNext(PopCount(io.canIssue)) - PopCount(is_issued)
+  val notSelected = PopCount(io.canIssue) - PopCount(is_issued)
   XSPerfAccumulate("not_selected_entries", notSelected)
   val isReplayed = PopCount(io.deqResp.map(resp => resp.valid && !resp.bits.success))
   XSPerfAccumulate("replayed_entries", isReplayed)

@@ -45,7 +45,7 @@ class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) 
 
   // read ports
   io.read.map(_.data).zip(io.read.map(_.addr)).map {
-    case (data, addr) => data := Mux1H(RegNext(addr), payload)
+    case (data, addr) => data := Mux1H(addr, payload)
     XSError(PopCount(addr) > 1.U, p"raddr ${Binary(addr)} is not one-hot\n")
   }
 

@@ -330,7 +330,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val stdWriteback = stdWbPorts.map(_._2)
 
   // instvalid field
-  val valid = Mem(RobSize, Bool())
+  val valid = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
   // writeback status
   val writebacked = Mem(RobSize, Bool())
   val store_data_writebacked = Mem(RobSize, Bool())
@@ -1147,26 +1147,32 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.instrCnt := instrCnt
   }
 
-  val validEntries = PopCount((0 until RobSize).map(valid(_)))
+  val validEntriesBanks = (0 until (RobSize + 63) / 64).map(i => RegNext(PopCount(valid.drop(i * 64).take(64))))
+  val validEntries = RegNext(ParallelOperation(validEntriesBanks, (a: UInt, b: UInt) => a +& b))
+  val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m })
+  val commitLoadVec = VecInit(commitLoadValid)
+  val commitBranchVec = VecInit(commitBranchValid)
+  val commitLoadWaitVec = VecInit(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w })
+  val commitStoreVec = VecInit(io.commits.commitValid.zip(commitIsStore).map{ case (v, t) => v && t })
   val perfEvents = Seq(
-    ("rob_interrupt_num      ", io.flushOut.valid && intrEnable                                                               ),
-    ("rob_exception_num      ", io.flushOut.valid && exceptionEnable                                                          ),
-    ("rob_flush_pipe_num     ", io.flushOut.valid && isFlushPipe                                                              ),
-    ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst                                          ),
-    ("rob_commitUop          ", ifCommit(commitCnt)                                                                           ),
-    ("rob_commitInstr        ", ifCommitReg(trueCommitCnt)                                                                    ),
-    ("rob_commitInstrMove    ", ifCommit(PopCount(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m }))     ),
-    ("rob_commitInstrFused   ", ifCommitReg(fuseCommitCnt)                                                                    ),
-    ("rob_commitInstrLoad    ", ifCommit(PopCount(commitLoadValid))                                                           ),
-    ("rob_commitInstrLoad    ", ifCommit(PopCount(commitBranchValid))                                                         ),
-    ("rob_commitInstrLoadWait", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w }))       ),
-    ("rob_commitInstrStore   ", ifCommit(PopCount(io.commits.commitValid.zip(commitIsStore).map{ case (v, t) => v && t }))    ),
-    ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)                                   ),
-    ("rob_walkCycle          ", (state === s_walk || state === s_extrawalk)                                                   ),
-    ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                                               ),
-    ("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U                            ),
-    ("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U                        ),
-    ("rob_4_4_valid          ", validEntries >  (RobSize * 3 / 4).U                                                           ),
+    ("rob_interrupt_num      ", io.flushOut.valid && intrEnable                                       ),
+    ("rob_exception_num      ", io.flushOut.valid && exceptionEnable                                  ),
+    ("rob_flush_pipe_num     ", io.flushOut.valid && isFlushPipe                                      ),
+    ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst                  ),
+    ("rob_commitUop          ", ifCommit(commitCnt)                                                   ),
+    ("rob_commitInstr        ", ifCommitReg(trueCommitCnt)                                            ),
+    ("rob_commitInstrMove    ", ifCommitReg(PopCount(RegNext(commitMoveVec)))                         ),
+    ("rob_commitInstrFused   ", ifCommitReg(fuseCommitCnt)                                            ),
+    ("rob_commitInstrLoad    ", ifCommitReg(PopCount(RegNext(commitLoadVec)))                         ),
+    ("rob_commitInstrBranch  ", ifCommitReg(PopCount(RegNext(commitBranchVec)))                       ),
+    ("rob_commitInstrLoadWait", ifCommitReg(PopCount(RegNext(commitLoadWaitVec)))                     ),
+    ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegNext(commitStoreVec)))                        ),
+    ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)           ),
+    ("rob_walkCycle          ", (state === s_walk || state === s_extrawalk)                           ),
+    ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                       ),
+    ("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U    ),
+    ("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),
+    ("rob_4_4_valid          ", validEntries >  (RobSize * 3 / 4).U                                   ),
   )
   generatePerfEvent()
 }
