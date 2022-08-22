@@ -93,7 +93,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 3000
+  val timeOutThreshold = 5000
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
