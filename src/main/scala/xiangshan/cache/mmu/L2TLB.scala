@@ -91,6 +91,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val cache = Module(new PtwCache)
   val ptw = Module(new PTW)
   val llptw = Module(new LLPTW)
+  val blockmq = Module(new BlockHelper(3))
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -108,7 +109,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val InArbMissQueuePort = 0
   val InArbTlbPort = 1
   val InArbPrefetchPort = 2
-  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
+  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready || blockmq.io.block)
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
   arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
@@ -147,6 +148,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   missQueue.io.in <> mq_arb.io.out
   missQueue.io.sfence  := sfence_dup(6)
   missQueue.io.csr := csr_dup(5)
+
+  blockmq.io.start := missQueue.io.out.fire
+  blockmq.io.enable := ptw.io.req.fire()
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
@@ -374,6 +378,35 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
   generatePerfEvent()
+}
+
+/** BlockHelper, block missqueue, not to send too many req to cache
+ *  Parameter:
+ *    enable: enable BlockHelper, mq should not send too many reqs
+ *    start: when miss queue out fire and need, block miss queue's out
+ *    block: block miss queue's out
+ *    latency: last missqueue out's cache access latency
+ */
+class BlockHelper(latency: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val enable = Input(Bool())
+    val start = Input(Bool())
+    val block = Output(Bool())
+  })
+
+  val count = RegInit(0.U(log2Ceil(latency).W))
+  val valid = RegInit(false.B)
+  val work = RegInit(true.B)
+
+  io.block := valid
+
+  when (io.start && work) { valid := true.B }
+  when (valid) { count := count + 1.U }
+  when (count === (latency.U) || io.enable) {
+    valid := false.B
+    work := io.enable
+    count := 0.U
+  }
 }
 
 class PTEHelper() extends ExtModule {
