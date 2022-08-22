@@ -563,7 +563,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Case 2: this is not a valid load-load pair
     val notFastMatch = RegEnable(!io.loadFastMatch, s0_tryPointerChasing)
     // Case 3: this load-load uop is cancelled
-    val isCancelled = RegNext(io.loadFastMatch) && !io.ldin.valid
+    val isCancelled = !io.ldin.valid
     when (s1_tryPointerChasing) {
       cancelPointerChasing := addressMisMatch || addressNotAligned || fuOpTypeIsNotLd || notFastMatch || isCancelled
       load_s1.io.in.bits.uop := io.ldin.bits.uop
@@ -585,7 +585,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
         io.ldin.ready := true.B
       }
     }
-    XSPerfAccumulate("load_to_load_forward", load_s1.io.out.valid && s1_tryPointerChasing && !cancelPointerChasing)
+
+    XSPerfAccumulate("load_to_load_forward", s1_tryPointerChasing && !cancelPointerChasing)
+    XSPerfAccumulate("load_to_load_forward_try", s1_tryPointerChasing)
+    XSPerfAccumulate("load_to_load_forward_fail", cancelPointerChasing)
+    XSPerfAccumulate("load_to_load_forward_fail_cancelled", cancelPointerChasing && isCancelled)
+    XSPerfAccumulate("load_to_load_forward_fail_wakeup_mismatch", cancelPointerChasing && !isCancelled && notFastMatch)
+    XSPerfAccumulate("load_to_load_forward_fail_op_not_ld",
+      cancelPointerChasing && !isCancelled && !notFastMatch && fuOpTypeIsNotLd)
+    XSPerfAccumulate("load_to_load_forward_fail_addr_align",
+      cancelPointerChasing && !isCancelled && !notFastMatch && !fuOpTypeIsNotLd && addressNotAligned)
+    XSPerfAccumulate("load_to_load_forward_fail_set_mismatch",
+      cancelPointerChasing && !isCancelled && !notFastMatch && !fuOpTypeIsNotLd && !addressNotAligned && addressMisMatch)
   }
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B,
     load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect) || cancelPointerChasing)
