@@ -113,6 +113,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toMSHR, fromMSHR)  = (io.mshr.map(_.toMSHR), io.mshr.map(_.fromMSHR))
   val (toITLB, fromITLB)  = (io.itlb.map(_.req), io.itlb.map(_.resp))
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
+  io.itlb.foreach(_.req_kill := false.B)
 
   /** pipeline control signal */
   val s1_ready, s2_ready = Wire(Bool())
@@ -335,7 +336,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_meta_errors    = RegEnable(s1_meta_errors,    s1_fire)
   val s2_data_errorBits = RegEnable(s1_data_errorBits, s1_fire)
   val s2_data_cacheline = RegEnable(s1_data_cacheline, s1_fire)
-  
+
   val s2_data_errors    = Wire(Vec(PortNumber,Vec(nWays, Bool())))
 
   (0 until PortNumber).map{ i =>

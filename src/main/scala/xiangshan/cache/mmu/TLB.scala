@@ -188,6 +188,9 @@ class TLB(Width: Int, Block: Seq[Boolean], q: TLBParameters)(implicit p: Paramet
 
     val ptw_just_back = ptw.resp.fire && ptw.resp.bits.entry.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
+    when (RegEnable(io.requestor(idx).req_kill, RegNext(io.requestor(idx).req.fire))) {
+      io.ptw.req(idx).valid := false.B
+    }
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
   }
 

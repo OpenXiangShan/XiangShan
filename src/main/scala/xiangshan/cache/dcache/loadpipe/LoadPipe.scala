@@ -108,8 +108,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_req = RegEnable(s0_req, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_addr = io.lsu.s1_paddr
-  val s1_vaddr = s1_req.addr
-  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_req.addr))
+  // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
+  val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr(blockOffBits - 1, 0))
+  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
