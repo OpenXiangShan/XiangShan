@@ -59,6 +59,13 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
   }
 }
 
+class DataSRAMBankWriteReq(implicit p: Parameters) extends DCacheBundle {
+  val en = Bool()
+  val addr = UInt()
+  val way_en = UInt(DCacheWays.W)
+  val data = UInt(DCacheSRAMRowBits.W)
+}
+
 //                     Banked DCache Data
 // -----------------------------------------------------------------
 // | Bank0 | Bank1 | Bank2 | Bank3 | Bank4 | Bank5 | Bank6 | Bank7 |
@@ -151,12 +158,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // wrap data rows of 8 ways
   class DataSRAMBank(index: Int) extends Module {
     val io = IO(new Bundle() {
-      val w = new Bundle() {
-        val en = Input(Bool())
-        val addr = Input(UInt())
-        val way_en = Input(UInt(DCacheWays.W))
-        val data = Input(UInt(DCacheSRAMRowBits.W))
-      }
+      val w = Input(new DataSRAMBankWriteReq)
 
       val r = new Bundle() {
         val en = Input(Bool())
@@ -167,8 +169,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
     })
 
+    assert(RegNext(!io.w.en || PopCount(io.w.way_en) <= 1.U))
+    assert(RegNext(!io.r.en || PopCount(io.r.way_en) <= 1.U))
+
     val r_way_en_reg = RegNext(io.r.way_en)
     val r_way_en_reg_dup_0 = RegNext(io.r.way_en)
+
+    val w_reg = RegNext(io.w)
+    // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
 
     // multiway data bank
     val data_bank = Array.fill(DCacheWays) {
@@ -183,11 +191,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
 
     for (w <- 0 until DCacheWays) {
-      val wen = io.w.en && io.w.way_en(w)
+      val wen = w_reg.en && w_reg.way_en(w)
       data_bank(w).io.w.req.valid := wen
       data_bank(w).io.w.req.bits.apply(
-        setIdx = io.w.addr,
-        data = io.w.data,
+        setIdx = w_reg.addr,
+        data = w_reg.data,
         waymask = 1.U
       )
       data_bank(w).io.r.req.valid := io.r.en
@@ -254,7 +262,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
-  val rwhazard = io.write.valid
+  val rwhazard = RegNext(io.write.valid)
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     set_addrs(rport_index) := addr_to_dcache_set(io.read(rport_index).bits.addr)
@@ -396,11 +404,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
     // ecc write
     val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.w.req.valid := io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index)
+    ecc_bank.io.w.req.valid := RegNext(io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index))
     ecc_bank.io.w.req.bits.apply(
-      setIdx = sram_waddr_dup(bank_index),
-      data = getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
-      waymask = io.write_dup(bank_index).bits.way_en
+      setIdx = RegNext(sram_waddr_dup(bank_index)),
+      data = RegNext(getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index))))),
+      waymask = RegNext(io.write_dup(bank_index).bits.way_en)
     )
     when(ecc_bank.io.w.req.valid) {
       XSDebug("write in ecc sram: bank %x set %x data %x waymask %x\n",
