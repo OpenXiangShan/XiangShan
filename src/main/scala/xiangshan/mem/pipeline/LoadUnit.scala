@@ -30,6 +30,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LqWriteBundle)
   val loadPaddrIn = ValidIO(new LqPaddrWriteBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
+  val ldRawData = Input(new LoadDataFromLQBundle)
   val s2_load_data_forwarded = Output(Bool())
   val s3_delayed_load_error = Output(Bool())
   val s2_dcache_require_replay = Output(Bool())
@@ -281,6 +282,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val sentFastUop = Input(Bool())
     val static_pm = Input(Valid(Bool())) // valid for static, bits for mmio
     val s2_can_replay_from_fetch = Output(Bool()) // dirty code
+    val loadDataFromDcache = Output(new LoadDataFromDcacheBundle)
   })
 
   val pmp = WireInit(io.pmpResp)
@@ -365,12 +367,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // data merge
   val rdataVec = VecInit((0 until XLEN / 8).map(j =>
-    if(j < XLEN / 16) {
-      Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))
-    }else {
-      Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data_dup_0(8*(j+1)-1, 8*j))
-    }
-    ))
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))
+  )) // s2_rdataVec will be write to load queue
   val rdata = rdataVec.asUInt
   val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),
@@ -382,13 +380,14 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     "b110".U -> rdata(63, 48),
     "b111".U -> rdata(63, 56)
   ))
-  val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
+  val rdataPartialLoad = rdataHelper(s2_uop, rdataSel) // s2_rdataPartialLoad is not used
 
   io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
-  io.out.bits.data := rdataPartialLoad
+  // io.out.bits.data := rdataPartialLoad
+  io.out.bits.data := 0.U // data will be generated in load_s3
   // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
     io.out.bits.miss := s2_cache_miss &&
@@ -401,6 +400,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
       !s2_is_prefetch
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
+
+  io.loadDataFromDcache.dcacheData := io.dcacheResp.bits.data
+  io.loadDataFromDcache.forwardMask := forwardMask
+  io.loadDataFromDcache.forwardData := forwardData
+  io.loadDataFromDcache.uop := io.out.bits.uop
+  io.loadDataFromDcache.addrOffset := s2_paddr(2, 0)
+
   io.s2_can_replay_from_fetch := !s2_mmio && !s2_is_prefetch && !s2_tlb_miss
   // if forward fail, replay this inst from fetch
   val debug_forwardFailReplay = s2_forward_fail && !s2_mmio && !s2_is_prefetch && !s2_tlb_miss
@@ -425,7 +431,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
-  // data retbrived from dcache is also included in io.out.bits.forwardData
+  // data retrived from dcache is also included in io.out.bits.forwardData
   io.out.bits.forwardData := rdataVec
 
   io.in.ready := io.out.ready || !io.in.valid
@@ -472,8 +478,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // fast load to load forward
   io.fastpath.valid := RegNext(io.out.valid) // for debug only
-  io.fastpath.data := RegNext(io.out.bits.data)
-
+  io.fastpath.data := RegNext(rdata) // fastpath is for ld only
 
   XSDebug(io.out.fire, "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
@@ -719,12 +724,44 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.out.ready := true.B
 
   // load s3
-  val load_wb_reg = RegNext(Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits))
-  io.ldout.bits := load_wb_reg
+  val s3_load_wb_meta_reg = RegNext(Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits))
+
+  // data from load queue refill
+  val s3_loadDataFromLQ = RegEnable(io.lsq.ldRawData, io.lsq.ldout.valid)
+  val s3_rdataLQ = s3_loadDataFromLQ.mergedData()
+  val s3_rdataSelLQ = LookupTree(s3_loadDataFromLQ.addrOffset, List(
+    "b000".U -> s3_rdataLQ(63, 0),
+    "b001".U -> s3_rdataLQ(63, 8),
+    "b010".U -> s3_rdataLQ(63, 16),
+    "b011".U -> s3_rdataLQ(63, 24),
+    "b100".U -> s3_rdataLQ(63, 32),
+    "b101".U -> s3_rdataLQ(63, 40),
+    "b110".U -> s3_rdataLQ(63, 48),
+    "b111".U -> s3_rdataLQ(63, 56)
+  ))
+  val s3_rdataPartialLoadLQ = rdataHelper(s3_loadDataFromLQ.uop, s3_rdataSelLQ)
+
+  // data from dcache hit
+  val s3_loadDataFromDcache = RegEnable(load_s2.io.loadDataFromDcache, load_s2.io.in.valid)
+  val s3_rdataDcache = s3_loadDataFromDcache.mergedData()
+  val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(
+    "b000".U -> s3_rdataDcache(63, 0),
+    "b001".U -> s3_rdataDcache(63, 8),
+    "b010".U -> s3_rdataDcache(63, 16),
+    "b011".U -> s3_rdataDcache(63, 24),
+    "b100".U -> s3_rdataDcache(63, 32),
+    "b101".U -> s3_rdataDcache(63, 40),
+    "b110".U -> s3_rdataDcache(63, 48),
+    "b111".U -> s3_rdataDcache(63, 56)
+  ))
+  val s3_rdataPartialLoadDcache = rdataHelper(s3_loadDataFromDcache.uop, s3_rdataSelDcache)
+
+  io.ldout.bits := s3_load_wb_meta_reg
+  io.ldout.bits.data := Mux(RegNext(hitLoadOut.valid), s3_rdataPartialLoadDcache, s3_rdataPartialLoadLQ)
   io.ldout.valid := RegNext(hitLoadOut.valid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)) ||
     RegNext(io.lsq.ldout.valid) && !RegNext(io.lsq.ldout.bits.uop.robIdx.needFlush(io.redirect)) && !RegNext(hitLoadOut.valid)
 
-  io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := load_wb_reg.uop.cf.exceptionVec(loadAccessFault) ||
+  io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := s3_load_wb_meta_reg.uop.cf.exceptionVec(loadAccessFault) ||
     RegNext(hitLoadOut.valid) && load_s2.io.s3_delayed_load_error
 
   // feedback tlb miss / dcache miss queue full

@@ -160,9 +160,39 @@ class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val resp = Flipped(Valid(new LoadViolationQueryResp))
 }
 
+// Store byte valid mask write bundle
+//
+// Store byte valid mask write to SQ takes 2 cycles
 class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
   val sqIdx = new SqPtr
   val mask = UInt(8.W)
+}
+
+// Load writeback data from dcache
+class LoadDataFromDcacheBundle(implicit p: Parameters) extends XSBundle {
+  val dcacheData = UInt(64.W)
+  val forwardMask = Vec(8, Bool())
+  val forwardData = Vec(8, UInt(8.W))
+  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val addrOffset = UInt(3.W) // for data selection
+
+  def mergedData(): UInt = {
+    val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+      Mux(forwardMask(j), forwardData(j), dcacheData(8*(j+1)-1, 8*j))
+    ))
+    rdataVec.asUInt
+  }
+}
+
+// Load writeback data from load queue (refill)
+class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
+  val lqData = UInt(64.W) // load queue has merged data
+  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val addrOffset = UInt(3.W) // for data selection
+
+  def mergedData(): UInt = {
+    lqData
+  }
 }
 
 // Bundle for load / store wait waking up
