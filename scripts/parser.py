@@ -40,12 +40,14 @@ class VModule(object):
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
     array_ext_line_re = re.compile(r'^  array_(\d*)_ext array_(\d*)_ext.*$')
+    difftest_module_re = re.compile(r'^  Difftest\w+\s+\w+ \( //.*$')
 
     def __init__(self, name):
         self.name = name
         self.lines = []
         self.io = []
         self.submodule = set()
+        self.in_difftest = False
 
     def add_line(self, line):
         debug_dontCare = False
@@ -57,9 +59,9 @@ class VModule(object):
         elif self.name.startswith("SynRegfileSlice"):
             if line.strip().startswith("assign io_debug_ports_"):
                 debug_dontCare = True
-        
+
         array_ext_match = self.array_ext_line_re.match(line)
-        if (array_ext_match):
+        if array_ext_match:
             print('array_ext match line ', line)
             idx = int(array_ext_match.group(1))
             # this is ugly
@@ -68,7 +70,13 @@ class VModule(object):
                 new_line = re.sub(r'\d+', str(idx + 1), line)
                 print(line, '->', new_line)
                 line = new_line
-        
+
+        # start of difftest module
+        difftest_match = self.difftest_module_re.match(line)
+        if difftest_match:
+            self.in_difftest = True
+            self.lines.append("`ifndef SYNTHESIS\n")
+
         if debug_dontCare:
             self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
@@ -76,6 +84,10 @@ class VModule(object):
             self.lines.append("`else\n")
             debug_dontCare_name = line.strip().split(" ")[1]
             self.lines.append(f"  assign {debug_dontCare_name} = 0;\n")
+            self.lines.append("`endif\n")
+        # end of difftest module
+        if self.in_difftest and line.strip() == ");":
+            self.in_difftest = False
             self.lines.append("`endif\n")
         if len(self.lines):
             io_match = self.io_re.match(line)
@@ -215,14 +227,14 @@ class VCollection(object):
             with open(output_file, "w") as f:
                 for module in modules:
                     f.writelines(module.get_lines())
-                    
+
     def dump_negedge_modules_to_file(self, name, output_dir, with_submodule=True):
         print("Dump negedge module {} to {}...".format(name, output_dir))
         negedge_modules = []
         self.get_module(name, negedge_modules, "NegedgeDataModule_", with_submodule)
         negedge_modules_sort = []
         for negedge in negedge_modules:
-            re_degits = re.compile(r".*[0-9]$")  
+            re_degits = re.compile(r".*[0-9]$")
             if re_degits.match(negedge):
                 negedge_module, num = negedge.rsplit("_", 1)
             else:
@@ -237,7 +249,7 @@ class VCollection(object):
                     f.write("{}\n".format(negedge_module))
                 else:
                     f.write("{}_{}\n".format(negedge_module, num))
-            f.write("]")            
+            f.write("]")
 
     def dump_clkdiv2_modules_to_file(self, name, output_dir, with_submodule=True):
         print("Dump clkdiv2 module {} to {}...".format(name, output_dir))
