@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
 import scala.math._
+import scala.{Tuple2 => &}
 
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -560,20 +561,25 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   val full_pred    = Vec(numDup, new FullBranchPrediction)
   val hasRedirect  = Vec(numDup, Bool())
   
-  val is_minimal = Bool()
+  val is_minimal = Vec(numDup, Bool())
 
   val ftq_idx = new FtqPtr
 
+  def getPredDup[T <: Data](f: BasicPrediction => T) =
+    for (is_m & mp & fp <- is_minimal zip minimal_pred zip full_pred) yield {
+      Mux(is_m, f(mp), f(fp))
+    }
+  def getPredDupWithPC[T <: Data](f: BasicPrediction =>(UInt => T)) =
+    for (is_m & mp & fp & p <- is_minimal zip minimal_pred zip full_pred zip pc) yield {
+      Mux(is_m, f(mp)(p), f(fp)(p))
+    }
 
-  def target = Mux(is_minimal,
-    VecInit(minimal_pred.zip(pc).map{case (mp, p) => mp.target(p)}),
-    VecInit(full_pred.zip(pc).map{case (fp, p) => fp.target(p)})
-  )
-  def cfiIndex       = Mux(is_minimal, VecInit(minimal_pred.map(_.cfiIndex)),       VecInit(full_pred.map(_.cfiIndex)))
-  def lastBrPosOH    = Mux(is_minimal, VecInit(minimal_pred.map(_.lastBrPosOH)),    VecInit(full_pred.map(_.lastBrPosOH)))
-  def brTaken        = Mux(is_minimal, VecInit(minimal_pred.map(_.brTaken)),        VecInit(full_pred.map(_.brTaken)))
-  def shouldShiftVec = Mux(is_minimal, VecInit(minimal_pred.map(_.shouldShiftVec)), VecInit(full_pred.map(_.shouldShiftVec)))
-  def fallThruError  = Mux(is_minimal, VecInit(minimal_pred.map(_.fallThruError)),  VecInit(full_pred.map(_.fallThruError)))
+  def target         = VecInit(getPredDupWithPC(_.target))
+  def cfiIndex       = VecInit(getPredDup(_.cfiIndex))
+  def lastBrPosOH    = VecInit(getPredDup(_.lastBrPosOH))
+  def brTaken        = VecInit(getPredDup(_.brTaken))
+  def shouldShiftVec = VecInit(getPredDup(_.shouldShiftVec))
+  def fallThruError  = VecInit(getPredDup(_.fallThruError))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
@@ -597,18 +603,18 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   def selectedRespForFtq ={
     val res =
       PriorityMux(Seq(
-        ((s3.valid(3) && s3.hasRedirect(3)) -> s3),
-        ((s2.valid(3) && s2.hasRedirect(3)) -> s2),
-        (s1.valid(3) -> s1)
+        ((s3.valid(dupForFtq) && s3.hasRedirect(dupForFtq)) -> s3),
+        ((s2.valid(dupForFtq) && s2.hasRedirect(dupForFtq)) -> s2),
+        (s1.valid(dupForFtq) -> s1)
       ))
     // println("is minimal: ", res.is_minimal)
     res
   }
   def selectedRespIdxForFtq =
     PriorityMux(Seq(
-      ((s3.valid(3) && s3.hasRedirect(3)) -> BP_S3),
-      ((s2.valid(3) && s2.hasRedirect(3)) -> BP_S2),
-      (s1.valid(3) -> BP_S1)
+      ((s3.valid(dupForFtq) && s3.hasRedirect(dupForFtq)) -> BP_S3),
+      ((s2.valid(dupForFtq) && s2.hasRedirect(dupForFtq)) -> BP_S2),
+      (s1.valid(dupForFtq) -> BP_S1)
     ))
   def lastStage = s3
 }
