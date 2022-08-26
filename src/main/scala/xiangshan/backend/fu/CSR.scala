@@ -890,63 +890,69 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode))
 
   // Branch control
-  val retTarget = Wire(UInt(VAddrBits.W))
+  val retTarget = WireInit(0.U)
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
-  retTarget := DontCare
-  // val illegalEret = TODO
+  private val illegalRetTarget = WireInit(false.B)
 
-  when (valid && isDret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
-    val debugModeNew = WireInit(debugMode)
-    when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
-    mstatus := mstatusNew.asUInt
-    priviledgeMode := dcsrNew.prv
-    retTarget := dpc(VAddrBits-1, 0)
-    debugModeNew := false.B
-    debugIntrEnable := true.B
-    debugMode := debugModeNew
-    XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
+  // Mux tree for wires
+  when (valid) {
+    when (isDret) {
+      retTarget := dpc(VAddrBits-1, 0)
+    }.elsewhen (isMret && !illegalMret) {
+      retTarget := mepc(VAddrBits-1, 0)
+    }.elsewhen (isSret && !illegalSret && !illegalSModeSret) {
+      retTarget := sepc(VAddrBits-1, 0)
+    }.elsewhen (isUret) {
+      retTarget := uepc(VAddrBits-1, 0)
+    }.otherwise {
+      illegalRetTarget := true.B
+    }
+  }.otherwise {
+    illegalRetTarget := true.B // when illegalRetTarget setted, retTarget should never be used
   }
 
-  when (valid && isMret && !illegalMret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.ie.m := mstatusOld.pie.m
-    priviledgeMode := mstatusOld.mpp
-    mstatusNew.pie.m := true.B
-    mstatusNew.mpp := ModeU
-    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
-    mstatus := mstatusNew.asUInt
-    // lr := false.B
-    retTarget := mepc(VAddrBits-1, 0)
-  }
-
-  when (valid && isSret && !illegalSret && !illegalSModeSret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.ie.s := mstatusOld.pie.s
-    priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
-    mstatusNew.pie.s := true.B
-    mstatusNew.spp := ModeU
-    mstatus := mstatusNew.asUInt
-    when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
-    // lr := false.B
-    retTarget := sepc(VAddrBits-1, 0)
-  }
-
-  when (valid && isUret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    // mstatusNew.mpp.m := ModeU //TODO: add mode U
-    mstatusNew.ie.u := mstatusOld.pie.u
-    priviledgeMode := ModeU
-    mstatusNew.pie.u := true.B
-    mstatus := mstatusNew.asUInt
-    retTarget := uepc(VAddrBits-1, 0)
+  // Mux tree for regs
+  when (valid) {
+    when (isDret) {
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
+      val debugModeNew = WireInit(debugMode)
+      when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
+      mstatus := mstatusNew.asUInt
+      priviledgeMode := dcsrNew.prv
+      debugModeNew := false.B
+      debugIntrEnable := true.B
+      debugMode := debugModeNew
+      XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
+    }.elsewhen(isMret && !illegalMret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      mstatusNew.ie.m := mstatusOld.pie.m
+      priviledgeMode := mstatusOld.mpp
+      mstatusNew.pie.m := true.B
+      mstatusNew.mpp := ModeU
+      when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
+      mstatus := mstatusNew.asUInt
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      mstatusNew.ie.s := mstatusOld.pie.s
+      priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
+      mstatusNew.pie.s := true.B
+      mstatusNew.spp := ModeU
+      mstatus := mstatusNew.asUInt
+      when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
+    }.elsewhen(isUret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      // mstatusNew.mpp.m := ModeU //TODO: add mode U
+      mstatusNew.ie.u := mstatusOld.pie.u
+      priviledgeMode := ModeU
+      mstatusNew.pie.u := true.B
+      mstatus := mstatusNew.asUInt
+    }
   }
 
   io.in.ready := true.B
@@ -1089,22 +1095,26 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     isXRetFlag := true.B
   }
   csrio.isXRet := isXRetFlag
-  val retTargetReg = RegEnable(retTarget, isXRet)
+  private val retTargetReg = RegEnable(retTarget, isXRet && !illegalRetTarget)
+  private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret, isXRet)
 
-  val tvec = Mux(delegS, stvec, mtvec)
-  val tvecBase = tvec(VAddrBits - 1, 2)
+  private val xtvec = Mux(delegS, stvec, mtvec)
+  private val xtvecBase = xtvec(VAddrBits - 1, 2)
+  // When MODE=Vectored, all synchronous exceptions into M/S mode
+  // cause the pc to be set to the address in the BASE field, whereas
+  // interrupts cause the pc to be set to the address in the BASE field
+  // plus four times the interrupt cause number.
+  private val pcFromXtvec = Cat(xtvecBase + Mux(mtvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
-  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
-    retTargetReg,
-    Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      // When MODE=Vectored, all synchronous exceptions into M/S mode
-      // cause the pc to be set to the address in the BASE field, whereas
-      // interrupts cause the pc to be set to the address in the BASE field
-      // plus four times the interrupt cause number.
-      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  )), isXRetFlag || csrio.exception.valid)
+  csrio.trapTarget := RegEnable(
+    MuxCase(pcFromXtvec, Seq(
+      (isXRetFlag && !illegalXret) -> retTargetReg,
+      (raiseDebugExceptionIntr || ebreakEnterParkLoop) -> debugTrapTarget
+    )),
+    isXRetFlag || csrio.exception.valid)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
