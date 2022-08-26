@@ -534,8 +534,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s0.io.s0_kill := false.B
   val s0_tryPointerChasing = !io.ldin.valid && io.fastpathIn.valid
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B,
-    load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect) && !s0_tryPointerChasing)
+  val s1_data = PipelineConnect(load_s0.io.out, load_s1.io.in, true.B,
+    load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect) && !s0_tryPointerChasing).get
 
   load_s1.io.s1_kill := RegEnable(load_s0.io.s0_kill, false.B, load_s0.io.in.valid || io.fastpathIn.valid)
   io.tlb.req_kill := load_s1.io.s1_kill
@@ -567,10 +567,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     when (s1_tryPointerChasing) {
       cancelPointerChasing := addressMisMatch || addressNotAligned || fuOpTypeIsNotLd || notFastMatch || isCancelled
       load_s1.io.in.bits.uop := io.ldin.bits.uop
-      val spec_vaddr = load_s1.io.in.bits.vaddr
+      val spec_vaddr = s1_data.vaddr
       val vaddr = Cat(spec_vaddr(VAddrBits - 1, 6), realPointerAddress(5, 3), spec_vaddr(2, 0))
-      io.sbuffer.vaddr := vaddr
-      io.lsq.forward.vaddr := vaddr
+      load_s1.io.in.bits.vaddr := vaddr
       load_s1.io.in.bits.rsIdx := io.rsIdx
       load_s1.io.in.bits.isFirstIssue := io.isFirstIssue
       // We need to replace vaddr(5, 3).
