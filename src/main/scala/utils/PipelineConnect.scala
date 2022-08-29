@@ -104,7 +104,7 @@ object PipelineConnect {
     rightOutFire: Bool,
     isFlush: Bool,
     block: Bool
-  ): Unit = {
+  ): T = {
     val valid = RegInit(false.B)
     val leftFire = left.valid && right.ready && !block
     when (rightOutFire) { valid := false.B }
@@ -112,8 +112,11 @@ object PipelineConnect {
     when (isFlush) { valid := false.B }
 
     left.ready := right.ready && !block
-    right.bits := RegEnable(left.bits, leftFire)
+    val data = RegEnable(left.bits, leftFire)
+    right.bits := data
     right.valid := valid
+
+    data
   }
 
   def apply[T <: Data](
@@ -123,7 +126,7 @@ object PipelineConnect {
     isFlush: Bool,
     block: Bool = false.B,
     moduleName: Option[String] = None
-  ): Unit = {
+  ): Option[T] = {
     if (moduleName.isDefined) {
       val pipeline = Module(new PipelineConnectPipe(left.bits))
       pipeline.suggestName(moduleName.get)
@@ -132,10 +135,11 @@ object PipelineConnect {
       pipeline.io.isFlush := isFlush
       pipeline.io.out <> right
       pipeline.io.out.ready := right.ready && !block
+      None
     }
     else {
       // do not use module here to please DCE
-      connect(left, right, rightOutFire, isFlush, block)
+      Some(connect(left, right, rightOutFire, isFlush, block))
     }
   }
 
