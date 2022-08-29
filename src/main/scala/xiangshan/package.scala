@@ -531,12 +531,12 @@ package object xiangshan {
       illegalInstr,
       instrAddrMisaligned,
       ecallM, ecallS, ecallU,
+      storeAddrMisaligned,
+      loadAddrMisaligned,
       storePageFault,
       loadPageFault,
       storeAccessFault,
-      loadAccessFault,
-      storeAddrMisaligned,
-      loadAddrMisaligned
+      loadAccessFault
     )
     def all = priorities.distinct.sorted
     def frontendSet = Seq(
