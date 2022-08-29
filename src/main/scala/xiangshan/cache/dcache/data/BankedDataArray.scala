@@ -87,7 +87,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val write_dup = Vec(DCacheBanks, Flipped(Decoupled(new L1BankedDataWriteReqCtrl)))
     // data bank read resp (all banks)
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
-    val resp_dup_0 = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
     val read_error_delayed = Output(Vec(LoadPipelineWidth, Bool()))
@@ -165,7 +164,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         val addr = Input(UInt())
         val way_en = Input(UInt(DCacheWays.W))
         val data = Output(UInt(DCacheSRAMRowBits.W))
-        val data_dup_0 = Output(UInt(DCacheSRAMRowBits.W))
       }
     })
 
@@ -173,7 +171,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     assert(RegNext(!io.r.en || PopCount(io.r.way_en) <= 1.U))
 
     val r_way_en_reg = RegNext(io.r.way_en)
-    val r_way_en_reg_dup_0 = RegNext(io.r.way_en)
 
     val w_reg = RegNext(io.w)
     // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
@@ -205,17 +202,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val half = nWays / 2
     val data_read = data_bank.map(_.io.r.resp.data(0))
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
-    val data_left_dup_0 = Mux1H(r_way_en_reg_dup_0.tail(half), data_read.take(half))
     val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
-    val data_right_dup_0 = Mux1H(r_way_en_reg_dup_0.head(half), data_read.drop(half))
 
     val sel_low = r_way_en_reg.tail(half).orR()
-    val sel_low_dup_0 = r_way_en_reg_dup_0.tail(half).orR()
     val row_data = Mux(sel_low, data_left, data_right)
-    val row_data_dup_0 = Mux(sel_low_dup_0, data_left_dup_0, data_right_dup_0)
 
     io.r.data := row_data
-    io.r.data_dup_0 := row_data_dup_0
 
     def dump_r() = {
       when(RegNext(io.r.en)) {
@@ -278,7 +270,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read each bank, get bank result
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
-  val bank_result_dup_0 = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   dontTouch(bank_result)
   val read_bank_error_delayed = Wire(Vec(DCacheBanks, Bool()))
   dontTouch(read_bank_error_delayed)
@@ -359,26 +350,22 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     data_bank.io.r.way_en := bank_way_en
     data_bank.io.r.addr := bank_set_addr
     bank_result(bank_index).raw_data := data_bank.io.r.data
-    bank_result_dup_0(bank_index).raw_data := data_bank.io.r.data_dup_0
 
     // read ECC
     val ecc_bank = ecc_banks(bank_index)
     ecc_bank.io.r.req.valid := read_enable
     ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
     bank_result(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
-    bank_result_dup_0(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
 
     // use ECC to check error
     val ecc_data = bank_result(bank_index).asECCData()
     val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
     bank_result(bank_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
-    bank_result_dup_0(bank_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
     read_bank_error_delayed(bank_index) := bank_result(bank_index).error_delayed
   }
 
   // read result: expose banked read result 
   io.resp := bank_result
-  io.resp_dup_0 := bank_result_dup_0
 
   // error detection
   // normal read ports

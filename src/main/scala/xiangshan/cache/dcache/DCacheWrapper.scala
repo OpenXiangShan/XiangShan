@@ -326,7 +326,6 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
-  val data_dup_0 = UInt(DataBits.W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -580,12 +579,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
 
-  (0 until (LoadPipelineWidth / 2)).map(i => {
+  (0 until LoadPipelineWidth).map(i => {
     ldu(i).io.banked_data_resp := bankedDataArray.io.resp
-  })
-
-  ((LoadPipelineWidth / 2) until LoadPipelineWidth).map(i => {
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp_dup_0
   })
 
   //----------------------------------------
