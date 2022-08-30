@@ -192,8 +192,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tag_sram_write(i).valid := write_bank_0
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
-      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid)
-      tagArrays(i).io.w.req.bits  := RegNext(tag_sram_write(i).bits)
+      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid,init = false.B)
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
     }
     else {
       tagArrays(i).io.r.req.valid := port_0_read_1 || port_1_read_1
@@ -201,8 +201,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tag_sram_write(i).valid := write_bank_1
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
-      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid)
-      tagArrays(i).io.w.req.bits  := RegNext(tag_sram_write(i).bits)
+      tagArrays(i).io.w.req.valid :=  RegNext(tag_sram_write(i).valid, init = false.B)
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
 
     }  
   }
@@ -325,8 +325,12 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val port_1_read_1_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_1, enable = io.read.fire())
   val port_1_read_0_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_0, enable = io.read.fire())
 
-  val bank_0_idx_vec = io.read.bits.map(copy =>  Mux(io.read.valid && copy.port_0_read_0, copy.vSetIdx(0), copy.vSetIdx(1)))
-  val bank_1_idx_vec = io.read.bits.map(copy =>  Mux(io.read.valid && copy.port_0_read_1, copy.vSetIdx(0), copy.vSetIdx(1)))
+  //val bank_0_idx_vec = io.read.bits.map(copy =>  Mux(io.read.bits.dup_valids && copy.port_0_read_0, copy.vSetIdx(0), copy.vSetIdx(1)))
+  //val bank_1_idx_vec = io.read.bits.map(copy =>  Mux(io.read.valid && copy.port_0_read_1, copy.vSetIdx(0), copy.vSetIdx(1)))
+
+  val bank_0_idx_vec = (0 until partWayNum).map(i => Mux(io.read.bits(i).readValid && io.read.bits(i).port_0_read_0, io.read.bits(i).vSetIdx(0), io.read.bits(i).vSetIdx(1)))
+  val bank_1_idx_vec = (0 until partWayNum).map(i => Mux(io.read.bits(i).readValid && io.read.bits(i).port_0_read_1, io.read.bits(i).vSetIdx(0), io.read.bits(i).vSetIdx(1)))
+
 
   val dataArrays = (0 until partWayNum).map{ i =>
     val dataArray = Module(new ICachePartWayArray(
@@ -334,9 +338,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       pWay,
     ))
 
-    dataArray.io.read.req(0).valid :=  io.read.bits(i).read_bank_0 && io.read.valid
+    dataArray.io.read.req(0).valid :=  io.read.bits(i).read_bank_0 && io.read.bits(i).readValid
     dataArray.io.read.req(0).bits.ridx := bank_0_idx_vec(i)(highestIdxBit,1)
-    dataArray.io.read.req(1).valid := io.read.bits(i).read_bank_1 && io.read.valid
+    dataArray.io.read.req(1).valid := io.read.bits(i).read_bank_1 && io.read.bits(i).readValid
     dataArray.io.read.req(1).bits.ridx := bank_1_idx_vec(i)(highestIdxBit,1)
 
     dataArray
@@ -351,8 +355,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     data_sram_write(i).bits.wbankidx := io.write.bits.bankIdx
     data_sram_write(i).bits.wmask    := io.write.bits.waymask.asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
 
-    dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid)
-    dataArrays(i).io.write.bits  := RegNext(data_sram_write(i).bits)
+    dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid, init = false.B)
+    dataArrays(i).io.write.bits  := RegEnable(data_sram_write(i).bits, enable = data_sram_write(i).valid)
   }
 
 
@@ -400,8 +404,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       // codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
       code_sram_write(i).valid := write_bank_0
       code_sram_write(i).bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
-      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid)
-      codeArrays(i).io.w.req.bits := RegNext(code_sram_write(i).bits)
+      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid, init = false.B)
+      codeArrays(i).io.w.req.bits := RegEnable(code_sram_write(i).bits, enable = code_sram_write(i).valid)
 
     }
     else {
@@ -411,8 +415,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       // codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
       code_sram_write(i).valid := write_bank_1
       code_sram_write(i).bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
-      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid)
-      codeArrays(i).io.w.req.bits := RegNext(code_sram_write(i).bits)
+      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid, init = false.B)
+      codeArrays(i).io.w.req.bits := RegEnable(code_sram_write(i).bits, enable = code_sram_write(i).valid)
     }
   }
   
@@ -538,7 +542,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val prefetchPipe    = Module(new IPrefetchPipe)
 
   val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  3))
-  val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  2))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
   val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
@@ -552,9 +555,21 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
   prefetchPipe.io.fromIMeta             <> metaArray.io.readResp
 
-  data_read_arb.io.in(ReplacePipeKey) <> replacePipe.io.data_read
-  data_read_arb.io.in(MainPipeKey)    <> mainPipe.io.dataArray.toIData
-  dataArray.io.read                   <> data_read_arb.io.out
+  val data_read_arb_vec = Seq.fill(partWayNum)(Module(new Arbiter(new ICacheReadBundle,  2)))
+  for(i <- 0 until partWayNum) {
+    data_read_arb_vec(i).io.in(ReplacePipeKey).valid := replacePipe.io.data_read.bits(i).readValid
+    data_read_arb_vec(i).io.in(ReplacePipeKey).bits  := replacePipe.io.data_read.bits(i)
+    replacePipe.io.data_read.ready := data_read_arb_vec(i).io.in(ReplacePipeKey).ready
+
+    data_read_arb_vec(i).io.in(MainPipeKey).valid    := mainPipe.io.dataArray.toIData.bits(i).readValid
+    data_read_arb_vec(i).io.in(MainPipeKey).bits     := mainPipe.io.dataArray.toIData.bits(i)
+    mainPipe.io.dataArray.toIData.ready   := data_read_arb_vec(i).io.in(MainPipeKey).ready
+    dataArray.io.read.bits(i) <> data_read_arb_vec(i).io.out.bits
+  }
+
+  dataArray.io.read.valid := data_read_arb_vec.head.io.out.valid
+  data_read_arb_vec.map(arb => arb.io.out.ready := dataArray.io.read.ready)
+
   replacePipe.io.data_response        <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
 
