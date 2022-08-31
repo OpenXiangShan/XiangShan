@@ -43,6 +43,7 @@ class VModule(object):
     module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
+    difftest_module_re = re.compile(r'^  \w*Difftest\w+\s+\w+ \( //.*$')
 
     def __init__(self, name):
         self.name = name
@@ -50,6 +51,7 @@ class VModule(object):
         self.io = []
         self.submodule = dict()
         self.instance = set()
+        self.in_difftest = False
 
     def add_line(self, line):
         debug_dontCare = False
@@ -61,6 +63,13 @@ class VModule(object):
         elif "SynRegfileSlice" in self.name:
             if line.strip().startswith("assign io_debug_ports_"):
                 debug_dontCare = True
+
+        # start of difftest module
+        difftest_match = self.difftest_module_re.match(line)
+        if difftest_match:
+            self.in_difftest = True
+            self.lines.append("`ifndef SYNTHESIS\n")
+
         if debug_dontCare:
             self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
@@ -69,10 +78,12 @@ class VModule(object):
             debug_dontCare_name = line.strip().split(" ")[1]
             self.lines.append(f"  assign {debug_dontCare_name} = 0;\n")
             self.lines.append("`endif\n")
+
         # end of difftest module
         if self.in_difftest and line.strip() == ");":
             self.in_difftest = False
             self.lines.append("`endif\n")
+
         if len(self.lines):
             io_match = self.io_re.match(line)
             if io_match:
