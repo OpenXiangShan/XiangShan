@@ -23,7 +23,8 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.SignExt
+import utils._
+import xiangshan._
 import xiangshan.backend.fu.util.CSA3_2
 
 class SRT16DividerDataModule(len: Int) extends Module {
@@ -464,4 +465,33 @@ class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len
   io.out.valid := divDataModule.io.out_valid
   io.out.bits.data := divDataModule.io.out_data
   io.out.bits.uop := uopReg
+}
+
+class DividerWrapper(len: Int)(implicit p: Parameters) extends FunctionUnit(len) {
+  val div = Module(new SRT16Divider(len))
+
+  div.io <> io
+
+  val func = io.in.bits.uop.ctrl.fuOpType
+  val (src1, src2) = (
+    io.in.bits.src(0)(XLEN - 1, 0),
+    io.in.bits.src(1)(XLEN - 1, 0)
+  )
+
+  val isW = MDUOpType.isW(func)
+  val isH = MDUOpType.isH(func)
+  val isDivSign = MDUOpType.isDivSign(func)
+  val divInputFunc = (x: UInt) => Mux(
+    isW,
+    Mux(isDivSign,
+      SignExt(x(31, 0), XLEN),
+      ZeroExt(x(31, 0), XLEN)
+    ),
+    x
+  )
+  div.io.in.bits.src(0) := divInputFunc(src1)
+  div.io.in.bits.src(1) := divInputFunc(src2)
+  div.ctrl.isHi := isH
+  div.ctrl.isW := isW
+  div.ctrl.sign := isDivSign
 }
