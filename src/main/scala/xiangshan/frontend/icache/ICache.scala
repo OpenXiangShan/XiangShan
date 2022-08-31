@@ -449,6 +449,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
   dataresp := DontCare
 
+  val data_resp_way = RegEnable(dataresp(RegNext(io.cacheOp.req.bits.wayNum(4, 0))), enable = RegNext(cacheOpShouldResp, init = false.B))
+
   for (w <- 0 until partWayNum) {
     when(io.cache_req_dup(w).valid){
       when(
@@ -473,11 +475,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     }
   }
   
-  io.cacheOp.resp.valid := RegNext(cacheOpShouldResp)
+  io.cacheOp.resp.valid := RegNext(RegNext(cacheOpShouldResp, init = false.B), init = false.B)
   val numICacheLineWords = blockBits / 64
   require(blockBits >= 64 && isPow2(blockBits))
   for (wordIndex <- 0 until numICacheLineWords) {
-    io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
+    io.cacheOp.resp.bits.read_data_vec(wordIndex) := data_resp_way(64*(wordIndex+1)-1, 64*wordIndex)
   }
 
 }
