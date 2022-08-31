@@ -427,7 +427,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  XSError(!resp.s1.is_minimal, "s1 should be minimal!\n")
+  // XSError(!resp.s1.is_minimal, "s1 should be minimal!\n")
 
   npcGen.register(s1_valid, resp.s1.getTarget, Some("s1_target"), 4)
   foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
