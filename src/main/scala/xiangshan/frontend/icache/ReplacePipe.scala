@@ -79,16 +79,18 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     * ReplacePipe Stage 0
     ******************************************************************************
     */  
+  val r0_valid = generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B)
 
-  val r0_valid       = RegNext(io.pipe_req.valid,init = false.B)
-
-  val r0_req         = RegEnable(io.pipe_req.bits, enable = io.pipe_req.valid)
+  val r0_req         = RegEnable(io.pipe_req.bits, enable = io.pipe_req.fire())
   val r0_req_vidx    = r0_req.vidx
 
-  val copied_r0_valid    =  Seq.fill(partWayNum)(RegNext(io.pipe_req.valid,init = false.B))
-  val copied_r0_req_vidx =  Seq.fill(partWayNum)(RegEnable(io.pipe_req.bits.vidx, enable = io.pipe_req.valid))
+  val copied_r0_valid    =  Seq.fill(partWayNum)(generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B))
+  val copied_r0_req_vidx =  Seq.fill(partWayNum)(RegEnable(io.pipe_req.bits.vidx, enable = io.pipe_req.fire()))
 
-  r0_fire        := io.pipe_req.fire()
+  val array_req = List(toMeta, toData)
+
+  r0_ready := array_req(0).ready && array_req(1).ready && r1_ready  || !r0_valid
+  r0_fire  := r0_valid && r0_ready
 
   for(i <- 0 until partWayNum) {
     toData.valid                     :=  copied_r0_valid(i)
@@ -98,13 +100,13 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     toData.bits(i).vSetIdx(1)        :=  DontCare
   }
 
-  val array_req = List(toMeta, toData)
 
   toMeta.valid               := r0_valid
   toMeta.bits.isDoubleLine   :=false.B
   toMeta.bits.vSetIdx(0)        := r0_req_vidx
   toMeta.bits.vSetIdx(1)        := DontCare
   toMeta.bits.readValid         := DontCare
+
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
 
   /**
