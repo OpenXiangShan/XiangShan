@@ -431,8 +431,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
-  // data retrived from dcache is also included in io.out.bits.forwardData
-  io.out.bits.forwardData := rdataVec
+  // data from dcache is not included in io.out.bits.forwardData
+  io.out.bits.forwardData := forwardData
 
   io.in.ready := io.out.ready || !io.in.valid
 
