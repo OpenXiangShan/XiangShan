@@ -435,7 +435,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
+  // XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
 
   for (npcGen & s1_valid & s1_target <- npcGen_dup zip s1_valid_dup zip resp.s1.target)
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
