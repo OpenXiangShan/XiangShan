@@ -790,10 +790,25 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.updateMidState := updateMid
 
     // FMUL intermediate results are ready in two cycles
+    val midFinished2T0 = midFinished2.zip(s2_deq).map{ case (v, deq) =>
+      // However, it may be flushed by redirect at T0.
+      // If flushed at T0, new instruction enters at T1 and writes the entry at T2.
+      // This is a rare case because usually instructions enter RS in-order,
+      // unless dispatch2 is blocked.
+      v && !deq.bits.uop.robIdx.needFlush(io.redirect)
+    }
+    val midIssuePtrOHT1 = midFinished2T0.zip(s2_issuePtrOH).map(x => RegEnable(x._2, x._1))
+    val midIssuePtrT1 = midFinished2T0.zip(s2_issuePtr).map(x => RegEnable(x._2, x._1))
+    val midFinished2T1 = midFinished2T0.map(v => RegNext(v))
+    // No flush here: the fma may dequeue at this stage.
+    // If cancelled at T1, data written at T2. However, new instruction writes at least at T3.
+    val midIssuePtrOHT2 = midFinished2T1.zip(midIssuePtrOHT1).map(x => RegEnable(x._2, x._1))
+    val midIssuePtrT2 = midFinished2T1.zip(midIssuePtrT1).map(x => RegEnable(x._2, x._1))
+    val midFinished2T2 = midFinished2T1.map(v => RegNext(v))
     for (i <- 0 until params.numDeq) {
-      dataArray.io.partialWrite(i).enable := RegNext(RegNext(midFinished2(i)))
+      dataArray.io.partialWrite(i).enable := midFinished2T2(i)
       dataArray.io.partialWrite(i).mask := DontCare
-      dataArray.io.partialWrite(i).addr := RegNext(RegNext(s2_issuePtrOH(i)))
+      dataArray.io.partialWrite(i).addr := midIssuePtrOHT2(i)
       val writeData = io.fmaMid.get(i).out.bits.asUInt
       require(writeData.getWidth <= 2 * params.dataBits, s"why ${writeData.getWidth}???")
       require(writeData.getWidth > params.dataBits, s"why ${writeData.getWidth}???")
@@ -812,7 +827,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // (1.1) If the instruction matches FMA/FMUL two cycles ealier, we issue it and it goes to FADD
     // (1.2) If the instruction matches FMA/FMUL two cycles ealier and it's blocked, we need to hold the result
     // At select stage: (2) bypass FMUL intermediate results from write ports if possible.
-    val issuedAtT0 = midFinished2.zip(s2_issuePtr).map(x => (RegNext(RegNext(x._1)), RegNext(RegNext(x._2))))
+    val issuedAtT0 = midFinished2T2.zip(midIssuePtrT2)
     for (i <- 0 until params.numDeq) {
       // cond11: condition (1.1) from different issue ports
       val cond11 = issuedAtT0.map(x => x._1 && x._2 === s2_issuePtr(i))
