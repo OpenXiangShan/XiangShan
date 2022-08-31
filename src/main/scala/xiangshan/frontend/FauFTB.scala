@@ -122,6 +122,10 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   resp_meta.hit := RegEnable(RegEnable(s1_hit, io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))
   resp_meta.pred_way := RegEnable(RegEnable(s1_hit_way, io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))
 
+  val s1_ftb_entry = Mux1H(s1_hit_oh, s1_all_entries)
+  io.out.last_stage_ftb_entry := RegEnable(RegEnable(s1_ftb_entry, io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))
+
+
   // pred update replacer state
   val s1_fire = io.s1_fire(dupForUbtb)
   replacer_touch_ways(0).valid := RegNext(s1_fire && s1_hit)

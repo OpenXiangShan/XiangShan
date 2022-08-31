@@ -588,10 +588,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire(1))
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire(1))
 
+  val s3_tageTakens_dup = RegEnable(VecInit(s2_tageTakens_dup), io.s2_fire(1))
+
   io.out := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
 
   val resp_s2 = io.out.s2
+  val resp_s3 = io.out.s3
 
   // Update logic
   val u_valid = io.update(dupForTage).valid
@@ -691,6 +694,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
         fp.br_taken_mask(i) := s2_tageTakens(i)
       }
       dontTouch(tage_enable)
+    }
+    for (tage_enable & fp & s3_tageTakens <- tage_enable_dup zip resp_s3.full_pred zip s3_tageTakens_dup) {
+      when (tage_enable) {
+        fp.br_taken_mask(i) := s3_tageTakens(i)
+      }
     }
 
     //---------------- update logics below ------------------//
