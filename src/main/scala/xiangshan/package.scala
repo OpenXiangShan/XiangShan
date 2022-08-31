@@ -726,7 +726,7 @@ package object xiangshan {
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, writeFflags = true, latency = UncertainLatency(),
-    fastUopOut = true, fastImplemented = true, hasInputBuffer = (true, 8, false)
+    fastUopOut = true, fastImplemented = true, hasInputBuffer = (true, 8, true)
   )
 
   val lduCfg = FuConfig(
