@@ -387,6 +387,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s1_issuePtrOH = Wire(Vec(params.numDeq, Valid(UInt(params.numEntries.W))))
   val s1_issuePtr = s1_issuePtrOH.map(iss => OHToUInt(iss.bits))
 
+  val numSelected = PopCount(s1_issuePtrOH.map(_.valid))
+  val numReadyEntries = PopCount(statusArray.io.canIssue)
+  val shouldSelected = Mux(numReadyEntries > params.numDeq.U, params.numDeq.U, numReadyEntries)
+  XSError(numSelected < shouldSelected,
+    p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
+
   // Allocation: store dispatch uops into payload and data array
   s1_dispatchUops_dup.foreach(_.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
     val s0_valid = in.fire && !enqReverse(s0_enqFlushed)(i)
@@ -737,6 +743,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     s2_deq(i).ready := !s2_deq(i).valid || io.deq(i).ready
     io.deq(i).valid := s2_deq(i).valid
     io.deq(i).bits := s2_deq(i).bits
+    io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
 
     // data: send to bypass network
     // TODO: these should be done outside RS
@@ -764,41 +771,11 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // we reduce its latency for one cycle since it does not need to read
       // from data array. Timing to be optimized later.
       if (params.isLoad) {
-        if (EnableLoadToLoadForward) {
-          val ldFastDeq = Wire(io.deq(i).cloneType)
-          // Condition: wakeup by load (to select load wakeup bits)
-          val ldCanBeFast = VecInit(
-            wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
-          ).asUInt
-          ldFastDeq.valid := s1_issuePtrOH(i).valid && ldCanBeFast.orR
-          ldFastDeq.ready := true.B
-          ldFastDeq.bits.src := DontCare
-          ldFastDeq.bits.uop := s1_out(i).bits.uop
-          // when last cycle load has fast issue, cancel this cycle's normal issue and let it go
-          val lastCycleLdFire = RegNext(ldFastDeq.valid && !s2_deq(i).valid && io.deq(i).ready)
-          when (lastCycleLdFire) {
-            s2_deq(i).valid := false.B
-            s2_deq(i).ready := true.B
-          }
-          // For now, we assume deq.valid has higher priority than ldFastDeq.
-          when (!s2_deq(i).valid) {
-            io.deq(i).valid := ldFastDeq.valid
-            io.deq(i).bits := ldFastDeq.bits
-            s2_deq(i).ready := true.B
-          }
-          io.load.get.fastMatch(i) := Mux(s2_deq(i).valid, 0.U, ldCanBeFast)
-          when (!s2_deq(i).valid) {
-            io.feedback.get(i).rsIdx := s1_issuePtr(i)
-            io.feedback.get(i).isFirstIssue := s1_is_first_issue(i)
-          }
-          XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
-          XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
-        } else {
-          io.load.get.fastMatch(i) := DontCare
-        }
+        // Condition: wakeup by load (to select load wakeup bits)
+        io.load.get.fastMatch(i) := Mux(s1_issuePtrOH(i).valid, VecInit(
+          wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
+        ).asUInt, 0.U)
       }
-
-      io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
 
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire && wakeupBypassMask(j).asUInt.orR)

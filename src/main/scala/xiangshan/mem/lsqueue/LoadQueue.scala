@@ -97,6 +97,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+    val ldRawDataOut = Vec(2, Output(new LoadDataFromLQBundle))
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
     val rob = Flipped(new RobLsqIO)
@@ -200,24 +201,22 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // flag bits in lq needs to be updated accurately
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
-          io.loadIn(i).bits.data,
           io.loadIn(i).bits.mask,
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio
         )
       }.otherwise {
-        XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+        XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
         io.loadIn(i).bits.uop.lqIdx.asUInt,
         io.loadIn(i).bits.uop.cf.pc,
         io.loadIn(i).bits.vaddr,
         io.loadIn(i).bits.paddr,
-        io.loadIn(i).bits.data,
         io.loadIn(i).bits.mask,
         io.loadIn(i).bits.forwardData.asUInt,
         io.loadIn(i).bits.forwardMask.asUInt,
@@ -456,7 +455,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // Int load writeback will finish (if not blocked) in one cycle
     io.ldout(i).bits.uop := seluop
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
-    io.ldout(i).bits.data := rdataPartialLoad
+    io.ldout(i).bits.data := rdataPartialLoad // not used
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
@@ -465,6 +464,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.ldout(i).bits.debug.vaddr := vaddrModule.io.rdata(i+1)
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
+    
+    // merged data, uop and offset for data sel in load_s3
+    io.ldRawDataOut(i).lqData := dataModule.io.wb.rdata(i).data
+    io.ldRawDataOut(i).uop := io.ldout(i).bits.uop
+    io.ldRawDataOut(i).addrOffset := dataModule.io.wb.rdata(i).paddr
 
     when(io.ldout(i).fire()) {
       XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",

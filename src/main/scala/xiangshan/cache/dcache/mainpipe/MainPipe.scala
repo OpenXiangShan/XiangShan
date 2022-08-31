@@ -511,6 +511,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   // LR, SC and AMO
   val debug_sc_fail_addr = RegInit(0.U)
   val debug_sc_fail_cnt  = RegInit(0.U(8.W))
+  val debug_sc_addr_match_fail_cnt  = RegInit(0.U(8.W))
 
   val lrsc_count = RegInit(0.U(log2Ceil(LRSCCycles).W))
   // val lrsc_valid = lrsc_count > LRSCBackOff.U
@@ -519,6 +520,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_sc = !s3_req_probe_dup(4) && s3_req.isAMO && s3_req_cmd_dup(4) === M_XSC
   val s3_lrsc_addr_match = lrsc_valid_dup(0) && lrsc_addr === get_block_addr(s3_req.addr)
   val s3_sc_fail = s3_sc && !s3_lrsc_addr_match
+  val debug_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid_dup(0)
   val s3_sc_resp = Mux(s3_sc_fail, 1.U, 0.U)
 
   val s3_can_do_amo = (s3_req_miss_dup(0) && !s3_req_probe_dup(5) && s3_req.isAMO) || s3_amo_hit
@@ -569,7 +571,22 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       }
     }
   }
-  assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
+  XSWarn(debug_sc_fail_cnt > 100.U, "L1DCache failed too many SCs in a row")
+
+  when (s3_valid_dup(2)) {
+    when (s3_req_addr_dup(1) === debug_sc_fail_addr) {
+      when (debug_s3_sc_fail_addr_match) {
+        debug_sc_addr_match_fail_cnt := debug_sc_addr_match_fail_cnt + 1.U
+      } .elsewhen (s3_sc) {
+        debug_sc_addr_match_fail_cnt := 0.U
+      }
+    } .otherwise {
+      when (s3_sc_fail) {
+        debug_sc_addr_match_fail_cnt  := 1.U
+      }
+    }
+  }
+  XSError(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
 
 
   val banked_amo_wmask = UIntToOH(s3_req.word_idx)

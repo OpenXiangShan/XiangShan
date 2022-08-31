@@ -118,7 +118,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     (buffers, node)
   }
 
-  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(5, "l1i_to_l2_buffer")
+  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
   misc.busPMU :=
     TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
     l1i_to_l2_buf_node :=
@@ -135,7 +135,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
 
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
     case None =>
   }
 

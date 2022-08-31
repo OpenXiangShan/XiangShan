@@ -178,21 +178,34 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       parentName = parentName + s"bank${bank}_"
     ))
 
-    //meta connection
-    if(bank == 0) {
-      tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      tagArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
-      tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
-    }
-    else {
-      tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      tagArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
-      tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
-    }
 
     tagArray
+  }
+
+  val tag_sram_write = Wire(Vec(2,tagArrays.head.io.w.req.cloneType))
+  tag_sram_write.map(_.ready := true.B)
+
+  (0 until 2).map{i =>
+    //meta connection
+    if(i == 0) {
+      tagArrays(i).io.r.req.valid := port_0_read_0 || port_1_read_0
+      tagArrays(i).io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
+      tag_sram_write(i).valid := write_bank_0
+      tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+
+      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid)
+      tagArrays(i).io.w.req.bits  := RegNext(tag_sram_write(i).bits)
+    }
+    else {
+      tagArrays(i).io.r.req.valid := port_0_read_1 || port_1_read_1
+      tagArrays(i).io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
+      tag_sram_write(i).valid := write_bank_1
+      tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+
+      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid)
+      tagArrays(i).io.w.req.bits  := RegNext(tag_sram_write(i).bits)
+
+    }
   }
 
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
@@ -247,8 +260,8 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     }
     when(CacheInstrucion.isWriteTag(io.cacheOp.req.bits.opCode)){
       for (i <- 0 until 2) {
-        tagArrays(i).io.w.req.valid := true.B
-        tagArrays(i).io.w.req.bits.apply(
+        tag_sram_write(i).valid := true.B
+        tag_sram_write(i).bits.apply(
           data = io.cacheOp.req.bits.write_tag_low,
           setIdx = io.cacheOp.req.bits.index,
           waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
@@ -328,15 +341,22 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     dataArray.io.read.req(1).valid := io.read.bits(i).read_bank_1 && io.read.valid
     dataArray.io.read.req(1).bits.ridx := bank_1_idx_vec(i)(highestIdxBit,1)
 
-
-    dataArray.io.write.valid         := io.write.bits.writeEn(i)
-    dataArray.io.write.bits.wdata    := write_data_bits
-    dataArray.io.write.bits.widx     := io.write.bits.virIdx(highestIdxBit,1)
-    dataArray.io.write.bits.wbankidx := io.write.bits.bankIdx
-    dataArray.io.write.bits.wmask    := io.write.bits.waymask.asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
-
     dataArray
   }
+
+  val data_sram_write = Wire(Vec(partWayNum,dataArrays.head.io.write.cloneType))
+
+  (0 until partWayNum).map{ i =>
+    data_sram_write(i).valid         := io.write.bits.writeEn(i)
+    data_sram_write(i).bits.wdata    := write_data_bits
+    data_sram_write(i).bits.widx     := io.write.bits.virIdx(highestIdxBit,1)
+    data_sram_write(i).bits.wbankidx := io.write.bits.bankIdx
+    data_sram_write(i).bits.wmask    := io.write.bits.waymask.asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
+
+    dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid)
+    dataArrays(i).io.write.bits  := RegNext(data_sram_write(i).bits)
+  }
+
 
   val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
 
@@ -354,6 +374,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
 
+
   val bank_0_idx = bank_0_idx_vec.last
   val bank_1_idx = bank_1_idx_vec.last
 
@@ -367,20 +388,34 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       parentName = parentName + s"codeArray${i}_"
     ))
 
+    codeArray
+  }
+
+  val code_sram_write = Wire(Vec(2,codeArrays.head.io.w.req.cloneType))
+  code_sram_write.map(_.ready := true.B)
+
+  (0 until 2).map{i =>
     if(i == 0) {
-      codeArray.io.r.req.valid := io.read.valid && io.read.bits.last.read_bank_0
-      codeArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
-      codeArray.io.w.req.valid := write_bank_0
-      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArrays(i).io.r.req.valid := io.read.valid && io.read.bits.last.read_bank_0
+      codeArrays(i).io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
+      // codeArray.io.w.req.valid := write_bank_0
+      // codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      code_sram_write(i).valid := write_bank_0
+      code_sram_write(i).bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid)
+      codeArrays(i).io.w.req.bits := RegNext(code_sram_write(i).bits)
+
     }
     else {
-      codeArray.io.r.req.valid := io.read.valid && io.read.bits.last.read_bank_1
-      codeArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
-      codeArray.io.w.req.valid := write_bank_1
-      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArrays(i).io.r.req.valid := io.read.valid && io.read.bits.last.read_bank_1
+      codeArrays(i).io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
+      // codeArray.io.w.req.valid := write_bank_1
+      // codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      code_sram_write(i).valid := write_bank_1
+      code_sram_write(i).bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArrays(i).io.w.req.valid := RegNext(code_sram_write(i).valid)
+      codeArrays(i).io.w.req.bits := RegNext(code_sram_write(i).bits)
     }
-
-    codeArray
   }
 
   io.read.ready := !io.write.valid &&
@@ -408,7 +443,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
   io.cacheOp.resp.valid := false.B
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
   val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
   dataresp := DontCare
 
@@ -426,16 +461,16 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
         dataresp :=Mux(io.cache_req_dup(w).bits.bank_num(0).asBool,  read_datas(1),  read_datas(0))
       }
       when(CacheInstrucion.isWriteData(io.cache_req_dup(w).bits.opCode)){
-        dataArrays(w).io.write.valid         := true.B
-        dataArrays(w).io.write.bits.wdata    := io.cache_req_dup(w).bits.write_data_vec.asTypeOf(write_data.cloneType)
-        dataArrays(w).io.write.bits.wbankidx := io.cache_req_dup(w).bits.bank_num(0)
-        dataArrays(w).io.write.bits.widx     := io.cache_req_dup(w).bits.index(highestIdxBit,1)
-        dataArrays(w).io.write.bits.wmask    := UIntToOH(io.cache_req_dup(w).bits.wayNum(4, 0)).asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(w)
+        data_sram_write(w).valid         := true.B
+        data_sram_write(w).bits.wdata    := io.cache_req_dup(w).bits.write_data_vec.asTypeOf(write_data.cloneType)
+        data_sram_write(w).bits.wbankidx := io.cache_req_dup(w).bits.bank_num(0)
+        data_sram_write(w).bits.widx     := io.cache_req_dup(w).bits.index(highestIdxBit,1)
+        data_sram_write(w).bits.wmask    := UIntToOH(io.cache_req_dup(w).bits.wayNum(4, 0)).asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(w)
         cacheOpShouldResp := true.B
       }
     }
   }
-  
+
   io.cacheOp.resp.valid := RegNext(cacheOpShouldResp)
   val numICacheLineWords = blockBits / 64
   require(blockBits >= 64 && isPow2(blockBits))
@@ -531,16 +566,9 @@ class ICacheImp(parentName:String = "Unknown")(outer: ICache) extends LazyModule
   meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
   meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
 
-  //metaArray.io.write <> meta_write_arb.io.out
-  //dataArray.io.write <> missUnit.io.data_write
+  metaArray.io.write <> meta_write_arb.io.out
+  dataArray.io.write <> missUnit.io.data_write
 
-  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
-  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
-  meta_write_arb.io.out.ready := true.B
-
-  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
-  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
-  missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
   replacePipe.io.csr_parity_enable := io.csr_parity_enable

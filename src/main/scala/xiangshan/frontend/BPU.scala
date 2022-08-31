@@ -38,7 +38,13 @@ trait HasBPUConst extends HasXSParameter {
   val numBrSlot = numBr-1
   val totalSlot = numBrSlot + 1
 
-  val numDup = 4
+  val numDup = 5
+  def dupForFtq = numDup - 1
+  def dupForFtb = 0
+  def dupForTage = 1
+  def dupForUbtb = 2
+  def dupForScIttage = 3
+  def dupForRas = 2
 
   def BP_STAGES = (0 until 3).map(_.U(2.W))
   def BP_S1 = BP_STAGES(0)
@@ -160,7 +166,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
 
-  val update = Flipped(Valid(new BranchPredictionUpdate))
+  val update = Vec(numDup, Flipped(Valid(new BranchPredictionUpdate)))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
@@ -312,6 +318,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
 
   val redirect_req = io.ftq_to_bpu.redirect
   val do_redirect_dup = dup_seq(RegNext(redirect_req, init=0.U.asTypeOf(io.ftq_to_bpu.redirect)))
+  do_redirect_dup.foreach(dontTouch(_))
 
   // Pipeline logic
   s2_redirect_dup.map(_ := false.B)
@@ -348,6 +355,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
       .elsewhen(s0_fire)      { s1_valid := true.B  }
       .elsewhen(s1_flush)     { s1_valid := false.B }
       .elsewhen(s1_fire)      { s1_valid := false.B }
+    dontTouch(s1_valid)
   }
   predictors.io.s1_fire := s1_fire_dup
 
@@ -359,6 +367,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
     when (s2_flush)      { s2_valid := false.B   }
       .elsewhen(s1_fire) { s2_valid := !s1_flush }
       .elsewhen(s2_fire) { s2_valid := false.B   }
+    dontTouch(s2_valid)
   }
 
   predictors.io.s2_fire := s2_fire_dup
@@ -372,6 +381,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
     when (s3_flush)      { s3_valid := false.B   }
       .elsewhen(s2_fire) { s3_valid := !s2_flush }
       .elsewhen(s3_fire) { s3_valid := false.B   }
+    dontTouch(s3_valid)
   }
 
   predictors.io.s3_fire := s3_fire_dup
@@ -437,7 +447,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
     )
   )
 
-  XSError(!resp.s1.is_minimal, "s1 should be minimal!\n")
+  XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
 
   for (npcGen & s1_valid & s1_target <- npcGen_dup zip s1_valid_dup zip resp.s1.target)
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
@@ -510,7 +520,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
   for (s2_redirect & s2_fire & s2_redirect_s1_last_pred_vec <- s2_redirect_dup zip s2_fire_dup zip s2_redirect_s1_last_pred_vec_dup)
     s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
 
-  XSError(resp.s2.is_minimal, "s2 should not be minimal!\n")
+  XSError(resp.s2.is_minimal(0), "s2 should not be minimal!\n")
 
   for (npcGen & s2_redirect & s2_target <- npcGen_dup zip s2_redirect_dup zip resp.s2.target)
     npcGen.register(s2_redirect, s2_target, Some("s2_target"), 5)
@@ -630,8 +640,8 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map {case (hr, r) => hr := r}
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update := RegNext(io.ftq_to_bpu.update)
-  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr))
+  predictors.io.update := VecInit(dup_seq(RegNext(io.ftq_to_bpu.update)))
+  predictors.io.update.map(_.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)))
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)

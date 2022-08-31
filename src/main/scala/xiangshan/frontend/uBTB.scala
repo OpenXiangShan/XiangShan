@@ -148,18 +148,18 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val validArray = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
 
-  dataMem.io.r.req.valid := io.s0_fire(2)
-  dataMem.io.r.req.bits.setIdx := s0_data_ridx_dup(2)
+  dataMem.io.r.req.valid := io.s0_fire(dupForUbtb)
+  dataMem.io.r.req.bits.setIdx := s0_data_ridx_dup(dupForUbtb)
 
-  fallThruPredRAM.io.ren := io.s0_fire(2)
-  fallThruPredRAM.io.ridx := getFtPredIdx(s0_pc_dup(2))
+  fallThruPredRAM.io.ren := io.s0_fire(dupForUbtb)
+  fallThruPredRAM.io.ridx := getFtPredIdx(s0_pc_dup(dupForUbtb))
   val shouldNotFallThru = fallThruPredRAM.io.rdata.andR() // only when confident should we not fallThru
 
   val update_valid = Wire(Bool())
   val pred_may_invalid_by_update_dup = dup_seq(RegInit(false.B))
   when (update_valid) {
     pred_may_invalid_by_update_dup.map(_ := true.B)
-  }.elsewhen (io.s1_fire(2)) {
+  }.elsewhen (io.s1_fire(dupForUbtb)) {
     pred_may_invalid_by_update_dup.map(_ := false.B)
   }
 
@@ -184,7 +184,7 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
   val outMeta = Wire(new MicroBTBOutMeta)
 
-  XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc_dup(2))}\n")
+  XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc_dup(dupForUbtb))}\n")
 
   val ubtb_enable_dup = dup_seq(RegNext(io.ctrl.ubtb_enable))
 
@@ -195,16 +195,17 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
         dataMem.io.r.resp.data(0), s1_pc
         ) // invalid when update
     }
-  io.out.s1.is_minimal := true.B
+  io.out.s1.is_minimal.map(_ := true.B)
 
   outMeta.ftPred := fallThruPredRAM.io.rdata
-  io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire(2)), io.s2_fire(2))
+  io.out.last_stage_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))
 
   // Update logic
-  val update_mispred = io.update.bits.mispred_mask.reduce(_||_)
-  val update_redirected = io.update.bits.from_stage === BP_S2
-  val update = RegNext(io.update.bits)
-  val u_valid = RegNext(io.update.valid && (update_mispred || update_redirected))
+  val io_update = io.update(dupForUbtb)
+  val update_mispred = io_update.bits.mispred_mask.reduce(_||_)
+  val update_redirected = io_update.bits.from_stage === BP_S2
+  val update = RegNext(io_update.bits)
+  val u_valid = RegNext(io_update.valid && (update_mispred || update_redirected))
   update_valid := u_valid
   val u_pc = update.pc
   val u_br_taken_mask = update.br_taken_mask
@@ -221,13 +222,13 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     validArray(u_idx) := true.B
   }
 
-  fallThruPredRAM.io.wen := u_ftMisPred && RegNext(io.update.valid)
+  fallThruPredRAM.io.wen := u_ftMisPred && RegNext(io_update.valid)
   fallThruPredRAM.io.widx := getFtPredIdx(u_pc)
   fallThruPredRAM.io.wdata := satUpdate(u_meta.ftPred, ftPredBits, true.B)
 
   val (uBTBMbistPipelineSram,uBTBMbistPipelineRf,uBTBMbistPipelineSramRepair,uBTBMbistPipelineRfRepair) = placePipelines(level = 1,infoName = s"MBISTPipeline_uBTB")
   // XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
-  XSDebug("target=%x\n", io.out.s1.target(2))
+  XSDebug("target=%x\n", io.out.s1.target(dupForUbtb))
 
   XSDebug(u_valid, "[update]Update from ftq\n")
   XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, ubtbAddr.getTag(u_pc))
@@ -242,13 +243,13 @@ class MicroBTB(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
   XSPerfAccumulate("ubtb_update_on_mispred", u_valid && RegNext(update_mispred))
   XSPerfAccumulate("ubtb_update_on_redirected_by_s2", u_valid && RegNext(update_redirected))
-  XSPerfAccumulate("ubtb_update_eliminated", io.update.valid && !(update_mispred || update_redirected))
+  XSPerfAccumulate("ubtb_update_eliminated", io_update.valid && !(update_mispred || update_redirected))
 
-  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire(2) && pred_may_invalid_by_update_dup(2) && shouldNotFallThru)
-  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire(2) && !pred_may_invalid_by_update_dup(2) && !shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_update", io.s1_fire(dupForUbtb) && pred_may_invalid_by_update_dup(dupForUbtb) && shouldNotFallThru)
+  XSPerfAccumulate("ubtb_resp_invalid_by_ftpred", io.s1_fire(dupForUbtb) && !pred_may_invalid_by_update_dup(dupForUbtb) && !shouldNotFallThru)
 
-  XSPerfAccumulate("ubtb_update_ft_mispred", RegNext(io.update.valid) && u_ftMisPred)
-  XSPerfAccumulate("ubtb_update_ft_pred_correct", RegNext(io.update.valid) && !u_ftMisPred)
+  XSPerfAccumulate("ubtb_update_ft_mispred", RegNext(io_update.valid) && u_ftMisPred)
+  XSPerfAccumulate("ubtb_update_ft_pred_correct", RegNext(io_update.valid) && !u_ftMisPred)
 
   override val perfEvents = Seq(
     // ("ubtb_commit_hit       ", u_valid &&  u_meta.hit),

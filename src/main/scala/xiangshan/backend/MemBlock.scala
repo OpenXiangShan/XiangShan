@@ -260,7 +260,6 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
     loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // NOTE: just for dtlb's perf cnt
-    loadUnits(i).io.loadFastMatch <> io.loadFastMatch(i)
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
@@ -276,10 +275,15 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
 
-    // laod to load fast forward
-    for (j <- 0 until exuParameters.LduCnt) {
-      loadUnits(i).io.fastpathIn(j) <> loadUnits(j).io.fastpathOut
-    }
+    // load to load fast forward: load(i) prefers data(i)
+    val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
+    val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
+    val fastDataVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.data)
+    val fastMatchVec = fastPriority.map(j => io.loadFastMatch(i)(j))
+    loadUnits(i).io.fastpathIn.valid := VecInit(fastValidVec).asUInt.orR
+    loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
+    val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
+    loadUnits(i).io.loadFastMatch := fastMatch
 
     // Lsq to load unit's rs
 
@@ -289,6 +293,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
+    lsq.io.ldRawDataOut(i) <> loadUnits(i).io.lsq.ldRawData
     lsq.io.s2_load_data_forwarded(i) <> loadUnits(i).io.lsq.s2_load_data_forwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 

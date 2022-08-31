@@ -218,9 +218,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       case ((nRows, ctrBits, histLen),idx) => {
         val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen,parentName = parentName + s"scTable${idx}_"))
         val req = t.io.req
-        req.valid := io.s0_fire(3)
-        req.bits.pc := s0_pc_dup(3)
-        req.bits.folded_hist := io.in.bits.folded_hist(3)
+        req.valid := io.s0_fire(dupForScIttage)
+        req.bits.pc := s0_pc_dup(dupForScIttage)
+        req.bits.folded_hist := io.in.bits.folded_hist(dupForScIttage)
         req.bits.ghist := DontCare
         if (!EnableSC) {t.io.update := DontCare}
         t
@@ -276,26 +276,26 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
-      val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire(3))
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(3)))
+      val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire(dupForScIttage))
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(dupForScIttage)))
       val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds = VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val s2_scResps = VecInit(RegEnable(s1_scResps, io.s1_fire(3)).map(_.ctrs(w)))
-      val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
-      val s2_chooseBit = s2_tageTakens_dup(3)(w)
+      val s2_scResps = VecInit(RegEnable(s1_scResps, io.s1_fire(dupForScIttage)).map(_.ctrs(w)))
+      val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens_dup(dupForScIttage)(w).asUInt)))
+      val s2_chooseBit = s2_tageTakens_dup(dupForScIttage)(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
           s2_scPreds(s2_chooseBit),
-          s2_tageTakens_dup(3)(w)
+          s2_tageTakens_dup(dupForScIttage)(w)
         )
 
-      scMeta.tageTakens(w) := RegEnable(s2_tageTakens_dup(3)(w), io.s2_fire(3))
-      scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire(3))
-      scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
-      scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire(3))
+      scMeta.tageTakens(w) := RegEnable(s2_tageTakens_dup(dupForScIttage)(w), io.s2_fire(dupForScIttage))
+      scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire(dupForScIttage))
+      scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(dupForScIttage))
+      scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire(dupForScIttage))
 
       when (s2_provideds(w)) {
         s2_sc_used(w) := true.B
@@ -306,8 +306,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         when (s2_sumAboveThresholds(s2_chooseBit)) {
           val pred = s2_scPreds(s2_chooseBit)
           val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
-          s2_agree(w) := s2_tageTakens_dup(3)(w) === pred
-          s2_disagree(w) := s2_tageTakens_dup(3)(w) =/= pred
+          s2_agree(w) := s2_tageTakens_dup(dupForScIttage)(w) === pred
+          s2_disagree(w) := s2_tageTakens_dup(dupForScIttage)(w) =/= pred
           // fit to always-taken condition
           // io.out.s2.full_pred.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
@@ -315,12 +315,13 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
 
       val s3_pred_dup = io.s2_fire.map(f => RegEnable(s2_pred, f))
-      val sc_enable_dup = dup(RegNext(io.ctrl.sc_enable))
+      val sc_enable_dup = dup_seq(RegNext(io.ctrl.sc_enable))
       for (sc_enable & fp & s3_pred <-
         sc_enable_dup zip io.out.s3.full_pred zip s3_pred_dup) {
           when (sc_enable) {
             fp.br_taken_mask(w) := s3_pred
           }
+          dontTouch(sc_enable)
       }
 
       val updateTageMeta = updateMeta

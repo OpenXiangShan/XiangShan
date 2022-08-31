@@ -219,6 +219,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
+  io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 

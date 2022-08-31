@@ -591,8 +591,8 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val resp_s2 = io.out.s2
 
   // Update logic
-  val u_valid = io.update.valid
-  val update = io.update.bits
+  val u_valid = io.update(dupForTage).valid
+  val update = io.update(dupForTage).bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)))
@@ -682,11 +682,12 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     resp_meta.takens(i)     := RegEnable(s2_tageTakens_dup(0)(i), io.s2_fire(1))
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire(1))
 
-    val tage_enable_dup = dup(RegNext(io.ctrl.tage_enable))
+    val tage_enable_dup = dup_seq(RegNext(io.ctrl.tage_enable))
     for (tage_enable & fp & s2_tageTakens <- tage_enable_dup zip resp_s2.full_pred zip s2_tageTakens_dup) {
       when (tage_enable) {
         fp.br_taken_mask(i) := s2_tageTakens(i)
       }
+      dontTouch(tage_enable)
     }
 
     //---------------- update logics below ------------------//
@@ -822,7 +823,7 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
       // use fetch pc instead of instruction pc
       tables(i).io.update.pc       := RegNext(update.pc)
       tables(i).io.update.folded_hist := RegNext(updateFHist)
-      tables(i).io.update.ghist := RegNext(io.update.bits.ghist)
+      tables(i).io.update.ghist := RegNext(io.update(dupForScIttage).bits.ghist)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)

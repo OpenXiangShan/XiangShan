@@ -69,6 +69,10 @@ class VModule(object):
             debug_dontCare_name = line.strip().split(" ")[1]
             self.lines.append(f"  assign {debug_dontCare_name} = 0;\n")
             self.lines.append("`endif\n")
+        # end of difftest module
+        if self.in_difftest and line.strip() == ");":
+            self.in_difftest = False
+            self.lines.append("`endif\n")
         if len(self.lines):
             io_match = self.io_re.match(line)
             if io_match:

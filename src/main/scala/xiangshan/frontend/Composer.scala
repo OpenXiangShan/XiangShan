@@ -64,11 +64,13 @@ class Composer(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   require(meta_sz < MaxMetaLength)
   io.out.last_stage_meta := metas
 
-  var update_meta = io.update.bits.meta
+  var update_meta_dup = io.update.map(_.bits.meta).toArray
   for (c <- components.reverse) {
     c.io.update := io.update
-    c.io.update.bits.meta := update_meta
-    update_meta = update_meta >> c.meta_size
+    for (i <- 0 until numDup) {
+      c.io.update(i).bits.meta := update_meta_dup(i)
+      update_meta_dup(i) = update_meta_dup(i) >> c.meta_size
+    }
   }
 
   def extractMeta(meta: UInt, idx: Int): UInt = {

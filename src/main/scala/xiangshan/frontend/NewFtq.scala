@@ -67,7 +67,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int, parentName:String = "Unknown")(
 
 }
 
-class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
+class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils with HasBPUConst {
   val startAddr = UInt(VAddrBits.W)
   val nextLineAddr = UInt(VAddrBits.W)
   val isNextMask = Vec(PredictWidth, Bool())
@@ -81,12 +81,12 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     def carryPos(addr: UInt) = addr(instOffsetBits+log2Ceil(PredictWidth)+1)
-    this.startAddr := resp.pc(3)
-    this.nextLineAddr := resp.pc(3) + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.startAddr := resp.pc(dupForFtq)
+    this.nextLineAddr := resp.pc(dupForFtq) + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
-      (resp.pc(3)(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
+      (resp.pc(dupForFtq)(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
     ))
-    this.fallThruError := resp.fallThruError(3)
+    this.fallThruError := resp.fallThruError(dupForFtq)
     this
   }
   override def toPrintable: Printable = {
@@ -495,8 +495,8 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
   val bpu_s3_resp = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = bpu_s2_resp.valid(3) && bpu_s2_resp.hasRedirect(3)
-  val bpu_s3_redirect = bpu_s3_resp.valid(3) && bpu_s3_resp.hasRedirect(3)
+  val bpu_s2_redirect = bpu_s2_resp.valid(dupForFtq) && bpu_s2_resp.hasRedirect(dupForFtq)
+  val bpu_s3_redirect = bpu_s3_resp.valid(dupForFtq) && bpu_s3_resp.hasRedirect(dupForFtq)
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire = io.fromBpu.resp.fire() && allowBpuIn // from bpu s1
@@ -517,7 +517,7 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1, parentName = parentName + "ftqRedirectSram_"))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_redirect_sram.io.wdata := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
@@ -525,12 +525,12 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1, parentName = parentName + "ftqMeta1rSram_"))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1, "FtqEntry"))
-  ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid(3))
+  ftb_entry_mem.io.wen(0) := RegNext(io.fromBpu.resp.bits.lastStage.valid(dupForFtq))
   ftb_entry_mem.io.waddr(0) := RegEnable(io.fromBpu.resp.bits.lastStage.ftq_idx.value, io.fromBpu.resp.bits.lastStage.valid(3))
   ftb_entry_mem.io.wdata(0) := RegEnable(io.fromBpu.resp.bits.last_stage_ftb_entry, io.fromBpu.resp.bits.lastStage.valid(3))
 
@@ -560,8 +560,8 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   val last_cycle_bpu_in = RegNext(bpu_in_fire)
   val last_cycle_bpu_in_ptr = RegNext(bpu_in_resp_ptr)
   val last_cycle_bpu_in_idx = last_cycle_bpu_in_ptr.value
-  val last_cycle_bpu_target = RegNext(bpu_in_resp.target(3))
-  val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex(3))
+  val last_cycle_bpu_target = RegNext(bpu_in_resp.target(dupForFtq))
+  val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex(dupForFtq))
   val last_cycle_bpu_in_stage = RegNext(bpu_in_stage)
 
   def extra_copyNum_for_commitStateQueue = 2
@@ -612,8 +612,8 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   }
 
   // only use ftb result to assign hit status
-  when (bpu_s2_resp.valid(3)) {
-    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred(3).hit, h_hit, h_not_hit)
+  when (bpu_s2_resp.valid(dupForFtq)) {
+    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred(dupForFtq).hit, h_hit, h_not_hit)
   }
 
 
@@ -1229,10 +1229,10 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
 
   val from_bpu = io.fromBpu.resp.bits
   def in_entry_len_map_gen(resp: BpuToFtqBundle)(stage: String) = {
-    val entry_len = (resp.last_stage_ftb_entry.getFallThrough(resp.s3.pc(3)) - resp.s3.pc(3)) >> instOffsetBits
+    val entry_len = (resp.last_stage_ftb_entry.getFallThrough(resp.s3.pc(dupForFtq)) - resp.s3.pc(dupForFtq)) >> instOffsetBits
     val entry_len_recording_vec = (1 to PredictWidth+1).map(i => entry_len === i.U)
     val entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.s3.valid(3))
+      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.s3.valid(dupForFtq))
     ).foldLeft(Map[String, UInt]())(_+_)
     entry_len_map
   }
