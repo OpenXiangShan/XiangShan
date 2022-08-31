@@ -745,6 +745,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                 (if (HasFPU) fcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
+  println("XiangShan CSR Lists")
+
+  for (addr <- mapping.keys.toSeq.sorted) {
+    println(f"$addr%#03x ${mapping(addr)._1}")
+  }
+
   val addr = src2(11, 0)
   val csri = ZeroExt(src2(16, 12), XLEN)
   val rdata = Wire(UInt(XLEN.W))
