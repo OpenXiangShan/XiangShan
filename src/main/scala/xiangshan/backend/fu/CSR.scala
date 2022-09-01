@@ -630,22 +630,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // CSR reg map
   val basicPrivMapping = Map(
 
-    //--- User Trap Setup ---
-    // MaskedRegMap(Ustatus, ustatus),
-    // MaskedRegMap(Uie, uie, 0.U, MaskedRegMap.Unwritable),
-    // MaskedRegMap(Utvec, utvec),
+    // Unprivileged Floating-Point CSRs
+    // Has been mapped above
 
-    //--- User Trap Handling ---
-    // MaskedRegMap(Uscratch, uscratch),
-    // MaskedRegMap(Uepc, uepc),
-    // MaskedRegMap(Ucause, ucause),
-    // MaskedRegMap(Utval, utval),
-    // MaskedRegMap(Uip, uip),
-
-    //--- User Counter/Timers ---
-    // MaskedRegMap(Cycle, cycle),
-    // MaskedRegMap(Time, time),
-    // MaskedRegMap(Instret, instret),
+    // Unprivileged Counter/Timers
+    MaskedRegMap(Cycle,   mcycle),
+    // We don't support read time CSR.
+    // MaskedRegMap(Time, mtime),
+    MaskedRegMap(Instret, minstret),
 
     //--- Supervisor Trap Setup ---
     MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
@@ -719,6 +711,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                  reg  = perfEvents(i),
                  wmask = "hf87fff3fcff3fcff".U(XLEN.W)),
     MaskedRegMap(addr = Mhpmcounter3 +i,
+                 reg  = perfCnts(i)),
+    MaskedRegMap(addr = Hpmcounter3 + i,
                  reg  = perfCnts(i))
   )}).fold(Map())((a,b) => a ++ b)
   // TODO: mechanism should be implemented later
@@ -766,6 +760,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
+    (addr >= Cycle.U) && (addr <= Hpmcounter31.U) ||
     addr === Mip.U
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
