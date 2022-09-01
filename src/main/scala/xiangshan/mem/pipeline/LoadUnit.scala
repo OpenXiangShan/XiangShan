@@ -588,10 +588,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       load_s1.io.in.bits.rsIdx := io.rsIdx
       load_s1.io.in.bits.isFirstIssue := io.isFirstIssue
       // We need to replace vaddr(5, 3).
-      for (d <- 0 until 2) {
-        val spec_paddr = io.tlb.resp.bits.paddr(d)
-        load_s1.io.dtlbResp.bits.paddr(d) := Cat(spec_paddr(PAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W))
-      }
+      val spec_paddr = io.tlb.resp.bits.paddr(0)
+      load_s1.io.dtlbResp.bits.paddr.foreach(_ := Cat(spec_paddr(PAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W)))
     }
     when (cancelPointerChasing) {
       load_s1.io.s1_kill := true.B
