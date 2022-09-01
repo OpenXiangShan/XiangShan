@@ -1121,7 +1121,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         dcsrNew.prv := priviledgeMode
         priviledgeMode := ModeM
         XSDebug(raiseDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
-      }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
+      }.elsewhen ((hasbreakPoint || hasSingleStep || hasTriggerHit && triggerAction) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
         dpc := iexceptionPC

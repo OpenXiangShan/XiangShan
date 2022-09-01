@@ -30,6 +30,7 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
   val vaddr  = UInt(VAddrBits.W)
   def vsetIdx = get_idx(vaddr)
+
 }
 
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
@@ -169,6 +170,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val tlb_resp_af     = Vec(PortNumber,Bool())
   }
 
+  val copied_tlb_slot_valid = Seq.fill(partWayNum)(RegInit(false.B))
+  val copied_miss_swtch_bit = Seq.fill(partWayNum)(RegInit(false.B))
+  val copied_tlb_slot_doubleline =  Seq.fill(partWayNum)(RegInit(false.B))
+  val copied_tlb_slot_vset_idx = Seq.fill(partWayNum)(RegInit(0.U.asTypeOf(Vec(PortNumber, UInt(idxBits.W)))))
 
   val tlb_slot = RegInit(0.U.asTypeOf(new tlbMissSlot))
 
@@ -194,15 +199,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   for(i <- 0 until partWayNum) {
-    toData.valid                  := (ftq_req_to_data_valid(i) || tlb_slot.valid) && !missSwitchBit
-    toData.bits(i).isDoubleLine   := Mux(tlb_slot.valid,tlb_slot.double_line ,ftq_req_to_data_doubleline(i))
-    toData.bits(i).vSetIdx        := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,ftq_req_to_data_vset_idx(i))
+    toData.valid                  := (ftq_req_to_data_valid.head || copied_tlb_slot_valid.head) && !copied_miss_swtch_bit.head
+    toData.bits(i).readValid     := (ftq_req_to_data_valid(i) || copied_tlb_slot_valid(i)) && !copied_miss_swtch_bit(i)
+    toData.bits(i).isDoubleLine   := Mux(copied_tlb_slot_valid(i), copied_tlb_slot_doubleline(i) ,ftq_req_to_data_doubleline(i))
+    toData.bits(i).vSetIdx        := Mux(copied_tlb_slot_valid(i), copied_tlb_slot_vset_idx(i) ,ftq_req_to_data_vset_idx(i))
   }
 
   toMeta.valid                    := (s0_valid || tlb_slot.valid) && !missSwitchBit
   toMeta.bits.isDoubleLine        := Mux(tlb_slot.valid,tlb_slot.double_line ,ftq_req_to_meta_doubleline)
   toMeta.bits.vSetIdx             := Mux(tlb_slot.valid,tlb_slot.req_vsetIdx ,ftq_req_to_meta_vset_idx)
-
+  toMeta.bits.readValid           := DontCare
 
   toITLB(0).valid         := s0_valid  
   toITLB(0).bits.size     := 3.U // TODO: fix the size
@@ -249,10 +255,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   when(tlb_has_miss && !tlb_slot.valid){
     tlb_slot.valid        := s0_valid
+    copied_tlb_slot_valid.map(_ := s0_valid)
     tlb_slot.only_first   := ftq_req_to_itlb_only_first
     tlb_slot.double_line  := ftq_req_to_itlb_doubleline
+    copied_tlb_slot_doubleline.map(_ := ftq_req_to_itlb_doubleline)
     tlb_slot.req_vaddr    := ftq_req_to_itlb_vaddr
     tlb_slot.req_vsetIdx  := ftq_req_to_itlb_vset_idx
+    copied_tlb_slot_vset_idx.map(_ := ftq_req_to_itlb_vset_idx)
   }
 
   /** latch tlb resp when pipeline stops */
@@ -267,6 +276,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   when(tlb_slot.valid && (tlb_all_resp || tlb_slot.has_latch_resp) && s0_can_go){
     tlb_slot.valid := false.B
+    copied_tlb_slot_valid.map(_ := false.B)
     tlb_slot.has_latch_resp := false.B
   }
 
@@ -758,9 +768,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   when(toMSHR.map(_.valid).reduce(_||_)){
     missSwitchBit := true.B
+    copied_miss_swtch_bit.foreach(_ := true.B)
     io.prefetchEnable := true.B
   }.elsewhen(missSwitchBit && s2_fetch_finish){
     missSwitchBit := false.B
+    copied_miss_swtch_bit.foreach(_ := false.B)
     io.prefetchDisable := true.B
   }
 

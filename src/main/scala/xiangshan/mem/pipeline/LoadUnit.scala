@@ -432,8 +432,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
-  // data retrived from dcache is also included in io.out.bits.forwardData
-  io.out.bits.forwardData := rdataVec
+  // data from dcache is not included in io.out.bits.forwardData
+  io.out.bits.forwardData := forwardData
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -520,6 +520,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(new LoadToLoadIO)
     val loadFastMatch = Input(Bool())
+    val loadFastImm = Input(UInt(12.W))
 
     val s3_delayed_load_error = Output(Bool()) // load ecc error
     // Note that io.s3_delayed_load_error and io.lsq.s3_delayed_load_error is different
@@ -540,9 +541,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   load_s0.io.fastpath := io.fastpathIn
   load_s0.io.s0_kill := false.B
   val s0_tryPointerChasing = !io.ldin.valid && io.fastpathIn.valid
+  val s0_pointerChasingVAddr = io.fastpathIn.data(5, 0) +& io.loadFastImm(5, 0)
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B,
-    load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect) && !s0_tryPointerChasing)
+  val s1_data = PipelineConnect(load_s0.io.out, load_s1.io.in, true.B,
+    load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect) && !s0_tryPointerChasing).get
 
   // load s1
   load_s1.io.s1_kill := RegEnable(load_s0.io.s0_kill, false.B, load_s0.io.in.valid || io.fastpathIn.valid)
@@ -562,17 +564,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.lsq.loadPaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
   io.lsq.loadPaddrIn.bits.paddr := load_s1.io.lsuPAddr
 
-  val s1_tryPointerChasing = RegNext(s0_tryPointerChasing && load_s0.io.in.ready && load_s0.io.dcacheReq.ready, false.B)
+  val s0_doTryPointerChasing = s0_tryPointerChasing && load_s0.io.in.ready && load_s0.io.dcacheReq.ready
+  val s1_tryPointerChasing = RegNext(s0_doTryPointerChasing, false.B)
+  val s1_pointerChasingVAddr = RegEnable(s0_pointerChasingVAddr, s0_doTryPointerChasing)
   val cancelPointerChasing = WireInit(false.B)
   if (EnableLoadToLoadForward) {
     // Sometimes, we need to cancel the load-load forwarding.
     // These can be put at S0 if timing is bad at S1.
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
-    val speculativeAddress = RegEnable(load_s0.io.fastpath.data(5, 0), s0_tryPointerChasing)
-    val realPointerAddress = Cat(speculativeAddress(5, 3), 0.U(3.W)) +& io.ldin.bits.uop.ctrl.imm(5, 0)
-    val addressMisMatch = realPointerAddress(6) || io.ldin.bits.uop.ctrl.imm(11, 6).orR
+    val addressMisMatch = s1_pointerChasingVAddr(6) || RegEnable(io.loadFastImm(11, 6).orR, s0_doTryPointerChasing)
     // Case 1: the address is not 64-bit aligned or the fuOpType is not LD
-    val addressNotAligned = speculativeAddress(2, 0).orR
+    val addressNotAligned = s1_pointerChasingVAddr(2, 0).orR
     val fuOpTypeIsNotLd = io.ldin.bits.uop.ctrl.fuOpType =/= LSUOpType.ld
     // Case 2: this is not a valid load-load pair
     val notFastMatch = RegEnable(!io.loadFastMatch, s0_tryPointerChasing)
@@ -581,15 +583,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     when (s1_tryPointerChasing) {
       cancelPointerChasing := addressMisMatch || addressNotAligned || fuOpTypeIsNotLd || notFastMatch || isCancelled
       load_s1.io.in.bits.uop := io.ldin.bits.uop
-      val spec_vaddr = load_s1.io.in.bits.vaddr
-      val vaddr = Cat(spec_vaddr(VAddrBits - 1, 6), realPointerAddress(5, 3), spec_vaddr(2, 0))
-      io.sbuffer.vaddr := vaddr
-      io.lsq.forward.vaddr := vaddr
+      val spec_vaddr = s1_data.vaddr
+      val vaddr = Cat(spec_vaddr(VAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W))
+      load_s1.io.in.bits.vaddr := vaddr
       load_s1.io.in.bits.rsIdx := io.rsIdx
       load_s1.io.in.bits.isFirstIssue := io.isFirstIssue
       // We need to replace vaddr(5, 3).
       val spec_paddr = io.tlb.resp.bits.paddr(0)
-      load_s1.io.dtlbResp.bits.paddr.foreach(_ := Cat(spec_paddr(PAddrBits - 1, 6), realPointerAddress(5, 3), spec_paddr(2, 0)))
+      load_s1.io.dtlbResp.bits.paddr.foreach(_ := Cat(spec_paddr(PAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W)))
     }
     when (cancelPointerChasing) {
       load_s1.io.s1_kill := true.B

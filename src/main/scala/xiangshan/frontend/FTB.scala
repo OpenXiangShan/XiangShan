@@ -411,7 +411,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.req_pc.valid := io.s0_fire(dupForFtb)
   ftbBank.io.req_pc.bits := s0_pc_dup(dupForFtb)
 
-  val btb_enable_dup = dup_seq(RegNext(io.ctrl.btb_enable))
+  val btb_enable_dup = RegNext(dup(io.ctrl.btb_enable))
   val s2_ftb_entry_dup = io.s1_fire.map(f => RegEnable(ftbBank.io.read_resp, f))
   val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
   

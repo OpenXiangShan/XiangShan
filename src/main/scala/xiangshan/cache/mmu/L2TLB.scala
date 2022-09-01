@@ -142,7 +142,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
     (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
     !from_pre(cache.io.resp.bits.req_info.source) &&
-    (cache.io.resp.bits.bypassed || !ptw.io.req.ready)
+    (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst || !ptw.io.req.ready)
   mq_arb.io.in(0).bits :=  cache.io.resp.bits.req_info
   mq_arb.io.in(1) <> llptw.io.cache
   missQueue.io.in <> mq_arb.io.out
@@ -164,10 +164,12 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
-    Mux(cache.io.resp.bits.bypassed, mq_arb.io.in(0).ready, mq_arb.io.in(0).ready || ptw.io.req.ready)))
+    Mux(cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst, mq_arb.io.in(0).ready, mq_arb.io.in(0).ready || ptw.io.req.ready)))
 
   // NOTE: missQueue req has higher priority
-  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
+  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit &&
+    !cache.io.resp.bits.bypassed &&
+    !cache.io.resp.bits.isFirst
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
