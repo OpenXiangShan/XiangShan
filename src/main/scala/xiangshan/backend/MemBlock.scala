@@ -66,6 +66,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // in
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
@@ -282,6 +283,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
+    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
 
     // Lsq to load unit's rs
 

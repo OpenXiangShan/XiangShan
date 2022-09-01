@@ -180,7 +180,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
      rs.foreach(_.io.checkwait.get <> io.checkwait.get)
     }
     if (io.load.isDefined) {
-      io.load.get.fastMatch <> rs.flatMap(_.io.load.get.fastMatch)
+      io.load.get <> rs.flatMap(_.io.load.get)
     }
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
@@ -229,9 +229,10 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
-  val load = if (params.isLoad) Some(new Bundle {
-    val fastMatch = Vec(params.numDeq, Output(UInt(exuParameters.LduCnt.W)))
-  }) else None
+  val load = if (params.isLoad) Some(Vec(params.numDeq, new Bundle {
+    val fastMatch = Output(UInt(exuParameters.LduCnt.W))
+    val fastImm = Output(UInt(12.W))
+  })) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 }
 
@@ -767,9 +768,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // from data array. Timing to be optimized later.
       if (params.isLoad) {
         // Condition: wakeup by load (to select load wakeup bits)
-        io.load.get.fastMatch(i) := Mux(s1_issuePtrOH(i).valid, VecInit(
+        io.load.get(i).fastMatch := Mux(s1_issuePtrOH(i).valid, VecInit(
           wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
         ).asUInt, 0.U)
+        io.load.get(i).fastImm := s1_out(i).bits.uop.ctrl.imm
       }
 
       for (j <- 0 until params.numFastWakeup) {
