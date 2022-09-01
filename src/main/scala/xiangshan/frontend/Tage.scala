@@ -685,7 +685,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.takens(i)     := RegEnable(s2_tageTakens_dup(0)(i), io.s2_fire(1))
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire(1))
 
-    val tage_enable_dup = dup_seq(RegNext(io.ctrl.tage_enable))
+    val tage_enable_dup = RegNext(dup(io.ctrl.tage_enable))
     for (tage_enable & fp & s2_tageTakens <- tage_enable_dup zip resp_s2.full_pred zip s2_tageTakens_dup) {
       when (tage_enable) {
         fp.br_taken_mask(i) := s2_tageTakens(i)
