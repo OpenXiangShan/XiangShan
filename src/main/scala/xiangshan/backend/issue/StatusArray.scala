@@ -78,6 +78,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isValid = Output(UInt(params.numEntries.W))
     val isValidNext = Output(UInt(params.numEntries.W))
     val canIssue = Output(UInt(params.numEntries.W))
+    val canIssueNext = Output(UInt(params.numEntries.W))
     val flushed = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
     val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
@@ -243,6 +244,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   io.isValid := statusArrayValid.asUInt
   io.isValidNext := statusArrayValidNext.asUInt
   io.canIssue := VecInit(statusArrayValidNext.zip(readyVecNext).map{ case (v, r) => RegNext(v && r) }).asUInt
+  io.canIssueNext := VecInit(statusArrayValidNext.zip(readyVecNext).map{ case (v, r) => v && r }).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
