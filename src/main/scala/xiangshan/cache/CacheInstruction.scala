@@ -159,6 +159,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val translated_cache_req                  = Reg(new CacheCtrlReqInfo)
   val translated_cache_req_opCode_dup_vec   = Reg(Vec(11, UInt(XLEN.W)))
   val translated_cache_req_bank_num_dup_vec = Reg(Vec(11, UInt(XLEN.W)))
+  val translated_cache_req_index_dup_vec = Reg(Vec(11, UInt(XLEN.W)))
+
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
@@ -183,7 +185,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   translated_cache_req_opCode_dup_vec.map(dup => update_cache_req_when_write("CACHE_OP", dup))
   update_cache_req_when_write("CACHE_LEVEL", translated_cache_req.level)
   update_cache_req_when_write("CACHE_WAY", translated_cache_req.wayNum)
-  update_cache_req_when_write("CACHE_IDX", translated_cache_req.index)
+  translated_cache_req_index_dup_vec.map(dup => update_cache_req_when_write("CACHE_IDX", dup))
   translated_cache_req_bank_num_dup_vec.map(dup => update_cache_req_when_write("CACHE_BANK_NUM", dup))
   update_cache_req_when_write("CACHE_TAG_HIGH", translated_cache_req.write_tag_high)
   update_cache_req_when_write("CACHE_TAG_LOW", translated_cache_req.write_tag_low)
@@ -218,6 +220,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.cache_req_dup.zipWithIndex.map{case (dup, i) => {
     dup.bits.opCode := translated_cache_req_opCode_dup_vec(i)
     dup.bits.bank_num := translated_cache_req_bank_num_dup_vec(i)
+    dup.bits.index    := translated_cache_req_index_dup_vec(i)
   }}
 
   // Receive cache op resp from cache

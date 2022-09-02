@@ -30,7 +30,13 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     // select for issue
     val request = Input(UInt(params.numEntries.W))
     val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
-    val grantBalance = Output(Bool())
+    // for load balance usage
+    val balance = if (params.needBalance && params.numDeq == 2) {
+      Some(new Bundle {
+        val tick = Input(Bool())
+        val out = Output(Bool())
+      })
+    } else None
   })
 
   val enqPolicy = if (params.numEnq > 2) "oddeven" else if (params.numEnq == 2) "center" else "circ"
@@ -49,8 +55,8 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
   val request = io.request.asBools
   val select = SelectOne(deqPolicy, request, params.numDeq)
-  for (i <- 0 until params.numDeq) {
-    val sel = select.getNthOH(i + 1, params.needBalance)
+  val selected = (0 until params.numDeq).map(i => select.getNthOH(i + 1))
+  for ((sel, i) <- selected.zipWithIndex) {
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
 
@@ -58,8 +64,20 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
     XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
   }
-  io.grantBalance := select.getBalance2
 
+  if (io.balance.isDefined) {
+    val balance = RegInit(false.B)
+    when (io.balance.get.tick) {
+      balance := !balance
+    }
+    io.balance.get.out := balance
+    for ((sel, i) <- selected.reverse.zipWithIndex) {
+      when (balance) {
+        io.grant(i).valid := sel._1
+        io.grant(i).bits := sel._2.asUInt
+      }
+    }
+  }
 }
 
 class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {

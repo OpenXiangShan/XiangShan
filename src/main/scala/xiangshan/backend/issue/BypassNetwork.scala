@@ -26,7 +26,6 @@ import utils._
 class BypassInfo(numWays: Int, dataBits: Int) extends Bundle {
   val valid = Vec(numWays, Bool())
   val data = UInt(dataBits.W)
-
 }
 
 class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundle {
@@ -34,7 +33,6 @@ class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundl
   val source = Vec(numWays, Input(UInt(dataBits.W)))
   val target = Vec(numWays, Output(UInt(dataBits.W)))
   val bypass = Vec(numBypass, Input(new BypassInfo(numWays, dataBits)))
-
 }
 
 class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)
@@ -60,13 +58,17 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Par
 class BypassNetworkRight(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)
   extends BypassNetwork(numWays, numBypass, dataBits) {
 
+  val last_cycle_hold = RegInit(false.B)
+  last_cycle_hold := io.hold
+
   val target_reg = Reg(Vec(numWays, UInt(dataBits.W)))
   val bypass_reg = Reg(Vec(numBypass, new BypassInfo(numWays, dataBits)))
 
-  when (io.hold) {
-    target_reg := io.target
+  // When last cycle holds the data, no need to update it.
+  when (io.hold && !last_cycle_hold) {
     bypass_reg.map(_.valid.map(_ := false.B))
-  }.otherwise {
+    target_reg := io.target
+  }.elsewhen(!io.hold) {
     target_reg := io.source
     for ((by_reg, by_io) <- bypass_reg.zip(io.bypass)) {
       by_reg.data := by_io.data
@@ -98,7 +100,17 @@ class BypassNetworkLeft(numWays: Int, numBypass: Int, dataBits: Int)(implicit p:
 }
 
 object BypassNetwork {
-  def apply(numWays: Int, numBypass: Int, dataBits: Int, optFirstStage: Boolean)(implicit p: Parameters) = {
-    Module(new BypassNetworkLeft(numWays, numBypass, dataBits))
+  def apply(
+    numWays: Int,
+    numBypass: Int,
+    dataBits: Int,
+    optFirstStage: Boolean
+  )(implicit p: Parameters): BypassNetwork = {
+    if (optFirstStage) {
+      Module(new BypassNetworkLeft(numWays, numBypass, dataBits))
+    }
+    else {
+      Module(new BypassNetworkRight(numWays, numBypass, dataBits))
+    }
   }
 }

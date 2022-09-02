@@ -67,6 +67,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // in
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
@@ -284,6 +285,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
+    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
 
     // Lsq to load unit's rs
 
@@ -457,7 +459,9 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.memoryViolation    <> lsq.io.rollback
-  lsq.io.uncache        <> uncache.io.lsq
+  // lsq.io.uncache        <> uncache.io.lsq
+  AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
+  AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
   // delay dcache refill for 1 cycle for better timing
   // TODO: remove RegNext after fixing refill paddr timing
   // lsq.io.dcache         <> dcache.io.lsu.lsq

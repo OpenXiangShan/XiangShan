@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -61,6 +61,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
+  EnableFauFTB: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -96,21 +97,15 @@ case class XSCoreParameters
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
   branchPredictor: Function3[BranchPredictionResp, Parameters, String, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters, parentName:String) => {
-      // val loop = Module(new LoopPredictor)
-      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
-      //                             else          Module(new Tage) }
-      //             else          { Module(new FakeTage) })
+    ((resp_in: BranchPredictionResp, p: Parameters, parentName: String) => {
       val ftb = Module(new FTB(parentName = parentName + "ftb_")(p))
-      val ubtb = Module(new MicroBTB(parentName = parentName + "ubtb_")(p))
+      val ubtb =
+        if (p(XSCoreParamsKey).EnableFauFTB) Module(new FauFTB()(p))
+        else Module(new MicroBTB(parentName = parentName + "ubtb_")(p))
       // val bim = Module(new BIM()(p))
       val tage = Module(new Tage_SC(parentName = parentName + "tage_")(p))
       val ras = Module(new RAS(parentName = parentName + "ras_")(p))
       val ittage = Module(new ITTage(parentName = parentName + "ittage_")(p))
-      // val tage = Module(new Tage()(p))
-      // val fake = Module(new FakePredictor()(p))
-
-      // val preds = Seq(loop, tage, btb, ubtb, bim)
       val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.foreach(_.io := DontCare)
 
@@ -311,6 +306,7 @@ trait HasXSParameter {
   val EnableGHistDiff = coreParams.EnableGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
+  val EnableFauFTB = coreParams.EnableFauFTB
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize

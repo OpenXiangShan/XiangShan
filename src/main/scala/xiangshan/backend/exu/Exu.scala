@@ -145,8 +145,8 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   val fuInReady = config.fuConfigs.zip(fuIn).zip(functionUnits.zip(fuSel)).map { case ((fuCfg, in), (fu, sel)) =>
     fu.io.redirectIn := io.redirect
 
-    if (fuCfg.hasInputBuffer) {
-      val buffer = Module(new InputBuffer(8))
+    if (fuCfg.hasInputBuffer._1) {
+      val buffer = Module(new InputBuffer(fuCfg.hasInputBuffer._2, fuCfg.hasInputBuffer._3))
       buffer.io.redirect <> io.redirect
       buffer.io.in.valid := in.valid && sel
       buffer.io.in.bits.uop := in.bits.uop

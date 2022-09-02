@@ -315,7 +315,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
 
       val s3_pred_dup = io.s2_fire.map(f => RegEnable(s2_pred, f))
-      val sc_enable_dup = dup_seq(RegNext(io.ctrl.sc_enable))
+      val sc_enable_dup = RegNext(dup(io.ctrl.sc_enable))
       for (sc_enable & fp & s3_pred <-
         sc_enable_dup zip io.out.s3.full_pred zip s3_pred_dup) {
           when (sc_enable) {

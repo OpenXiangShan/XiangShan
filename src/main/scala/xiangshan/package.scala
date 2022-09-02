@@ -561,7 +561,7 @@ package object xiangshan {
       partialSelect(vec, exuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted)
   }
 
-  def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
+  def dividerGen(p: Parameters) = new DividerWrapper(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def bkuGen(p: Parameters) = new Bku()(p)
@@ -664,7 +664,8 @@ package object xiangshan {
     writeFpRf = false,
     latency = UncertainLatency(),
     fastUopOut = true,
-    fastImplemented = true
+    fastImplemented = true,
+    hasInputBuffer = (true, 4, true)
   )
 
   val mulCfg = FuConfig(
@@ -724,7 +725,7 @@ package object xiangshan {
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, writeFflags = true, latency = UncertainLatency(),
-    fastUopOut = true, fastImplemented = true, hasInputBuffer = true
+    fastUopOut = true, fastImplemented = true, hasInputBuffer = (true, 8, true)
   )
 
   val lduCfg = FuConfig(

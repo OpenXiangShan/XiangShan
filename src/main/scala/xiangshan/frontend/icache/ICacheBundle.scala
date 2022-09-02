@@ -26,6 +26,7 @@ import utils._
 class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val isDoubleLine  = Bool()
+  val readValid     = Bool() 
   val vSetIdx       = Vec(2,UInt(log2Ceil(nSets).W))
 
   def port_0_read_0 =  !vSetIdx(0)(0)
