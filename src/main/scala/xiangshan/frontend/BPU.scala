@@ -49,8 +49,8 @@ trait HasBPUConst extends HasXSParameter {
   def BP_S2 = BP_STAGES(1)
   def BP_S3 = BP_STAGES(2)
 
-  def dup_seq[T](src: T, num: Int = numDup) = Seq.tabulate(num)(n => src)
-  def dup[T <: Data](src: T, num: Int = numDup) = VecInit(Seq.tabulate(num)(n => src))
+  def dup_seq[T](src: T, num: Int = numDup) = Seq.fill(num)(src)
+  def dup[T <: Data](src: T, num: Int = numDup) = VecInit(Seq.fill(num)(src))
   def dup_wire[T <: Data](src: T, num: Int = numDup) = Wire(Vec(num, src.cloneType))
   def dup_idx = Seq.tabulate(numDup)(n => n.toString())
   val numBpStages = BP_STAGES.length
@@ -228,11 +228,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
 
   val s0_fire_dup, s1_fire_dup, s2_fire_dup, s3_fire_dup = dup_wire(Bool())
-  val s1_valid_dup, s2_valid_dup, s3_valid_dup = dup_seq(RegInit(false.B))
+  val s1_valid_dup, s2_valid_dup, s3_valid_dup = RegInit(dup(false.B))
   val s1_ready_dup, s2_ready_dup, s3_ready_dup = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup = dup_seq(WireInit(resetVector.U))
+  val s0_pc_dup = dup(resetVector.U(VAddrBits.W))
+
   val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x, init=resetVector.U))
   // for debug, would not appear in real RTL
   val s1_pc = RegEnable(s0_pc_dup(0), s0_fire_dup(0))
@@ -305,7 +306,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
   val redirect_req = io.ftq_to_bpu.redirect
-  val do_redirect_dup = dup_seq(RegNext(redirect_req, init=0.U.asTypeOf(io.ftq_to_bpu.redirect)))
+  val do_redirect_dup = RegNext(dup(redirect_req), init=0.U.asTypeOf(dup(redirect_req)))
   do_redirect_dup.foreach(dontTouch(_))
 
   // Pipeline logic
@@ -435,7 +436,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
+  // XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
 
   for (npcGen & s1_valid & s1_target <- npcGen_dup zip s1_valid_dup zip resp.s1.target)
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
@@ -628,7 +629,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map {case (hr, r) => hr := r}
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update := VecInit(dup_seq(RegNext(io.ftq_to_bpu.update)))
+  predictors.io.update := RegNext(dup(io.ftq_to_bpu.update))
   predictors.io.update.map(_.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)))
   
   val redirect_dup = do_redirect_dup.map(_.bits)

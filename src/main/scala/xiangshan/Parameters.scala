@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -61,6 +61,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
+  EnableFauFTB: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -97,20 +98,14 @@ case class XSCoreParameters
   numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
-      // val loop = Module(new LoopPredictor)
-      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
-      //                             else          Module(new Tage) }
-      //             else          { Module(new FakeTage) })
       val ftb = Module(new FTB()(p))
-      val ubtb = Module(new MicroBTB()(p))
+      val ubtb =
+        if (p(XSCoreParamsKey).EnableFauFTB) Module(new FauFTB()(p))
+        else Module(new MicroBTB()(p))
       // val bim = Module(new BIM()(p))
       val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
-      // val tage = Module(new Tage()(p))
-      // val fake = Module(new FakePredictor()(p))
-
-      // val preds = Seq(loop, tage, btb, ubtb, bim)
       val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
@@ -311,6 +306,7 @@ trait HasXSParameter {
   val EnableGHistDiff = coreParams.EnableGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
+  val EnableFauFTB = coreParams.EnableFauFTB
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize

@@ -72,15 +72,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
-    val top_dup = dup_seq(Reg(new RASEntry()))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
-
-    val top_write_en = WireInit(false.B)
-    val top_write = WireInit(top_dup(0))
     
-    when (top_write_en) {
-      top_dup.foreach(_ := top_write)
-    }
+    val top_write_en = WireInit(false.B)
+    val top_write = Wire(new RASEntry)
+    val top_dup = RegEnable(dup(top_write), top_write_en)
+    top_write := top_dup(0)
+    top_dup.foreach(dontTouch(_))
     
     val wen = WireInit(false.B)
     val write_bypass_entry = Reg(new RASEntry())
@@ -216,7 +214,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s2_is_jalr_dup = s2_full_pred.map(_.is_jalr)
   val s2_is_ret_dup = s2_full_pred.map(_.is_ret)
   // assert(is_jalr && is_ret || !is_ret)
-  val ras_enable_dup = dup_seq(RegNext(io.ctrl.ras_enable))
+  val ras_enable_dup = RegNext(dup(io.ctrl.ras_enable))
   for (ras_enable & s2_is_ret & s2_jalr_target & spec_top_addr <-
     ras_enable_dup zip s2_is_ret_dup zip s2_jalr_target_dup zip spec_top_addr_dup) {
       when(s2_is_ret && ras_enable) {
