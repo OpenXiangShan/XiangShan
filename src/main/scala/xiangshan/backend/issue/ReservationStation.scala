@@ -42,7 +42,6 @@ case class RSParams
   var hasFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
-  var optBuf: Boolean = false,
   // special cases
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
@@ -63,6 +62,7 @@ case class RSParams
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
   def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
+  def optDeqFirstStage: Boolean = !exuCfg.get.readFpRf
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -340,6 +340,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // select the issue instructions
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
+
+  select.io.balance
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -485,14 +487,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     oldestSelection.io.oldest := s1_in_oldestPtrOH
     // By default, we use the default victim index set in parameters.
     oldestSelection.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
-    // When deq width is two, we have a balance bit to indicate selection priorities.
-    // For better performance, we decide the victim according to selection priorities.
-    if (params.needBalance && params.oldestFirst._2 && params.numDeq == 2) {
-      // When balance2 bit is set, selection prefers the second selection port.
-      // Thus, the first is the victim if balance2 bit is set.
-      oldestSelection.io.canOverride(0) := select.io.grantBalance
-      oldestSelection.io.canOverride(1) := !select.io.grantBalance
-    }
     s1_issue_oldest := oldestSelection.io.isOverrided
   }
 
@@ -754,8 +748,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         }
       }
 
-      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
-      bypassNetwork.io.hold := !s2_deq(i).ready
+      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optDeqFirstStage)
+      bypassNetwork.io.hold := !s2_deq(i).ready || !s1_out(i).valid
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
         by.valid := m
@@ -892,11 +886,18 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
+  if (select.io.balance.isDefined) {
+    require(params.numDeq == 2)
+    val balance = select.io.balance.get
+    balance.tick := (balance.out && !s1_out(0).fire && s1_out(1).fire) ||
+      (!balance.out && s1_out(0).fire && !s1_out(1).fire && !io.fromDispatch(0).fire)
+  }
+
   // logs
   for ((dispatch, i) <- io.fromDispatch.zipWithIndex) {
     XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, robIdx ${dispatch.bits.robIdx}\n")
     XSDebug(dispatch.fire, p"enq fire, robIdx ${dispatch.bits.robIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
-    XSPerfAccumulate(s"allcoate_fire_$i", dispatch.fire)
+    XSPerfAccumulate(s"allocate_fire_$i", dispatch.fire)
     XSPerfAccumulate(s"allocate_valid_$i", dispatch.valid)
     XSPerfAccumulate(s"srcState_ready_$i", PopCount(dispatch.bits.srcState.map(_ === SrcState.rdy)))
     if (params.checkWaitBit) {
