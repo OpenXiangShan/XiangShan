@@ -65,9 +65,9 @@ class VModule(object):
             print('array_ext match line ', line)
             idx = int(array_ext_match.group(1))
             # this is ugly
-            # sram with idx 4 is eliminated, so those with idx >= 4 should use idx + 1
-            if idx >= 4:
-                new_line = re.sub(r'\d+', str(idx + 1), line)
+            # sram with idx 3, 4 is eliminated, so those with idx >= 3 should use idx + 2
+            if idx >= 3:
+                new_line = re.sub(r'\d+', str(idx + 2), line)
                 print(line, '->', new_line)
                 line = new_line
 
