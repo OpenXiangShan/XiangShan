@@ -119,6 +119,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val released = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // load data has been released by dcache
   val error = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // load data has been corrupted
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
+  val need_refill_by_dcache = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, the data should be refilled by dcache
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val refilling = WireInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
@@ -164,6 +165,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       writebacked(index) := false.B
       released(index) := false.B
       miss(index) := false.B
+      need_refill_by_dcache(index) := false.B
       pending(index) := false.B
       error(index) := false.B
       XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
@@ -244,8 +246,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       if(EnableFastForward){
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.dcacheRequireReplay(i)
+        need_refill_by_dcache(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.dcacheRequireReplay(i)
       } else {
         miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
+        need_refill_by_dcache(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
       released(loadWbIndex) := release2cycle.valid && 
@@ -303,6 +307,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
         miss(lastCycleLoadWbIndex) := false.B // disable refill listening
+        need_refill_by_dcache(lastCycleLoadWbIndex) := false.B // instr will replay, no need to be refilled by dcache for now 
         datavalid(lastCycleLoadWbIndex) := false.B // disable refill listening
         assert(!datavalid(lastCycleLoadWbIndex))
       }
@@ -716,8 +721,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   (0 until LoadQueueSize).map(i => {
     when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
-      allocated(i) && 
-      writebacked(i) &&
+      allocated(i) &&
+      (
+        // load has been writebacked
+        writebacked(i) || 
+        // or this load missed, refilled by dcache, but has not been writebacked to ROB
+        (need_refill_by_dcache(i) && datavalid(i) && !writebacked(i))
+      ) &&
       release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
