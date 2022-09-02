@@ -76,7 +76,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     
     val top_write_en = WireInit(false.B)
     val top_write = Wire(new RASEntry)
-    val top_dup = dup_seq(RegEnable(top_write, top_write_en))
+    val top_dup = RegEnable(dup(top_write), top_write_en)
     top_write := top_dup(0)
     top_dup.foreach(dontTouch(_))
     

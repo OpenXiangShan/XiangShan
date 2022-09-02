@@ -155,7 +155,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val shouldNotFallThru = fallThruPredRAM.io.rdata.andR() // only when confident should we not fallThru
 
   val update_valid = Wire(Bool())
-  val pred_may_invalid_by_update_dup = dup_seq(RegInit(false.B))
+  val pred_may_invalid_by_update_dup = RegInit(dup(false.B))
   when (update_valid) {
     pred_may_invalid_by_update_dup.map(_ := true.B)
   }.elsewhen (io.s1_fire(dupForUbtb)) {
@@ -185,7 +185,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s0_pc_dup(dupForUbtb))}\n")
 
-  val ubtb_enable_dup = dup_seq(RegNext(io.ctrl.ubtb_enable))
+  val ubtb_enable_dup = RegNext(dup(io.ctrl.ubtb_enable))
 
   for (mp & invalid_by_upd & ubtb_enable & s1_pc & resp_valid <-
     io.out.s1.minimal_pred zip pred_may_invalid_by_update_dup zip ubtb_enable_dup zip s1_pc_dup zip resp_valid_dup) {

@@ -171,7 +171,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
 
   val s1_hit_full_pred_dup = s1_hit_oh_dup.zip(s1_possible_full_preds_dup).map(t => Mux1H(t._1, t._2))
   XSError(PopCount(s1_hit_oh_dup(0)) > 1.U, "fauftb has multiple hits!\n")
-  val fauftb_enable_dup = dup_seq(RegNext(io.ctrl.ubtb_enable))
+  val fauftb_enable_dup = RegNext(dup(io.ctrl.ubtb_enable))
 
   io.out.s1.full_pred.map(_ := s1_hit_full_pred_dup(0))
   io.out.s1.full_pred.zip(fauftb_enable_dup).map {case (fp, en) => fp.hit := s1_hit_dup(0) && en}
@@ -221,7 +221,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
       !(PriorityEncoder(u.bits.br_taken_mask) < w.U)))
   ))
   // s1
-  val u_s1_valid_dup = us.map(u => dup_seq(RegNext(u.valid), numWays+1)) // reduce fanouts
+  val u_s1_valid_dup = us.map(u => RegNext(dup(u.valid, numWays+1))) // reduce fanouts
   val u_s1_tag_dup       = u_valids.zip(u_s0_tag_dup).map {case (v, tag) => RegEnable(tag, v)}
   val u_s1_hit_oh_dup    = u_valids.zip(u_s0_hit_oh_dup).map {case (v, oh) => RegEnable(oh, v)}
   val u_s1_hit_dup       = u_valids.zip(u_s0_hit_dup).map {case (v, h) => RegEnable(h, v)}
