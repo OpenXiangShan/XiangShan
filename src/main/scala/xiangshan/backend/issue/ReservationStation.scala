@@ -373,7 +373,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   val s1_slowPorts = RegNext(io.slowPorts)
   val s1_fastUops = RegNext(io.fastUopsIn)
-  val s1_dispatchUops_dup = Reg(Vec(3, Vec(params.numEnq, Valid(new MicroOp))))
+  val s1_dispatchUops_dup = Reg(Vec(4, Vec(params.numEnq, Valid(new MicroOp))))
   val s1_delayedSrc = Wire(Vec(params.numEnq, Vec(params.numSrc, Bool())))
   val s1_allocatePtrOH_dup = RegNext(VecInit.fill(3)(VecInit(enqReverse(s0_allocatePtrOH))))
   val s1_allocatePtr = RegNext(VecInit(enqReverse(s0_allocatePtr)))
@@ -566,6 +566,40 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
   }
   statusArray.io.updateMidState := 0.U
+
+  // special optimization for ALU
+  if (params.exuCfg.get.latency.latencyVal.getOrElse(1) == 0) {
+    val uop_for_fast_dup = Reg(Vec(params.numEntries, new MicroOp))
+    for (i <- 0 until params.numEntries) {
+      val wenVec = VecInit(payloadArray.io.write.map(w => w.enable && w.addr(i)))
+      when (wenVec.asUInt.orR) {
+        uop_for_fast_dup(i) := Mux1H(wenVec, payloadArray.io.write.map(_.data))
+      }
+    }
+    val canIssue_dup = RegNext(statusArray.io.canIssueNext)
+    val select_dup = Module(new SelectPolicy(params))
+    select_dup.io.validVec := DontCare
+    select_dup.io.request := canIssue_dup
+    val select_ptr_dup = select_dup.io.grant
+    val select_uop_dup = select_ptr_dup.map(p => Mux1H(p.bits, uop_for_fast_dup))
+    val oldest_sel_ptr_dup = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, canIssue_dup)
+    val oldest_uop_dup = Mux1H(oldest_sel_ptr_dup.bits, uop_for_fast_dup)
+    val oldestSelection_dup = Module(new OldestSelection(params))
+    oldestSelection_dup.io.in := select_ptr_dup
+    oldestSelection_dup.io.oldest := oldest_sel_ptr_dup
+    // By default, we use the default victim index set in parameters.
+    oldestSelection_dup.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
+    val s1_issue_oldest_dup = oldestSelection_dup.io.isOverrided
+    for (i <- 0 until params.numDeq) {
+      val uop = s1_dispatchUops_dup.last(i)
+      val is_ready = (0 until 2).map(j => uop.bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR)
+      val canBypass = uop.valid && VecInit(is_ready).asUInt.andR
+      io.fastWakeup.get(i).valid := s1_issue_oldest_dup(i) || select_ptr_dup(i).valid || canBypass
+      io.fastWakeup.get(i).bits := Mux(s1_issue_oldest_dup(i), oldest_uop_dup,
+        Mux(select_ptr_dup(i).valid, select_uop_dup(i), uop.bits))
+      io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer() + 1.U
+    }
+  }
 
   // select whether the source is from (whether slowPorts, regfile or imm)
   // for read-after-issue, it's done over the selected uop
