@@ -407,7 +407,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(robIdxVec(i)(j).needFlush(io.redirect)){
+      when(validVec(i)(j) && robIdxVec(i)(j).needFlush(io.redirect)){
         validVec(i)(j) := false.B
       }
     })
