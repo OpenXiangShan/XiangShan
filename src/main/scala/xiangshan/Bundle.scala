@@ -244,6 +244,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     replayInst: Boolean = false
   ): MicroOp = {
     cf.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
+    cf.trigger.backendHit.foreach(_ := false.B)
     if (!flushPipe) { ctrl.flushPipe := false.B }
     if (!replayInst) { ctrl.replayInst := false.B }
     this
