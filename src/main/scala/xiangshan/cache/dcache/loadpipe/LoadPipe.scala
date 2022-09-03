@@ -266,7 +266,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits := DontCare
   // resp.bits.data := s2_word_decoded
   resp.bits.data := banked_data_resp_word.raw_data
-  resp.bits.data_dup_0 := banked_data_resp_word_dup_0.raw_data
   // * on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
