@@ -141,12 +141,12 @@ class SSIT(implicit p: Parameters) extends XSModule {
         state := s_idle // reset finished
         resetStepCounter := 0.U
       }.otherwise{
-        valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
-        valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
-        valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
-        debug_valid(resetStepCounter) := false.B
         resetStepCounter := resetStepCounter + 1.U
       }
+      valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+      valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+      valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+      debug_valid(resetStepCounter) := false.B
     }
   }
   XSPerfAccumulate("reset_timeout", state === s_flush && resetCounter === 0.U)
@@ -385,7 +385,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   (0 until exuParameters.StuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.robIdx.value === robIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.cf.storeSetHit && io.storeIssue(i).bits.uop.robIdx.value === robIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
         validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
       }
     })
@@ -405,7 +405,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(robIdxVec(i)(j).needFlush(io.redirect)){
+      when(validVec(i)(j) && robIdxVec(i)(j).needFlush(io.redirect)){
         validVec(i)(j) := false.B
       }
     })
