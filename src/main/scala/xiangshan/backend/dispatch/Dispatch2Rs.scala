@@ -105,14 +105,14 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
 
   val enableLoadBalance = outer.numOut > 2
   val numPingPongBits = outer.numOut / 2
-  val pingpong = Seq.fill(numPingPongBits)(RegInit(false.B))
-  pingpong.foreach(p => p := !p)
+  val pingpong_dup = Seq.fill(outer.numOut)(Seq.fill(numPingPongBits)(RegInit(false.B)))
+  pingpong_dup.foreach(_.foreach(p => p := !p))
   val pairIndex = (0 until outer.numOut).map(i => (i + 2) % outer.numOut)
 
   def needLoadBalance(index: Int): Bool = {
     val bitIndex = Seq(index, pairIndex(index), numPingPongBits - 1).min
     // When ping pong bit is set, use pairIndex
-    if (enableLoadBalance) pingpong(bitIndex) && (index != pairIndex(index)).B else false.B
+    if (enableLoadBalance) pingpong_dup(index)(bitIndex) && (index != pairIndex(index)).B else false.B
   }
   // out is directly connected from in for better timing
   // TODO: select critical instruction first

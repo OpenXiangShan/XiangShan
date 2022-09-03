@@ -30,7 +30,7 @@ class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: P
 }
 
 class DataArrayWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
-  val enable = Input(Bool())
+  val enable = Vec(numSrc, Input(Bool()))
   val mask   = Vec(numSrc, Input(Bool()))
   val addr   = Input(UInt(numEntries.W))
   val data   = Vec(numSrc, Input(UInt(dataBits.W)))
@@ -64,15 +64,21 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     val delayedWaddr = if (params.delayedSrc) io.delayedWrite.map(_.addr) else Seq()
     val delayedWdata = if (params.delayedSrc) io.delayedWrite.map(_.data(i)) else Seq()
 
-    val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegNext(w.enable)) else Seq()
-    val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.addr, w.enable)) else Seq()
-    val partialWdata = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.data(i), w.enable)) else Seq()
+    val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegNext(w.enable(i))) else Seq()
+    val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.addr, w.enable(i))) else Seq()
+    val partialWdata = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.data(i), w.enable(i))) else Seq()
 
-    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen ++ partialWen
+    val wen = io.write.map(w => w.enable(i) && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen ++ partialWen
     val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr ++ partialWaddr
     val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata ++ partialWdata
 
-    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
+    val dataModule = Module(new AsyncRawDataModuleTemplate(
+      UInt(params.dataBits.W),
+      params.numEntries,
+      io.read.length,
+      wen.length,
+      optWrite = 0 until params.numEnq
+    ))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
     io.read.map(_.data(i)).zip(dataModule.io.rdata).foreach{ case (d, r) => d := r }
     dataModule.io.wen := wen

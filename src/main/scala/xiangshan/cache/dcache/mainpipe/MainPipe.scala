@@ -1361,7 +1361,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
   io.data_read_intend := s1_valid_dup(3) && s1_need_data
-  io.data_read.valid := s1_valid_dup(4) && s1_need_data && s2_ready
+  io.data_read.valid := s1_valid_dup(4) && s1_need_data
   io.data_read.bits.rmask := s1_banked_rmask
   io.data_read.bits.way_en := s1_way_en
   io.data_read.bits.addr := s1_req_vaddr_dup_for_data_read
