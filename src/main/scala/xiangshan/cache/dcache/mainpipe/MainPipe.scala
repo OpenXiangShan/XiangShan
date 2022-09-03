@@ -215,7 +215,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val miss_need_data = s0_req.miss
   val replace_need_data = s0_req.replace
 
-  val banked_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data || replace_need_data
+  val s0_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data || replace_need_data
 
   val s0_banked_rmask = Mux(store_need_data, banked_store_rmask,
     Mux(probe_need_data || amo_need_data || miss_need_data || replace_need_data,
@@ -230,7 +230,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   // s1: read data
   val s1_valid = RegInit(false.B)
-  val s1_need_data = RegEnable(banked_need_data, s0_fire)
+  val s1_need_data = RegEnable(s0_need_data, s0_fire)
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
@@ -1360,11 +1360,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
+  io.data_read.valid := req.valid && s0_need_data
+  io.data_read.bits.addr_s0 := s0_req.vaddr
+
   io.data_read_intend := s1_valid_dup(3) && s1_need_data
-  io.data_read.valid := s1_valid_dup(4) && s1_need_data
-  io.data_read.bits.rmask := s1_banked_rmask
-  io.data_read.bits.way_en := s1_way_en
-  io.data_read.bits.addr := s1_req_vaddr_dup_for_data_read
+  io.data_read.bits.rmask_s1 := s1_banked_rmask
+  io.data_read.bits.way_en_s1 := s1_way_en
+  io.data_read.bits.keep_req_s1 := s1_valid && !s1_can_go
 
   io.miss_req.valid := s2_valid_dup(4) && s2_can_go_to_mq_dup(0)
   val miss_req = io.miss_req.bits

@@ -307,7 +307,7 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
-  val data         = UInt(DataBits.W)
+  val data   = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
 
   // cache req missed, send it to miss queue
@@ -326,6 +326,12 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
+}
+
+class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
+{
+  val bank_data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
+  val bank_oh = UInt(DCacheBanks.W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -372,7 +378,7 @@ class Release(implicit p: Parameters) extends DCacheBundle
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new DCacheWordResp))
+  val resp = Flipped(DecoupledIO(new BankedDCacheWordResp))
 }
 
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
