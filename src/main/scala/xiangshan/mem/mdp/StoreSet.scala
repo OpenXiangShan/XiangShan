@@ -143,12 +143,12 @@ class SSIT(implicit p: Parameters) extends XSModule {
         state := s_idle // reset finished
         resetStepCounter := 0.U
       }.otherwise{
-        valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
-        valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
-        valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
-        debug_valid(resetStepCounter) := false.B
         resetStepCounter := resetStepCounter + 1.U
       }
+      valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+      valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+      valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+      debug_valid(resetStepCounter) := false.B
     }
   }
   XSPerfAccumulate("reset_timeout", state === s_flush && resetCounter === 0.U)
