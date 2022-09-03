@@ -273,26 +273,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val tdata1Phy = RegInit(VecInit(List.fill(10) {(2L << 60L).U(64.W)})) // init ttype 2
   val tdata2Phy = Reg(Vec(10, UInt(64.W)))
   val tselectPhy = RegInit(0.U(4.W))
-  val tDummy1 = WireInit(0.U(64.W))
-  val tDummy2 = WireInit(0.U(64.W))
-  val tdata1Wire = Wire(UInt(64.W))
-  val tdata2Wire = Wire(UInt(64.W))
   val tinfo = RegInit(2.U(64.W))
   val tControlPhy = RegInit(0.U(64.W))
   val triggerAction = RegInit(false.B)
-  tdata1Wire := tdata1Phy(tselectPhy)
-  tdata2Wire := tdata2Phy(tselectPhy)
-  tDummy1 := tdata1Phy(tselectPhy)
-  tDummy2 := tdata2Phy(tselectPhy)
 
-  def ReadTdata1(rdata: UInt) = {
-    val tdata1 = WireInit(tdata1Wire)
-    val read_data = tdata1Wire
-    XSDebug(src2(11, 0) === Tdata1.U && valid, p"\nDebug Mode: tdata1(${tselectPhy})is read, the actual value is ${Binary(tdata1)}\n")
-    read_data | (triggerAction << 12) // fix action
-  }
-  def WriteTdata1(wdata: UInt) = {
-    val tdata1 = WireInit(tdata1Wire.asTypeOf(new TdataBundle))
+  def ReadTdata1(rdata: UInt) = rdata | Cat(triggerAction, 0.U(12.W)) // fix action
+  def WriteTdata1(wdata: UInt): UInt = {
+    val tdata1 = WireInit(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle))
     val wdata_wire = WireInit(wdata.asTypeOf(new TdataBundle))
     val tdata1_new = WireInit(wdata.asTypeOf(new TdataBundle))
     XSDebug(src2(11, 0) === Tdata1.U && valid && func =/= CSROpType.jmp, p"Debug Mode: tdata1(${tselectPhy})is written, the actual value is ${wdata}\n")
@@ -319,24 +306,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     tdata1_new.execute := TypeLookup(tselectPhy) === I_Trigger
     tdata1_new.store := TypeLookup(tselectPhy) === S_Trigger
     tdata1_new.load := TypeLookup(tselectPhy) === L_Trigger
-    when(valid && func =/= CSROpType.jmp && addr === Tdata1.U) {
-      tdata1Phy(tselectPhy) := tdata1_new.asUInt
-    }
-    0.U
+    tdata1_new.asUInt
   }
 
   def WriteTselect(wdata: UInt) = {
     Mux(wdata < 10.U, wdata(3, 0), tselectPhy)
   }
-
-  def ReadTdata2(tdata: UInt) = tdata2Phy(tselectPhy)
-  def WriteTdata2(wdata: UInt) = {
-    when(valid && func =/= CSROpType.jmp && addr === Tdata2.U) {
-      tdata2Phy(tselectPhy) := wdata
-    }
-    0.U
-  }
-
 
   val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
 
@@ -724,8 +699,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
-    MaskedRegMap(Tdata1, tDummy1, WritableMask, WriteTdata1, WritableMask, ReadTdata1),
-    MaskedRegMap(Tdata2, tDummy2, WritableMask, WriteTdata2, WritableMask, ReadTdata2),
+    MaskedRegMap(Tdata1, tdata1Phy(tselectPhy), WritableMask, WriteTdata1, WritableMask, ReadTdata1),
+    MaskedRegMap(Tdata2, tdata2Phy(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
