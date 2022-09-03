@@ -19,7 +19,14 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class RawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean) extends Module {
+class RawDataModuleTemplate[T <: Data](
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  isSync: Boolean,
+  optWrite: Seq[Int] = Seq()
+) extends Module {
   val io = IO(new Bundle {
     val rvec  = Vec(numRead,  Input(UInt(numEntries.W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -30,6 +37,10 @@ class RawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, nu
 
   val data = Reg(Vec(numEntries, gen))
 
+  val wen = io.wen.zipWithIndex.map{ case (en, i) => if (optWrite.contains(i)) RegNext(en) else en }
+  val wvec = io.wvec.zipWithIndex.map{ case (v, i) => if (optWrite.contains(i)) RegEnable(v, io.wen(i)) else v }
+  val wdata = io.wdata.zipWithIndex.map{ case (d, i) => if (optWrite.contains(i)) RegEnable(d, io.wen(i)) else d }
+
   // read ports
   val rvec = if (isSync) RegNext(io.rvec) else io.rvec
   for (i <- 0 until numRead) {
@@ -37,21 +48,37 @@ class RawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, nu
     io.rdata(i) := Mux1H(rvec(i), data)
   }
 
+  if (optWrite.nonEmpty) {
+    val data_next = WireInit(data)
+    val wbypass = io.wen.zip(io.wvec).zip(wdata).zipWithIndex.filter(x => optWrite.contains(x._2)).map(_._1)
+    for (i <- 0 until numEntries) {
+      val wbypass_en = wbypass.map(w => RegNext(w._1._1 && w._1._2(i)))
+      when (VecInit(wbypass_en).asUInt.orR) {
+        data_next(i) := Mux1H(wbypass_en, wbypass.map(_._2))
+      }
+    }
+    for (i <- 0 until numRead) {
+      io.rdata(i) := Mux1H(rvec(i), data_next)
+    }
+  }
+
   // write ports
   for (i <- 0 until numEntries) {
-    val w = VecInit((0 until numWrite).map(j => io.wen(j) && io.wvec(j)(i)))
+    val w = VecInit((0 until numWrite).map(j => wen(j) && wvec(j)(i)))
     assert(PopCount(w) <= 1.U)
     when (w.asUInt.orR) {
-      data(i) := Mux1H(w, io.wdata)
+      data(i) := Mux1H(w, wdata)
     }
   }
 }
 
 
-class SyncRawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int)
-  extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, true)
-class AsyncRawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int)
-  extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, false)
+class SyncRawDataModuleTemplate[T <: Data](
+  gen: T, numEntries: Int, numRead: Int, numWrite: Int, optWrite: Seq[Int] = Seq()
+) extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, true, optWrite)
+class AsyncRawDataModuleTemplate[T <: Data](
+  gen: T, numEntries: Int, numRead: Int, numWrite: Int, optWrite: Seq[Int] = Seq()
+) extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, false, optWrite)
 
 class SyncDataModuleTemplate[T <: Data](
   gen: T,

@@ -72,7 +72,13 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr ++ partialWaddr
     val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata ++ partialWdata
 
-    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
+    val dataModule = Module(new AsyncRawDataModuleTemplate(
+      UInt(params.dataBits.W),
+      params.numEntries,
+      io.read.length,
+      wen.length,
+      optWrite = 0 until params.numEnq
+    ))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
     io.read.map(_.data(i)).zip(dataModule.io.rdata).foreach{ case (d, r) => d := r }
     dataModule.io.wen := wen
