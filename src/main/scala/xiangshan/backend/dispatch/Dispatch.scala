@@ -102,11 +102,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
-  val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
-    io.fromRename(i).fire()
-  ))
-
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -142,17 +137,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     when (io.fromRename(i).fire()) {
       XSDebug(updatedUop(i).cf.trigger.getHitFrontend, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
-    }
-    if (false && env.EnableDifftest) {
-      // debug runahead hint
-      val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
-      if(i == 0){
-        debug_runahead_checkpoint_id := checkpoint_id
-      } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
-          io.fromRename(i).fire()
-        ))
-      }
     }
   }
 

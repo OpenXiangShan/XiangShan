@@ -244,6 +244,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     replayInst: Boolean = false
   ): MicroOp = {
     cf.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
+    cf.trigger.backendHit.foreach(_ := false.B)
     if (!flushPipe) { ctrl.flushPipe := false.B }
     if (!replayInst) { ctrl.replayInst := false.B }
     this
@@ -288,8 +289,6 @@ class Redirect(implicit p: Parameters) extends XSBundle {
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
-
-  val debug_runahead_checkpoint_id = UInt(64.W)
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
