@@ -290,8 +290,6 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
-  val debug_runahead_checkpoint_id = UInt(64.W)
-
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
   // def isException() = RedirectLevel.isException(level)

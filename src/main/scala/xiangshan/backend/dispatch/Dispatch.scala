@@ -102,11 +102,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
-  val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
-    io.fromRename(i).fire()
-  ))
-
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -142,56 +137,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     when (io.fromRename(i).fire()) {
       XSDebug(updatedUop(i).cf.trigger.getHitFrontend, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
-    }
-    if (false && env.EnableDifftest) {
-      // debug runahead hint
-      val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
-      if(i == 0){
-        debug_runahead_checkpoint_id := checkpoint_id
-      } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
-          io.fromRename(i).fire()
-        ))
-      }
-
-      val runahead = Module(new DifftestRunaheadEvent)
-      runahead.io.clock         := clock
-      runahead.io.coreid        := io.hartId
-      runahead.io.index         := i.U
-      runahead.io.valid         := io.fromRename(i).fire()
-      runahead.io.branch        := isBranch(i) // setup checkpoint for branch
-      runahead.io.may_replay    := isLs(i) && !isStore(i) // setup checkpoint for load, as load may replay
-      runahead.io.pc            := updatedUop(i).cf.pc
-      runahead.io.checkpoint_id := debug_runahead_checkpoint_id 
-
-      // when(runahead.io.valid){
-      //   printf("XS runahead " + i + " : %d: pc %x branch %x cpid %x\n",
-      //     GTimer(),
-      //     runahead.io.pc,
-      //     runahead.io.branch,
-      //     runahead.io.checkpoint_id
-      //   );
-      // }
-
-      val mempred_check = Module(new DifftestRunaheadMemdepPred)
-      mempred_check.io.clock     := clock
-      mempred_check.io.coreid    := io.hartId
-      mempred_check.io.index     := i.U
-      mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
-      mempred_check.io.is_load   := !isStore(i) && isLs(i)
-      mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
-      mempred_check.io.pc        := updatedUop(i).cf.pc 
-
-      when(RegNext(mempred_check.io.valid)){
-        XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
-          RegNext(GTimer()),
-          RegNext(mempred_check.io.pc),
-          RegNext(mempred_check.io.is_load),
-          RegNext(mempred_check.io.need_wait),
-          mempred_check.io.oracle_vaddr 
-        );
-      }
-      updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
   }
 

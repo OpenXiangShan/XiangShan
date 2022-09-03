@@ -469,7 +469,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.ldout(i).bits.debug.vaddr := vaddrModule.io.rdata(i+1)
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
-    
+
     // merged data, uop and offset for data sel in load_s3
     io.ldRawDataOut(i).lqData := dataModule.io.wb.rdata(i).data
     io.ldRawDataOut(i).uop := io.ldout(i).bits.uop
@@ -707,7 +707,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.rollback.bits.interrupt := DontCare
   io.rollback.bits.cfiUpdate := DontCare
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
 
   io.rollback.valid := rollbackValidVecChecked.asUInt.orR
