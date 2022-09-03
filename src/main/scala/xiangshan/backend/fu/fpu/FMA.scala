@@ -87,16 +87,6 @@ class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
 
   val outSel = S2Reg(S1Reg(typeSel))
 
-  val s_mul :: d_mul :: Nil = FPU.ftypes.zipWithIndex.map{ case (ftype, i) =>
-    val mul = Module(new FMUL(ftype.expWidth, ftype.precision))
-    val in1 = src1
-    val in2 = Mux(fpCtrl.fmaCmd(1), invert_sign(src2, ftype.len), src2)
-    mul.io.a := in1
-    mul.io.b := in2
-    mul.io.rm := rm
-    mul
-  }
-
   toAdd.addend := S2Reg(S1Reg(io.in.bits.src(2)))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
   toAdd.uop := uopVec.last
