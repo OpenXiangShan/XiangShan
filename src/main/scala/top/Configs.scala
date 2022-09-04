@@ -271,8 +271,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         )),
         sramClkDivBy2 = true,
         sramDepthDiv = 4,
-        tagECC = Some("secded"),
-        dataECC = Some("secded"),
+        tagECC = None,
+        dataECC = None,
         simulation = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
