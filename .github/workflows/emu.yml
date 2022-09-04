@@ -37,6 +37,13 @@ jobs:
             --config DefaultConfig --prefix bosc_                     \
             --sram-replace --mbist-scan-replace
           tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz bosc_XSTop-Release*
+      - name: release for BOSC
+        run: |
+          rm -rf bosc_XSTop-Release*
+          bash scripts/generate_all.sh
+          mkdir release-${HEAD_SHA}-bosc
+          mv bosc_* release-${HEAD_SHA}-bosc
+          tar -czf $WAVE_HOME/release-${HEAD_SHA}-bosc.tar.gz release-${HEAD_SHA}-bosc
 
   generate-fpga-verilog:
     runs-on: bosc
