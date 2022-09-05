@@ -40,7 +40,7 @@ jobs:
       - name: release for BOSC
         run: |
           rm -rf bosc_XSTop-Release*
-          export NOOP_HOME= $GITHUB_WORKSPACE
+          export NOOP_HOME=$GITHUB_WORKSPACE
           bash scripts/generate_all.sh
           mkdir release-${HEAD_SHA}-bosc
           mv bosc_* release-${HEAD_SHA}-bosc
