@@ -41,7 +41,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val archHeadPtrOHVec = VecInit.tabulate(CommitWidth + 1)(archHeadPtrOHShift.left)
 
   val doRename = (io.canAllocate || io.walk) && io.doAllocate && !io.redirect
-  val doCommit = !io.walk
+  val doCommit = io.commit.isCommit
 
   /**
     * Allocation: from freelist (same as StdFreelist)

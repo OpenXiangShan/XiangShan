@@ -710,6 +710,32 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     */
   val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
+  // redirect logic writes 6 valid
+  val redirectHeadVec = Reg(Vec(RenameWidth, new RobPtr))
+  val redirectTail = Reg(new RobPtr)
+  val redirectIdle :: redirectBusy :: Nil = Enum(2)
+  val redirectState = RegInit(redirectIdle)
+  val invMask = redirectHeadVec.map(redirectHead => isBefore(redirectHead, redirectTail))
+  when(redirectState === redirectBusy) {
+    redirectHeadVec.foreach(redirectHead => redirectHead := redirectHead + RenameWidth.U)
+    redirectHeadVec zip invMask foreach {
+      case (redirectHead, inv) => when(inv) {
+        valid(redirectHead.value) := false.B
+      }
+    }
+    when(!invMask.last) {
+      redirectState := redirectIdle
+    }
+  }
+  when(io.redirect.valid) {
+    redirectState := redirectBusy
+    when(redirectState === redirectIdle) {
+      redirectTail := enqPtr
+    }
+    redirectHeadVec.zipWithIndex.foreach { case (redirectHead, i) =>
+      redirectHead := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx + i.U, io.redirect.bits.robIdx + (i + 1).U)
+    }
+  }
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
@@ -721,20 +747,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
       valid(commitReadAddr(i)) := false.B
-    }
-  }
-  // redirect
-  when(io.redirect.valid) {
-    for (i <- 0 until RobSize) {
-      val rValue = io.redirect.bits.robIdx.value
-      val rFlag = io.redirect.bits.robIdx.flag
-      val shouldInvalidate =
-        io.redirect.bits.flushItself() && rValue === i.U ||
-        rFlag === enqPtr.flag && rValue < i.U && i.U < enqPtr.value ||
-        rFlag =/= enqPtr.flag && (rValue < i.U || i.U < enqPtr.value)
-      when(shouldInvalidate) {
-        valid(i) := false.B
-      }
     }
   }
   // reset: when exception, reset all valid to false
