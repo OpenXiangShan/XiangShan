@@ -32,7 +32,7 @@ import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
 case class ICacheParameters(
     nSets: Int = 256,
-    nWays: Int = 8,
+    nWays: Int = 4,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
@@ -85,7 +85,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def PortNumber = 2
   def ProbeKey   = 3
 
-  def partWayNum = 4
+  def partWayNum = 2
   def pWay = nWays/partWayNum
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
