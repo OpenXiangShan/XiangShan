@@ -316,13 +316,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // now cache ecc error will raise an access fault
   // at the same time, error info (including error paddr) will be write to
   // an customized CSR "CACHE_ERROR"
-  if (EnableAccurateLoadError) {
-    io.s3_delayed_load_error := io.dcacheResp.bits.error_delayed &&
-      io.csrCtrl.cache_error_enable &&
-      RegNext(io.out.valid)
-  } else {
+  // if (EnableAccurateLoadError) {
+  //   io.s3_delayed_load_error := io.dcacheResp.bits.error_delayed &&
+  //     io.csrCtrl.cache_error_enable &&
+  //     RegNext(io.out.valid)
+  // } else {
     io.s3_delayed_load_error := false.B
-  }
+  // }
 
   val actually_mmio = pmp.mmio
   val s2_uop = io.in.bits.uop
@@ -332,7 +332,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
-  val s2_cache_tag_error = io.dcacheResp.bits.tag_error
+  val s2_cache_tag_error = 0.U.asTypeOf(io.dcacheResp.bits.tag_error.cloneType)
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   val s2_ldld_violation = io.loadViolationQueryResp.valid &&
     io.loadViolationQueryResp.bits.have_violation &&
@@ -753,8 +753,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.ldout.valid := RegNext(hitLoadOut.valid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)) ||
     RegNext(io.lsq.ldout.valid) && !RegNext(io.lsq.ldout.bits.uop.robIdx.needFlush(io.redirect)) && !RegNext(hitLoadOut.valid)
 
-  io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := s3_load_wb_meta_reg.uop.cf.exceptionVec(loadAccessFault) ||
-    RegNext(hitLoadOut.valid) && load_s2.io.s3_delayed_load_error
+  io.ldout.bits.uop.cf.exceptionVec(loadAccessFault) := s3_load_wb_meta_reg.uop.cf.exceptionVec(loadAccessFault) //||
+    //RegNext(hitLoadOut.valid) && load_s2.io.s3_delayed_load_error
 
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
@@ -778,7 +778,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     io.ldout.bits.uop.ctrl.replayInst := s3_need_replay_from_fetch
   }
 
-  io.lsq.s3_delayed_load_error := load_s2.io.s3_delayed_load_error
+  io.lsq.s3_delayed_load_error := false.B//load_s2.io.s3_delayed_load_error
   io.lsq.s3_replay_from_fetch := s3_need_replay_from_fetch && s3_can_replay_from_fetch
 
   // s3_delayed_load_error path is not used for now, as we writeback load result in load_s3
