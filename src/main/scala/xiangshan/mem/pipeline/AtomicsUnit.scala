@@ -432,7 +432,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
     difftest.io.coreid     := io.hartId
-    difftest.io.atomicResp := io.dcache.resp.fire()
+    difftest.io.atomicResp := (state === s_cache_resp_latch && data_valid)
     difftest.io.atomicAddr := paddr_reg
     difftest.io.atomicData := data_reg
     difftest.io.atomicMask := mask_reg
