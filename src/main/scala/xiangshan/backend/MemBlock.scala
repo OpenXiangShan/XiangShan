@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import huancun.PrefetchRecv
+import huancun.utils.{RegNextN, ValidIODelay}
 import utils._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
@@ -45,7 +47,7 @@ class MemBlock(parentName:String = "Unknown")(implicit p: Parameters) extends La
   val dcache = LazyModule(new DCacheWrapper(parentName = parentName + "dcache_")(p))
   val uncache = LazyModule(new Uncache())
   val pf_sender_opt = coreParams.prefetcher.map(_ =>
-    BundleBridgeSource(() => ValidIO(UInt(64.W)))
+    BundleBridgeSource(() => new PrefetchRecv)
   )
 
   lazy val module = new MemBlockImp(this, parentName)
@@ -128,9 +130,17 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val exeUnits = loadUnits ++ storeUnits
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
-      Module(new SMSPrefetcher())
+      val sms = Module(new SMSPrefetcher())
+      sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms
   }
-  prefetcherOpt.foreach(pf => outer.pf_sender_opt.get.out.head._1 := pf.io.pf_addr)
+  prefetcherOpt.foreach(pf => {
+    outer.pf_sender_opt.get.out.head._1.addr := ValidIODelay(pf.io.pf_addr, 2)
+    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
+    pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+  })
+  val pf_train_on_hit = RegNextN(io.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -294,7 +304,13 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // prefetch
-    prefetcherOpt.foreach(pf => pf.io.ld_in(i) := loadUnits(i).io.prefetch_train)
+    prefetcherOpt.foreach(pf => {
+      pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
+        loadUnits(i).io.prefetch_train.valid,
+        loadUnits(i).io.prefetch_train.valid && !loadUnits(i).io.prefetch_train.bits.miss
+      )
+      pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
+    })
 
     // load to load fast forward: load(i) prefers data(i)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
