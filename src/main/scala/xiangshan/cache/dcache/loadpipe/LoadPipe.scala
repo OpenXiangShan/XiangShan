@@ -172,7 +172,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // check ecc error
   val s1_encTag = Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.tag_resp(w)))
-  val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
+  val s1_flag_error = false.B//Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -232,8 +232,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_instrtype = s2_req.instrtype
 
-  val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
-  val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
+  val s2_tag_error = false.B//dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
+  val s2_flag_error = false.B//RegEnable(s1_flag_error, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
   assert(!RegNext(s2_valid && (s2_tag_match && !s2_hit)))
@@ -276,7 +276,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss || io.bank_conflict_slow
   // load pipe need replay when there is a bank conflict
   resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
-  resp.bits.tag_error := s2_tag_error // report tag_error in load s2
+  resp.bits.tag_error := false.B//s2_tag_error // report tag_error in load s2
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
 
@@ -302,10 +302,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
 
-  val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
-  val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
-  val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
-  val s3_error = s3_tag_error || s3_flag_error || s3_data_error
+  val s3_data_error = false.B//io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
+  val s3_tag_error = false.B//RegEnable(s2_tag_error, s2_fire)
+  val s3_flag_error = false.B//RegEnable(s2_flag_error, s2_fire)
+  val s3_error = false.B//s3_tag_error || s3_flag_error || s3_data_error
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
@@ -319,7 +319,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.source.l2 := s3_flag_error
   io.error.opType.load := true.B
   // report tag error / l2 corrupted to CACHE_ERROR csr
-  io.error.valid := s3_error && s3_valid
+  io.error.valid := false.B//s3_error && s3_valid
 
   // update plru, report error in s3
 
