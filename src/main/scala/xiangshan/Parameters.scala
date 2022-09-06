@@ -211,8 +211,8 @@ case class XSCoreParameters
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = None,
-    dataECC = None,
+    tagECC = Some("parity"),
+    dataECC = Some("parity"),
     replacer = Some("setplru"),
     nMissEntries = 2,
     nProbeEntries = 2,

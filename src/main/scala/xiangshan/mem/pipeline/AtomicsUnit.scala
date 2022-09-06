@@ -282,12 +282,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
       ))
 
-      // when (io.dcache.resp.bits.error && io.csrCtrl.cache_error_enable) {
-      //   exceptionVec(loadAccessFault)  := isLr
-      //   exceptionVec(storeAccessFault) := !isLr
-      //   assert(!exceptionVec(loadAccessFault))
-      //   assert(!exceptionVec(storeAccessFault))
-      // }
+      when (io.dcache.resp.bits.error && io.csrCtrl.cache_error_enable) {
+        exceptionVec(loadAccessFault)  := isLr
+        exceptionVec(storeAccessFault) := !isLr
+        assert(!exceptionVec(loadAccessFault))
+        assert(!exceptionVec(storeAccessFault))
+      }
 
       resp_data := resp_data_wire
       state := s_finish
