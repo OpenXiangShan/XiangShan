@@ -75,6 +75,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.StuCnt, new MemRSFeedbackIO)
+    val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
@@ -328,6 +329,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         loadUnits(i).io.prefetch_train.valid && !loadUnits(i).io.prefetch_train.bits.miss
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
+      pf.io.ld_in(i).bits.uop.cf.pc := io.loadPc(i)
     })
 
     // load to load fast forward: load(i) prefers data(i)
