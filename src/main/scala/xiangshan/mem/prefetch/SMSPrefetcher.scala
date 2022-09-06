@@ -11,8 +11,8 @@ import xiangshan.cache.mmu._
 case class SMSParams
 (
   region_size: Int = 1024,
-  vaddr_hash_width: Int = 1,
-  block_addr_raw_width: Int = 30,
+  vaddr_hash_width: Int = 5,
+  block_addr_raw_width: Int = 10,
   filter_table_size: Int = 16,
   active_gen_table_size: Int = 16,
   pht_size: Int = 64,
