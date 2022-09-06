@@ -74,6 +74,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
+    val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
@@ -310,6 +311,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
         loadUnits(i).io.prefetch_train.valid && !loadUnits(i).io.prefetch_train.bits.miss
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
+      pf.io.ld_in(i).bits.uop.cf.pc := io.loadPc(i)
     })
 
     // load to load fast forward: load(i) prefers data(i)
