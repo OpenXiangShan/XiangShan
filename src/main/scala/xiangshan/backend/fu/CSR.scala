@@ -500,9 +500,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // spfctl Bit 0: L1I Cache Prefetcher Enable
   // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "b11".U)
+  // spfctl Bit 2: L1D Cache Prefetcher Enable
+  // spfctl Bit 3: L1D train prefetch on hit
+  // spfctl Bit 4: L1D prefetch enable agt
+  // spfctl Bit 5: L1D prefetch enable pht
+  // turn on L2 BOP, turn off L1 SMS by default
+  val spfctl = RegInit(UInt(XLEN.W), "b11011".U)
   csrio.customCtrl.l1I_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
+  csrio.customCtrl.l1D_pf_enable := spfctl(2)
+  csrio.customCtrl.l1D_pf_train_on_hit := spfctl(3)
+  csrio.customCtrl.l1D_pf_enable_agt := spfctl(4)
+  csrio.customCtrl.l1D_pf_enable_pht := spfctl(5)
 
   // sfetchctl Bit 0: L1I Cache Parity check enable
   val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
