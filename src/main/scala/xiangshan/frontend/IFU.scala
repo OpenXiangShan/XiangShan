@@ -681,17 +681,15 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * we set a flag to notify f3 that the last half flag need not to be set.
     */
   //f3_fire is after wb_valid
-  when(wb_valid && RegNext(f3_hasLastHalf) 
-        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) 
-        && !f3_lastHalf.valid && !f3_fire
+  when(wb_valid && RegNext(f3_hasLastHalf,init = false.B) 
+        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) && !f3_fire  && !RegNext(f3_fire,init = false.B)
       ){
     f3_lastHalf_disable := true.B
   }
 
   //wb_valid and f3_fire are in same cycle
-  when(wb_valid && RegNext(f3_hasLastHalf) 
-        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) 
-        && !f3_lastHalf.valid && f3_fire
+  when(wb_valid && RegNext(f3_hasLastHalf,init = false.B) 
+        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) && f3_fire
       ){
     f3_lastHalf.valid := false.B
   }
