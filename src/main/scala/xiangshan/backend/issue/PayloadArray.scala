@@ -42,8 +42,9 @@ class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) 
   })
 
   val payload = Reg(Vec(params.numEntries, gen))
-  // specialized for LOAD to avoid x-prop
-  val immArray = if (params.isLoad) Some(RegInit(VecInit.fill(params.numEntries)(0.U(12.W)))) else None
+  // specialized other RS to reduce registers
+  // However, they should be optimized out by the synthesis tools as well.
+  val immArray = if (!params.isJump) Some(Reg(Vec(params.numEntries, UInt(12.W)))) else None
 
   // read ports
   io.read.map(_.data).zip(io.read.map(_.addr)).foreach {
