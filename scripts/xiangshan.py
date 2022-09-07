@@ -33,9 +33,9 @@ class XSArgs(object):
     # default path to the repositories
     noop_home = os.path.join(os.path.dirname(script_path), "..")
     nemu_home = os.path.join(noop_home, "../NEMU")
-    am_home = os.path.join(noop_home, "../nexus-am")
+    am_home = "/nfs/home/share/southlake-release/workloads/nexus-am"
     dramsim3_home = os.path.join(noop_home, "../DRAMsim3")
-    rvtest_home = "/nfs-nvme/home/share/debug/southlake/riscv-tests"
+    rvtest_home = "/nfs/home/share/southlake-release/workloads/riscv-tests"
     default_wave_home = os.path.join(noop_home, "build")
     wave_home   = default_wave_home
 
@@ -367,7 +367,7 @@ class XiangShan(object):
 
     def run_ci_vcs(self, test):
         all_tests = {
-            # "cputest": self.__get_ci_cputest,
+            "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
             # "misc-tests": self.__get_ci_misc,
             # "mc-tests": self.__get_ci_mc,
