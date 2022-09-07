@@ -1207,7 +1207,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val raiseDebugException = !debugMode && isEbreak && ebreakEnterDebugMode
 
   val csrExceptionVec = WireInit(cfIn.exceptionVec)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak && (ebreakCauseException || debugMode)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
   csrExceptionVec(ecallM) := privilegeMode === ModeM && io.in.valid && isEcall
   csrExceptionVec(ecallVS) := privilegeMode === ModeS && virtMode && io.in.valid && isEcall
   csrExceptionVec(ecallS) := privilegeMode === ModeS && !virtMode && io.in.valid && isEcall
@@ -1261,22 +1261,23 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
   val hasDebugIntr = intrNO === IRQ_DEBUG.U && hasIntr
 
-  // exceptions
-  val raiseException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
-  val hasInstrPageFault = csrio.exception.bits.uop.cf.exceptionVec(instrPageFault) && raiseException
-  val hasLoadPageFault = csrio.exception.bits.uop.cf.exceptionVec(loadPageFault) && raiseException
-  val hasStorePageFault = csrio.exception.bits.uop.cf.exceptionVec(storePageFault) && raiseException
-  val hasStoreAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(storeAddrMisaligned) && raiseException
-  val hasLoadAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(loadAddrMisaligned) && raiseException
-  val hasInstrAccessFault = csrio.exception.bits.uop.cf.exceptionVec(instrAccessFault) && raiseException
-  val hasLoadAccessFault = csrio.exception.bits.uop.cf.exceptionVec(loadAccessFault) && raiseException
-  val hasStoreAccessFault = csrio.exception.bits.uop.cf.exceptionVec(storeAccessFault) && raiseException
-  val hasbreakPoint = csrio.exception.bits.uop.cf.exceptionVec(breakPoint) && raiseException
-  val hasSingleStep = csrio.exception.bits.uop.ctrl.singleStep && raiseException
-  val hasTriggerHit = (csrio.exception.bits.uop.cf.trigger.hit) && raiseException
-  val hasInstGuestPageFault = csrio.exception.bits.uop.cf.exceptionVec(instrGuestPageFault) && raiseException
-  val hasLoadGuestPageFault = csrio.exception.bits.uop.cf.exceptionVec(loadGuestPageFault) && raiseException
-  val hasStoreGuestPageFault = csrio.exception.bits.uop.cf.exceptionVec(storeGuestPageFault) && raiseException
+  // exceptions from rob need to handle
+  val exceptionVecFromRob    = csrio.exception.bits.uop.cf.exceptionVec
+  val hasException           = csrio.exception.valid && !csrio.exception.bits.isInterrupt
+  val hasInstrPageFault      = hasException && exceptionVecFromRob(instrPageFault)
+  val hasLoadPageFault       = hasException && exceptionVecFromRob(loadPageFault)
+  val hasStorePageFault      = hasException && exceptionVecFromRob(storePageFault)
+  val hasStoreAddrMisalign   = hasException && exceptionVecFromRob(storeAddrMisaligned)
+  val hasLoadAddrMisalign    = hasException && exceptionVecFromRob(loadAddrMisaligned)
+  val hasInstrAccessFault    = hasException && exceptionVecFromRob(instrAccessFault)
+  val hasLoadAccessFault     = hasException && exceptionVecFromRob(loadAccessFault)
+  val hasStoreAccessFault    = hasException && exceptionVecFromRob(storeAccessFault)
+  val hasBreakPoint          = hasException && exceptionVecFromRob(breakPoint)
+  val hasSingleStep          = hasException && csrio.exception.bits.uop.ctrl.singleStep
+  val hasTriggerHit          = hasException && csrio.exception.bits.uop.cf.trigger.hit
+  val hasInstGuestPageFault  = hasException && exceptionVecFromRob(instrGuestPageFault)
+  val hasLoadGuestPageFault  = hasException && exceptionVecFromRob(loadGuestPageFault)
+  val hasStoreGuestPageFault = hasException && exceptionVecFromRob(storeGuestPageFault)
 
   XSDebug(hasSingleStep, "Debug Mode: single step exception\n")
   XSDebug(hasTriggerHit, p"Debug Mode: trigger hit, is frontend? ${Binary(csrio.exception.bits.uop.cf.trigger.frontendHit.asUInt)} " +
@@ -1316,8 +1317,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hasInstrAccessFault,
     hasLoadAccessFault,
     hasStoreAccessFault,
-    hasLoadAddrMisaligned,
-    hasStoreAddrMisaligned,
+    hasLoadAddrMisalign,
+    hasStoreAddrMisalign,
     hasInstGuestPageFault,
     hasLoadGuestPageFault,
     hasStoreGuestPageFault
@@ -1368,13 +1369,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
-  val deleg = Mux(raiseIntr, mideleg , medeleg)
-  val hdeleg = Mux(raiseIntr, hideleg, hedeleg)
+  val deleg = Mux(hasIntr, mideleg , medeleg)
+  val hdeleg = Mux(hasIntr, hideleg, hedeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (privilegeMode < ModeM);
   val delegS = deleg(causeNO(7,0)) && (privilegeMode < ModeM)
   val delegVS = virtMode && delegS && hdeleg(causeNO(7, 0)) && (privilegeMode < ModeM)
-  val clearTval = !updateTval || raiseIntr
-  val clearTval_h = !updateTval_h || raiseIntr
+  val clearTval = !updateTval || hasIntr
+  val clearTval_h = !updateTval_h || hasIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
   val isHyperInst = csrio.exception.bits.uop.ctrl.isHyperInst
   // ctrl block will use theses later for flush
@@ -1393,14 +1394,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // cause the pc to be set to the address in the BASE field, whereas
   // interrupts cause the pc to be set to the address in the BASE field
   // plus four times the interrupt cause number.
-  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && hasIntr, causeNO(3, 0), 0.U), 0.U(2.W))
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
   csrio.trapTarget := RegEnable(
     MuxCase(pcFromXtvec, Seq(
       (isXRetFlag && !illegalXret) -> retTargetReg,
-      (raiseDebugExceptionIntr || ebreakEnterParkLoop) -> debugTrapTarget
+      (hasDebugExceptionIntr || ebreakEnterParkLoop) -> debugTrapTarget
     )),
     isXRetFlag || csrio.exception.valid)
 
@@ -1435,7 +1436,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     }.elsewhen (debugMode) {
       //do nothing
     }.elsewhen (delegVS) {
-      vscause := (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO >> 1.U, exceptionNO)
+      vscause := (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO >> 1.U, exceptionNO)
       vsepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       vsstatusNew.spp := privilegeMode
       vsstatusNew.pie.s := vsstatusOld.ie.s
@@ -1447,7 +1448,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       val virt = Mux(mstatusOld.mprv.asBool, mstatusOld.mpv, virtMode)
       // to do hld st
       hstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-                      ((virt.asBool || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+                      ((virt.asBool || isHyperInst) && ((hasException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
                       || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       hstatusNew.spv := virtMode
       when(virtMode){
@@ -1466,7 +1467,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       val virt = Mux(mstatusOld.mprv.asBool, mstatusOld.mpv, virtMode)
       // to do hld st
       mstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-      ((virt.asBool || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+      ((virt.asBool || isHyperInst) && ((hasException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
         || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       mstatusNew.mpv := virtMode
       virtMode := false.B
