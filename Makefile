@@ -131,7 +131,7 @@ RUN_BIN ?= coremark-2-iteration.bin
 
 simv_rtl-run:
 	touch sim/rtl/sim.log
-	cd sim/rtl && (./simv +dump-wave=fsdb +workload=$(RUN_BIN_DIR)/$(RUN_BIN) +diff=$(RUN-BIN)/riscv64-nemu-interpreter-so | tee -a sim.log)
+	cd sim/rtl && (./simv +dump-wave=fsdb +workload=$(RUN_BIN_DIR)/$(RUN_BIN) +diff=$(RUN_BIN_DIR)/riscv64-nemu-interpreter-so | tee -a sim.log)
 
 verdi_rtl:
 	cd sim/rtl && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
