@@ -341,7 +341,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
 
-  select.io.balance
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -373,7 +372,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   val s1_slowPorts = RegNext(io.slowPorts)
   val s1_fastUops = RegNext(io.fastUopsIn)
-  val s1_dispatchUops_dup = Reg(Vec(4 + params.numSrc, Vec(params.numEnq, Valid(new MicroOp))))
+  val s1_dispatchUops_dup = if (params.isLoad) {
+    RegInit(VecInit.fill(4 + params.numSrc)(0.U.asTypeOf(Vec(params.numEnq, Valid(new MicroOp)))))
+  }
+  else {
+    Reg(Vec(4 + params.numSrc, Vec(params.numEnq, Valid(new MicroOp))))
+  }
   val s1_delayedSrc = Wire(Vec(params.numEnq, Vec(params.numSrc, Bool())))
   val s1_allocatePtrOH_dup = RegNext(VecInit.fill(3)(VecInit(enqReverse(s0_allocatePtrOH))))
   val s1_allocatePtr = RegNext(VecInit(enqReverse(s0_allocatePtr)))
