@@ -90,7 +90,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 
+ABS_WORK_DIR := $(shell pwd)
+FILELIST := $(ABS_WORK_DIR)/build/cpu_flist.f
 sim-verilog: $(SIM_TOP_V)
+	find $(ABS_WORK_DIR)/build -name "*.v" > $(FILELIST)
 
 clean:
 	$(MAKE) -C ./difftest clean
@@ -117,8 +120,18 @@ emu-run:
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation
-simv:
-	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+simv_rtl:
+	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) CONSIDER_FSDB=1
+
+RUN_BIN_DIR ?= $(ABS_WORK_DIR)/ready-to-run
+RUN_BIN ?= coremark-2-iteration.bin
+
+simv_rtl-run:
+	touch sim/rtl/sim.log
+	cd sim/rtl && (./simv +dump-wave=fsdb +workload=$(RUN_BIN_DIR)/$(RUN_BIN) +diff=$(RUN-BIN)/riscv64-nemu-interpreter-so | tee -a sim.log)
+
+verdi_rtl:
+	cd sim/rtl && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
