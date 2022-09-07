@@ -205,7 +205,7 @@ trait HasCSRConst {
   // Debug Mode Registers
   val Dcsr          = 0x7B0
   val Dpc           = 0x7B1
-  val Dscratch      = 0x7B2
+  val Dscratch0     = 0x7B2
   val Dscratch1     = 0x7B3
 
   def privEcall  = 0x000.U
