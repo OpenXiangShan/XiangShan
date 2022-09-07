@@ -319,7 +319,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val s1_read_bank_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val s1_read_way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en_s1.cloneType))
 
-  val s1_readline_valid = RegNext(s0_readline_valid)
+  val s1_readline_valid = RegInit(false.B)
+  s1_readline_valid := Mux(io.readline.bits.keep_req_s1, s1_readline_valid, s0_readline_valid)
   val s1_readline_set_addrs = RegEnable(s0_readline_set_addrs, s0_readline_valid)
   val s1_readline_rmask = io.readline.bits.rmask_s1
   val s1_readline_way_en = io.readline.bits.way_en_s1
@@ -408,7 +409,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       s1.read(rport_index).set := RegEnable(s0.read(rport_index).set, s0.read(rport_index).en)
       s1.read(rport_index).bank_match := RegNext(s0.read(rport_index).bank_match)
     })
-    s1.readline.en := RegNext(s0.readline.en || io.readline.bits.keep_req_s1 && s1.readline.en)
+
+    val s1_readline_en = RegInit(false.B)
+    s1_readline_en := Mux(io.readline.bits.keep_req_s1, s1.readline.en, s0.readline.en)
+    s1.readline.en := s1_readline_en
     s1.readline.set := RegEnable(s0.readline.set, s0.readline.en && !io.readline.bits.keep_req_s1)
   }}
 
