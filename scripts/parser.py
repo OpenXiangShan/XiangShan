@@ -5,6 +5,34 @@ import os
 import re
 import sys
 
+origin_sram_mapping = [ # lib/wrapper      rtl
+                        ["array_2_ext",  "array_1_ext"],
+                        ["array_5_ext",  "array_2_ext"],
+                        ["array_6_ext",  "array_3_ext"],
+                        ["array_7_ext ", "array_4_ext"],
+                        ["array_8_ext",  "array_5_ext"],
+                        ["array_9_ext",  "array_6_ext"],
+                        ["array_10_ext", "array_7_ext"],
+                        ["array_11_ext", "array_8_ext"],
+                        ["array_12_ext", "array_9_ext"],
+                        ["array_13_ext", "array_10_ext"],
+                        ["array_14_ext", "array_11_ext"],
+                        ["array_15_ext", "array_12_ext"],
+                        ["array_17_ext", "array_13_ext"],
+                        ["array_19_ext", "array_14_ext"],
+                        ["array_20_ext", "array_15_ext"],
+                        ["array_22_ext", "array_16_ext"],
+                        ["array_23_ext", "array_17_ext"],
+                        ["array_25_ext", "array_18_ext"],
+                        ["array_26_ext", "array_19_ext"],
+                        ["array_28_ext", "array_20_ext"],
+                        ["array_29_ext", "array_21_ext"],
+                        ["array_31_ext", "array_22_ext"],
+                        ["array_32_ext", "array_23_ext"],
+                        ["array_34_ext", "array_24_ext"],
+                        ["array_35_ext", "array_25_ext"],
+                        ["array_37_ext", "array_26_ext"] ]
+origin_max_wrapper_num = 37
 
 class VIO(object):
     def __init__(self, info):
@@ -39,15 +67,15 @@ class VIO(object):
 class VModule(object):
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
-    array_ext_line_re = re.compile(r'^  array_(\d*)_ext array_(\d*)_ext.*$')
+    array_ext_line_re = re.compile(r'^  array_(\d*)_ext (array_\d*_ext).*$')
     difftest_module_re = re.compile(r'^  Difftest\w+\s+\w+ \( //.*$')
-
+    
     def __init__(self, name):
         self.name = name
         self.lines = []
         self.io = []
         self.submodule = set()
-        self.in_difftest = False
+        self.in_difftest = False        
 
     def add_line(self, line):
         debug_dontCare = False
@@ -63,13 +91,22 @@ class VModule(object):
         array_ext_match = self.array_ext_line_re.match(line)
         if array_ext_match:
             print('array_ext match line ', line)
-            idx = int(array_ext_match.group(1))
-            # this is ugly
-            # sram with idx 3, 4 is eliminated, so those with idx >= 3 should use idx + 2
-            if idx >= 3:
-                new_line = re.sub(r'\d+', str(idx + 2), line)
-                print(line, '->', new_line)
-                line = new_line
+            for mapping in origin_sram_mapping:
+                if mapping[1] == array_ext_match.group(2):
+                    new_line = line.replace(mapping[1], mapping[0])
+                    print(line, '->', new_line)
+                    line = new_line
+                    break
+
+        #     print('array_ext match line ', line)
+        #     idx = int(array_ext_match.group(1))
+        #     # this is ugly
+        #     # sram with idx 3, 4 is eliminated, so those with idx >= 3 should use idx + 2
+        #     if idx >= 3:
+        #         new_line = re.sub(r'\d+', str(idx + 2), line)
+        #         print(line, '->', new_line)
+        #         line = new_line
+
 
         # start of difftest module
         difftest_match = self.difftest_module_re.match(line)
@@ -309,7 +346,19 @@ def get_files(build_path):
             files += get_files(file_path)
     return files
 
+def add_sram(new_sram_name):
+    global origin_max_wrapper_num
+    idx = int(re.findall(r"\d+",new_sram_name)[0])
+    print("add SRAM idx:", idx)
+    origin_sram_mapping.insert(idx - 1,["array_{}_ext".format(origin_max_wrapper_num+1),new_sram_name])
+    for i in range(idx, len(origin_sram_mapping)):
+        new_num = int(re.findall(r"\d+",origin_sram_mapping[i][1])[0]) + 1
+        origin_sram_mapping[i][1] = "array_{}_ext".format(new_num)
+        print(origin_sram_mapping[i])
+    origin_max_wrapper_num += 1
+
 def main(files):
+    #add_sram("array_14_ext")  # add SMS prefetch SRAM
     collection = VCollection()
     for f in files:
         collection.load_modules(f)
