@@ -210,6 +210,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
     // evict entry to pht
     val s2_evict = ValidIO(new AGTEntry())
     val s2_pf_gen_req = ValidIO(new PfGenReq())
+    val act_threshold = Input(UInt(REGION_OFFSET.W))
+    val act_stride = Input(UInt(6.W))
   })
 
   val entries = Seq.fill(smsParams.active_gen_table_size){ Reg(new AGTEntry()) }
@@ -326,8 +328,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
     s1_agt_entry.decr_mode
   )
 
-  val s1_pf_gen_vaddr_inc = Cat(0.U, s1_region_vaddr(REGION_TAG_WIDTH - 1, 0), s1_region_offset) + 30.U
-  val s1_pf_gen_vaddr_dec = Cat(0.U, s1_region_vaddr(REGION_TAG_WIDTH - 1, 0), s1_region_offset) - 30.U
+  val s1_pf_gen_vaddr_inc = Cat(0.U, s1_region_vaddr(REGION_TAG_WIDTH - 1, 0), s1_region_offset) + io.act_stride
+  val s1_pf_gen_vaddr_dec = Cat(0.U, s1_region_vaddr(REGION_TAG_WIDTH - 1, 0), s1_region_offset) - io.act_stride
   val s1_vaddr_inc_cross_page = s1_pf_gen_vaddr_inc(BLOCK_ADDR_PAGE_BIT) =/= s1_region_vaddr(REGION_ADDR_PAGE_BIT)
   val s1_vaddr_dec_cross_page = s1_pf_gen_vaddr_dec(BLOCK_ADDR_PAGE_BIT) =/= s1_region_vaddr(REGION_ADDR_PAGE_BIT)
   val s1_vaddr_inc_cross_max_lim = s1_pf_gen_vaddr_inc.head(1).asBool
@@ -351,7 +353,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_pf_gen_valid = prev_lookup_valid && io.s1_match_or_alloc && Mux(s1_pf_gen_decr_mode,
     !s1_vaddr_dec_cross_max_lim,
     !s1_vaddr_inc_cross_max_lim
-  ) && (s1_pf_gen_access_cnt > (REGION_BLKS * 3 / 4).U)
+  ) && (s1_pf_gen_access_cnt > io.act_threshold)
   val s1_pf_gen_paddr_valid = Mux(s1_pf_gen_decr_mode, !s1_vaddr_dec_cross_page, !s1_vaddr_inc_cross_page)
   val s1_pf_gen_region_addr = Mux(s1_pf_gen_paddr_valid,
     Cat(s1_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT), s1_pf_gen_vaddr(REGION_ADDR_PAGE_BIT - 1, 0)),
@@ -669,7 +671,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     s4_pf_gen_decr_region.region_tag := s3_decr_region_tag
     s4_pf_gen_decr_region.region_bits := s3_decr_region_bits
     s4_pf_gen_decr_region.paddr_valid := !s3_decr_crosspage
-    s4_pf_gen_decr_region.decr_mode := false.B
+    s4_pf_gen_decr_region.decr_mode := true.B
   }
 
   pf_gen_req_arb.io.in.head.valid := s4_pf_gen_cur_region_valid
@@ -723,6 +725,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   io.tlb_req.req <> tlb_req_arb.io.out
   io.tlb_req.resp.ready := true.B
+  io.tlb_req.req_kill := false.B
   io.l2_pf_addr.valid := pf_req_arb.io.out.valid
   io.l2_pf_addr.bits := pf_req_arb.io.out.bits
   pf_req_arb.io.out.ready := true.B
@@ -838,6 +841,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   val io_agt_en = IO(Input(Bool()))
   val io_pht_en = IO(Input(Bool()))
+  val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
+  val io_act_stride = IO(Input(UInt(6.W)))
 
   val ld_curr = io.ld_in.map(_.bits)
   val ld_curr_block_tag = ld_curr.map(x => block_hash_tag(x.vaddr))
@@ -926,6 +931,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   filter_table.io.s0_lookup.bits.offset := train_region_offset_s0
   filter_table.io.s1_update := !active_gen_table.io.s1_match_or_alloc
 
+  active_gen_table.io.act_threshold := io_act_threshold
+  active_gen_table.io.act_stride := io_act_stride
   active_gen_table.io.s0_lookup.valid := train_vld_s0
   active_gen_table.io.s0_lookup.bits.region_tag := train_region_tag_s0
   active_gen_table.io.s0_lookup.bits.region_p1_tag := train_region_p1_tag_s0

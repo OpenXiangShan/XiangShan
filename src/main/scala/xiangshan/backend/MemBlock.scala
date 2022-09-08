@@ -134,6 +134,8 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
       val sms = Module(new SMSPrefetcher())
       sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
       sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := RegNextN(io.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
       sms
   }
   prefetcherOpt.foreach(pf => {
