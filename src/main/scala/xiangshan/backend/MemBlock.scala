@@ -19,7 +19,7 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 import xiangshan._
@@ -29,6 +29,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
 import xiangshan.mem._
+import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher}
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -42,6 +43,9 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
+  val pf_sender_opt = coreParams.prefetcher.map(_ =>
+    BundleBridgeSource(() => ValidIO(UInt(64.W)))
+  )
 
   lazy val module = new MemBlockImp(this)
 
@@ -76,7 +80,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
+    val ptw = new BTlbPtwIO(ld_tlb_ports + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -121,6 +125,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
+  val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
+    case _: SMSParams =>
+      Module(new SMSPrefetcher())
+  }
+  prefetcherOpt.foreach(pf => outer.pf_sender_opt.get.out.head._1 := pf.io.pf_addr)
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -162,12 +171,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   // dtlb
+  val total_tlb_ports = ld_tlb_ports + exuParameters.StuCnt
   val NUMSfenceDup = 3
   val NUMTlbCsrDup = 8
   val sfence_dup = Seq.fill(NUMSfenceDup)(RegNext(io.sfence))
   val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(io.tlbCsr))
+
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLB(exuParameters.LduCnt, 2, ldtlbParams))
+    val tlb_ld = Module(new TLB(ld_tlb_ports, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
@@ -175,19 +186,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_st.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st
-  val dtlb_reqs = dtlb.map(_.requestor).flatten
-  val dtlb_pmps = dtlb.map(_.pmp).flatten
-  dtlb.zip(sfence_dup.take(2)).map{ case (d,s) => d.sfence := s }
-  dtlb.zip(tlbcsr_dup.take(2)).map{ case (d,c) => d.csr := c }
+  val dtlb_reqs = dtlb.flatMap(_.requestor)
+  val dtlb_pmps = dtlb.flatMap(_.pmp)
+  dtlb.zip(sfence_dup.take(2)).foreach{ case (d,s) => d.sfence := s }
+  dtlb.zip(tlbcsr_dup.take(2)).foreach{ case (d,c) => d.csr := c }
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)
 
-    val replace = Module(new TlbReplace(exuParameters.LduCnt + exuParameters.StuCnt, ldtlbParams))
+    val replace = Module(new TlbReplace(total_tlb_ports, ldtlbParams))
     replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
-      val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
+      val replace_ld = Module(new TlbReplace(ld_tlb_ports, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
     }
     if (sttlbParams.outReplace) {
@@ -197,26 +208,28 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
-  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(RegNext(sfence_dup(2).valid && tlbcsr_dup(7).satp.changed)), init = false.B)
+  val ptw_resp_v = RegNext(
+    io.ptw.resp.valid && !(RegNext(sfence_dup.last.valid && tlbcsr_dup.last.satp.changed)),
+    init = false.B
+  )
   io.ptw.resp.ready := true.B
 
-  (dtlb.map(a => a.ptw.req.map(b => b)))
-    .flatten
+  dtlb.flatMap(a => a.ptw.req)
     .zipWithIndex
-    .map{ case (tlb, i) =>
+    .foreach{ case (tlb, i) =>
     tlb <> io.ptw.req(i)
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
-      else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
-      else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
+      else if (i < ld_tlb_ports) Cat(ptw_resp_next.vector.take(ld_tlb_ports)).orR
+      else Cat(ptw_resp_next.vector.drop(ld_tlb_ports)).orR
     io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.entry.hit(tlb.bits.vpn, RegNext(tlbcsr_dup(i).satp.asid), allType = true, ignoreAsid = true))
   }
-  dtlb.map(_.ptw.resp.bits := ptw_resp_next.data)
+  dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
-    dtlb.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
+    dtlb.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
   } else {
-    dtlb_ld.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR)
-    dtlb_st.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR)
+    dtlb_ld.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(ld_tlb_ports)).orR)
+    dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(ld_tlb_ports)).orR)
   }
 
 
@@ -224,16 +237,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3, leaveHitMux = true)).io))
+  val pmp_check = VecInit(Seq.fill(total_tlb_ports)(
+    Module(new PMPChecker(3, leaveHitMux = true)).io
+  ))
   val tlbcsr_pmp = tlbcsr_dup.drop(2).map(RegNext(_))
-  for (((p,d),i) <- (pmp_check zip dtlb_pmps) zipWithIndex) {
+  for (((p,d),i) <- (pmp_check zip dtlb_pmps).zipWithIndex) {
     p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
   val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-  pmp_check_ptw.io.apply(tlbcsr_pmp(4).priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
-    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt)
-  dtlb.map(_.ptw_replenish := pmp_check_ptw.io.resp)
+  pmp_check_ptw.io.apply(
+    tlbcsr_pmp.last.priv.dmode,
+    pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
+    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt
+  )
+  dtlb.foreach(_.ptw_replenish := pmp_check_ptw.io.resp)
 
   val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
@@ -271,6 +289,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
+    // prefetch
+    prefetcherOpt.foreach(pf => pf.io.ld_in(i) := loadUnits(i).io.prefetch_train)
 
     // load to load fast forward: load(i) prefers data(i)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
@@ -340,6 +360,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p"has trigger hit vec ${io.writeback(i).bits.uop.cf.trigger.backendHit}\n")
 
   }
+  // Prefetcher
+  prefetcherOpt.foreach(pf => {
+    dtlb_reqs(ld_tlb_ports - 1) <> pf.io.tlb_req
+  })
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
@@ -359,8 +383,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.lsq          <> lsq.io.storeIn(i)
     stu.io.lsq_replenish <> lsq.io.storeInRe(i)
     // dtlb
-    stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt)(i)
-    stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
+    stu.io.tlb          <> dtlb_reqs.drop(ld_tlb_ports)(i)
+    stu.io.pmp          <> pmp_check(i+ld_tlb_ports).resp
 
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
