@@ -56,7 +56,7 @@ jobs:
           rm -rf $GITHUB_WORKSPACE/bosc_XSTop-Release*
           mkdir -p $WAVE_HOME
       - name: generate verilog file
-        run:
+        run: |
           sed -i "s/isRF = if (true)/isRF = if (false)/" \
             $GITHUB_WORKSPACE/huancun/src/main/scala/huancun/utils/SRAMTemplate.scala
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate
