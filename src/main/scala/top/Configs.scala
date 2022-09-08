@@ -244,7 +244,7 @@ class WithNKBL2
         )),
         reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.BOPParameters()),
+        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
         enablePerf = true,
         sramDepthDiv = 2,
         tagECC = Some("secded"),

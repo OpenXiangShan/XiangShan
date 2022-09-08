@@ -869,6 +869,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.forward_result_valid := forward_result_valid
   load_s2.io.forward_mshr := forward_mshr
   load_s2.io.forwardData_mshr := forwardData_mshr
+  io.prefetch_train.bits := load_s2.io.in.bits
+  io.prefetch_train.valid := load_s2.io.in.fire
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
