@@ -76,7 +76,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     
     val top_write_en = WireInit(false.B)
     val top_write = Wire(new RASEntry)
-    val top_dup = RegEnable(dup(top_write), top_write_en)
+    val top_dup = RegEnable(dup(top_write), init=dup(RASEntry(0x80000000L.U, 0.U)), top_write_en)
     top_write := top_dup(0)
     top_dup.foreach(dontTouch(_))
     
@@ -179,6 +179,16 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     io.sp := sp
     io.top := top_dup
     
+    val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
+    val do_reset = RegInit(true.B)
+    when (do_reset) {
+      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
+    }
+    resetIdx := resetIdx + do_reset
+    when (resetIdx === (RasSize-1).U) {
+      do_reset := false.B
+    }
+
     debugIO.spec_push_entry := RASEntry(io.spec_new_addr, Mux(spec_alloc_new, 1.U, top_dup(0).ctr + 1.U))
     debugIO.spec_alloc_new := spec_alloc_new
     debugIO.recover_push_entry := RASEntry(io.recover_new_addr, Mux(recover_alloc_new, 1.U, io.recover_top.ctr + 1.U))
