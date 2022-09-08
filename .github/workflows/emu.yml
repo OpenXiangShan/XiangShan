@@ -37,9 +37,34 @@ jobs:
             --config DefaultConfig --prefix bosc_                     \
             --sram-replace --mbist-scan-replace
           tar -czf $WAVE_HOME/release-${HEAD_SHA}.tar.gz bosc_XSTop-Release*
-      - name: release for BOSC
+
+  generate-verilog-bosc:
+    runs-on: bosc
+    continue-on-error: false
+    name: Generate Verilog
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
         run: |
-          rm -rf bosc_XSTop-Release*
+          echo "HEAD_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/share/southlake-release/${HEAD_SHA}" >> $GITHUB_ENV
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          rm -rf $GITHUB_WORKSPACE/bosc_XSTop-Release*
+          mkdir -p $WAVE_HOME
+      - name: generate verilog file
+        run:
+          sed -i "s/isRF = if (true)/isRF = if (false)/" \
+            $GITHUB_WORKSPACE/huancun/src/main/scala/huancun/utils/SRAMTemplate.scala
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate
+      - name: check verilog
+        run:
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
+      - name: release
+        run: |
           export NOOP_HOME=$GITHUB_WORKSPACE
           bash scripts/generate_all.sh
           mkdir release-${HEAD_SHA}-bosc
