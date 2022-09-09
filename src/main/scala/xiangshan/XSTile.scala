@@ -136,7 +136,10 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
-      l2.pf_recv_node.map(recv => recv := core.memBlock.pf_sender_opt.get)
+      l2.pf_recv_node.map(recv => {
+        println("Connecting L1 prefetcher to L2!")
+        recv := core.memBlock.pf_sender_opt.get
+      })
     case None =>
   }
 
