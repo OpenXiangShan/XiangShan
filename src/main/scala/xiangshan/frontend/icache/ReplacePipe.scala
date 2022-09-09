@@ -60,7 +60,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     val pipe_resp = ValidIO(UInt(ReplaceIdWid.W))
     
     val status = new Bundle() {
-      val r1_set, r2_set, r3_set = ValidIO(UInt(idxBits.W))
+      val r0_set, r1_set, r2_set, r3_set = ValidIO(UInt(idxBits.W))
     }
 
     val csr_parity_enable = Input(Bool())
@@ -108,6 +108,9 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   toMeta.bits.readValid         := DontCare
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
+  
+  io.status.r0_set.valid := r0_valid
+  io.status.r0_set.bits  := r0_req.vidx
 
   /**
     ******************************************************************************
