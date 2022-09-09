@@ -517,6 +517,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     val tlb = new TlbRequestIO(2)
     val pmp = Flipped(new PMPRespBundle()) // arrive same to tlb now
 
+    // provide prefetch info
+    val prefetch_train = ValidIO(new LsPipelineBundle())
+
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(new LoadToLoadIO)
     val loadFastMatch = Input(Bool())
@@ -618,6 +621,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect) || cancelPointerChasing)
 
   // load s2
+  io.prefetch_train.bits := load_s2.io.in.bits
+  // override miss bit
+  io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.in.bits.mmio && !load_s2.io.in.bits.tlbMiss
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
