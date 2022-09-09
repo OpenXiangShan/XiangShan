@@ -1130,7 +1130,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // cause the pc to be set to the address in the BASE field, whereas
   // interrupts cause the pc to be set to the address in the BASE field
   // plus four times the interrupt cause number.
-  private val pcFromXtvec = Cat(xtvecBase + Mux(mtvec(0) && hasIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && hasIntr, causeNO(3, 0), 0.U), 0.U(2.W))
 
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
