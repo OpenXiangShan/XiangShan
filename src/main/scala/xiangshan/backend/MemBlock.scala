@@ -150,7 +150,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms
   }
   prefetcherOpt.foreach(pf => {
-    outer.pf_sender_opt.get.out.head._1.addr := ValidIODelay(pf.io.pf_addr, 2)
+    val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)
+    outer.pf_sender_opt.get.out.head._1.addr_valid := pf_to_l2.valid
+    outer.pf_sender_opt.get.out.head._1.addr := pf_to_l2.bits
     outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
     pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
   })
