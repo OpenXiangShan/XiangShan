@@ -322,6 +322,34 @@ class XiangShan(object):
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
 
+    def __get_ci_privilege(self, name=None):
+        base_dir = "/nfs/home/share/huxuan/ci-workloads/privilege"
+        # TODO: add all privilege workloads when CSR debug would finish
+        workloads = [
+            "rv64mi-p-asid.bin",
+            "rv64mi-p-csr.bin",
+            "rv64mi-p-illegal.bin",
+            "rv64mi-p-ma_addr.bin",
+            "rv64mi-p-ma_fetch.bin",
+            "rv64mi-p-mcsr.bin",
+            "rv64mi-p-pbmt.bin",
+            "rv64mi-p-sbreak.bin",
+            "rv64mi-p-scall.bin",
+            "rv64mi-p-svinval.bin",
+            "rv64mi-p-xret_clear_mprv.bin",
+            "rv64si-p-csr.bin",
+            "rv64si-p-dirty.bin",
+            "rv64si-p-icache-alias.bin",
+            "rv64si-p-immio-af.bin",
+            "rv64si-p-ma_fetch.bin",
+            "rv64si-p-satp_ppn.bin",
+            "rv64si-p-sbreak.bin",
+            "rv64si-p-scall.bin",
+            "rv64si-p-wfi.bin",
+        ]
+        privilege_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return privilege_tests
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -388,6 +416,7 @@ class XiangShan(object):
         all_tests = {
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
+            "privilege": self.__get_ci_privilege,
             "misc-tests": self.__get_ci_misc,
             "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
