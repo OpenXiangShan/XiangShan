@@ -509,9 +509,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val spfctl = RegInit(UInt(XLEN.W), Seq(
     30 << 10,    // L1D active page stride [15:10]
     12 << 6,    // L1D active page threshold [9:6]
-    0  << 5,    // L1D enable pht [5]
+    1  << 5,    // L1D enable pht [5]
     1  << 4,    // L1D enable agt [4]
-    0  << 3,    // L1D train on hit agt [3]
+    0  << 3,    // L1D train on hit [3]
     1  << 2,    // L1D pf enable [2]
     0  << 1,    // L2 pf enable [1]
     1  << 0,    // L1I pf enable [0]
