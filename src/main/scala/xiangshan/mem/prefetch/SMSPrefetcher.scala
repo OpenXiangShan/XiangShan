@@ -707,7 +707,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s0_pf_fire_vec = VecInit(pf_req_arb.io.in.map(_.fire))
 
   val s0_update_way = OHToUInt(s0_match_vec)
-  val s0_replace_way = OHToUInt(replacement.way)
+  val s0_replace_way = replacement.way
   val s0_access_way = Mux(s0_any_matched, s0_update_way, s0_replace_way)
   when(s0_gen_req_valid){
     replacement.access(s0_access_way)
