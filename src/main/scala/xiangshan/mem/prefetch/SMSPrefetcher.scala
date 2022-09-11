@@ -185,9 +185,18 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   // lookup_region + 1 == entry_region
   // lookup_region = entry_region - 1 => decr mode
   s0_agt_entry.decr_mode := !s0_region_hit && !any_region_m1_match && any_region_p1_match
-  val s0_replace_mask = UIntToOH(replacement.way)
+  val s0_replace_way = replacement.way
+  val s0_replace_mask = UIntToOH(s0_replace_way)
   // s0 hit a entry that may be replaced in s1
   val s0_update_conflict = Cat(VecInit(region_match_vec_s0).asUInt & s0_replace_mask).orR
+
+  val s0_access_way = Mux1H(
+    Seq(s0_region_hit, s0_alloc),
+    Seq(OHToUInt(region_match_vec_s0), s0_replace_way)
+  )
+  when(s0_lookup_valid) {
+    replacement.access(s0_access_way)
+  }
 
   // stage1: update/alloc
   // region hit, update entry
@@ -222,11 +231,6 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
     )
     valids(i) := valids(i) || alloc
     entries(i) := Mux(alloc, s1_alloc_entry, Mux(update, update_entry, entries(i)))
-  }
-  when(s1_update) {
-    replacement.access(OHToUInt(s1_update_mask))
-  }.elsewhen(s1_alloc){
-    replacement.access(OHToUInt(s1_replace_mask))
   }
 
   when(s1_update){
@@ -438,8 +442,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   )
 
   // pipe s2: generate ram write addr/data
-  val s2_valid = RegNext(s1_valid && !s3_ram_en, false.B)
-  val s2_reg_en = s1_valid && !s3_ram_en
+  val s2_valid = RegNext(s1_valid && !s1_wait, false.B)
+  val s2_reg_en = s1_valid && !s1_wait
   val s2_hist_update_mask = RegEnable(s1_hist_update_mask, s2_reg_en)
   val s2_hist_bits = RegEnable(s1_hist_bits, s2_reg_en)
   val s2_tag = RegEnable(s1_tag, s2_reg_en)
@@ -702,6 +706,13 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s0_tlb_fire_vec = VecInit(tlb_req_arb.io.in.map(_.fire))
   val s0_pf_fire_vec = VecInit(pf_req_arb.io.in.map(_.fire))
 
+  val s0_update_way = OHToUInt(s0_match_vec)
+  val s0_replace_way = OHToUInt(replacement.way)
+  val s0_access_way = Mux(s0_any_matched, s0_update_way, s0_replace_way)
+  when(s0_gen_req_valid){
+    replacement.access(s0_access_way)
+  }
+
   // s1: update or alloc
   val s1_valid_r = RegNext(s0_gen_req_valid, false.B)
   val s1_hit_r = RegEnable(s0_hit, s0_gen_req_valid)
@@ -742,11 +753,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
       v := true.B
     }
   }
-  val s1_access_mask = Mux(s1_hit, s1_update_vec, s1_replace_vec)
-  val s1_access_way = OHToUInt(s1_access_mask.asUInt)
-  when(s1_valid){
-    replacement.access(s1_access_way)
-  }
   when(s1_valid && s1_hit){
     assert(PopCount(s1_update_vec) === 1.U, "sms_pf_filter: multi-hit")
   }
@@ -756,7 +762,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   XSPerfAccumulate("sms_pf_filter_tlb_req", io.tlb_req.req.fire)
   XSPerfAccumulate("sms_pf_filter_tlb_resp_miss", io.tlb_req.resp.fire && io.tlb_req.resp.bits.miss)
   for(i <- 0 until smsParams.pf_filter_size){
-    XSPerfAccumulate(s"sms_pf_filter_access_way_$i", s1_valid && s1_access_way === i.U)
+    XSPerfAccumulate(s"sms_pf_filter_access_way_$i", s0_gen_req_valid && s0_access_way === i.U)
   }
   XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid)
 }
