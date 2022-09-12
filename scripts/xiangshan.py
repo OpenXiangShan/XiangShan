@@ -337,6 +337,7 @@ class XiangShan(object):
             "rv64mi-p-scall.bin",
             "rv64mi-p-svinval.bin",
             "rv64mi-p-xret_clear_mprv.bin",
+            "rv64mi-p-xtvec.bin",
             "rv64si-p-csr.bin",
             "rv64si-p-dirty.bin",
             "rv64si-p-icache-alias.bin",
