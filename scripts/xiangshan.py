@@ -323,7 +323,7 @@ class XiangShan(object):
         return misc_tests
 
     def __get_ci_privilege(self, name=None):
-        base_dir = "/nfs/home/share/huxuan/ci-workloads/privilege"
+        base_dir = "/nfs/home/share/ci-workloads/privilege"
         # TODO: add all privilege workloads when CSR debug would finish
         workloads = [
             "rv64mi-p-asid.bin",
