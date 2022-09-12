@@ -773,6 +773,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   // * io.fastUop.valid should not be reported
   assert(!RegNext(io.feedbackFast.valid && io.fastUop.valid))
 
+  // load forward_fail/ldld_violation check
+  // check for inst in load pipeline
   val s3_forward_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid)
   val s3_ldld_violation = RegNext(
     io.lsq.loadViolationQuery.resp.valid &&
@@ -781,16 +783,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   )
   val s3_need_replay_from_fetch = s3_forward_fail || s3_ldld_violation
   val s3_can_replay_from_fetch = RegEnable(load_s2.io.s2_can_replay_from_fetch, load_s2.io.out.valid)
-  when (RegNext(load_s2.io.out.valid)) {
+  // 1) use load pipe check result generated in load_s3 iff load_hit
+  when (RegNext(hitLoadOut.valid)) {
     io.ldout.bits.uop.ctrl.replayInst := s3_need_replay_from_fetch
   }
-
-  io.lsq.s3_delayed_load_error := load_s2.io.s3_delayed_load_error
+  // 2) otherwise, write check result to load queue
   io.lsq.s3_replay_from_fetch := s3_need_replay_from_fetch && s3_can_replay_from_fetch
 
   // s3_delayed_load_error path is not used for now, as we writeback load result in load_s3
   // but we keep this path for future use
   io.s3_delayed_load_error := false.B
+  io.lsq.s3_delayed_load_error := false.B //load_s2.io.s3_delayed_load_error
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
