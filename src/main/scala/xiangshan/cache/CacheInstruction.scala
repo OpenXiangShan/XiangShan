@@ -156,10 +156,10 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val data_transfer_cnt = RegInit(0.U(log2Up(maxDataRowSupport).W))
 
   // Translate CSR write to cache op
-  val translated_cache_req                  = Reg(new CacheCtrlReqInfo)
-  val translated_cache_req_opCode_dup_vec   = Reg(Vec(11, UInt(XLEN.W)))
-  val translated_cache_req_bank_num_dup_vec = Reg(Vec(11, UInt(XLEN.W)))
-  val translated_cache_req_index_dup_vec = Reg(Vec(11, UInt(XLEN.W)))
+  val translated_cache_req                  = RegInit(0.U.asTypeOf(new CacheCtrlReqInfo))
+  val translated_cache_req_opCode_dup_vec   = RegInit(VecInit(Seq.fill(11)(0.U(XLEN.W))))
+  val translated_cache_req_bank_num_dup_vec = RegInit(VecInit(Seq.fill(11)(0.U(XLEN.W))))
+  val translated_cache_req_index_dup_vec = RegInit(VecInit(Seq.fill(11)(0.U(XLEN.W))))
 
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
