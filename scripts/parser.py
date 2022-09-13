@@ -69,13 +69,13 @@ class VModule(object):
     submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
     array_ext_line_re = re.compile(r'^  array_(\d*)_ext (array_\d*_ext).*$')
     difftest_module_re = re.compile(r'^  Difftest\w+\s+\w+ \( //.*$')
-    
+
     def __init__(self, name):
         self.name = name
         self.lines = []
         self.io = []
         self.submodule = set()
-        self.in_difftest = False        
+        self.in_difftest = False
 
     def add_line(self, line):
         debug_dontCare = False
@@ -358,7 +358,7 @@ def add_sram(new_sram_name):
     origin_max_wrapper_num += 1
 
 def main(files):
-    #add_sram("array_14_ext")  # add SMS prefetch SRAM
+    add_sram("array_14_ext")  # add SMS prefetch SRAM
     collection = VCollection()
     for f in files:
         collection.load_modules(f)
