@@ -88,6 +88,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           LduCnt = 2,
           StuCnt = 2
         ),
+        prefetcher = None,
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache
           tagECC = Some("parity"),
@@ -288,13 +289,6 @@ class MinimalL3DebugConfig(n: Int = 1) extends Config(
 
 class DefaultL3DebugConfig(n: Int = 1) extends Config(
   new WithL3DebugConfig ++ new BaseConfig(n)
-)
-
-class MinimalAliasDebugConfig(n: Int = 1) extends Config(
-  new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = false, alwaysReleaseData = true) ++
-    new WithNKBL1D(128) ++
-    new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
