@@ -150,38 +150,42 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p2_valid =  generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
-  val p2_pmp_fire = p2_valid
-  val pmpExcpAF = fromPMP.instr
 
-  val p2_paddr     = RegEnable(tlb_resp_paddr,  p1_fire)
-  val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
-  val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(tlb_resp_af, p1_fire)
-  val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
+  val p2_paddr     = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
+  val p2_except_pf = RegEnable(next =tlb_resp_pf, enable = p1_fire)
+  val p2_except_tlb_af = RegEnable(next = tlb_resp_af, enable = p1_fire)
 
   /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
   val p2_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p2_paddr, blockBytes, PAddrBits))).reduce(_||_)
 
   //TODO wait PMP logic
-  val p2_exception  = VecInit(Seq(pmpExcpAF, p2_mmio)).reduce(_||_)
-
-  io.pmp.req.valid      := p2_pmp_fire
-  io.pmp.req.bits.addr  := p2_paddr
-  io.pmp.req.bits.size  := 3.U
-  io.pmp.req.bits.cmd   := TlbCmd.exec
+  val p2_exception  = VecInit(Seq(p2_except_tlb_af, p2_except_pf)).reduce(_||_)
 
   p2_ready :=   p2_fire || p2_discard || !p2_valid
-  p2_fire  :=   p2_valid && !p2_exception && p3_ready && p2_pmp_fire
-  p2_discard := p2_valid && (p2_exception && p2_pmp_fire)
+  p2_fire  :=   p2_valid && !p2_exception && p3_ready
+  p2_discard := p2_valid && p2_exception
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p3_paddr = RegEnable(p2_paddr,  p2_fire)
-  val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
+  val p3_pmp_fire = p3_valid
+  val pmpExcpAF = fromPMP.instr
+  val p3_paddr = RegEnable(next = p2_paddr,  enable = p2_fire)
+
+  io.pmp.req.valid      := p3_pmp_fire
+  io.pmp.req.bits.addr  := p3_paddr
+  io.pmp.req.bits.size  := 3.U
+  io.pmp.req.bits.cmd   := TlbCmd.exec
+
+  val p3_except_pmp_af = DataHoldBypass(pmpExcpAF, p3_pmp_fire) 
+  val p3_check_in_mshr = RegEnable(next = p2_check_in_mshr,  enable = p2_fire)
+  val p3_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p3_except_pmp_af, p3_pmp_fire)
+
+  val p3_exception  = VecInit(Seq(p3_except_pmp_af, p3_mmio)).reduce(_||_)
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
 
-  p3_discard := p3_hit_dir || p3_check_in_mshr || (p3_valid && enableBit && !toMissUnit.enqReq.ready)
+  p3_discard := p3_exception || p3_hit_dir || p3_check_in_mshr || (p3_valid && enableBit && !toMissUnit.enqReq.ready)
 
   toMissUnit.enqReq.valid             := p3_valid && enableBit && !p3_discard
   toMissUnit.enqReq.bits.paddr        := p3_paddr
