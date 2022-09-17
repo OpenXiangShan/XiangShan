@@ -690,7 +690,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     */
   //f3_fire is after wb_valid
   when(wb_valid && RegNext(f3_hasLastHalf,init = false.B) 
-        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) && !f3_fire  && !RegNext(f3_fire,init = false.B)
+        && wb_check_result_stage2.fixedMissPred(PredictWidth - 1) && !f3_fire  && !RegNext(f3_fire,init = false.B) && !f3_flush
       ){
     f3_lastHalf_disable := true.B
   }
