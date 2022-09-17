@@ -716,8 +716,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   (0 until LoadQueueSize).map(i => {
     when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
-      allocated(i) && 
-      writebacked(i) &&
+      allocated(i) &&
+      datavalid(i) &&
       release1cycle.valid
     )){
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
