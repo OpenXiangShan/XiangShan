@@ -346,10 +346,23 @@ class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
 }
 
+class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
+  val data    = UInt(DataBits.W)
+  val miss    = Bool()
+  val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+  val replay  = Bool()
+  val error   = Bool()
+
+  val ack_miss_queue = Bool()
+
+  val id     = UInt(reqIdWidth.W)
+}
+
 class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReqWithVaddr)
-  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+  val req  = DecoupledIO(new MainPipeReq)
+  val resp = Flipped(ValidIO(new AtomicsResp))
+  val block_lr = Input(Bool())
 }
 
 // used by load unit
@@ -448,7 +461,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
-  val atomicsReplayUnit = Module(new AtomicsReplayEntry)
+  // val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
   val missQueue  = Module(new MissQueue(edge))
@@ -549,9 +562,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // atomics
   // atomics not finished yet
-  io.lsu.atomics <> atomicsReplayUnit.io.lsu
-  atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
-  atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
+  // io.lsu.atomics <> atomicsReplayUnit.io.lsu
+  io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
+  io.lsu.atomics.block_lr := mainPipe.io.block_lr
+  // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   //----------------------------------------
   // miss queue
@@ -602,7 +617,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
   arbiter_with_pipereg(
-    in = Seq(missQueue.io.main_pipe_req, atomicsReplayUnit.io.pipe_req),
+    in = Seq(missQueue.io.main_pipe_req, io.lsu.atomics.req),
     out = mainPipe.io.atomic_req,
     name = Some("main_pipe_atomic_req")
   )

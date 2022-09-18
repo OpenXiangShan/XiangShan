@@ -50,6 +50,8 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   })
 
   val llptw = DecoupledIO(new LLPTWInBundle())
+  // NOTE: llptw change from "connect to llptw" to "connect to page cache"
+  // to avoid corner case that caused duplicate entries
 
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())

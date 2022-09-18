@@ -93,19 +93,25 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
     val source = UInt(bSourceWidth.W)
-  }, if (l2tlbParams.enablePrefetch) 3 else 2))
+  }, if (l2tlbParams.enablePrefetch) 4 else 3))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
 
+  // arb2 input port
+  val InArbPTWPort = 0
+  val InArbMissQueuePort = 1
+  val InArbTlbPort = 2
+  val InArbPrefetchPort = 3
   // NOTE: when cache out but miss and ptw doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
-  arb1.io.out.ready := arb2.io.in(1).ready
+  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready
 
-  val InArbMissQueuePort = 0
-  val InArbTlbPort = 1
-  val InArbPrefetchPort = 2
+  arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
+  arb2.io.in(InArbPTWPort).bits.vpn := ptw.io.llptw.bits.req_info.vpn
+  arb2.io.in(InArbPTWPort).bits.source := ptw.io.llptw.bits.req_info.source
+  ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
@@ -124,14 +130,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   arb2.io.out.ready := cache.io.req.ready
 
-  val LLPTWARB_CACHE=0
-  val LLPTWARB_PTW=1
-  val llptw_arb = Module(new Arbiter(new LLPTWInBundle, 2))
-  llptw_arb.io.in(LLPTWARB_CACHE).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
-  llptw_arb.io.in(LLPTWARB_CACHE).bits.req_info := cache.io.resp.bits.req_info
-  llptw_arb.io.in(LLPTWARB_CACHE).bits.ppn := cache.io.resp.bits.toFsm.ppn
-  llptw_arb.io.in(LLPTWARB_PTW) <> ptw.io.llptw
-  llptw.io.in <> llptw_arb.io.out
+  llptw.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
+  llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
+  llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw.io.sfence := sfence
   llptw.io.csr := csr
 
@@ -144,7 +145,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
     outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw_arb.io.in(LLPTWARB_CACHE).ready,
+    Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw.io.in.ready,
     Mux(cache.io.resp.bits.bypassed, missQueue.io.in.ready, missQueue.io.in.ready || ptw.io.req.ready)))
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
