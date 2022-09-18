@@ -145,8 +145,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   ptw_to_l2_buffer.node := ptw.node
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
-  val intWbPorts = wbArbiter.intWbPorts
-  val fpWbPorts = wbArbiter.fpWbPorts
+  val intWbPorts: Seq[Seq[ExuConfig]] = wbArbiter.intWbPorts
+  val fpWbPorts: Seq[Seq[ExuConfig]] = wbArbiter.fpWbPorts
 
   // TODO: better RS organization
   // generate rs according to number of function units
@@ -159,33 +159,53 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val schedulePorts = Seq(
     // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
     Seq(
-      (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
-      (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg), Seq()),
-      (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
-      (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
-      (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
-      (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
+      ScheLaneBaseConfig(
+        AluExeUnitCfg,
+        exuParameters.AluCnt,
+        Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg)),
+      ScheLaneBaseConfig(
+        MulDivExeUnitCfg,
+        exuParameters.MduCnt,
+        Seq(AluExeUnitCfg, MulDivExeUnitCfg)),
+      ScheLaneBaseConfig(
+        JumpCSRExeUnitCfg,
+        1),
+      ScheLaneBaseConfig(
+        LdExeUnitCfg,
+        exuParameters.LduCnt,
+        Seq(AluExeUnitCfg, LdExeUnitCfg)),
+      ScheLaneBaseConfig(StaExeUnitCfg,
+        exuParameters.StuCnt),
+      ScheLaneBaseConfig(
+        StdExeUnitCfg,
+        exuParameters.StuCnt)
     ),
     Seq(
-      (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
-      (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq())
+      ScheLaneBaseConfig(
+        FmacExeUnitCfg,
+        exuParameters.FmacCnt,
+        Seq(),
+        Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
+      ScheLaneBaseConfig(
+        FmiscExeUnitCfg,
+        exuParameters.FmiscCnt)
     )
   )
 
   // should do outer fast wakeup ports here
-  val otherFastPorts = schedulePorts.zipWithIndex.map { case (sche, i) =>
+  val otherFastPorts: Seq[Seq[Seq[Int]]] = schedulePorts.zipWithIndex.map { case (sche, i) =>
     val otherCfg = schedulePorts.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
     val outerPorts = sche.map(cfg => {
       // exe units from this scheduler need fastUops from exeunits
-      val outerWakeupInSche = sche.filter(_._1.wakeupFromExu)
-      val intraIntScheOuter = outerWakeupInSche.filter(_._3.contains(cfg._1)).map(_._1)
-      val intraFpScheOuter = outerWakeupInSche.filter(_._4.contains(cfg._1)).map(_._1)
+      val outerWakeupInSche = sche.filter(_.exuConfig.wakeupFromExu)
+      val intraIntScheOuter = outerWakeupInSche.filter(_.intFastWakeupTarget.contains(cfg.exuConfig)).map(_.exuConfig)
+      val intraFpScheOuter = outerWakeupInSche.filter(_.fpFastWakeupTarget.contains(cfg.exuConfig)).map(_.exuConfig)
       // exe units from other schedulers need fastUop from outside
-      val otherIntSource = otherCfg.filter(_._3.contains(cfg._1)).map(_._1)
-      val otherFpSource = otherCfg.filter(_._4.contains(cfg._1)).map(_._1)
+      val otherIntSource = otherCfg.filter(_.intFastWakeupTarget.contains(cfg.exuConfig)).map(_.exuConfig)
+      val otherFpSource = otherCfg.filter(_.fpFastWakeupTarget.contains(cfg.exuConfig)).map(_.exuConfig)
       val intSource = findInWbPorts(intWbPorts, intraIntScheOuter ++ otherIntSource)
       val fpSource = findInWbPorts(fpWbPorts, intraFpScheOuter ++ otherFpSource)
-      getFastWakeupIndex(cfg._1, intSource, fpSource, intWbPorts.length).sorted
+      getFastWakeupIndex(cfg.exuConfig, intSource, fpSource, intWbPorts.length).sorted
     })
     println(s"inter-scheduler wakeup sources for $i: $outerPorts")
     outerPorts
@@ -193,16 +213,21 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
-    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
-    else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
-    else Seq((0, i))
+    if (i < exuParameters.JmpCnt) Seq(
+      DpPortMapConfig(0, i),
+      DpPortMapConfig(1, i),
+      DpPortMapConfig(2, i))
+    else if (i < 2 * exuParameters.MduCnt) Seq(
+      DpPortMapConfig(0, i),
+      DpPortMapConfig(1, i))
+    else Seq(DpPortMapConfig(0, i))
   })
-  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq((3, i))) ++
-                  (0 until exuParameters.StuCnt).map(i => Seq((4, i))) ++
-                  (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
+  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq(DpPortMapConfig(3, i))) ++
+                  (0 until exuParameters.StuCnt).map(i => Seq(DpPortMapConfig(4, i))) ++
+                  (0 until exuParameters.StuCnt).map(i => Seq(DpPortMapConfig(5, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
-    if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
-    else Seq((0, i))
+    if (i < 2 * exuParameters.FmiscCnt) Seq(DpPortMapConfig(0, i), DpPortMapConfig(1, i))
+    else Seq(DpPortMapConfig(0, i))
   })
 
   val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts)

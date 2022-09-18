@@ -25,8 +25,8 @@ import xiangshan._
 import xiangshan.backend.exu._
 
 class ExuBlock(
-  val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],
-  val dpPorts: Seq[Seq[(Int, Int)]],
+  val configs: Seq[ScheLaneBaseConfig],
+  val dpPorts: Seq[Seq[DpPortMapConfig]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
   val outFastPorts: Seq[Seq[Int]],
@@ -37,11 +37,11 @@ class ExuBlock(
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource with HasExuWbHelper {
   val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
 
-  val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts
+  val allRfWbPorts: Seq[Seq[ExuConfig]] = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)
 
-  val fuConfigs = configs.map(c => (c._1, c._2)).filter(_._1.extendsExu)
-  val numOutFu = configs.filterNot(_._1.extendsExu).map(_._2).sum
+  val fuConfigs: Seq[(ExuConfig, Int)] = configs.map(c => (c.exuConfig, c.numDeq)).filter(_._1.extendsExu)
+  val numOutFu: Int = configs.filterNot(_.exuConfig.extendsExu).map(_.numDeq).sum
 
   lazy val module = new ExuBlockImp(this)
 
