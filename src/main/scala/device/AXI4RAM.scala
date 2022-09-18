@@ -59,11 +59,11 @@ class AXI4RAM
 
     def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt()
 
-    def inRange(idx: UInt) = idx < (memByte / beatBytes).U
+    def inRange(addr: UInt) = addr < (baseAddress + memByte).U
 
     val wIdx = index(waddr) + writeBeatCnt
     val rIdx = index(raddr) + readBeatCnt
-    val wen = in.w.fire() && inRange(wIdx)
+    val wen = in.w.fire() && inRange(waddr)
     require(beatBytes >= 8)
 
     val rdata = if (useBlackBox) {

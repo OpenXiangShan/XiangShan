@@ -44,7 +44,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   if(!useDRAMSim){
     val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.misc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
+      l_soc.misc.memAXI4SlaveNode, 16L * 1024 * 1024 * 1024, useBlackBox = true
     ))
     val simAXIMem = Module(l_simAXIMem.module)
     l_simAXIMem.io_axi4 <> soc.memory
