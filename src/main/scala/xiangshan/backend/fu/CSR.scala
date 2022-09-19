@@ -906,7 +906,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Branch control
   val retTarget = WireInit(0.U)
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
+  val writeFrmOrFcsr = wen && (addr === Fcsr.U || addr === Frm.U)
+  val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
+  flushPipe := resetSatp || writeFrmOrFcsr || isXRet
 
   private val illegalRetTarget = WireInit(false.B)
 
@@ -1109,7 +1111,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val clearTval = !updateTval || hasIntr
-  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
