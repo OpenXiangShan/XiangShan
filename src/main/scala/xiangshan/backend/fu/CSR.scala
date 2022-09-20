@@ -507,14 +507,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // spfctl Bit [15:10]: L1D prefetch active page stride
   // turn off L2 BOP, turn on L1 SMS by default
   val spfctl = RegInit(UInt(XLEN.W), Seq(
-    30 << 10,    // L1D active page stride [15:10]
-    12 << 6,    // L1D active page threshold [9:6]
-    1  << 5,    // L1D enable pht [5]
-    1  << 4,    // L1D enable agt [4]
-    0  << 3,    // L1D train on hit [3]
-    1  << 2,    // L1D pf enable [2]
-    0  << 1,    // L2 pf enable [1]
-    1  << 0,    // L1I pf enable [0]
+    0 << 16,    // L2 pf store only [16] init: false
+    30 << 10,   // L1D active page stride [15:10] init: 30
+    12 << 6,    // L1D active page threshold [9:6] init: 12
+    1  << 5,    // L1D enable pht [5] init: true
+    1  << 4,    // L1D enable agt [4] init: true
+    0  << 3,    // L1D train on hit [3] init: false
+    1  << 2,    // L1D pf enable [2] init: true
+    1  << 1,    // L2 pf enable [1] init: true
+    1  << 0,    // L1I pf enable [0] init: true
   ).reduce(_|_).U(XLEN.W))
   csrio.customCtrl.l1I_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
@@ -524,6 +525,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.l1D_pf_enable_pht := spfctl(5)
   csrio.customCtrl.l1D_pf_active_threshold := spfctl(9, 6)
   csrio.customCtrl.l1D_pf_active_stride := spfctl(15, 10)
+  csrio.customCtrl.l2_pf_store_only := spfctl(16)
 
   // sfetchctl Bit 0: L1I Cache Parity check enable
   val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
