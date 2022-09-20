@@ -150,6 +150,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     })
+    val l2_pf_store_only = Input(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -421,7 +422,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
   // trigger prefetch
-  io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := true.B)
+  io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isStore, true.B))
   // prefer not to cache data in L2 by default
   io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   require(nSets <= 256)
@@ -568,6 +569,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     }))
+    val l2_pf_store_only = Input(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -617,6 +619,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
       
       e.io.id := i.U
+      e.io.l2_pf_store_only := io.l2_pf_store_only
       e.io.req.valid := io.req.valid
       e.io.primary_valid := io.req.valid && 
         !merge && 
