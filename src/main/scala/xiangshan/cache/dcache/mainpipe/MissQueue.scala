@@ -167,6 +167,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val req_handled_by_this_entry = Output(Bool())
 
     val forwardInfo = Output(new MissEntryForwardIO)
+    val l2_pf_store_only = Input(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -611,6 +612,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+    val l2_pf_store_only = Input(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -677,6 +679,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       
       e.io.hartId := io.hartId
       e.io.id := i.U
+      e.io.l2_pf_store_only := io.l2_pf_store_only
       e.io.req.valid := io.req.valid
       e.io.primary_valid := io.req.valid && 
         !merge && 
