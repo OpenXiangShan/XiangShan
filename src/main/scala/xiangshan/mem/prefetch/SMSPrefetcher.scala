@@ -100,6 +100,7 @@ class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val pht_tag = UInt(PHT_TAG_BITS.W)
   val region_bits = UInt(REGION_BLKS.W)
   val region_tag = UInt(REGION_TAG_WIDTH.W)
+  val region_offset = UInt(REGION_OFFSET.W)
   val access_cnt = UInt((REGION_BLKS-1).U.getWidth.W)
   val decr_mode = Bool()
 }
@@ -181,6 +182,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s0_agt_entry.pht_tag := s0_lookup.pht_tag
   s0_agt_entry.region_bits := region_offset_to_bits(s0_lookup.region_offset)
   s0_agt_entry.region_tag := s0_lookup.region_tag
+  s0_agt_entry.region_offset := s0_lookup.region_offset
   s0_agt_entry.access_cnt := 1.U
   // lookup_region + 1 == entry_region
   // lookup_region = entry_region - 1 => decr mode
@@ -403,9 +405,9 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     lookup.bits.pht_index
   )
   val s0_tag = Mux(evict.valid, evict.bits.pht_tag, lookup.bits.pht_tag)
+  val s0_region_offset = Mux(evict.valid, evict.bits.region_offset, lookup.bits.region_offset)
   val s0_region_paddr = lookup.bits.region_paddr
   val s0_region_vaddr = lookup.bits.region_vaddr
-  val s0_region_offset = lookup.bits.region_offset
   val s0_region_bits = evict.bits.region_bits
   val s0_decr_mode = evict.bits.decr_mode
   val s0_evict = evict.valid
