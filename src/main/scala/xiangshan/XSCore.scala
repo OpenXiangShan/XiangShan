@@ -449,7 +449,7 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
         ResetGenNode(
-          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
+          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module) :+ ModuleNode(wb2Ctrl)
         ),
         ResetGenNode(Seq(
           ModuleNode(ctrlBlock),

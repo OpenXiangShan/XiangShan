@@ -204,6 +204,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
+<<<<<<< HEAD
     // MBIST Interface Implementation begins
 
     val xsl2_ultiscan = IO(core_with_l2.head.module.ultiscanIO.cloneType)
@@ -258,10 +259,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.reset.asBool)
     misc.module.debug_module_io.clock := childClock.asBool
-    misc.module.debug_module_io.reset := childReset
+    misc.module.debug_module_io.reset := misc.module.reset
 
     // TODO: use synchronizer?
-    misc.module.debug_module_io.debugIO.reset := childReset
+    misc.module.debug_module_io.debugIO.reset := misc.module.reset
     misc.module.debug_module_io.debugIO.clock := childClock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
