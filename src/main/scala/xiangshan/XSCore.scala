@@ -437,7 +437,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
         ResetGenNode(
-          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
+          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module) :+ ModuleNode(wb2Ctrl)
         ),
         ResetGenNode(Seq(
           ModuleNode(ctrlBlock),

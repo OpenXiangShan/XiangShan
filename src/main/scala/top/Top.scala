@@ -179,9 +179,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock
-    misc.module.debug_module_io.reset := reset_sync
+    misc.module.debug_module_io.reset := misc.module.reset
 
-    misc.module.debug_module_io.debugIO.reset := reset_sync
+    misc.module.debug_module_io.debugIO.reset := misc.module.reset
     misc.module.debug_module_io.debugIO.clock := io.clock.asClock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
