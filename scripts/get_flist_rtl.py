@@ -4,7 +4,9 @@ import sys
 def get_dir_files(file_dir):
   file_list = []
   for root, dirs, files in os.walk(file_dir):
-    file_list += files
+    for f in files:
+      if not (f.startswith("STD_CLKGT")):
+        file_list.append(f)
   #print(file_list)
   return file_list
 
