@@ -1107,7 +1107,6 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
   update.br_taken_mask     := ftbEntryGen.taken_mask
   update.jmp_taken         := ftbEntryGen.jmp_taken
 
-  // update.is_minimal := false.B
   // update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
   // update.full_pred.jalr_target := commit_target
   // update.full_pred.hit := true.B

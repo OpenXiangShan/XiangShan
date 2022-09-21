@@ -396,29 +396,6 @@ trait BasicPrediction extends HasXSParameter {
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
 }
-class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry with BasicPrediction {
-  val valid = Bool()
-  def cfiIndex = {
-    val res = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-    res.valid := taken && valid
-    res.bits := cfiOffset | Fill(res.bits.getWidth, !valid)
-    res
-  }
-  def target(pc: UInt) = nextAddr
-  def lastBrPosOH: Vec[Bool] = VecInit(brNumOH.asBools())
-  def brTaken = takenOnBr
-  def shouldShiftVec: Vec[Bool] = VecInit((0 until numBr).map(i => lastBrPosOH.drop(i+1).reduce(_||_)))
-  def fallThruError: Bool = false.B // we do this check on the following stages
-
-  def fromMicroBTBEntry(valid: Bool, entry: NewMicroBTBEntry, pc: UInt) = {
-    this.valid := valid
-    this.nextAddr := Mux(valid, entry.nextAddr, pc + (FetchWidth*4).U)
-    this.cfiOffset := entry.cfiOffset | Fill(cfiOffset.getWidth, !valid)
-    this.taken := entry.taken && valid
-    this.takenOnBr := entry.takenOnBr && valid
-    this.brNumOH := Mux(valid, entry.brNumOH, 1.U((numBr+1).W))
-  }
-}
 @chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
@@ -557,29 +534,22 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   val pc    = Vec(numDup, UInt(VAddrBits.W))
   val valid = Vec(numDup, Bool())
 
-  val minimal_pred = Vec(numDup, new MinimalBranchPrediction)
   val full_pred    = Vec(numDup, new FullBranchPrediction)
   val hasRedirect  = Vec(numDup, Bool())
   
-  val is_minimal = Vec(numDup, Bool())
-
   val ftq_idx = new FtqPtr
 
-  def getPredDup[T <: Data](f: BasicPrediction => T) =
-    for (is_m & mp & fp <- is_minimal zip minimal_pred zip full_pred) yield {
-      Mux(is_m, f(mp), f(fp))
-    }
-  def getPredDupWithPC[T <: Data](f: BasicPrediction =>(UInt => T)) =
-    for (is_m & mp & fp & p <- is_minimal zip minimal_pred zip full_pred zip pc) yield {
-      Mux(is_m, f(mp)(p), f(fp)(p))
+  def getPredDupWithPC[T <: Data](f: BasicPrediction =>(UInt => T)) = 
+    for (fp & p <- full_pred zip pc) yield {
+      f(fp)(p)
     }
 
-  def target         = VecInit(getPredDupWithPC(_.target))
-  def cfiIndex       = VecInit(getPredDup(_.cfiIndex))
-  def lastBrPosOH    = VecInit(getPredDup(_.lastBrPosOH))
-  def brTaken        = VecInit(getPredDup(_.brTaken))
-  def shouldShiftVec = VecInit(getPredDup(_.shouldShiftVec))
-  def fallThruError  = VecInit(getPredDup(_.fallThruError))
+  def target         = VecInit(full_pred.zip(pc).map {case (fp, p) => fp.target(p)})
+  def cfiIndex       = VecInit(full_pred.map(_.cfiIndex))
+  def lastBrPosOH    = VecInit(full_pred.map(_.lastBrPosOH))
+  def brTaken        = VecInit(full_pred.map(_.brTaken))
+  def shouldShiftVec = VecInit(full_pred.map(_.shouldShiftVec))
+  def fallThruError  = VecInit(full_pred.map(_.fallThruError))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
@@ -607,7 +577,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
         ((s2.valid(dupForFtq) && s2.hasRedirect(dupForFtq)) -> s2),
         (s1.valid(dupForFtq) -> s1)
       ))
-    // println("is minimal: ", res.is_minimal)
     res
   }
   def selectedRespIdxForFtq =

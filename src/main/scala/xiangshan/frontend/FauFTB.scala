@@ -183,8 +183,6 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
       p"fauftb s1 pred $i differs from pred 0\n")
   }
 
-  io.out.s1.is_minimal.foreach(_ := false.B)
-
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
   resp_meta.hit := RegEnable(RegEnable(s1_hit_dup(0), io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))

@@ -447,13 +447,11 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
         full_pred.fromFtbEntry(s2_ftb_entry, s2_pc, Some((s1_pc, s1_fire)))
       }
     }
-  io.out.s2.is_minimal.map(_ := false.B)
 
   // s3
   val s3_full_pred = io.s2_fire.zip(io.out.s2.full_pred).map {case (f, fp) => RegEnable(fp, f)}
   // br_taken_mask from SC in stage3 is covered here, will be recovered in always taken logic
   io.out.s3.full_pred := s3_full_pred
-  io.out.s3.is_minimal.map(_ := false.B)
 
   val s3_fauftb_hit_ftb_miss = RegEnable(!s2_ftb_hit_dup(dupForFtb) && s2_uftb_hit_dup(dupForFtb), io.s2_fire(dupForFtb))
   io.out.last_stage_ftb_entry := Mux(s3_fauftb_hit_ftb_miss, io.in.bits.resp_in(0).last_stage_ftb_entry, s3_ftb_entry_dup(dupForFtb))
