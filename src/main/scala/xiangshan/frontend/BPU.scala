@@ -436,12 +436,19 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     b.register(w.reduce(_||_), s1_ghv_wdatas(i), Some(s"s1_new_bit_$i"), 4)
   }
 
-  def preds_needs_redirect_vec(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
+  class PreviousPredInfo extends Bundle {
+    val target = UInt(VAddrBits.W)
+    val lastBrPosOH = UInt((numBr+1).W)
+    val taken = Bool()
+    val cfiIndex = UInt(log2Ceil(PredictWidth).W)
+  }
+
+  def preds_needs_redirect_vec(x: PreviousPredInfo, y: BranchPredictionBundle) = {
     VecInit(
-      x.getTarget =/= y.getTarget,
-      x.lastBrPosOH.asUInt =/= y.lastBrPosOH.asUInt,
+      x.target =/= y.getTarget,
+      x.lastBrPosOH =/= y.lastBrPosOH.asUInt,
       x.taken =/= y.taken,
-      (x.taken && y.taken) && x.cfiIndex.bits =/= y.cfiIndex.bits,
+      (x.taken && y.taken) && x.cfiIndex =/= y.cfiIndex.bits,
       // x.shouldShiftVec.asUInt =/= y.shouldShiftVec.asUInt,
       // x.brTaken =/= y.brTaken
     )
@@ -481,9 +488,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s1_pred = RegEnable(resp.s1, 0.U.asTypeOf(resp.s1), s1_fire)
+  val s1_pred_info = Wire(new PreviousPredInfo)
+  s1_pred_info.target := resp.s1.getTarget
+  s1_pred_info.lastBrPosOH := resp.s1.lastBrPosOH.asUInt
+  s1_pred_info.taken := resp.s1.taken
+  s1_pred_info.cfiIndex := resp.s1.cfiIndex.bits
 
-  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred, resp.s2)
+  val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(s1_pred_info), s1_fire)
+
+  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred_info, resp.s2)
 
   s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
 
