@@ -635,7 +635,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // access tag tables and output meta info
 
   for (i <- 0 until numBr) {
-    val use_alt_on_pvdr_unconf = Wire(Bool())
     val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc_dup(1)), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
 
