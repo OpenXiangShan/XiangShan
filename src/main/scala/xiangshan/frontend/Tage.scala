@@ -92,6 +92,7 @@ class TageReq(implicit p: Parameters) extends TageBundle {
 class TageResp(implicit p: Parameters) extends TageBundle {
   val ctr = UInt(TageCtrBits.W)
   val u = Bool()
+  val unconf = Bool()
 }
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
@@ -326,24 +327,28 @@ class TageTable
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
   val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
+  val resp_invalid_by_write = Wire(Bool())
 
   val tables_r = table_banks.map(_.io.r.resp.data) // s1
+  val unconfs = tables_r.map(r => VecInit(r.map(e => WireInit(unconf(e.ctr))))) // do unconf cal in parallel
+  val hits = tables_r.map(r => VecInit(r.map(e => e.tag === s1_tag && e.valid && !resp_invalid_by_write))) // do tag compare in parallel
 
   val resp_selected = Mux1H(s1_bank_req_1h, tables_r)
-  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
+  val unconf_selected = Mux1H(s1_bank_req_1h, unconfs)
+  val hit_selected = Mux1H(s1_bank_req_1h, hits)
+  resp_invalid_by_write := Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
 
 
   val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), resp_selected)))
+  val per_br_unconf = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), unconf_selected)))
+  val per_br_hit = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), hit_selected)))
   val per_br_u    = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), us.io.r.resp.data)))
 
-  val req_rhits = VecInit((0 until numBr).map(i =>
-    per_br_resp(i).valid && per_br_resp(i).tag === s1_tag && !resp_invalid_by_write
-  ))
-
   for (i <- 0 until numBr) {
-    io.resps(i).valid := req_rhits(i)
+    io.resps(i).valid := per_br_hit(i)
     io.resps(i).bits.ctr := per_br_resp(i).ctr
     io.resps(i).bits.u := per_br_u(i)
+    io.resps(i).bits.unconf := per_br_unconf(i)
   }
 
   if (EnableGHistDiff) {
@@ -489,8 +494,8 @@ class TageTable
     p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
     p"idx=$s0_idx, tag=$s0_tag\n")
   for (i <- 0 until numBr) {
-    XSDebug(RegNext(io.req.fire) && req_rhits(i),
-      p"TageTableResp_br_$i: idx=$s1_idx, hit:${req_rhits(i)}, " +
+    XSDebug(RegNext(io.req.fire) && per_br_hit(i),
+      p"TageTableResp_br_$i: idx=$s1_idx, hit:${per_br_hit(i)}, " +
       p"ctr:${io.resps(i).bits.ctr}, u:${io.resps(i).bits.u}\n")
     XSDebug(io.update.mask(i),
       p"update Table_br_$i: pc:${Hexadecimal(u.pc)}}, " +
@@ -500,7 +505,7 @@ class TageTable
     XSDebug(io.update.mask(i),
       p"update Table_$i: writing tag:$update_tag, " +
       p"ctr: ${per_bank_update_wdata(bank)(pi).ctr} in idx ${update_idx}\n")
-    XSDebug(RegNext(io.req.fire) && !req_rhits(i), p"TageTableResp_$i: not hit!\n")
+    XSDebug(RegNext(io.req.fire) && !per_br_hit(i), p"TageTableResp_$i: not hit!\n")
   }
 
   // ------------------------------Debug-------------------------------------
@@ -622,14 +627,20 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   class TageTableInfo(implicit p: Parameters) extends XSBundle {
     val resp = new TageResp
     val tableIdx = UInt(log2Ceil(TageNTables).W)
+    val use_alt_on_unconf = Bool()
   }
   // access tag tables and output meta info
 
   for (i <- 0 until numBr) {
+    val use_alt_on_pvdr_unconf = Wire(Bool())
+    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc_dup(1)), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
+    val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
+
     val s1_per_br_resp = VecInit(s1_resps.map(_(i)))
     val inputRes = s1_per_br_resp.zipWithIndex.map{case (r, idx) => {
       val tableInfo = Wire(new TageTableInfo)
       tableInfo.resp := r.bits
+      tableInfo.use_alt_on_unconf := r.bits.unconf && useAltOnNa
       tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
       (r.valid, tableInfo)
     }}
@@ -666,19 +677,16 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
 
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire(1))
 
-    val providerUnconf = unconf(providerInfo.resp.ctr)
-    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc_dup(1)), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
-    val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
     val s1_bimCtr = bt.io.s1_cnt(i)
     s1_tageTakens(i) :=
-      Mux(!provided || providerUnconf && useAltOnNa,
+      Mux(!provided || providerInfo.use_alt_on_unconf,
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
-    s1_altUsed(i)       := !provided || providerUnconf && useAltOnNa
+    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
-    s1_useAltOnNa(i)    := providerUnconf && useAltOnNa
+    s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire(1))
     resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens_dup(0)(i), io.s2_fire(1))
