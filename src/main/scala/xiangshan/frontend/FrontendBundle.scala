@@ -395,29 +395,6 @@ trait BasicPrediction extends HasXSParameter {
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
 }
-class MinimalBranchPrediction(implicit p: Parameters) extends NewMicroBTBEntry with BasicPrediction {
-  val valid = Bool()
-  def cfiIndex = {
-    val res = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-    res.valid := taken && valid
-    res.bits := cfiOffset | Fill(res.bits.getWidth, !valid)
-    res
-  }
-  def target(pc: UInt) = nextAddr
-  def lastBrPosOH: Vec[Bool] = VecInit(brNumOH.asBools())
-  def brTaken = takenOnBr
-  def shouldShiftVec: Vec[Bool] = VecInit((0 until numBr).map(i => lastBrPosOH.drop(i+1).reduce(_||_)))
-  def fallThruError: Bool = false.B // we do this check on the following stages
-
-  def fromMicroBTBEntry(valid: Bool, entry: NewMicroBTBEntry, pc: UInt) = {
-    this.valid := valid
-    this.nextAddr := Mux(valid, entry.nextAddr, pc + (FetchWidth*4).U)
-    this.cfiOffset := entry.cfiOffset | Fill(cfiOffset.getWidth, !valid)
-    this.taken := entry.taken && valid
-    this.takenOnBr := entry.takenOnBr && valid
-    this.brNumOH := Mux(valid, entry.brNumOH, 1.U((numBr+1).W))
-  }
-}
 @chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
@@ -552,25 +529,19 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
 @chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
-  // def full_pred_info[T <: Data](x: T) = if (is_minimal) None else Some(x)
   val pc = UInt(VAddrBits.W)
-
   val valid = Bool()
-
   val hasRedirect = Bool()
   val ftq_idx = new FtqPtr
-  // val hit = Bool()
-  val is_minimal = Bool()
-  val minimal_pred = new MinimalBranchPrediction
   val full_pred = new FullBranchPrediction
 
 
-  def target(pc: UInt) = Mux(is_minimal, minimal_pred.target(pc),     full_pred.target(pc))
-  def cfiIndex         = Mux(is_minimal, minimal_pred.cfiIndex,       full_pred.cfiIndex)
-  def lastBrPosOH      = Mux(is_minimal, minimal_pred.lastBrPosOH,    full_pred.lastBrPosOH)
-  def brTaken          = Mux(is_minimal, minimal_pred.brTaken,        full_pred.brTaken)
-  def shouldShiftVec   = Mux(is_minimal, minimal_pred.shouldShiftVec, full_pred.shouldShiftVec)
-  def fallThruError    = Mux(is_minimal, minimal_pred.fallThruError,  full_pred.fallThruError)
+  def target(pc: UInt) = full_pred.target(pc)
+  def cfiIndex         = full_pred.cfiIndex
+  def lastBrPosOH      = full_pred.lastBrPosOH
+  def brTaken          = full_pred.brTaken
+  def shouldShiftVec   = full_pred.shouldShiftVec
+  def fallThruError    = full_pred.fallThruError
 
   def getTarget = target(pc)
   def taken = cfiIndex.valid
@@ -599,7 +570,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
         ((s2.valid && s2.hasRedirect) -> s2),
         (s1.valid -> s1)
       ))
-    // println("is minimal: ", res.is_minimal)
     res
   }
   def selectedRespIdx =

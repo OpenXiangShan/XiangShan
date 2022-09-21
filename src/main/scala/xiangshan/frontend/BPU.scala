@@ -427,8 +427,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  // XSError(!resp.s1.is_minimal, "s1 should be minimal!\n")
-
   npcGen.register(s1_valid, resp.s1.getTarget, Some("s1_target"), 4)
   foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
   ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 4)
@@ -488,8 +486,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred, resp.s2)
 
   s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
-
-  XSError(resp.s2.is_minimal, "s2 should not be minimal!\n")
 
   npcGen.register(s2_redirect, resp.s2.getTarget, Some("s2_target"), 5)
   foldedGhGen.register(s2_redirect, s2_predicted_fh, Some("s2_FGH"), 5)

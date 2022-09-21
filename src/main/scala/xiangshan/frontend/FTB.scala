@@ -425,12 +425,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.s2.full_pred.hit       := s2_hit
   io.out.s2.pc                  := s2_pc
   io.out.s2.full_pred.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
-  io.out.s2.is_minimal := false.B
 
   io.out.s3.full_pred.hit := s3_hit
   io.out.s3.pc                  := s3_pc
   io.out.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
-  io.out.s3.is_minimal := false.B
 
   io.out.last_stage_ftb_entry := s3_ftb_entry
   io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)

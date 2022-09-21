@@ -115,7 +115,6 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
   io.out.s1.full_pred := s1_hit_full_pred
   io.out.s1.full_pred.hit := s1_hit && fauftb_enable
-  io.out.s1.is_minimal := false.B
 
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
