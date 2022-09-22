@@ -30,7 +30,7 @@ trait FauFTBParams extends HasXSParameter with HasBPUConst {
 
   val numDup_local = 2
 
-  def special_idx_for_dup = dupForTage
+  def special_idx_for_dup = dupForTageSC
 
   def getTag(pc: UInt) = pc(tagSize+instOffsetBits-1, instOffsetBits)
 }
@@ -183,8 +183,6 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
       p"fauftb s1 pred $i differs from pred 0\n")
   }
 
-  io.out.s1.is_minimal.foreach(_ := false.B)
-
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
   resp_meta.hit := RegEnable(RegEnable(s1_hit_dup(0), io.s1_fire(dupForUbtb)), io.s2_fire(dupForUbtb))
@@ -205,9 +203,9 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val us = Wire(Vec(numDup_local, io.update(0).cloneType))
   val u_valids = Wire(Vec(numDup_local, Bool()))
   u_valids(0) := io.update(dupForUbtb).valid
-  u_valids(1) := io.update(dupForTage).valid
+  u_valids(1) := io.update(dupForTageSC).valid
   us(0) := io.update(dupForUbtb)
-  us(1) := io.update(dupForTage)
+  us(1) := io.update(dupForTageSC)
   val u_meta_dup = us.map(_.bits.meta.asTypeOf(new FauFTBMeta))
   val u_s0_tag_dup = us.map(u => getTag(u.bits.pc))
   for (b <- 0 until numDup_local) {

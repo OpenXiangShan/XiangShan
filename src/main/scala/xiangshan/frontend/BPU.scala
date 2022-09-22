@@ -39,9 +39,9 @@ trait HasBPUConst extends HasXSParameter {
   val numDup = 5
   def dupForFtq = numDup - 1
   def dupForFtb = 0
-  def dupForTage = 1
+  def dupForTageSC = 1
   def dupForUbtb = 2
-  def dupForScIttage = 3
+  def dupForIttage = 3
   def dupForRas = 2
 
   def BP_STAGES = (0 until 3).map(_.U(2.W))
@@ -436,8 +436,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  // XSError(!resp.s1.is_minimal(0), "s1 should be minimal!\n")
-
   for (npcGen & s1_valid & s1_target <- npcGen_dup zip s1_valid_dup zip resp.s1.target)
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
   for (foldedGhGen & s1_valid & s1_predicted_fh <- foldedGhGen_dup zip s1_valid_dup zip s1_predicted_fh_dup)
@@ -452,11 +450,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     b.register(w.reduce(_||_), s1_ghv_wdatas(i), Some(s"s1_new_bit_$i"), 4)
   }
 
-  def preds_needs_redirect_vec_dup(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
-    val target_diff = x.target.zip(y.target).map {case (t1, t2) => t1 =/= t2 }
-    val lastBrPosOH_diff = x.lastBrPosOH.zip(y.lastBrPosOH).map {case (oh1, oh2) => oh1.asUInt =/= oh2.asUInt}
-    val taken_diff = x.taken.zip(y.taken).map {case (t1, t2) => t1 =/= t2}
-    val takenOffset_diff = x.cfiIndex.zip(y.cfiIndex).map {case (i1, i2) => i1.valid && i2.valid && i1.bits =/= i2.bits}
+  class PreviousPredInfo extends Bundle {
+    val target = UInt(VAddrBits.W)
+    val lastBrPosOH = UInt((numBr+1).W)
+    val taken = Bool()
+    val cfiIndex = UInt(log2Ceil(PredictWidth).W)
+  }
+
+  def preds_needs_redirect_vec_dup(x: Seq[PreviousPredInfo], y: BranchPredictionBundle) = {
+    val target_diff = x.zip(y.target).map {case (t1, t2) => t1.target =/= t2 }
+    val lastBrPosOH_diff = x.zip(y.lastBrPosOH).map {case (oh1, oh2) => oh1.lastBrPosOH.asUInt =/= oh2.asUInt}
+    val taken_diff = x.zip(y.taken).map {case (t1, t2) => t1.taken =/= t2}
+    val takenOffset_diff = x.zip(y.cfiIndex).map {case (i1, i2) => i1.cfiIndex =/= i2.bits}
     VecInit(
       for (tgtd & lbpohd & tkd & tod <-
         target_diff zip lastBrPosOH_diff zip taken_diff zip takenOffset_diff)
@@ -502,14 +507,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s1_pred = RegEnable(resp.s1, init=0.U.asTypeOf(resp.s1), s1_fire_dup(0))
+  val s1_pred_info = dup_wire(new PreviousPredInfo)
+  s1_pred_info.zip(resp.s1.target).map(tp => tp._1.target := tp._2)
+  s1_pred_info.zip(resp.s1.lastBrPosOH).map(tp => tp._1.lastBrPosOH := tp._2.asUInt)
+  s1_pred_info.zip(resp.s1.taken).map(tp => tp._1.taken := tp._2)
+  s1_pred_info.zip(resp.s1.cfiIndex).map(tp => tp._1.cfiIndex := tp._2.bits)
 
-  val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred, resp.s2)
+  val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(s1_pred_info), s1_fire_dup(0))
+
+  val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
   for (s2_redirect & s2_fire & s2_redirect_s1_last_pred_vec <- s2_redirect_dup zip s2_fire_dup zip s2_redirect_s1_last_pred_vec_dup)
     s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
-
-  XSError(resp.s2.is_minimal(0), "s2 should not be minimal!\n")
 
   for (npcGen & s2_redirect & s2_target <- npcGen_dup zip s2_redirect_dup zip resp.s2.target)
     npcGen.register(s2_redirect, s2_target, Some("s2_target"), 5)
