@@ -39,9 +39,9 @@ trait HasBPUConst extends HasXSParameter {
   val numDup = 5
   def dupForFtq = numDup - 1
   def dupForFtb = 0
-  def dupForTage = 1
+  def dupForTageSC = 1
   def dupForUbtb = 2
-  def dupForScIttage = 3
+  def dupForIttage = 3
   def dupForRas = 2
 
   def BP_STAGES = (0 until 3).map(_.U(2.W))
