@@ -346,7 +346,7 @@ class XiangShan(object):
 
     def run_ci(self, test):
         all_tests = {
-            # "cputest": self.__get_ci_cputest,
+            "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
             # "misc-tests": self.__get_ci_misc,
             # "mc-tests": self.__get_ci_mc,
