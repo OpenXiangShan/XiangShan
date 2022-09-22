@@ -357,9 +357,9 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new ITTageTable(parentName + s"table${i}_", nRows, histLen, tagLen, UBitPeriod, i))
-      t.io.req.valid := io.s0_fire(dupForScIttage)
-      t.io.req.bits.pc := s0_pc_dup(dupForScIttage)
-      t.io.req.bits.folded_hist := io.in.bits.folded_hist(dupForScIttage)
+      t.io.req.valid := io.s0_fire(dupForIttage)
+      t.io.req.bits.pc := s0_pc_dup(dupForIttage)
+      t.io.req.bits.folded_hist := io.in.bits.folded_hist(dupForIttage)
       t
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
@@ -369,14 +369,14 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   val tickCtr = RegInit(0.U(TickWidth.W))
 
   // Keep the table responses to process in s2
-  val s0_fire = io.s0_fire(dupForScIttage)
-  val s1_fire = io.s1_fire(dupForScIttage)
-  val s2_fire = io.s2_fire(dupForScIttage)
+  val s0_fire = io.s0_fire(dupForIttage)
+  val s1_fire = io.s1_fire(dupForIttage)
+  val s2_fire = io.s2_fire(dupForIttage)
 
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val s2_resps = RegEnable(s1_resps, s1_fire)
 
-  val debug_pc_s1 = RegEnable(s0_pc_dup(dupForScIttage), enable=s0_fire)
+  val debug_pc_s1 = RegEnable(s0_pc_dup(dupForIttage), enable=s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=s1_fire)
   val debug_pc_s3 = RegEnable(debug_pc_s2, enable=s2_fire)
 
@@ -412,8 +412,8 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   io.out.last_stage_meta := resp_meta.asUInt
 
   // Update logic
-  val u_valid = io.update(dupForScIttage).valid
-  val update = io.update(dupForScIttage).bits
+  val u_valid = io.update(dupForIttage).valid
+  val update = io.update(dupForIttage).bits
   val updateValid =
     update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
     update.jmp_taken
@@ -461,7 +461,7 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   val providerNull = providerInfo.ctr === 0.U
 
   val basePred   = true.B
-  val baseTarget = io.in.bits.resp_in(0).s2.full_pred(dupForScIttage).jalr_target // use ftb pred as base target
+  val baseTarget = io.in.bits.resp_in(0).s2.full_pred(dupForIttage).jalr_target // use ftb pred as base target
 
   s2_tageTaken := Mux1H(Seq(
     (provided && !providerNull, providerInfo.ctr(ITTageCtrBits-1)),
@@ -497,11 +497,11 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   resp_meta.provider.bits     := s3_provider
   resp_meta.altProvider.valid := s3_altProvided
   resp_meta.altProvider.bits  := s3_altProvider
-  resp_meta.altDiffers        := s3_finalAltPred =/= s3_tageTaken_dup(dupForScIttage)
+  resp_meta.altDiffers        := s3_finalAltPred =/= s3_tageTaken_dup(dupForIttage)
   resp_meta.providerU         := s3_providerU
   resp_meta.providerCtr       := s3_providerCtr
   resp_meta.altProviderCtr    := s3_altProviderCtr
-  resp_meta.taken             := s3_tageTaken_dup(dupForScIttage)
+  resp_meta.taken             := s3_tageTaken_dup(dupForIttage)
   resp_meta.providerTarget    := s3_providerTarget
   resp_meta.altProviderTarget := s3_altProviderTarget
   resp_meta.pred_cycle.map(_:= GTimer())
@@ -661,10 +661,10 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
     //   )
     // }
     val s2_resps = RegEnable(s1_resps, s1_fire)
-    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_pc_dup(dupForScIttage))
+    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_pc_dup(dupForIttage))
     XSDebug("s1_fire:%d, resp: pc=%x\n", s1_fire, debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b, taken=%b\n",
-      debug_pc_s2, io.out.s2.target(dupForScIttage), s2_provided, s2_tageTaken)
+      debug_pc_s2, io.out.s2.target(dupForIttage), s2_provided, s2_tageTaken)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,

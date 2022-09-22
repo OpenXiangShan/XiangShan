@@ -599,8 +599,8 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val resp_s3 = io.out.s3
 
   // Update logic
-  val u_valid = io.update(dupForTage).valid
-  val update = io.update(dupForTage).bits
+  val u_valid = io.update(dupForTageSC).valid
+  val update = io.update(dupForTageSC).bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)))
@@ -838,7 +838,7 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
       // use fetch pc instead of instruction pc
       tables(i).io.update.pc       := RegNext(update.pc)
       tables(i).io.update.folded_hist := RegNext(updateFHist)
-      tables(i).io.update.ghist := RegNext(io.update(dupForScIttage).bits.ghist)
+      tables(i).io.update.ghist := RegNext(io.update(dupForTageSC).bits.ghist)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)
