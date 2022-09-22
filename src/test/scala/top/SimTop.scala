@@ -84,6 +84,7 @@ class SimTop(implicit p: Parameters) extends Module {
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
     val memAXI = if(useDRAMSim) soc.memory.cloneType else null
+    val clock_div2 = Output(Bool())
   })
 
   // NOTE: SimMMIO has a 2-divided clock.
@@ -100,6 +101,7 @@ class SimTop(implicit p: Parameters) extends Module {
   if(useDRAMSim){
     io.memAXI <> soc.memory
   }
+  io.clock_div2 := clock_div2.asBool
 
   soc.xsx_fscan := DontCare
   soc.mem := DontCare
