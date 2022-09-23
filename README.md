@@ -20,7 +20,7 @@ Copyright 2020-2022 by Peng Cheng Laboratory.
 
 Our paper introduces XiangShan and the practice of agile development methodology on high performance RISC-V processors.
 It covers some representative tools we have developed and used to accelerate the chip development process, including design, functional verification, debugging, performance validation, etc.
-This paper is awarded all three available badges for artifacts evaluation.
+This paper is awarded all three available badges for artifact evaluation (Available, Functional, and Reproduced).
 
 ![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
 ![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
