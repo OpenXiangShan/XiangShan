@@ -14,6 +14,20 @@ Copyright 2020-2022 by Peng Cheng Laboratory.
 
 * Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
 
+## Publications
+
+### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
+
+Our paper introduces XiangShan and the practice of agile development methodology on high performance RISC-V processors.
+It covers some representative tools we have developed and used to accelerate the chip development process, including design, functional verification, debugging, performance validation, etc.
+This paper is awarded all three available badges for artifacts evaluation.
+
+![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
+![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
+![Results Reproduced](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/results_reproduced_dl.jpg)
+
+[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)
+
 ## Follow us
 
 Wechat/微信：香山开源处理器
@@ -119,13 +133,3 @@ In the development of XiangShan, some sub-modules from the open-source community
 | Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the Diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
 
 We are grateful for the support of the open-source community and encourage other open-source projects to reuse our code within the scope of the [license](LICENSE).
-
-## Publications
-
-### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
-
-Our paper introduces XiangShan and the practice of agile development methodology on high performance RISC-V processors.
-It covers some representative tools we have developed and used to accelerate the chip development process, including design, functional verification, debugging, performance validation, etc.
-This paper is awarded all three available badges for artifacts evaluation.
-
-[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)

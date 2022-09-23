@@ -14,6 +14,20 @@ English Readme is [here](README.md).
 
 * 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
 
+
+## 论文发表情况
+
+### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
+
+我们在 MICRO'22 会议上的论文介绍了香山处理器及敏捷开发实践经验，包括一些面向设计、功能验证、调试、性能评估等方面的敏捷开发工具。论文得到了 Artifact Evaluation 的所有三个徽章。
+
+![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
+![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
+![Results Reproduced](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/results_reproduced_dl.jpg)
+
+[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)
+
+
 ## 关注我们
 
 Wechat/微信：香山开源处理器
@@ -114,11 +128,3 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 | Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | 我们复用了来自 rocket-chip 的 Diplomacy 框架和 Tilelink 工具，来协商总线. |
 
 我们深深地感谢来自开源社区的支持，我们也鼓励其他开源项目在[木兰宽松许可证](LICENSE)的范围下复用我们的代码。
-
-## 论文发表情况
-
-### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
-
-我们在 MICRO'22 会议上的论文介绍了香山处理器及敏捷开发实践经验，包括一些面向设计、功能验证、调试、性能评估等方面的敏捷开发工具。论文得到了 Aritifact Evaluation 的所有三个徽章。
-
-[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)
