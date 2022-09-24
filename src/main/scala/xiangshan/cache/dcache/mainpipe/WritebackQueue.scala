@@ -95,9 +95,9 @@ class ReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
   val data = UInt((cfg.blockBytes * 8).W)
 }
 
-// To reduce fanout, miss queue entry data is updated 1 cycle
+// To reduce fanout, writeback queue entry data is updated 1 cycle
 // after ReleaseUpdate.fire()
-class MissQueueEntryReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
+class WBQEntryReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
   // only consider store here
   val addr = UInt(PAddrBits.W)
   val mask_delayed = UInt(DCacheBanks.W)
@@ -126,7 +126,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val block_addr  = Output(Valid(UInt()))
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
-    val release_update = Flipped(ValidIO(new MissQueueEntryReleaseUpdate))
+    val release_update = Flipped(ValidIO(new WBQEntryReleaseUpdate))
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
@@ -543,13 +543,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_grant.ready   := false.B
 
   // dalay data write in miss queue release update for 1 cycle
-  val release_update_bits_for_entry = Wire(new MissQueueEntryReleaseUpdate)
+  val release_update_bits_for_entry = Wire(new WBQEntryReleaseUpdate)
   release_update_bits_for_entry.addr := io.release_update.bits.addr
   release_update_bits_for_entry.mask_delayed := RegEnable(io.release_update.bits.mask, io.release_update.valid)
   release_update_bits_for_entry.data_delayed := RegEnable(io.release_update.bits.data, io.release_update.valid)
   release_update_bits_for_entry.mask_orr := io.release_update.bits.mask.orR
 
-  // delay data write in miss queue req for 1 cycle
+  // delay data write in writeback req for 1 cycle
   val req_data = RegEnable(io.req.bits.toWritebackReqData(), io.req.valid)
 
   require(isPow2(cfg.nMissEntries))
