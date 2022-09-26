@@ -115,7 +115,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
+    val probe_ttob_check_req = ValidIO(new ProbeToBCheckReq)
+    val probe_ttob_check_resp = Flipped(ValidIO(new ProbeToBCheckResp))
 
+    // data sram
     val data_read_intend = Output(Bool())
     val data_read = DecoupledIO(new L1BankedDataReadLineReq)
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
@@ -124,12 +127,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
     val data_write_ready_dup = Vec(nDupDataWriteReady, Input(Bool()))
 
+    // meta array
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
     val meta_write = DecoupledIO(new MetaWriteReq)
     val error_flag_resp = Input(Vec(nWays, Bool()))
     val error_flag_write = DecoupledIO(new ErrorWriteReq)
 
+    // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
@@ -328,6 +333,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO) && !s1_hit
 
+  val s1_ttob_probe = s1_valid && s1_req.probe && s1_req.probe_param === TLPermissions.toB
+  io.probe_ttob_check_req.valid := s1_ttob_probe
+  io.probe_ttob_check_req.bits.addr := get_block_addr(Cat(s1_tag, get_untag(s1_req.vaddr)))
+
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
@@ -418,6 +427,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
+  val s2_probe_ttob_check_resp = Wire(io.probe_ttob_check_resp.cloneType)
+  s2_probe_ttob_check_resp := Mux(RegNext(s1_fire), io.probe_ttob_check_resp, RegNext(s2_probe_ttob_check_resp))
+
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
   val s3_req = RegEnable(s2_req, s2_fire_to_s3)
@@ -447,7 +459,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_error = RegEnable(s2_error, s2_fire_to_s3) || s3_data_error
   val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
-
+  val s3_probe_ttob_check_resp = RegEnable(s2_probe_ttob_check_resp, s2_fire_to_s3)
 
   // duplicate regs to reduce fanout
   val s3_valid_dup = RegInit(VecInit(Seq.fill(14)(false.B)))
@@ -668,7 +680,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_new_hit_coh_dup_for_meta_w_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
   
   val miss_update_meta_dup_for_meta_w_valid = s3_req_miss_dup_for_meta_w_valid
-  val probe_update_meta_dup_for_meta_w_valid = s3_req_probe_dup_for_meta_w_valid && s3_tag_match_dup_for_meta_w_valid && s3_coh_dup_for_meta_w_valid =/= probe_new_coh_dup_for_meta_w_valid
+  val probe_update_meta_dup_for_meta_w_valid = WireInit(s3_req_probe_dup_for_meta_w_valid && s3_tag_match_dup_for_meta_w_valid && s3_coh_dup_for_meta_w_valid =/= probe_new_coh_dup_for_meta_w_valid)
   val store_update_meta_dup_for_meta_w_valid = s3_req_source_dup_for_meta_w_valid === STORE_SOURCE.U &&
     !s3_req_probe_dup_for_meta_w_valid &&
     s3_hit_coh_dup_for_meta_w_valid =/= s3_new_hit_coh_dup_for_meta_w_valid
@@ -747,12 +759,26 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   when (do_amoalu_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := true.B }
   when (s3_fire_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := false.B }
 
+  // fix probe meta change
+  val s3_probe_ttob_override = s3_valid &&
+    // s3_probe_ttob_check_resp.valid && 
+    s3_probe_ttob_check_resp.bits.toN && 
+    s3_coh_dup_for_meta_w_valid === Trunk
+  val s3_probe_new_coh = Mux(
+    s3_probe_ttob_override,
+    ClientMetadata(Nothing),
+    probe_new_coh_dup_for_meta_w_valid
+  )
+  when(s3_probe_ttob_override) {
+    probe_update_meta_dup_for_meta_w_valid := true.B
+  }
+
   val new_coh = Mux(
     miss_update_meta_dup_for_meta_w_valid,
     miss_new_coh,
     Mux(
       probe_update_meta,
-      probe_new_coh_dup_for_meta_w_valid,
+      s3_probe_new_coh,
       Mux(
         store_update_meta_dup_for_meta_w_valid || amo_update_meta_dup_for_meta_w_valid,
         s3_new_hit_coh_dup_for_meta_w_valid,
