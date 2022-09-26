@@ -174,6 +174,7 @@ abstract class BasePredictor(parentName:String = "Unknown")(implicit p: Paramete
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
+  val is_fast_pred = false
   val io = IO(new BasePredictorIO())
 
   io.out := io.in.bits.resp_in(0)

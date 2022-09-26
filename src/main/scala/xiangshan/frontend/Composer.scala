@@ -27,6 +27,14 @@ import utils._
 class Composer(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, parentName = parentName)
   io.out := resp
+  // shorter path for s1 pred
+  val all_fast_pred = components.filter(_.is_fast_pred)
+  require(all_fast_pred.length <= 1)
+  if (all_fast_pred.length == 1) {
+    val fast_pred = all_fast_pred(0)
+    println("[composer] bypassing output of fast pred: " + fast_pred.name)
+    io.out.s1 := fast_pred.io.out.s1
+  }
 
   var metas = 0.U(1.W)
   var meta_sz = 0
@@ -55,6 +63,7 @@ class Composer(parentName:String = "Unknown")(implicit p: Parameters) extends Ba
     meta_sz = meta_sz + c.meta_size
   }
   println(s"total meta size: $meta_sz\n\n")
+
 
   io.in.ready := components.map(_.io.s1_ready).reduce(_ && _)
 
