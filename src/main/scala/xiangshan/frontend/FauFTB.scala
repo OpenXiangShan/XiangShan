@@ -83,6 +83,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
   val resp_meta = Wire(new FauFTBMeta)
   override val meta_size = resp_meta.getWidth
+  override val is_fast_pred = true
 
 
 
