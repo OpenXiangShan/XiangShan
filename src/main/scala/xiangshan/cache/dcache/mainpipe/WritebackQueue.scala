@@ -105,6 +105,17 @@ class WBQEntryReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
   val mask_orr = Bool()
 }
 
+// When a probe TtoB req enter dcache main pipe, check if that cacheline
+// is waiting for release. If it is so, change TtoB to TtoN, set dcache
+// coh to N.
+class ProbeToBCheckReq(implicit p: Parameters) extends DCacheBundle {
+  val addr = UInt(PAddrBits.W) // paddr from mainpipe s1
+}
+
+class ProbeToBCheckResp(implicit p: Parameters) extends DCacheBundle {
+  val toN = Bool() // need to set dcache coh to N
+}
+
 class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
@@ -127,6 +138,9 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
     val release_update = Flipped(ValidIO(new WBQEntryReleaseUpdate))
+
+    val probe_ttob_check_req = Flipped(ValidIO(new ProbeToBCheckReq))
+    val probe_ttob_check_resp = ValidIO(new ProbeToBCheckResp)
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
@@ -493,6 +507,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid }
   io.secondary_ready := state_dup_1 =/= s_invalid && io.req.bits.addr === paddr_dup_0
 
+  io.probe_ttob_check_resp.valid := RegNext(io.probe_ttob_check_req.valid) // for debug only
+  io.probe_ttob_check_resp.bits.toN := state_dup_1 === s_sleep && 
+    RegNext(io.probe_ttob_check_req.bits.addr) === paddr_dup_0 &&
+    RegNext(io.probe_ttob_check_req.valid)
+
   // data update logic
   when (!s_data_merge) {
     data := mergeData(data, io.release_update.bits.data_delayed, io.release_update.bits.mask_delayed)
@@ -508,6 +527,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   XSPerfAccumulate("wb_req", io.req.fire())
   XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
   XSPerfAccumulate("wb_probe_resp", state_dup_0 === s_release_req && release_done && !req.voluntary)
+  XSPerfAccumulate("wb_probe_ttob_fix", io.probe_ttob_check_resp.valid && io.probe_ttob_check_resp.bits.toN)
   XSPerfAccumulate("penalty_blocked_by_channel_C", io.mem_release.valid && !io.mem_release.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state_dup_1 === s_release_resp)
 }
@@ -521,6 +541,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
     val release_update = Flipped(ValidIO(new ReleaseUpdate))
+
+    val probe_ttob_check_req = Flipped(ValidIO(new ProbeToBCheckReq))
+    val probe_ttob_check_resp = ValidIO(new ProbeToBCheckResp)
 
     val miss_req = Flipped(Valid(UInt()))
     val block_miss_req = Output(Bool())
@@ -583,11 +606,16 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.release_wakeup := io.release_wakeup
       entry.io.release_update.valid := io.release_update.valid
       entry.io.release_update.bits := release_update_bits_for_entry // data write delayed
+
+      entry.io.probe_ttob_check_req := io.probe_ttob_check_req
   }
 
   io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
     rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR
   }
+
+  io.probe_ttob_check_resp.valid := RegNext(io.probe_ttob_check_req.valid) // for debug only
+  io.probe_ttob_check_resp.bits.toN := VecInit(entries.map(e => e.io.probe_ttob_check_resp.bits.toN)).asUInt.orR
 
   assert(RegNext(!(io.mem_grant.valid && !io.mem_grant.ready)))
   io.mem_grant.ready := true.B
