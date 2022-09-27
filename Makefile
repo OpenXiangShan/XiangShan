@@ -26,7 +26,23 @@ SIMTOP  = top.SimTop
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
+ABS_WORK_DIR := $(shell pwd)
+# VCS sim options
+RUN_BIN_DIR ?= $(ABS_WORK_DIR)/ready-to-run
+RUN_BIN ?= coremark-2-iteration
+CONSIDER_FSDB ?= 1
 
+ifdef FLASH
+	RUN_OPTS := +flash=$(RUN_BIN_DIR)/$(RUN_BIN).bin
+else
+	RUN_OPTS := +workload=$(RUN_BIN_DIR)/$(RUN_BIN).bin
+endif
+ifeq ($(CONSIDER_FSDB),1)
+	RUN_OPTS += +dump-wave=fsdb
+endif
+#RUN_OPTS += +diff=$(ABS_WORK_DIR)/ready-to-run/riscv64-nemu-interpreter-so
+RUN_OPTS += +no-diff
+RUN_OPTS += -fgp=num_threads:4,num_fsdb_threads:4
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
 ifndef DRAMSIM3_HOME
@@ -90,7 +106,6 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 
-ABS_WORK_DIR := $(shell pwd)
 FILELIST := $(ABS_WORK_DIR)/build/cpu_flist.f
 sim-verilog: $(SIM_TOP_V)
 	find $(ABS_WORK_DIR)/build -name "*.v" > $(FILELIST)
@@ -124,17 +139,19 @@ simv:
 	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 simv_rtl:
-	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) CONSIDER_FSDB=1
-
-RUN_BIN_DIR ?= $(ABS_WORK_DIR)/ready-to-run
-RUN_BIN ?= coremark-2-iteration.bin
+	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) CONSIDER_FSDB=$(CONSIDER_FSDB)
 
 simv_rtl-run:
-	touch sim/rtl/sim.log
-	cd sim/rtl && (./simv +dump-wave=fsdb +workload=$(RUN_BIN_DIR)/$(RUN_BIN) +diff=$(RUN_BIN_DIR)/riscv64-nemu-interpreter-so | tee -a sim.log)
+	$(shell if [ ! -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN) ];then mkdir -p $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN); fi)
+	touch sim/rtl/$(RUN_BIN)/sim.log
+	$(shell if [ -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv ];then rm -f $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv; fi)
+	$(shell if [ -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir ];then rm -rf $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir; fi)
+	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv
+	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv.daidir $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir
+	cd sim/rtl/$(RUN_BIN) && (./simv $(RUN_OPTS) | tee -a sim.log)
 
 verdi_rtl:
-	cd sim/rtl && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
+	cd sim/rtl/$(RUN_BIN) && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
