@@ -321,7 +321,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val plic = LazyModule(new TLPLIC(PLICParams(0x1f1c000000L), 8))
+  val plicParams = PLICParams(
+    baseAddress = 0x1f1c000000L,
+    maxPriorities = 3
+  )
+  val plic = LazyModule(new TLPLIC(plicParams, 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode
