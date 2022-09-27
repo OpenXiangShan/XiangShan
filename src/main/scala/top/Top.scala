@@ -204,7 +204,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-<<<<<<< HEAD
     // MBIST Interface Implementation begins
 
     val xsl2_ultiscan = IO(core_with_l2.head.module.ultiscanIO.cloneType)
