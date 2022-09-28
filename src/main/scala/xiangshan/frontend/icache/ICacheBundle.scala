@@ -99,3 +99,26 @@ class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
 }
+
+class PIQMetaWrite(implicit p: Parameters) extends  IPrefetchBundle{
+  val tag = UInt(tagBits.W)
+  val index = UInt(idxBits.W)
+}
+
+class PIQDataWrite(implicit p: Parameters) extends  IPrefetchBundle{
+  val data = UInt(blockBits.W)
+}
+
+class ICachePrefetchBundle(implicit p: Parameters) extends ICacheBundle{
+  //prefetch bundle
+  val piq_req         = Flipped(DecoupledIO(new PIQReq))
+  //hit in prefetch buffer
+  val freeReq = Flipped(new PIQFreeReq)
+
+  //write back to Prefetch Buffer
+  val pfbuffer_data_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQDataWrite))
+  val pfbuffer_meta_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQMetaWrite))
+
+  val metaRead    = new ICacheCommonReadBundle(isMeta = true)
+
+}

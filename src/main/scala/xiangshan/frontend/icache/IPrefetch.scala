@@ -31,9 +31,9 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
-  val paddr      = UInt(PAddrBits.W)
+  val addr      = UInt(PAddrBits.W)
+  val vSetIdx   = UInt(idxBits.W)
 }
-
 
 class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
   val enqReq  = DecoupledIO(new PIQReq)
@@ -203,64 +203,119 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
 }
 
-class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends ICacheMissUnitModule
+class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
 {
-  val io = IO(new Bundle {
-    val id = Input(UInt(log2Ceil(PortNumber + nPrefetchEntries).W))
+  val io = IO(new Bundle{
+    val id          = Input(UInt(log2Ceil(nPrefetchEntries).W))
 
-    val req = Flipped(DecoupledIO(new PIQReq))
+    val req         = Flipped(DecoupledIO(new PIQReq))
 
-    //tilelink channel
-    val mem_hint = DecoupledIO(new TLBundleA(edge.bundle))
-    val mem_hint_ack = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
+    //write back to Prefetch Buffer
+    val pfbuffer_data_write  = ValidIO(new PIQDataWrite)
+    val pfbuffer_meta_write  = ValidIO(new PIQMetaWrite)
+
+    //write back to ICache
+    val meta_refill  = DecoupledIO(new ICacheMetaWriteBundle)
+    val data_refill  = DecoupledIO(new ICacheDataWriteBundle)
+
+    //TOO: fencei flush instructions
+    val fencei      = Input(Bool())
+    //hit in prefetch buffer
+    val hitFree     = Input(Bool())
+    //free as a victim
+    val replaceFree = Input(Bool())
   })
 
-  /** default value for control signals */
-  io.mem_hint.bits := DontCare
-  io.mem_hint_ack.ready := true.B
-
-
-  val s_idle  :: s_send_hint :: s_wait_hint_ack :: Nil = Enum(3)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_free :: Nil = Enum(5)
   val state = RegInit(s_idle)
-  /** control logic transformation */
-  //request register
-  val req = Reg(new PIQReq)
-  //initial
-  io.mem_hint.bits := DontCare
-  io.mem_hint_ack.ready := true.B
 
-  io.req.ready := (state === s_idle)
-  io.mem_hint.valid := (state === s_send_hint)
+  //req register
+  val req = Reg(new PIQReq)
+  val req_idx = req.vSetIdx                     //virtual index
+  val req_tag = get_phy_tag(req.addr)           //physical tag
+
+  val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
+
+  //8 for 64 bits bus and 2 for 256 bits
+  val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
+  val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
+
+  //initial
+  io.mem_acquire.bits := DontCare
+  io.mem_grant.ready := true.B
+  io.pfbuffer_meta_write.bits := DontCare
+  io.pfbuffer_data_write.bits := DontCare
+
+  io.req.ready := state === s_idle
+  io.mem_acquire.valid := state === s_memReadReq
+
+  //flush register
+  val needFlush = generateState(enable = io.fencei && (state =/= s_idle) && (state =/= s_wait_free), release = (state=== s_wait_free))
+
+  val freeEntry   = io.hitFree || io.replaceFree
+  val refill_finish = io.meta_refill.fire() && io.data_refill.fire()
+  val needFree    = generateState(enable = freeEntry && (state === s_wait_free),  release = (state=== s_wait_free))
+  val needRefill  = generateState(enable = io.hitFree && (state === s_wait_free), release = (state=== s_wait_free) && refill_finish)
 
   //state change
-  switch(state) {
-    is(s_idle) {
-      when(io.req.fire()) {
-        state := s_send_hint
+  switch(state){
+    is(s_idle){
+      when(io.req.fire()){
+        readBeatCnt := 0.U
+        state := s_memReadReq
         req := io.req.bits
       }
     }
 
     // memory request
-    is(s_send_hint) {
-      when(io.mem_hint.fire()) {
+    is(s_memReadReq){
+      when(io.mem_acquire.fire()){
+        state := s_memReadResp
+      }
+    }
+
+    is(s_memReadResp){
+      when (edge.hasData(io.mem_grant.bits)) {
+        when (io.mem_grant.fire()) {
+          readBeatCnt := readBeatCnt + 1.U
+          respDataReg(readBeatCnt) := io.mem_grant.bits.data
+          when (readBeatCnt === (refillCycles - 1).U) {
+            assert(refill_done, "refill not done!")
+            state := Mux(needFlush, s_idle, s_write_back)
+          }
+        }
+      }
+    }
+
+    is(s_write_back){
+      state := Mux(needFlush, s_idle, s_wait_free)
+    }
+
+    is(s_wait_free){
+      when(needRefill){
+        state := Mux(refill_finish, s_idle, s_wait_free)
+      }.elsewhen(needFlush || needFree){
         state := s_idle
       }
     }
   }
 
-  /** refill write and meta write */
-  val hint = edge.Hint(
-    fromSource = io.id,
-    toAddress = addrAlign(req.paddr, blockBytes, PAddrBits) + blockBytes.U,
-    lgSize = (log2Up(cacheParams.blockBytes)).U,
-    param = TLHints.PREFETCH_READ
-  )._2
-  io.mem_hint.bits := hint
-  io.mem_hint.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
+  //refill write and meta write
+  //WARNING: Maybe could not finish refill in 1 cycle
+  io.pfbuffer_meta_write.valid := (state === s_write_back) && !needFlush
+  io.pfbuffer_meta_write.bits.tag := req_tag
+  io.pfbuffer_meta_write.bits.index := req_idx
 
+  io.pfbuffer_data_write.valid := (state === s_write_back) && !needFlush
+  io.pfbuffer_data_write.bits.data := respDataReg.asUInt
 
-  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())
+  //mem request
+  io.mem_acquire.bits  := edge.Get(
+    fromSource      = io.id,
+    toAddress       = Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
+    lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
 
 }

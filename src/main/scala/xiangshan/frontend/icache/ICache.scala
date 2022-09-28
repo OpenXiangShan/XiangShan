@@ -99,6 +99,16 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     Mux(valid, data, RegEnable(data, valid))
   }
 
+  def generateState(enable: Bool, release: Bool): Bool = {
+    val stateReg = RegInit(false.B)
+    val state    = Wire(Bool())
+    when(enable)       {stateReg := true.B }
+      .elsewhen(release && stateReg) {stateReg := false.B}
+
+    state := stateReg || enable
+
+    state
+  }
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }

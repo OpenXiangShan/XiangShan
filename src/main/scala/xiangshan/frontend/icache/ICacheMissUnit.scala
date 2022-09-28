@@ -78,6 +78,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
+    //write back to Prefetch Buffer
+    val pfbuffer_data_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQDataWrite))
+    val pfbuffer_meta_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQMetaWrite))
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
   })
