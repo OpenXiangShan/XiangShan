@@ -3,6 +3,7 @@ package xiangshan.mem.prefetch
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.SRAMTemplate
 import xiangshan._
 import utils._
@@ -362,7 +363,7 @@ class PhtEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val decr_mode = Bool()
 }
 
-class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
+class PatternHistoryTable(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
   val io = IO(new Bundle() {
     // receive agt evicted entry
     val agt_update = Flipped(ValidIO(new AGTEntry()))
@@ -375,7 +376,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val pht_ram = Module(new SRAMTemplate[PhtEntry](new PhtEntry,
     set = smsParams.pht_size / smsParams.pht_ways,
     way =smsParams.pht_ways,
-    singlePort = true
+    singlePort = true,
+    parentName = parentName + s"pht_ram_"
   ))
   def PHT_SETS = smsParams.pht_size / smsParams.pht_ways
   val pht_valids = Seq.fill(smsParams.pht_ways){
@@ -770,7 +772,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid)
 }
 
-class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper {
+class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper {
 
   require(exuParameters.LduCnt == 2)
 
@@ -840,7 +842,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   // prefetch stage0
   val active_gen_table = Module(new ActiveGenerationTable())
-  val pht = Module(new PatternHistoryTable())
+  val pht = Module(new PatternHistoryTable(parentName + s"pht_"))
+  val (smsMbistPipelineSram,smsMbistPipelineRf,smsMbistPipelineSramRepair,smsMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_memBlock")
   val pf_filter = Module(new PrefetchFilter())
 
   val train_vld_s0 = RegNext(train_vld, false.B)

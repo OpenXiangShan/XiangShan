@@ -132,7 +132,7 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val exeUnits = loadUnits ++ storeUnits
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
-      val sms = Module(new SMSPrefetcher())
+      val sms = Module(new SMSPrefetcher(parentName = parentName + s"sms_"))
       sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
       sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
@@ -195,11 +195,11 @@ class MemBlockImp(outer: MemBlock, parentName:String = "Unknown") extends LazyMo
   val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(io.tlbCsr))
 
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd", ld_tlb_ports, 2, ldtlbParams))
+    val tlb_ld = Module(new TLB(parentName = parentName + s"tlbLd_", ld_tlb_ports, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLB(parentName = parentName + s"tlbSt", exuParameters.StuCnt, 1, sttlbParams))
+    val tlb_st = Module(new TLB(parentName = parentName + s"tlbSt_", exuParameters.StuCnt, 1, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st
