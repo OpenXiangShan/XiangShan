@@ -843,7 +843,7 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   // prefetch stage0
   val active_gen_table = Module(new ActiveGenerationTable())
   val pht = Module(new PatternHistoryTable(parentName + s"pht_"))
-  val (smsMbistPipelineSram,smsMbistPipelineRf,smsMbistPipelineSramRepair,smsMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_memBlock")
+  val (smsMbistPipelineSram,smsMbistPipelineRf,smsMbistPipelineSramRepair,smsMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_smsprftch")
   val pf_filter = Module(new PrefetchFilter())
 
   val train_vld_s0 = RegNext(train_vld, false.B)
