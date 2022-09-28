@@ -95,30 +95,47 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
 
 trait PMAMethod extends PMAConst {
   /**
-  def SimpleMemMapList = List(
-      //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
-      MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RWX"),
-      MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
-      MemMap("h00_3001_0000", "h00_3004_FFFF",   "h0", "GPU",         "RWC"),
-      MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
-      MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
-      MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
-      MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
-      MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
-      MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
-      MemMap("h00_3802_1000", "h00_3802_1FFF",   "h0", "MMPMA",       "RW"),
-      MemMap("h00_3802_2000", "h00_3900_0000",   "h0", "Reserved",    ""),
-      MemMap("h00_3900_0000", "h00_3900_1FFF",   "h0", "L3CacheCtrl",  "RW"),
-      MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3A00_0000", "h00_3A00_0FFF",   "h0", "PLL0",        "RW),
-      MemMap('h00_3A00_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
-      MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
-      MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
-      MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
-    )
+   * from  CPU
+   * BASE	          TOP	Size	            Description	Attribute
+   * 0x00_0000_0000	0x00_0FFF_FFFF  256MB	Reserved
+   * 0x00_1000_0000	0x00_1FFF_FFFF  256MB	QSPI Flash	RX
+   * 0x00_2000_0000	0x00_2FFF_FFFF        Reserved
+   * 0x00_3000_0000	0x00_3000_FFFF  64KB	DMA	        RW
+   * 0x00_3001_0000	0x00_3004_FFFF  256KB	GPU	        RW
+   * 0x00_3005_0000	0x00_3005_FFFF  64KB  USB	        RW
+   * 0x00_3006_0000	0x00_3006_FFFF  64KB  SDMMC	      RW
+   * 0x00_3007_0000	0x00_30FF_FFFF        Reserved
+   * 0x00_3100_0000	0x00_3100_FFFF  64KB  QSPI	      RW
+   * 0x00_3101_0000	0x00_3101_FFFF  64KB  GMAC	      RW
+   * 0x00_3102_0000	0x00_3102_FFFF  64KB  HDMI	      RW
+   * 0x00_3103_0000	0x00_3103_FFFF  64KB  HDMI_PHY	  RW
+   * 0x00_3104_0000	0x00_3105_FFFF  128KB	DP	        RW
+   * 0x00_3106_0000	0x00_3106_FFFF  64KB  DDR0	      RW
+   * 0x00_3107_0000	0x00_3107_FFFF  64KB 	DDR0_PHY	  RW
+   * 0x00_3108_0000	0x00_3108_FFFF  64KB 	DDR1	      RW
+   * 0x00_3109_0000	0x00_3109_FFFF  64KB 	DDR1_PHY	  RW
+   * 0x00_310A_0000	0x00_310A_FFFF  64KB 	IIS	        RW
+   * 0x00_310B_0000	0x00_310B_FFFF  64KB 	UART0	      RW
+   * 0x00_310C_0000	0x00_310C_FFFF  64KB 	UART1	      RW
+   * 0x00_310D_0000	0x00_310D_FFFF  64KB 	IIC0	      RW
+   * 0x00_310E_0000	0x00_310E_FFFF  64KB 	IIC1	      RW
+   * 0x00_310F_0000	0x00_310F_FFFF  64KB 	IIC2	      RW
+   * 0x00_3110_0000	0x00_3110_FFFF  64KB 	GPIO	      RW
+   * 0x00_3111_0000	0x00_3111_FFFF  64KB  CRU	        RW
+   * 0x00_3112_0000	0x00_37FF_FFFF        Reserved
+   * 0x00_3800_0000	0x00_3800_FFFF  64KB  CLINT	      RW
+   * 0x00_3801_0000	0x00_38FF_FFFF        Reserved
+   * 0x00_3900_0000	0x00_3900_0FFF  4KB   CacheCtrl	  RW
+   * 0x00_3900_1000	0x00_3900_1FFF  4KB   Core Reset	RW
+   * 0x00_3900_2000	0x00_39FF_FFFF        Reserved
+   * 0x00_3a00_0000	0x00_3a00_0FFF  4KB   PLL Ctrl	  RW
+   * 0x00_3a00_1000	0x00_3BFF_FFFF        Reserved
+   * 0x00_3C00_0000	0x00_3FFF_FFFF        PLIC (In core)	RW
+   * 0x00_4000_0000	0x00_4FFF_FFFF  256MB	PCIe0	      RW
+   * 0x00_5000_0000	0x00_5FFF_FFFF  256MB	PCIe1	      RW
+   * 0x00_6000_0000	0x00_6FFF_FFFF  256MB	PCIe2	      RW
+   * 0x00_7000_0000	0x00_7FFF_FFFF  256MB	PCIe3	      RW
+   * 0x00_8000_0000	0x1F_FFFF_FFFF  126GB	DDR	        RWXIDSA
    */
 
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
@@ -155,18 +172,19 @@ trait PMAMethod extends PMAConst {
 
     addPMA(0x480000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)
     addPMA(0x80000000L, a = 1, w = true, r = true)
-    addPMA(0x3C000000L, a = 1)
-    addPMA(0x3A001000L, a = 1, w = true, r = true)
-    addPMA(0x3A000000L, a = 1)
+    addPMA(0x3c000000L, a = 1)
+    addPMA(0x3a001000L, a = 1, w = true, r = true)
+    addPMA(0x3a000000L, a = 1)
     addPMA(0x39002000L, a = 1, w = true, r = true)
     addPMA(0x39000000L, a = 1)
-    addPMA(0x38022000L, a = 1, w = true, r = true)
-    addPMA(0x38021000L, a = 1, x = true, w = true, r = true)
-    addPMA(0x38020000L, a = 1, w = true, r = true)
-    addPMA(0x30050000L, a = 1, w = true, r = true) // FIXME: GPU space is cacheable?
-    addPMA(0x30010000L, a = 1, w = true, r = true)
-    addPMA(0x20000000L, a = 1, x = true, w = true, r = true)
-    addPMA(0x10000000L, a = 1, w = true, r = true)
+    addPMA(0x38010000L, a = 1, w = true, r = true)
+    addPMA(0x38000000L, a = 1)
+    addPMA(0x31120000L, a = 1, w = true, r = true)
+    addPMA(0x31000000L, a = 1)
+    addPMA(0x30070000L, a = 1, w = true, r = true)
+    addPMA(0x30000000L, a = 1)
+    addPMA(0x20000000L, a = 1, x = true, r = true)
+    addPMA(0x10000000L, a = 1)
     addPMA(0)
     while (cfg_list.length < 16) {
       addPMA(0)
