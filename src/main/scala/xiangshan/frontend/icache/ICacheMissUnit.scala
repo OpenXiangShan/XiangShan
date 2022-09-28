@@ -78,10 +78,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
-    val release_req    =  DecoupledIO(new ReplacePipeReq)
-    val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
-    val victimInfor    =  Output(new ICacheVictimInfor())
-
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
   })
@@ -101,11 +97,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_idx = req.getVirSetIdx //virtual index
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
-  val release_id  = Cat(MainPipeKey.U, id.U)
   val req_corrupt = RegInit(false.B)
-
-  io.victimInfor.valid := false.B//state === s_send_replace || state === s_wait_replace || state === s_wait_resp
-  io.victimInfor.vidx  := false.B//req_idx
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
@@ -120,17 +112,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
-  io.release_req.bits.paddr := req.paddr
-  io.release_req.bits.vaddr := req.vaddr
-  io.release_req.bits.voluntary := true.B
-  io.release_req.bits.waymask   := req.waymask
-  io.release_req.bits.needData   := false.B
-  io.release_req.bits.id   := release_id
-  io.release_req.bits.param := DontCare //release will not care tilelink param
-
   io.req.ready := (state === s_idle)
   io.mem_acquire.valid := (state === s_send_mem_aquire)
-  io.release_req.valid := false.B//(state === s_send_replace)
 
   io.toPrefetch.valid := (state =/= s_idle)
   io.toPrefetch.bits  :=  addrAlign(req.paddr, blockBytes, PAddrBits)
@@ -259,11 +242,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
-    val release_req    =  DecoupledIO(new ReplacePipeReq)
-    val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
-
-    val victimInfor = Vec(PortNumber, Output(new ICacheVictimInfor()))
-
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
 
@@ -274,7 +252,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  PortNumber))
   val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  PortNumber))
-  val release_arb    = Module(new Arbiter(new ReplacePipeReq,  PortNumber))
 
   io.mem_grant.ready := true.B
 
@@ -291,7 +268,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     // entry resp
     meta_write_arb.io.in(i)     <>  entry.io.meta_write
     refill_arb.io.in(i)         <>  entry.io.data_write
-    release_arb.io.in(i)        <>  entry.io.release_req
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
@@ -300,11 +276,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     }
 
     io.resp(i) <> entry.io.resp
-
-    io.victimInfor(i) := entry.io.victimInfor
     io.prefetch_check(i) <> entry.io.toPrefetch
-
-    entry.io.release_resp <> io.release_resp
 
     XSPerfAccumulate(
       "entryPenalty" + Integer.toString(i, 10),
@@ -337,7 +309,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     prefetchEntry
   }
-
   alloc := PriorityEncoder(prefEntries.map(_.io.req.ready))
   io.prefetch_req.ready := ParallelOR(prefEntries.map(_.io.req.ready))
   val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_hint)
@@ -347,7 +318,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
-  io.release_req        <> release_arb.io.out
 
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)

@@ -99,8 +99,3 @@ class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
 }
-
-class ICacheVictimInfor(implicit p: Parameters) extends ICacheBundle {
-  val valid = Bool()
-  val vidx  = UInt(idxBits.W)
-}
