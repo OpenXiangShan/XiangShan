@@ -383,7 +383,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
   val hasWFI = RegInit(false.B)
   io.cpu_halt := hasWFI
-  when (RegNext(RegNext(io.csr.wfiEvent))) {
+  when (RegNext(RegNext(io.csr.wfiEvent)) || io.flushOut.valid) {
     hasWFI := false.B
   }
 
