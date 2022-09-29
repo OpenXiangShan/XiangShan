@@ -98,7 +98,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-        perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d)
+      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d)
     }
   }
 
@@ -113,7 +113,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   io.ptw.resp.ready := true.B
 
   /************************  main body above | method/log/perf below ****************************/
-  
   def TLBRead(i: Int) = {
     val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
@@ -141,7 +140,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
-    
+
     val pmp_paddr = Mux(vmEnable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
     // val pmp_paddr = Mux(vmEnable, paddr, vaddr)
@@ -153,7 +152,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
     pmp(idx).valid := resp(idx).valid
     pmp(idx).bits.addr := addr
-    pmp(idx).bits.size := size           
+    pmp(idx).bits.size := size
     pmp(idx).bits.cmd := cmd
   }
 

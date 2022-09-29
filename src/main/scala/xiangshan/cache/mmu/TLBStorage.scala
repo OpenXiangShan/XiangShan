@@ -67,7 +67,7 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
           io.wdata, dataBanks(k)(bankOffset(io.raddr(i))))
       }
     }
-    // next cycle48G
+    // next cycle
     for (j <- 0 until numDup) {
       io.rdata(i)(j) := Mux1H(bank_index(j), data_read(j))
     }
@@ -246,7 +246,7 @@ class TLBSA(
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
     val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
-    val vidx_bypass = RegNext((entries.io.waddr(0) === ridx) && entries.io.wen(0))
+    val vidx_bypass = RegNext((entries.io.waddr === ridx) && entries.io.wen)
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
