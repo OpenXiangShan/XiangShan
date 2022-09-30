@@ -1416,6 +1416,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.replace_tag := s2_repl_tag
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
+  miss_req.pc := DontCare
 
   io.store_replay_resp.valid := s2_valid_dup(5) && s2_can_go_to_mq_dup(1) && replay && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare

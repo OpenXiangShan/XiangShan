@@ -26,9 +26,10 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
+import huancun.prefetch.L1MissTrace
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
-import huancun.utils.FastArbiter
-import mem.{AddPipelineReg}
+import huancun.utils.{ChiselDB, FastArbiter}
+import mem.AddPipelineReg
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -36,6 +37,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val way_en = UInt(DCacheWays.W)
+  val pc = UInt(VAddrBits.W)
 
   // store
   val full_overwrite = Bool()
@@ -102,6 +104,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out.replace_tag := replace_tag
     out.id := id
     out.cancel := cancel
+    out.pc := pc
     out
   }
 }
@@ -600,6 +603,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val reject = Cat(secondary_reject_vec).orR
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
+
+  val miss_trace = Wire(new L1MissTrace)
+  miss_trace.vaddr := io.req.bits.vaddr
+  miss_trace.paddr := io.req.bits.addr
+  miss_trace.source := io.req.bits.source
+  miss_trace.pc := io.req.bits.pc
+
+  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
+  table.log(miss_trace, io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))

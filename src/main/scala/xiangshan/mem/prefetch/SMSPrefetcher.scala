@@ -3,6 +3,8 @@ package xiangshan.mem.prefetch
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import huancun.prefetch.L1MissTrace
+import huancun.utils.ChiselDB
 import xiangshan._
 import utils._
 import xiangshan.cache.HasDCacheParameters
@@ -219,6 +221,7 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
   io.s2_gen_req.bits.region_bits := region_offset_to_bits(s2_pf_region_offset)
   io.s2_gen_req.bits.paddr_valid := s2_pf_gen_paddr_valid
   io.s2_gen_req.bits.decr_mode := false.B
+  io.s2_gen_req.bits.debug_source_type := HW_PREFETCH_STRIDE.U
 
 }
 
@@ -239,6 +242,7 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val paddr_valid = Bool()
   val decr_mode = Bool()
   val alias_bits = UInt(2.W)
+  val debug_source_type = UInt(log2Up(nSourceType).W)
 }
 
 class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -459,6 +463,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s2_pf_gen_req.bits.paddr_valid := s2_paddr_valid
   io.s2_pf_gen_req.bits.decr_mode := s2_pf_gen_decr_mode
   io.s2_pf_gen_req.valid := s2_pf_gen_valid
+  io.s2_pf_gen_req.bits.debug_source_type := HW_PREFETCH_AGT.U
 
   io.s2_pht_lookup.valid := s2_pht_lookup_valid
   io.s2_pht_lookup.bits := s2_pht_lookup
@@ -752,10 +757,13 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
 
   pf_gen_req_arb.io.in.head.valid := s4_pf_gen_cur_region_valid
   pf_gen_req_arb.io.in.head.bits := s4_pf_gen_cur_region
+  pf_gen_req_arb.io.in.head.bits.debug_source_type := HW_PREFETCH_PHT_CUR.U
   pf_gen_req_arb.io.in(1).valid := s4_pf_gen_incr_region_valid
   pf_gen_req_arb.io.in(1).bits := s4_pf_gen_incr_region
+  pf_gen_req_arb.io.in(1).bits.debug_source_type := HW_PREFETCH_PHT_INC.U
   pf_gen_req_arb.io.in(2).valid := s4_pf_gen_decr_region_valid
   pf_gen_req_arb.io.in(2).bits := s4_pf_gen_decr_region
+  pf_gen_req_arb.io.in(2).bits.debug_source_type := HW_PREFETCH_PHT_DEC.U
   pf_gen_req_arb.io.out.ready := true.B
 
   io.pf_gen_req.valid := pf_gen_req_arb.io.out.valid
@@ -782,6 +790,7 @@ class PrefetchFilterEntry()(implicit p: Parameters) extends XSBundle with HasSMS
   val alias_bits = UInt(2.W)
   val paddr_valid = Bool()
   val decr_mode = Bool()
+  val debug_source_type = UInt(log2Up(nSourceType).W)
 }
 
 class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -790,6 +799,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val tlb_req = new TlbRequestIO(2)
     val l2_pf_addr = ValidIO(UInt(PAddrBits.W))
     val pf_alias_bits = Output(UInt(2.W))
+    val debug_source_type = Output(UInt(log2Up(nSourceType).W))
   })
   val entries = Seq.fill(smsParams.pf_filter_size){ Reg(new PrefetchFilterEntry()) }
   val valids = Seq.fill(smsParams.pf_filter_size){ RegInit(false.B) }
@@ -810,6 +820,8 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     case (entry, i) => (i.U === pf_req_arb.io.chosen) -> entry.alias_bits
   }))
   pf_req_arb.io.out.ready := true.B
+
+  io.debug_source_type := VecInit(entries.map(_.debug_source_type))(pf_req_arb.io.chosen)
 
   val s1_valid = Wire(Bool())
   val s1_hit = Wire(Bool())
@@ -884,6 +896,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.decr_mode := s1_gen_req.decr_mode
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
+  s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val alloc = s1_valid && !s1_hit && s1_replace_vec(i)
     val update = s1_valid && s1_hit && s1_update_vec(i)
@@ -1064,6 +1077,14 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
     XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && train.bits.meta_prefetch)
   }
+  val trace = Wire(new L1MissTrace)
+  trace.vaddr := 0.U
+  trace.pc := 0.U
+  trace.paddr := io.pf_addr.bits
+  trace.source := pf_filter.io.debug_source_type
+  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
+  table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
+
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )
