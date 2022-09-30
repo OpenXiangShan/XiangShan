@@ -34,7 +34,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new AtomicWordIO
-    val dtlb          = new TlbRequestIO
+    val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
@@ -137,7 +137,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
 
     when(io.dtlb.resp.fire){
-      paddr := io.dtlb.resp.bits.paddr
+      paddr := io.dtlb.resp.bits.paddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -146,10 +146,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
       exceptionVec(storeAddrMisaligned) := !addrAligned
-      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
-      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
-      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
-      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
+      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
