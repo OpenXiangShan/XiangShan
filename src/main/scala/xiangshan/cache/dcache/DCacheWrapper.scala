@@ -100,12 +100,19 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
-  def nSourceType = 4
+  def nSourceType = 10
   def sourceTypeWidth = log2Up(nSourceType)
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
   def DCACHE_PREFETCH = 3
+  def SOFT_PREFETCH = 4
+  def HW_PREFETCH_AGT = 5
+  def HW_PREFETCH_PHT_CUR = 6
+  def HW_PREFETCH_PHT_INC = 7
+  def HW_PREFETCH_PHT_DEC = 8
+  def HW_PREFETCH_BOP = 9
+  def HW_PREFETCH_STRIDE = 10
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
@@ -477,6 +484,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
   val s2_kill  = Output(Bool())
+  val s2_pc = Output(UInt(VAddrBits.W))
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
