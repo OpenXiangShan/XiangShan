@@ -302,6 +302,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
+  io.miss_req.bits.pc := io.lsu.s2_pc
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))

@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
+import huancun.prefetch.L1MissTrace
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
 import utility.FastArbiter
 import mem.{AddPipelineReg}
@@ -37,6 +38,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val way_en = UInt(DCacheWays.W)
+  val pc = UInt(VAddrBits.W)
 
   // store
   val full_overwrite = Bool()
@@ -103,6 +105,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out.replace_tag := replace_tag
     out.id := id
     out.cancel := cancel
+    out.pc := pc
     out
   }
 }
@@ -719,6 +722,17 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
+  // L1MissTrace Chisel DB
+  val debug_miss_trace = Wire(new L1MissTrace)
+  debug_miss_trace.vaddr := io.req.bits.vaddr
+  debug_miss_trace.paddr := io.req.bits.addr
+  debug_miss_trace.source := io.req.bits.source
+  debug_miss_trace.pc := io.req.bits.pc
+
+  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
+  table.log(debug_miss_trace, io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
+
+  // Difftest
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
@@ -729,6 +743,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
   }
 
+  // Perf count
   XSPerfAccumulate("miss_req", io.req.fire())
   XSPerfAccumulate("miss_req_allocate", io.req.fire() && alloc)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && io.req.bits.isLoad)
