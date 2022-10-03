@@ -391,7 +391,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for (i <- 0 until RenameWidth) {
     // fusion decoder
     val decodeHasException = io.frontend.cfVec(i).bits.exceptionVec(instrPageFault) || io.frontend.cfVec(i).bits.exceptionVec(instrAccessFault)
-    val disableFusion = decode.io.csrCtrl.singlestep
+    val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
     fusionDecoder.io.in(i).valid := io.frontend.cfVec(i).valid && !(decodeHasException || disableFusion)
     fusionDecoder.io.in(i).bits := io.frontend.cfVec(i).bits.instr
     if (i > 0) {
@@ -512,6 +512,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr
+  // When wfi is disabled, it will not block ROB commit.
+  rob.io.csr.wfiEvent := io.robio.toCSR.wfiEvent || !decode.io.csrCtrl.wfi_enable
   io.robio.toCSR.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.uop.cf.pc := flushPC
