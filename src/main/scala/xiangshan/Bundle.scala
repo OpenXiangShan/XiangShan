@@ -511,7 +511,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
   // Rename
-  val move_elim_enable = Output(Bool())
+  val fusion_enable = Output(Bool())
+  val wfi_enable = Output(Bool())
   // Decode
   val svinval_enable = Output(Bool())
 
