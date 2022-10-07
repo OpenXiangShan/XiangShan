@@ -180,6 +180,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
 
+  val lastCycleRedirect = RegNext(io.brqRedirect)
+  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
+
   /**
     * Writeback load from load units
     *
@@ -463,7 +466,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.ldout(i).bits.debug.paddr := debug_paddr(loadWbSel(i))
     io.ldout(i).bits.debug.vaddr := vaddrModule.io.rdata(i+1)
     io.ldout(i).bits.fflags := DontCare
-    io.ldout(i).valid := loadWbSelV(i)
+    io.ldout(i).valid := loadWbSelV(i) && !io.ldout(i).bits.uop.robIdx.needFlush(lastCycleRedirect)
 
     // merged data, uop and offset for data sel in load_s3
     io.ldRawDataOut(i).lqData := dataModule.io.wb.rdata(i).data
@@ -626,8 +629,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       b // sel b
     )
   }
-  val lastCycleRedirect = RegNext(io.brqRedirect)
-  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
   // S2: select rollback (part1) and generate rollback request
   // rollback check
@@ -775,7 +776,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   (0 until LoadQueueSize).map(i => {
-    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
+    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) &&
       allocated(i) &&
       datavalid(i) &&
       release1cycle.valid
