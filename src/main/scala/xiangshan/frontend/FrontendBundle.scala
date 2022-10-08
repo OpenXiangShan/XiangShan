@@ -103,6 +103,11 @@ class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
   val req = DecoupledIO(new PrefetchRequest)
 }
 
+class mmioCommitRead(implicit p: Parameters) extends XSBundle {
+  val mmioFtqPtr = Output(new FtqPtr)
+  val mmioLastCommit = Input(Bool())
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs    = Vec(PredictWidth, UInt(32.W))
   val valid     = UInt(PredictWidth.W)
