@@ -140,6 +140,8 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
   ftq.io.fromIfu          <> ifu.io.ftqInter.toFtq
   bpu.io.ftq_to_bpu       <> ftq.io.toBpu
   ftq.io.fromBpu          <> bpu.io.bpu_to_ftq
+
+  ftq.io.mmioCommitRead   <> ifu.io.mmioCommitRead
   //IFU-ICache
 
   icache.io.fetch.req <> ftq.io.toICache.req

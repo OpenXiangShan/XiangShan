@@ -444,6 +444,8 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
       val bpRight = Output(UInt(XLEN.W))
       val bpWrong = Output(UInt(XLEN.W))
     }
+
+    val mmioCommitRead = Flipped(new mmioCommitRead)
   })
   io.bpuInfo := DontCare
 
@@ -1014,6 +1016,11 @@ class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModul
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
+
+  val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
+  val mmioLastCommit = isBefore(commPtr, mmioReadPtr) && (isAfter(ifuPtr,mmioReadPtr)  ||  mmioReadPtr ===   ifuPtr) &&
+                       Cat(commitStateQueue(mmioReadPtr.value).map(s => { s === c_invalid || s === c_commited})).andR()
+  io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
   val commit_pc_bundle = RegNext(ftq_pc_mem.io.commPtr_rdata)
