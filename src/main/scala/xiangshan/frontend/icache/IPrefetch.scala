@@ -124,9 +124,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   when(p0_fire) {tlb_resp_valid := true.B}
   .elsewhen(tlb_resp_valid && (p1_fire || p1_discard)) {tlb_resp_valid := false.B}
 
-  val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr)
-  val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.pf.instr && tlb_resp_valid)
-  val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp.af.instr && tlb_resp_valid)
+  val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr(0))
+  val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instr && tlb_resp_valid)
+  val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).af.instr && tlb_resp_valid)
 
   val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)

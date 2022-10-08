@@ -432,12 +432,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_tlbResp){
-      val tlbExept = io.iTLBInter.resp.bits.excp.pf.instr ||
-                     io.iTLBInter.resp.bits.excp.af.instr
+      val tlbExept = io.iTLBInter.resp.bits.excp(0).pf.instr ||
+                     io.iTLBInter.resp.bits.excp(0).af.instr
       mmio_state :=  Mux(tlbExept,m_waitCommit,m_sendPMP)
-      mmio_resend_addr := io.iTLBInter.resp.bits.paddr
-      mmio_resend_af := io.iTLBInter.resp.bits.excp.af.instr
-      mmio_resend_pf := io.iTLBInter.resp.bits.excp.pf.instr
+      mmio_resend_addr := io.iTLBInter.resp.bits.paddr(0)
+      mmio_resend_af := io.iTLBInter.resp.bits.excp(0).af.instr
+      mmio_resend_pf := io.iTLBInter.resp.bits.excp(0).pf.instr
     }
 
     is(m_sendPMP){
