@@ -508,7 +508,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // spfctl Bit [15:10]: L1D prefetch active page stride
   // turn off L2 BOP, turn on L1 SMS by default
   val spfctl = RegInit(UInt(XLEN.W), Seq(
-    0 << 16,    // L2 pf store only [16] init: false
+    0 << 17,    // L2 pf store only [17] init: false
+    1 << 16,    // L1D pf enable stride [16] init: true
     30 << 10,   // L1D active page stride [15:10] init: 30
     12 << 6,    // L1D active page threshold [9:6] init: 12
     1  << 5,    // L1D enable pht [5] init: true
@@ -526,7 +527,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.l1D_pf_enable_pht := spfctl(5)
   csrio.customCtrl.l1D_pf_active_threshold := spfctl(9, 6)
   csrio.customCtrl.l1D_pf_active_stride := spfctl(15, 10)
-  csrio.customCtrl.l2_pf_store_only := spfctl(16)
+  csrio.customCtrl.l1D_pf_enable_stride := spfctl(16)
+  csrio.customCtrl.l2_pf_store_only := spfctl(17)
 
   // sfetchctl Bit 0: L1I Cache Parity check enable
   val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
