@@ -198,6 +198,13 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     tagArray
   }
 
+  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
+  val validArray = RegInit(0.U((nSets * nWays).W))
+  val validMetas = VecInit((0 until 2).map{ bank =>
+    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
+    validMeta
+  })
+
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
   //Parity Decode
@@ -217,6 +224,9 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   val wayNum   = OHToUInt(io.write.bits.waymask)
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
+  when(io.write.valid){
+    validArray := validArray.bitSet(validPtr, true.B)
+  }
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
@@ -230,6 +240,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   }.elsewhen(port_1_read_1_reg){
     io.readResp.metaData(1) := read_metas(1)
   }
+
+  io.readResp.entryValid := validMetas.asTypeOf(Vec(2, Vec(nWays, Bool())))
 
 
   io.write.ready := true.B
@@ -259,16 +271,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       }
       cacheOpShouldResp := true.B
     }
-    // TODO
-    // when(CacheInstrucion.isWriteTagECC(io.cacheOp.req.bits.opCode)){
-    //   for (i <- 0 until readPorts) {
-    //     array(i).io.ecc_write.valid := true.B
-    //     array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
-    //     array(i).io.ecc_write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-    //     array(i).io.ecc_write.bits.ecc := io.cacheOp.req.bits.write_tag_ecc
-    //   }
-    //   cacheOpShouldResp := true.B
-    // }
   }
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid,
