@@ -373,10 +373,15 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_kill  = Output(Bool())
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
-  val s1_paddr = Output(UInt(PAddrBits.W))
-  val s1_hit_way = Input(UInt(nWays.W))
+  val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
+  val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
+  // cycle 2: hit signal
+  val s2_hit = Input(Bool()) // hit signal for lsu, 
+
+  // debug
+  val debug_s1_hit_way = Input(UInt(nWays.W))
 }
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
@@ -749,7 +754,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     case (a, u) =>
       a.valid := RegNext(u.io.lsu.req.fire()) && !u.io.lsu.s1_kill
       a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.addr))
-      a.bits.tag := get_tag(u.io.lsu.s1_paddr)
+      a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   }
   st_access.valid := RegNext(mainPipe.io.store_req.fire())
   st_access.bits.idx := RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))

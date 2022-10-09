@@ -14,6 +14,20 @@ Copyright 2020-2022 by Peng Cheng Laboratory.
 
 * Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
 
+## Publications
+
+### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
+
+Our paper introduces XiangShan and the practice of agile development methodology on high performance RISC-V processors.
+It covers some representative tools we have developed and used to accelerate the chip development process, including design, functional verification, debugging, performance validation, etc.
+This paper is awarded all three available badges for artifact evaluation (Available, Functional, and Reproduced).
+
+![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
+![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
+![Results Reproduced](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/results_reproduced_dl.jpg)
+
+[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)
+
 ## Follow us
 
 Wechat/微信：香山开源处理器
@@ -28,7 +42,11 @@ You can contact us through [our mail list](mailto:xiangshan-all@ict.ac.cn). All 
 
 ## Architecture
 
-The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) on this [branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020. The current version of XiangShan, also known as Nanhu (南湖), is still under development on the master branch.
+The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) [on the yanqihu branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020.
+
+The second stable micro-architecture of XiangShan is called Nanhu (南湖) [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
+
+The current version of XiangShan, also known as Kunminghu (昆明湖), is still under development on the master branch.
 
 The micro-architecture overview of Nanhu (南湖) is shown below.
 
@@ -115,4 +133,3 @@ In the development of XiangShan, some sub-modules from the open-source community
 | Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the Diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
 
 We are grateful for the support of the open-source community and encourage other open-source projects to reuse our code within the scope of the [license](LICENSE).
-

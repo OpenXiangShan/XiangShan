@@ -14,6 +14,20 @@ English Readme is [here](README.md).
 
 * 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
 
+
+## 论文发表情况
+
+### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
+
+我们在 MICRO'22 会议上的论文介绍了香山处理器及敏捷开发实践经验，包括一些面向设计、功能验证、调试、性能评估等方面的敏捷开发工具。论文得到了 Artifact Evaluation 的所有三个徽章。
+
+![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
+![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
+![Results Reproduced](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/results_reproduced_dl.jpg)
+
+[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | IEEE Xplore (TBD) | ACM DL (TBD) | BibTeX (TBD)
+
+
 ## 关注我们
 
 Wechat/微信：香山开源处理器
@@ -28,7 +42,11 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 ## 处理器架构
 
-自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。目前版本的香山（即南湖）正在 master 分支上不断开发中。
+自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。
+
+香山的第二代微架构被命名为[南湖](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)。
+
+香山的第三代微架构（昆明湖）正在 master 分支上不断开发中。
 
 南湖微架构概览：
 ![xs-arch-nanhu](images/xs-arch-nanhu.svg)
