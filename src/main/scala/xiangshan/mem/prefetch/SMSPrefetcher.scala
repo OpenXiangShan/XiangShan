@@ -15,7 +15,9 @@ case class SMSParams
   region_size: Int = 1024,
   vaddr_hash_width: Int = 5,
   block_addr_raw_width: Int = 10,
-  filter_table_size: Int = 16,
+  stride_pc_bits: Int = 10,
+  max_stride: Int = 1024,
+  stride_entries: Int = 16,
   active_gen_table_size: Int = 16,
   pht_size: Int = 64,
   pht_ways: Int = 2,
@@ -44,6 +46,8 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
   // page bit index in block addr
   val BLOCK_ADDR_PAGE_BIT = log2Up(dcacheParameters.pageSize / dcacheParameters.blockBytes)
   val REGION_ADDR_PAGE_BIT = log2Up(dcacheParameters.pageSize / smsParams.region_size)
+  val STRIDE_PC_BITS = smsParams.stride_pc_bits
+  val STRIDE_BLK_ADDR_BITS = log2Up(smsParams.max_stride)
 
   def block_addr(x: UInt): UInt = {
     val offset = log2Up(dcacheParameters.blockBytes)
@@ -97,6 +101,125 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
   }
 }
 
+class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
+  val io = IO(new Bundle() {
+    val stride_en = Input(Bool())
+    val s0_lookup = Flipped(new ValidIO(new Bundle() {
+      val pc = UInt(STRIDE_PC_BITS.W)
+      val vaddr = UInt(VAddrBits.W)
+      val paddr = UInt(PAddrBits.W)
+    }))
+    val s1_valid = Input(Bool())
+    val s2_gen_req = ValidIO(new PfGenReq())
+  })
+
+  val prev_valid = RegNext(io.s0_lookup.valid, false.B)
+  val prev_pc = RegEnable(io.s0_lookup.bits.pc, io.s0_lookup.valid)
+
+  val s0_valid = io.s0_lookup.valid && !(prev_valid && prev_pc === io.s0_lookup.bits.pc)
+
+  def entry_map[T](fn: Int => T) = (0 until smsParams.stride_entries).map(fn)
+
+  val replacement = ReplacementPolicy.fromString("plru", smsParams.stride_entries)
+  val valids = entry_map(_ => RegInit(false.B))
+  val entries_pc = entry_map(_ => Reg(UInt(STRIDE_PC_BITS.W)) )
+  val entries_conf = entry_map(_ => RegInit(1.U(2.W)))
+  val entries_last_addr = entry_map(_ => Reg(UInt(STRIDE_BLK_ADDR_BITS.W)) )
+  val entries_stride = entry_map(_ => Reg(SInt((STRIDE_BLK_ADDR_BITS+1).W)))
+
+
+  val s0_match_vec = valids.zip(entries_pc).map({
+    case (v, pc) => v && pc === io.s0_lookup.bits.pc
+  })
+
+  val s0_hit = s0_valid && Cat(s0_match_vec).orR
+  val s0_miss = s0_valid && !s0_hit
+  val s0_matched_conf = Mux1H(s0_match_vec, entries_conf)
+  val s0_matched_last_addr = Mux1H(s0_match_vec, entries_last_addr)
+  val s0_matched_last_stride = Mux1H(s0_match_vec, entries_stride)
+
+
+  val s1_vaddr = RegEnable(io.s0_lookup.bits.vaddr, s0_valid)
+  val s1_paddr = RegEnable(io.s0_lookup.bits.paddr, s0_valid)
+  val s1_hit = RegNext(s0_hit) && io.s1_valid
+  val s1_alloc = RegNext(s0_miss) && io.s1_valid
+  val s1_conf = RegNext(s0_matched_conf)
+  val s1_last_addr = RegNext(s0_matched_last_addr)
+  val s1_last_stride = RegNext(s0_matched_last_stride)
+  val s1_match_vec = RegNext(VecInit(s0_match_vec))
+
+  val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
+  val s1_new_stride_vaddr = s1_vaddr(BLOCK_OFFSET + STRIDE_BLK_ADDR_BITS - 1, BLOCK_OFFSET)
+  val s1_new_stride = (0.U(1.W) ## s1_new_stride_vaddr).asSInt - (0.U(1.W) ## s1_last_addr).asSInt
+  val s1_stride_non_zero = s1_last_stride =/= 0.S
+  val s1_stride_match = s1_new_stride === s1_last_stride && s1_stride_non_zero
+  val s1_replace_idx = replacement.way
+
+  for(i <- 0 until smsParams.stride_entries){
+    val alloc = s1_alloc && i.U === s1_replace_idx
+    val update = s1_hit && s1_match_vec(i)
+    when(update){
+      assert(valids(i))
+      entries_conf(i) := Mux(s1_stride_match,
+        Mux(s1_conf === 3.U, 3.U, s1_conf + 1.U),
+        Mux(s1_conf === 0.U, 0.U, s1_conf - 1.U)
+      )
+      entries_last_addr(i) := s1_new_stride_vaddr
+      when(!s1_conf(1)){
+        entries_stride(i) := s1_new_stride
+      }
+    }
+    when(alloc){
+      valids(i) := true.B
+      entries_pc(i) := prev_pc
+      entries_conf(i) := 0.U
+      entries_last_addr(i) := s1_new_stride_vaddr
+      entries_stride(i) := 0.S
+    }
+    assert(!(update && alloc))
+  }
+  when(s1_hit){
+    replacement.access(OHToUInt(s1_match_vec.asUInt))
+  }.elsewhen(s1_alloc){
+    replacement.access(s1_replace_idx)
+  }
+
+  val s1_block_vaddr = block_addr(s1_vaddr)
+  val s1_pf_block_vaddr = (s1_block_vaddr.asSInt + s1_last_stride).asUInt
+  val s1_pf_cross_page = s1_pf_block_vaddr(BLOCK_ADDR_PAGE_BIT) =/= s1_block_vaddr(BLOCK_ADDR_PAGE_BIT)
+
+  val s2_pf_gen_valid = RegNext(s1_hit && s1_stride_match, false.B)
+  val s2_pf_gen_paddr_valid = RegEnable(!s1_pf_cross_page, s1_hit && s1_stride_match)
+  val s2_pf_block_vaddr = RegEnable(s1_pf_block_vaddr, s1_hit && s1_stride_match)
+  val s2_block_paddr = RegEnable(block_addr(s1_paddr), s1_hit && s1_stride_match)
+
+  val s2_pf_block_addr = Mux(s2_pf_gen_paddr_valid,
+    Cat(
+      s2_block_paddr(PAddrBits - BLOCK_OFFSET - 1, BLOCK_ADDR_PAGE_BIT),
+      s2_pf_block_vaddr(BLOCK_ADDR_PAGE_BIT - 1, 0)
+    ),
+    s2_pf_block_vaddr
+  )
+  val s2_pf_full_addr = Wire(UInt(VAddrBits.W))
+  s2_pf_full_addr := s2_pf_block_addr ## 0.U(BLOCK_OFFSET.W)
+
+  val s2_pf_region_addr = region_addr(s2_pf_full_addr)
+  val s2_pf_region_offset = s2_pf_block_addr(REGION_OFFSET - 1, 0)
+
+  val s2_full_vaddr = Wire(UInt(VAddrBits.W))
+  s2_full_vaddr := s2_pf_block_vaddr ## 0.U(BLOCK_OFFSET.W)
+
+  val s2_region_tag = region_hash_tag(region_addr(s2_full_vaddr))
+
+  io.s2_gen_req.valid := s2_pf_gen_valid && io.stride_en
+  io.s2_gen_req.bits.region_tag := s2_region_tag
+  io.s2_gen_req.bits.region_addr := s2_pf_region_addr
+  io.s2_gen_req.bits.region_bits := region_offset_to_bits(s2_pf_region_offset)
+  io.s2_gen_req.bits.paddr_valid := s2_pf_gen_paddr_valid
+  io.s2_gen_req.bits.decr_mode := false.B
+
+}
+
 class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
   val pht_index = UInt(PHT_INDEX_BITS.W)
   val pht_tag = UInt(PHT_TAG_BITS.W)
@@ -117,6 +240,7 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
 
 class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
   val io = IO(new Bundle() {
+    val agt_en = Input(Bool())
     val s0_lookup = Flipped(ValidIO(new Bundle() {
       val region_tag = UInt(REGION_TAG_WIDTH.W)
       val region_p1_tag = UInt(REGION_TAG_WIDTH.W)
@@ -131,7 +255,9 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       val region_paddr = UInt(REGION_ADDR_BITS.W)
       val region_vaddr = UInt(REGION_ADDR_BITS.W)
     }))
-    // if agt missed, try lookup pht
+    val s1_sel_stride = Output(Bool())
+    val s2_stride_hit = Input(Bool())
+    // if agt/stride missed, try lookup pht
     val s2_pht_lookup = ValidIO(new PhtLookup())
     // evict entry to pht
     val s2_evict = ValidIO(new AGTEntry())
@@ -143,6 +269,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val entries = Seq.fill(smsParams.active_gen_table_size){ Reg(new AGTEntry()) }
   val valids = Seq.fill(smsParams.active_gen_table_size){ RegInit(false.B) }
   val replacement = ReplacementPolicy.fromString("plru", smsParams.active_gen_table_size)
+
+  val s1_replace_mask_w = Wire(UInt(smsParams.active_gen_table_size.W))
 
   val s0_lookup = io.s0_lookup.bits
   val s0_lookup_valid = io.s0_lookup.valid
@@ -167,9 +295,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val any_region_m1_match = Cat(region_m1_match_vec_s0).orR && s0_lookup.allow_cross_region_m1
 
   val s0_region_hit = any_region_match
-  // region miss, but cross region match
-  val s0_alloc = !s0_region_hit && !s0_match_prev
-  val s0_match_or_alloc = any_region_match || any_region_p1_match || any_region_m1_match
+  val s0_cross_region_hit = any_region_m1_match || any_region_p1_match
+  val s0_alloc = s0_lookup_valid && !s0_region_hit && !s0_match_prev
   val s0_pf_gen_match_vec = valids.indices.map(i => {
     Mux(any_region_match,
       region_match_vec_s0(i),
@@ -192,31 +319,27 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s0_replace_way = replacement.way
   val s0_replace_mask = UIntToOH(s0_replace_way)
   // s0 hit a entry that may be replaced in s1
-  val s0_update_conflict = Cat(VecInit(region_match_vec_s0).asUInt & s0_replace_mask).orR
+  val s0_update_conflict = Cat(VecInit(region_match_vec_s0).asUInt & s1_replace_mask_w).orR
+  val s0_update = s0_lookup_valid && s0_region_hit && !s0_update_conflict
 
   val s0_access_way = Mux1H(
-    Seq(s0_region_hit, s0_alloc),
+    Seq(s0_update, s0_alloc),
     Seq(OHToUInt(region_match_vec_s0), s0_replace_way)
   )
-  when(s0_lookup_valid) {
+  when(s0_update || s0_alloc) {
     replacement.access(s0_access_way)
   }
 
   // stage1: update/alloc
   // region hit, update entry
-  val s1_update_conflict = RegEnable(s0_update_conflict, s0_lookup_valid && s0_region_hit)
-  val s1_update = RegNext(s0_lookup_valid && s0_region_hit, false.B) && !s1_update_conflict
-  val s1_update_mask = RegEnable(
-    VecInit(region_match_vec_s0),
-    VecInit(Seq.fill(smsParams.active_gen_table_size){ false.B }),
-    s0_lookup_valid
-  )
+  val s1_update = RegNext(s0_update, false.B)
+  val s1_update_mask = RegEnable(VecInit(region_match_vec_s0), s0_lookup_valid)
   val s1_agt_entry = RegEnable(s0_agt_entry, s0_lookup_valid)
-  // cross region match or filter table second hit
-  val s1_cross_region_match = RegNext(s0_lookup_valid && s0_alloc, false.B)
-  val s1_alloc = s1_cross_region_match
+  val s1_cross_region_match = RegNext(s0_lookup_valid && s0_cross_region_hit, false.B)
+  val s1_alloc = RegNext(s0_alloc, false.B)
   val s1_alloc_entry = s1_agt_entry
   val s1_replace_mask = RegEnable(s0_replace_mask, s0_lookup_valid)
+  s1_replace_mask_w := s1_replace_mask & Fill(smsParams.active_gen_table_size, s1_alloc)
   val s1_evict_entry = Mux1H(s1_replace_mask, entries)
   val s1_evict_valid = Mux1H(s1_replace_mask, valids)
   // pf gen
@@ -276,10 +399,11 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   )
   val s1_pf_gen_offset_mask = UIntToOH(s1_pf_gen_offset)
   val s1_pf_gen_access_cnt = Mux1H(s1_pf_gen_match_vec, entries.map(_.access_cnt))
-  val s1_pf_gen_valid = prev_lookup_valid && (s1_alloc || s1_update) && Mux(s1_pf_gen_decr_mode,
+  val s1_in_active_page = s1_pf_gen_access_cnt > io.act_threshold
+  val s1_pf_gen_valid = prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && Mux(s1_pf_gen_decr_mode,
     !s1_vaddr_dec_cross_max_lim,
     !s1_vaddr_inc_cross_max_lim
-  ) && (s1_pf_gen_access_cnt > io.act_threshold)
+  ) && s1_in_active_page && io.agt_en
   val s1_pf_gen_paddr_valid = Mux(s1_pf_gen_decr_mode, !s1_vaddr_dec_cross_page, !s1_vaddr_inc_cross_page)
   val s1_pf_gen_region_addr = Mux(s1_pf_gen_paddr_valid,
     Cat(s1_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT), s1_pf_gen_vaddr(REGION_ADDR_PAGE_BIT - 1, 0)),
@@ -307,6 +431,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s1_pht_lookup.region_paddr := s1_region_paddr
   s1_pht_lookup.region_offset := s1_region_offset
 
+  io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
+
   // stage2: gen pf reg / evict entry to pht
   val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc)
   val s2_evict_valid = RegNext(s1_alloc && s1_evict_valid, false.B)
@@ -316,7 +442,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pf_gen_region_paddr = RegEnable(s1_pf_gen_region_addr, s1_pf_gen_valid)
   val s2_pf_gen_region_bits = RegEnable(s1_pf_gen_region_bits, s1_pf_gen_valid)
   val s2_pf_gen_valid = RegNext(s1_pf_gen_valid, false.B)
-  val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B)
+  val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
   val s2_pht_lookup = RegEnable(s1_pht_lookup, s1_pht_lookup_valid)
 
   io.s2_evict.valid := s2_evict_valid
@@ -332,6 +458,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s2_pht_lookup.valid := s2_pht_lookup_valid
   io.s2_pht_lookup.bits := s2_pht_lookup
 
+  XSPerfAccumulate("sms_agt_in", io.s0_lookup.valid)
   XSPerfAccumulate("sms_agt_alloc", s1_alloc) // cross region match or filter evict
   XSPerfAccumulate("sms_agt_update", s1_update) // entry hit
   XSPerfAccumulate("sms_agt_pf_gen", io.s2_pf_gen_req.valid)
@@ -392,6 +519,11 @@ class PatternHistoryTable(parentName:String = "Unknown")(implicit p: Parameters)
   val evict_queue = Module(new OverrideableQueue(new AGTEntry, smsParams.pht_lookup_queue_size))
   evict_queue.io.in := io.agt_update
   val evict = evict_queue.io.out
+
+  XSPerfAccumulate("sms_pht_lookup_in", lookup_queue.io.in.fire)
+  XSPerfAccumulate("sms_pht_lookup_out", lookup_queue.io.out.fire)
+  XSPerfAccumulate("sms_pht_evict_in", evict_queue.io.in.fire)
+  XSPerfAccumulate("sms_pht_evict_out", evict_queue.io.out.fire)
 
   val s3_ram_en = Wire(Bool())
   val s1_valid = Wire(Bool())
@@ -693,11 +825,11 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val pending_req_vec = ent.region_bits & (~ent.filter_bits).asUInt
     val first_one_offset = PriorityMux(
       pending_req_vec.asBools,
-      (0 until smsParams.filter_table_size).map(_.U(REGION_OFFSET.W))
+      (0 until smsParams.pf_filter_size).map(_.U(REGION_OFFSET.W))
     )
     val last_one_offset = PriorityMux(
       pending_req_vec.asBools.reverse,
-      (0 until smsParams.filter_table_size).reverse.map(_.U(REGION_OFFSET.W))
+      (0 until smsParams.pf_filter_size).reverse.map(_.U(REGION_OFFSET.W))
     )
     val pf_addr = Cat(
       ent.region_addr,
@@ -777,6 +909,7 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   require(exuParameters.LduCnt == 2)
 
   val io_agt_en = IO(Input(Bool()))
+  val io_stride_en = IO(Input(Bool()))
   val io_pht_en = IO(Input(Bool()))
   val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
   val io_act_stride = IO(Input(UInt(6.W)))
@@ -806,19 +939,14 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   val pending_sel_ld0 = RegNext(Mux(pending_vld, ld0_older_than_ld1, !ld0_older_than_ld1))
   val pending_ld = Mux(pending_sel_ld0, ld_prev.head, ld_prev.last)
   val pending_ld_block_tag = Mux(pending_sel_ld0, ld_prev_block_tag.head, ld_prev_block_tag.last)
-
-  // prepare training data
-  val train_ld = RegEnable(
-    Mux(pending_vld, pending_ld, Mux(ld0_older_than_ld1 || !ld_curr_vld.last, ld_curr.head, ld_curr.last)),
-    pending_vld || Cat(ld_curr_vld).orR
+  val oldest_ld = Mux(pending_vld,
+    pending_ld,
+    Mux(ld0_older_than_ld1 || !ld_curr_vld.last, ld_curr.head, ld_curr.last)
   )
 
-  val train_block_tag = RegEnable(
-    Mux(pending_vld, pending_ld_block_tag,
-      Mux(ld0_older_than_ld1 || !ld_curr_vld.last, ld_curr_block_tag.head, ld_curr_block_tag.last)
-    ),
-    pending_vld || Cat(ld_curr_vld).orR
-  )
+  val train_ld = RegEnable(oldest_ld, pending_vld || Cat(ld_curr_vld).orR)
+
+  val train_block_tag = block_hash_tag(train_ld.vaddr)
   val train_region_tag = train_block_tag.head(REGION_TAG_WIDTH)
 
   val train_region_addr_raw = region_addr(train_ld.vaddr)(REGION_TAG_WIDTH + 2 * VADDR_HASH_WIDTH - 1, 0)
@@ -842,8 +970,9 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
 
   // prefetch stage0
   val active_gen_table = Module(new ActiveGenerationTable())
+  val stride = Module(new StridePF())
   val pht = Module(new PatternHistoryTable(parentName + s"pht_"))
-  val (smsMbistPipelineSram,smsMbistPipelineRf,smsMbistPipelineSramRepair,smsMbistPipelineRfRepair) = placePipelines(level = 2,infoName = s"MBISTPipeline_smsprftch")
+  val (smsMbistPipelineSram, smsMbistPipelineRf, smsMbistPipelineSramRepair, smsMbistPipelineRfRepair) = placePipelines(level = 2, infoName = s"MBISTPipeline_smsprftch")
   val pf_filter = Module(new PrefetchFilter())
 
   val train_vld_s0 = RegNext(train_vld, false.B)
@@ -861,6 +990,7 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   val train_region_paddr_s0 = RegEnable(train_region_paddr, train_vld)
   val train_region_vaddr_s0 = RegEnable(train_region_vaddr, train_vld)
 
+  active_gen_table.io.agt_en := io_agt_en
   active_gen_table.io.act_threshold := io_act_threshold
   active_gen_table.io.act_stride := io_act_stride
   active_gen_table.io.s0_lookup.valid := train_vld_s0
@@ -876,17 +1006,34 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   active_gen_table.io.s0_lookup.bits.region_m1_cross_page := train_region_m1_cross_page_s0
   active_gen_table.io.s0_lookup.bits.region_paddr := train_region_paddr_s0
   active_gen_table.io.s0_lookup.bits.region_vaddr := train_region_vaddr_s0
+  active_gen_table.io.s2_stride_hit := stride.io.s2_gen_req.valid
+
+  stride.io.stride_en := io_stride_en
+  stride.io.s0_lookup.valid := train_vld_s0
+  stride.io.s0_lookup.bits.pc := train_s0.uop.cf.pc(STRIDE_PC_BITS - 1, 0)
+  stride.io.s0_lookup.bits.vaddr := Cat(
+    train_region_vaddr_s0, train_region_offset_s0, 0.U(log2Up(dcacheParameters.blockBytes).W)
+  )
+  stride.io.s0_lookup.bits.paddr := Cat(
+    train_region_paddr_s0, train_region_offset_s0, 0.U(log2Up(dcacheParameters.blockBytes).W)
+  )
+  stride.io.s1_valid := active_gen_table.io.s1_sel_stride
 
   pht.io.s2_agt_lookup := active_gen_table.io.s2_pht_lookup
   pht.io.agt_update := active_gen_table.io.s2_evict
 
   val pht_gen_valid = pht.io.pf_gen_req.valid && io_pht_en
-  val agt_gen_valid = active_gen_table.io.s2_pf_gen_req.valid && io_agt_en
-  val pf_gen_req = Mux(agt_gen_valid,
-    active_gen_table.io.s2_pf_gen_req.bits,
+  val agt_gen_valid = active_gen_table.io.s2_pf_gen_req.valid
+  val stride_gen_valid = stride.io.s2_gen_req.valid
+  val pf_gen_req = Mux(agt_gen_valid || stride_gen_valid,
+    Mux1H(Seq(
+      agt_gen_valid -> active_gen_table.io.s2_pf_gen_req.bits,
+      stride_gen_valid -> stride.io.s2_gen_req.bits
+    )),
     pht.io.pf_gen_req.bits
   )
-  pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid
+  assert(!(agt_gen_valid && stride_gen_valid))
+  pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid || stride_gen_valid
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x2000000000L.U
