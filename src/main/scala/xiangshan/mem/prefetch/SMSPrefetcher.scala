@@ -852,7 +852,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   // s1: update or alloc
   val s1_valid_r = RegNext(s0_gen_req_valid, false.B)
-  val s1_hit_r = RegEnable(s0_hit, s0_gen_req_valid)
+  val s1_hit_r = RegEnable(s0_hit, false.B, s0_gen_req_valid)
   val s1_gen_req = RegEnable(s0_gen_req, s0_gen_req_valid)
   val s1_replace_vec_r = RegEnable(s0_replace_vec, s0_gen_req_valid && !s0_hit)
   val s1_update_vec = RegEnable(VecInit(s0_match_vec).asUInt, s0_gen_req_valid && s0_hit)
