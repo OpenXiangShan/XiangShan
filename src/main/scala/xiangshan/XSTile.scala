@@ -420,6 +420,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
         mbistControllerCoreWithL2.io.hduspsr_out <> mbistInterfaceCoreRF.hduspsr_fuse
       }
       mbistControllerCoreWithL2.io.fscan_clkungate := xsl2_ultiscan.io.fscan.clkungate
+      mbistControllerCoreWithL2.io.fscan_mode := xsl2_ultiscan.io.fscan.mode
       mbistControllerCoreWithL2.io.clock := childClock
 
       mbistControllerCoreWithL2.io.xsx_fscan_in <> xsx_ultiscan_in

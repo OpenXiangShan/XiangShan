@@ -239,6 +239,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       mem.l3_dir.zip(l3Module.mbist_extra_dirs.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
       mem.l3_banks.zip(l3Module.mbist_extra_banks.get).foreach({ case(memIO,cacheIO) => memIO <> cacheIO})
       l3Module.fscan_clkungate.get := xsx_fscan.clkungate
+      l3Module.fscan_mode.get := xsx_fscan.mode
       l3Module.xsx_ultiscan.get.bypsel <> xsx_fscan.ram.bypsel
       l3Module.xsx_ultiscan.get.wdis_b <> xsx_fscan.ram.wrdis_b
       l3Module.xsx_ultiscan.get.rdis_b <> xsx_fscan.ram.rddis_b
