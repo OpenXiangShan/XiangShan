@@ -27,6 +27,7 @@ import chipsalliance.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
 import freechips.rocketchip.util.ElaborationArtefacts
+import huancun.utils.ClockGating
 import top.TopMain.writeOutputFile
 
 class SimTop(implicit p: Parameters) extends Module {
@@ -56,6 +57,12 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.sram_config := 0.U
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
+
+  if (soc.io.clock_div2.isDefined) {
+    val clk_en = RegInit(false.B)
+    clk_en := ~clk_en
+    soc.io.clock_div2.get := ClockGating(clk_en, clock)
+  }
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p))

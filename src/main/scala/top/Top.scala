@@ -24,6 +24,7 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
+import chisel3.util.experimental.BoringUtils
 import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -36,7 +37,7 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.ResetGen
+import huancun.utils.{ClockGating, ResetGen}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -125,6 +126,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral <> misc.peripheral
     memory <> misc.memory
 
+    val needClockDiv2Source = ClockGating.needClockDiv2Source
+
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(AsyncReset())
@@ -142,7 +145,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val debug_reset = Output(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
+      val clock_div2 = if (needClockDiv2Source) Some(Input(Clock())) else None
     })
+    if (io.clock_div2.isDefined) {
+      BoringUtils.addSource(io.clock_div2.get, "clock_div2")
+    }
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
