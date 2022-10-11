@@ -521,6 +521,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     // Note that io.s3_delayed_load_error and io.lsq.s3_delayed_load_error is different
 
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val s2IsPointerChasing = Output(Bool())
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -614,6 +615,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect) || cancelPointerChasing)
 
   // load s2
+  io.s2IsPointerChasing := RegEnable(s1_tryPointerChasing && !cancelPointerChasing, load_s1.io.out.fire)
   io.prefetch_train.bits := load_s2.io.in.bits
   // override miss bit
   io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
