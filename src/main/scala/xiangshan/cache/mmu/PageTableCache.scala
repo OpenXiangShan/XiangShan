@@ -21,10 +21,8 @@ import chisel3._
 import chisel3.util._
 import chisel3.internal.naming.chiselName
 import xiangshan._
-import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
+import huancun.utils.SRAMTemplate
 
 /* ptw cache caches the page table of all the three layers
  * ptw cache resp at next cycle

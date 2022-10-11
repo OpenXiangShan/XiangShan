@@ -22,10 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
+import huancun.utils.FoldedSRAMTemplate
 
 import scala.math.min
 import scala.util.matching.Regex

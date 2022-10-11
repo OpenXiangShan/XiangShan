@@ -19,12 +19,8 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import utils.XSDebug
 import xiangshan.L1CacheErrorInfo
-
-import scala.math.max
-
 
 class L1DataReadReq(implicit p: Parameters) extends DCacheBundle {
   // you can choose which bank to read to save power

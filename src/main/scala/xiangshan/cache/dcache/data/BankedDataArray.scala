@@ -18,13 +18,9 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import utils._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
-import xiangshan.L1CacheErrorInfo
-
-import scala.math.max
+import utils.{XSDebug, XSPerfAccumulate}
+import huancun.utils.SRAMTemplate
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
 {

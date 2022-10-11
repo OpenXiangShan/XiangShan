@@ -36,7 +36,7 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.ResetGen
+import huancun.utils.{ResetGen, SRAMTemplate}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -201,6 +201,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
 
+    val sigFromSram = SRAMTemplate.genTopConnector()
+    val mbist = IO(sigFromSram.cloneType)
+    mbist <> sigFromSram
+    dontTouch(mbist)
   }
 }
 

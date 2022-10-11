@@ -424,7 +424,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     }
   }
 
-  rename.io.redirect <> stage2Redirect
+  rename.io.redirect := stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
 
@@ -434,7 +434,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   dispatch.io.hartId := io.hartId
-  dispatch.io.redirect <> stage2Redirect
+  dispatch.io.redirect := stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.toIntDq <> intDq.io.enq
   dispatch.io.toFpDq <> fpDq.io.enq
@@ -442,9 +442,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.allocPregs <> io.allocPregs
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
-  intDq.io.redirect <> redirectForExu
-  fpDq.io.redirect <> redirectForExu
-  lsDq.io.redirect <> redirectForExu
+  intDq.io.redirect := redirectForExu
+  fpDq.io.redirect := redirectForExu
+  lsDq.io.redirect := redirectForExu
 
   val dpqOut = intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
   io.dispatch <> dpqOut
@@ -500,10 +500,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
-  rob.io.redirect <> stage2Redirect
+  rob.io.redirect := stage2Redirect
   outer.rob.generateWritebackIO(Some(outer), Some(this))
 
-  io.redirect <> stage2Redirect
+  io.redirect := stage2Redirect
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr

@@ -7,6 +7,7 @@ import xiangshan._
 import utils._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
+import huancun.utils.SRAMTemplate
 
 case class SMSParams
 (

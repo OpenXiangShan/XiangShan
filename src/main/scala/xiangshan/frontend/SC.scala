@@ -22,6 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.experimental.chiselName
+import huancun.utils.SRAMTemplate
 
 import scala.math.min
 import scala.{Tuple2 => &}

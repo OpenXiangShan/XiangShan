@@ -1,7 +1,7 @@
 <scalastyle>
  <name>Scalastyle standard configuration</name>
  <check level="warning" class="org.scalastyle.file.FileTabChecker" enabled="true"></check>
- <check level="warning" class="org.scalastyle.file.FileLengthChecker" enabled="true">
+ <check level="warning" class="org.scalastyle.file.FileLengthChecker" enabled="false">
   <parameters>
    <parameter name="maxFileLength"><![CDATA[800]]></parameter>
   </parameters>

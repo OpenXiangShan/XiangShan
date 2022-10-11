@@ -19,10 +19,8 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
-
-import scala.math.max
+import utils.XSDebug
+import huancun.utils.SRAMTemplate
 
 class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
   val singlePort = true

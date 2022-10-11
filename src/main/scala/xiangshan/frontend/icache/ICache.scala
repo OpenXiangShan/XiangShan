@@ -26,9 +26,9 @@ import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
-import utils.{SRAMTemplate, _}
-import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
+import utils._
+import huancun.utils.SRAMTemplate
+import xiangshan.cache.mmu.BlockTlbRequestIO
 
 case class ICacheParameters(
     nSets: Int = 256,
