@@ -775,8 +775,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // load unit ctrl
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+
     val reExecuteQuery = Flipped(Vec(StorePipelineWidth, Valid(new LoadReExecuteQueryIO)))    // load replay
     val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
+    val s2IsPointerChasing = Output(Bool()) // provide right pc for hw prefetch
   })
 
   val load_s0 = Module(new LoadUnit_S0)

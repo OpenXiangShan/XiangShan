@@ -545,7 +545,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for(i <- 0 until exuParameters.LduCnt){
     // load s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
     pcMem.io.raddr(i + 5) := io.ld_pc_read(i).ptr.value
-    io.ld_pc_read(i).data := RegNext(pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset)))
+    io.ld_pc_read(i).data := pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset))
   }
 
   rob.io.hartId := io.hartId
