@@ -85,8 +85,10 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   /*** internal interface ***/
-  val metaArray   = new ICacheMetaReqBundle
-  val dataArray   = new ICacheDataReqBundle
+  val metaArray    = new ICacheMetaReqBundle
+  val dataArray    = new ICacheDataReqBundle
+  val iprefetchBuf = Flipped(new IPFBufferRead)
+
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
@@ -110,6 +112,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (fromIFU, toIFU)    = (io.fetch.map(_.req), io.fetch.map(_.resp))
   val (toMeta, metaResp)  = (io.metaArray.toIMeta, io.metaArray.fromIMeta)
   val (toData, dataResp)  = (io.dataArray.toIData,  io.dataArray.fromIData)
+  val (toIPF,  fromIPF)   = (io.iprefetchBuf.req,   io.iprefetchBuf.resp)
   val (toMSHR, fromMSHR)  = (io.mshr.map(_.toMSHR), io.mshr.map(_.fromMSHR))
   val (toITLB, fromITLB)  = (io.itlb.map(_.req), io.itlb.map(_.resp))
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
@@ -153,7 +156,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     fetch_req(i).valid             := s0_valid && !missSwitchBit
     fetch_req(i).bits.isDoubleLine := s0_final_double_line
     fetch_req(i).bits.vSetIdx      := s0_final_vsetIdx
+
   }
+  toIPF.valid      := s0_valid && !missSwitchBit
+  toIPF.bits.vaddr := s0_req_vaddr
+
 
   /** s0 tlb **/
   toITLB(0).valid         := s0_valid
@@ -180,7 +187,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    */
 
   val itlb_can_go    = toITLB(0).ready && toITLB(1).ready
-  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready
+  //TODO: ipf read not blocking mainpipe
+  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready && toIPF.ready
   val pipe_can_go    = !missSwitchBit && s1_ready
   val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go
   val s0_fetch_fire  = s0_valid && s0_can_go
@@ -245,6 +253,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
 
+  toIPF.bits.paddr := s1_req_paddr
+
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
@@ -274,6 +284,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val port_hit_data = Mux1H(s1_tag_match_vec(i).asUInt, bank)
     port_hit_data
   })
+
+  val s1_ipf_hit  = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid))
+  val s1_ipf_data = fromIPF.bits.cacheline
+
+  val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i)))
+  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_port_hit(i),s1_ipf_data(i), s1_hit_data(i))))
 
   /** <PERF> replace victim way number */
 
@@ -320,7 +336,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_only_first   = RegEnable(s1_only_first, s1_fire)
   val s2_double_line  = RegEnable(s1_double_line, s1_fire)
   val s2_hit          = RegEnable(s1_hit   , s1_fire)
-  val s2_port_hit     = RegEnable(s1_port_hit, s1_fire)
+  val s2_port_hit     = RegEnable(s1_final_port_hit, s1_fire)
   val s2_bank_miss    = RegEnable(s1_bank_miss, s1_fire)
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
   val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
@@ -335,7 +351,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val s2_meta_errors    = RegEnable(s1_meta_errors,    s1_fire)
   val s2_data_errorBits = RegEnable(s1_data_errorBits, s1_fire)
-  val s2_data_cacheline = RegEnable(s1_data_cacheline, s1_fire)
+  val s2_data_cacheline = RegEnable(s1_final_hit_data, s1_fire)
 
   val s2_data_errors    = Wire(Vec(PortNumber,Vec(nWays, Bool())))
 

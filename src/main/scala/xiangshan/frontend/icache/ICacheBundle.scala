@@ -104,22 +104,29 @@ class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
 class PIQMetaWrite(implicit p: Parameters) extends  IPrefetchBundle{
   val tag = UInt(tagBits.W)
   val index = UInt(idxBits.W)
+  val paddr = UInt(PAddrBits.W)
 }
 
-class PIQDataWrite(implicit p: Parameters) extends  IPrefetchBundle{
-  val data = UInt(blockBits.W)
+class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
+  /** input */
+  val req = Flipped(Decoupled(new Bundle{
+    //stage 0: vaddr by s0
+    val vaddr = Vec(PortNumber, UInt(VAddrBits.W))
+    //stage 1: paddr by s1
+    val paddr = Vec(PortNumber, UInt(VAddrBits.W))
+  }))
+  /** output */
+  val resp = ValidIO(new Bundle{
+    val ipf_hit      = Vec(PortNumber, Bool())
+    val cacheline    = Vec(PortNumber, Bool())
+  })
 }
 
-class ICachePrefetchBundle(implicit p: Parameters) extends ICacheBundle{
-  //prefetch bundle
-  val piq_req         = Flipped(DecoupledIO(new PIQReq))
-  //hit in prefetch buffer
-  val freeReq = Flipped(new PIQFreeReq)
-
-  //write back to Prefetch Buffer
-  val pfbuffer_data_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQDataWrite))
-  val pfbuffer_meta_write  = Vec(cacheParams.nPrefetchEntries, ValidIO(new PIQMetaWrite))
-
-  val metaRead    = new ICacheCommonReadBundle(isMeta = true)
-
+class IPFBufferWrite(implicit p: Parameters) extends  IPrefetchBundle{
+  val buffIdx = UInt(log2Ceil(nPrefetchEntries).W)
+  val meta = new PIQMetaWrite
+  val data =  UInt(blockBits.W)
 }
+
+
+

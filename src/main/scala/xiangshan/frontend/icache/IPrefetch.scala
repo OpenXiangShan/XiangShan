@@ -31,7 +31,7 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
-  val addr      = UInt(PAddrBits.W)
+  val paddr      = UInt(PAddrBits.W)
   val vSetIdx   = UInt(idxBits.W)
 }
 
@@ -50,6 +50,117 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
+}
+
+/** Prefetch Buffer **/
+
+
+class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
+{
+  val io = IO(new Bundle{
+    val read  = new IPFBufferRead
+    val write = Flipped(ValidIO(new IPFBufferWrite))
+    val move  = new Bundle() {
+//      /** input */
+//      val mp_ip_cache_hit = Input(Bool())
+//      val mp_ip_buffer_idx = Input(Bool())
+      /** output */
+      val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
+      val data_write = DecoupledIO(new ICacheDataWriteBundle)
+    }
+    val fencei = Input(Bool())
+  })
+
+  class IPFBufferEntryMeta(implicit p: Parameters) extends IPrefetchBundle
+  {
+    val tag = UInt(tagBits.W)
+    val index = UInt(idxBits.W)
+    val paddr = UInt(PAddrBits.W)
+    val valid = Bool()
+  }
+
+  class IPFBufferEntryData(implicit p: Parameters) extends IPrefetchBundle
+  {
+    val cachline = UInt(blockBits.W)
+  }
+
+  def InitQueue[T <: Data](entry: T, size: Int): Vec[T] ={
+    return RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
+  }
+
+  val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nPrefetchEntries)
+  val data_buffer = InitQueue(new IPFBufferEntryData, size = nPrefetchEntries)
+  val free_list   = RegInit(VecInit(Seq.fill(nPrefetchEntries)(true.B)))
+
+  /** read logic */
+  // latch read req address and response in next cycle
+  val r_vidx_s0 = VecInit(io.read.req.bits.vaddr.map(get_idx(_)))
+  val r_vidx_s1 = RegNext(r_vidx_s0, init = 0.U.asTypeOf(r_vidx_s0.cloneType))
+
+  val r_ptag_s1 = VecInit(io.read.req.bits.paddr.map(get_phy_tag(_)))
+
+  val r_hit_oh_s1 = VecInit((0 until PortNumber).map(i =>
+                                 VecInit(meta_buffer.map(entry => entry.valid &&
+                                                                  entry.tag === r_ptag_s1(i) &&
+                                                                  entry.index === r_vidx_s1(i)))))
+
+  val r_buffer_hit_s1  = VecInit(r_hit_oh_s1.map(_.reduce(_||_)))
+  val r_buffer_hit_idx_s1 = VecInit(r_hit_oh_s1.map(PriorityEncoder(_)))
+  val r_buffer_hit_data_s1 = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh_s1(i), data_buffer.map(_.cachline)) ))
+
+
+  io.read.req.ready := !io.write.valid
+  io.read.resp.valid := RegNext(io.read.req.fire(), init = false.B)
+  io.read.resp.bits.ipf_hit := r_buffer_hit_s1
+  io.read.resp.bits.cacheline := r_buffer_hit_data_s1
+
+
+  /** write logic */
+  when(io.write.valid){
+    meta_buffer(io.write.bits.buffIdx).tag := io.write.bits.meta.tag
+    meta_buffer(io.write.bits.buffIdx).index := io.write.bits.meta.index
+    meta_buffer(io.write.bits.buffIdx).paddr := io.write.bits.meta.paddr
+    meta_buffer(io.write.bits.buffIdx).valid := true.B
+
+    data_buffer(io.write.bits.buffIdx).cachline := io.write.bits.data
+  }
+
+
+  /** move logic */
+  //now we only move port 1 for simplicity
+  //TODO: move 2 port
+  val r_buffer_hit_s2  = RegNext(r_buffer_hit_s1, init=0.U.asTypeOf(r_buffer_hit_s1.cloneType))
+  val r_buffer_hit_idx_s2 = RegNext(r_buffer_hit_idx_s1)
+
+  io.move.meta_write.valid := RegNext(r_buffer_hit_s2(0), init = false.B)
+  io.move.data_write.valid := RegNext(r_buffer_hit_s2(0), init = false.B)
+  io.move.meta_write.bits  := DontCare
+  io.move.data_write.bits  := DontCare
+
+  when(r_buffer_hit_s2(0)) {
+    val moveEntryMeta = RegNext(meta_buffer(r_buffer_hit_idx_s2(0)))
+    val moveEntryData = RegNext(data_buffer(r_buffer_hit_idx_s2(0)))
+
+
+    io.move.meta_write.bits.generate(tag = moveEntryMeta.tag,
+      coh = ClientMetadata(ClientStates.Branch),
+      idx = moveEntryMeta.index,
+      waymask = 0.U,
+      bankIdx = moveEntryMeta.index(0))
+
+    io.move.data_write.bits.generate(data = moveEntryData.cachline,
+      idx = moveEntryMeta.index,
+      waymask = 0.U,
+      bankIdx = moveEntryMeta.index(0),
+      paddr = moveEntryMeta.paddr)
+
+  }
+
+  /** fencei: invalid all entries */
+  when(io.fencei){
+    meta_buffer.map(_.valid := false.B)
+  }
+
 }
 
 class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
@@ -158,6 +269,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
   val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(tlb_resp_af, p1_fire)
   val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
+  val p2_vaddr   =  RegEnable(p1_vaddr,    p1_fire)
+
 
   /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
   val p2_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p2_paddr, blockBytes, PAddrBits))).reduce(_||_)
@@ -179,6 +292,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p3_paddr = RegEnable(p2_paddr,  p2_fire)
   val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
+  val p3_vaddr   =  RegEnable(p2_vaddr,    p2_fire)
+
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
 
@@ -186,6 +301,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   toMissUnit.enqReq.valid             := p3_valid && enableBit && !p3_discard
   toMissUnit.enqReq.bits.paddr        := p3_paddr
+  toMissUnit.enqReq.bits.vSetIdx        := get_idx(p3_vaddr)
+
 
   when(reachMaxSize){
     maxPrefetchCoutner := 0.U
@@ -214,28 +331,23 @@ class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
     //write back to Prefetch Buffer
-    val pfbuffer_data_write  = ValidIO(new PIQDataWrite)
-    val pfbuffer_meta_write  = ValidIO(new PIQMetaWrite)
-
-    //write back to ICache
-    val meta_refill  = DecoupledIO(new ICacheMetaWriteBundle)
-    val data_refill  = DecoupledIO(new ICacheDataWriteBundle)
+    val piq_write_ipbuffer = DecoupledIO(new IPFBufferWrite)
 
     //TOO: fencei flush instructions
     val fencei      = Input(Bool())
-    //hit in prefetch buffer
-    val hitFree     = Input(Bool())
-    //free as a victim
-    val replaceFree = Input(Bool())
+//    //hit in prefetch buffer
+//    val hitFree     = Input(Bool())
+//    //free as a victim
+//    val replaceFree = Input(Bool())
   })
 
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_free :: Nil = Enum(5)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_finish:: Nil = Enum(5)
   val state = RegInit(s_idle)
 
   //req register
   val req = Reg(new PIQReq)
   val req_idx = req.vSetIdx                     //virtual index
-  val req_tag = get_phy_tag(req.addr)           //physical tag
+  val req_tag = get_phy_tag(req.paddr)           //physical tag
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
@@ -246,19 +358,16 @@ class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
   //initial
   io.mem_acquire.bits := DontCare
   io.mem_grant.ready := true.B
-  io.pfbuffer_meta_write.bits := DontCare
-  io.pfbuffer_data_write.bits := DontCare
+  io.piq_write_ipbuffer.bits:= DontCare
 
   io.req.ready := state === s_idle
   io.mem_acquire.valid := state === s_memReadReq
 
   //flush register
-  val needFlush = generateState(enable = io.fencei && (state =/= s_idle) && (state =/= s_wait_free), release = (state=== s_wait_free))
-
-  val freeEntry   = io.hitFree || io.replaceFree
-  val refill_finish = io.meta_refill.fire() && io.data_refill.fire()
-  val needFree    = generateState(enable = freeEntry && (state === s_wait_free),  release = (state=== s_wait_free))
-  val needRefill  = generateState(enable = io.hitFree && (state === s_wait_free), release = (state=== s_wait_free) && refill_finish)
+//  val needFlush = generateState(enable = io.fencei && (state =/= s_idle) && (state =/= s_finish), release = (state=== s_wait_free))
+//
+//  val freeEntry   = io.fencei
+//  val needFree    = generateState(enable = freeEntry && (state === s_finish),  release = (state === s_finish))
 
   //state change
   switch(state){
@@ -284,38 +393,35 @@ class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
           when (readBeatCnt === (refillCycles - 1).U) {
             assert(refill_done, "refill not done!")
-            state := Mux(needFlush, s_idle, s_write_back)
+            state := s_write_back
           }
         }
       }
     }
 
     is(s_write_back){
-      state := Mux(needFlush, s_idle, s_wait_free)
+      state := Mux(io.piq_write_ipbuffer.fire(), s_finish, s_write_back)
     }
 
-    is(s_wait_free){
-      when(needRefill){
-        state := Mux(refill_finish, s_idle, s_wait_free)
-      }.elsewhen(needFlush || needFree){
-        state := s_idle
-      }
+    is(s_finish){
+      state := s_idle
     }
   }
 
   //refill write and meta write
   //WARNING: Maybe could not finish refill in 1 cycle
-  io.pfbuffer_meta_write.valid := (state === s_write_back) && !needFlush
-  io.pfbuffer_meta_write.bits.tag := req_tag
-  io.pfbuffer_meta_write.bits.index := req_idx
-
-  io.pfbuffer_data_write.valid := (state === s_write_back) && !needFlush
-  io.pfbuffer_data_write.bits.data := respDataReg.asUInt
+  io.piq_write_ipbuffer.valid := (state === s_write_back) //&& !needFlush
+  io.piq_write_ipbuffer.bits.meta.tag := req_tag
+  io.piq_write_ipbuffer.bits.meta.index := req_idx
+  io.piq_write_ipbuffer.bits.meta.paddr := req.paddr
+  io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
+  io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
+  io.piq_write_ipbuffer.bits.buffIdx := io.id - PortNumber.U
 
   //mem request
   io.mem_acquire.bits  := edge.Get(
     fromSource      = io.id,
-    toAddress       = Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
+    toAddress       = Cat(req.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
 
 }

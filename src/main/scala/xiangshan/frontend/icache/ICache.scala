@@ -42,6 +42,7 @@ case class ICacheParameters(
     nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 4,
+    nPrefBufferEntries: Int = 8,
     hasPrefetch: Boolean = false,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
@@ -503,11 +504,23 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val mainPipe = Module(new ICacheMainPipe)
   val missUnit = Module(new ICacheMissUnit(edge))
   val prefetchPipe = Module(new IPrefetchPipe)
+  val ipfBuffer  = Module(new PrefetchBuffer)
 
   val meta_read_arb = Module(new Arbiter(new ICacheReadBundle, 2))
   val data_read_arb = Module(new Arbiter(new ICacheReadBundle, 1))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(), 1))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(), 2))
+  val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
+
+  ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
+  meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
+  data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
+
+  //TODO: ipfBuffer fencei
+  ipfBuffer.io.fencei := false.B
+  missUnit.io.fencei := false.B
+
+  ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
   meta_read_arb.io.in(0) <> mainPipe.io.metaArray.toIMeta
   meta_read_arb.io.in(1) <> prefetchPipe.io.toIMeta
@@ -524,9 +537,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.perfInfo := mainPipe.io.perfInfo
 
   meta_write_arb.io.in(0) <> missUnit.io.meta_write
+  data_write_arb.io.in(0) <> missUnit.io.data_write
 
   metaArray.io.write <> meta_write_arb.io.out
-  dataArray.io.write <> missUnit.io.data_write
+  dataArray.io.write <> data_write_arb.io.out
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
 
