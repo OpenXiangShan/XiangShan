@@ -70,8 +70,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U && (mode < ModeM))
+  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U && !req.bits.no_translate)
+    else (satp.mode === 8.U && (mode < ModeM) && !req.bits.no_translate)
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
