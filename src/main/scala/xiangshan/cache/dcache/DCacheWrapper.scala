@@ -142,6 +142,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   // uncache
   val uncacheIdxBits = log2Up(StoreQueueSize) max log2Up(LoadQueueSize)
+  // hardware prefetch parameters
+  // high confidence hardware prefetch port
+  val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default
+  val IgnorePrefetchConfidence = false
 
   // parameters about duplicating regs to solve fanout
   // In Main Pipe:

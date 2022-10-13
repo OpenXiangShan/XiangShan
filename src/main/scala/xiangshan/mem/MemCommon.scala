@@ -68,8 +68,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
 
-  //softprefetch
-  val isSoftPrefetch = Bool() 
+  // prefetch
+  val isPrefetch = Bool()
+  val isHWPrefetch = Bool()
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -104,7 +105,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     rsIdx := input.rsIdx
     forwardMask := input.forwardMask
     forwardData := input.forwardData
-    isSoftPrefetch := input.isSoftPrefetch
+    isPrefetch := input.isPrefetch
+    isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
