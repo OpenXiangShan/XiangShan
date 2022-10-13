@@ -793,8 +793,8 @@ package object xiangshan {
   def jumpRSWrapperGen(p: Parameters) = new JumpRSWrapper()(p)
   def mulRSWrapperGen(p: Parameters) = new MulRSWrapper()(p)
   def loadRSWrapperGen(p: Parameters) = new LoadRSWrapper()(p)
-  def stdRSWrapperGen(p: Parameters) = new StoreRSWrapper()(p)
-  def staRSWrapperGen(p: Parameters) = new StoreDataRSWrapper()(p)
+  def stdRSWrapperGen(p: Parameters) = new StdRSWrapper()(p)
+  def staRSWrapperGen(p: Parameters) = new StaRSWrapper()(p)
   def fmaRSWrapperGen(p: Parameters) = new FMARSWrapper()(p)
   def fmiscRSWrapperGen(p: Parameters) = new FMiscRSWrapper()(p)
 }
