@@ -80,6 +80,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
+    // prefetch to l1 req
+    val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
@@ -174,6 +176,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
   val stOut = io.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
+
+  // prefetch to l1 req
+  loadUnits.map(load_unit => {
+    load_unit.io.prefetch_req.valid <> io.prefetch_req.valid
+    load_unit.io.prefetch_req.bits <> io.prefetch_req.bits
+  })
+  // when loadUnits(0) stage 0 is busy, hw prefetch will never use that pipeline
+  loadUnits(0).io.prefetch_req.bits.confidence := 0.U
+
+  io.prefetch_req.ready := (io.prefetch_req.bits.confidence > 0.U) ||
+    loadUnits.map(!_.io.ldin.valid).reduce(_ || _)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrappper)

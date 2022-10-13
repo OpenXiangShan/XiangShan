@@ -138,6 +138,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
 
+  // hardware prefetch parameters
+  // high confidence hardware prefetch port
+  val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default
+  val IgnorePrefetchConfidence = false
+
   // parameters about duplicating regs to solve fanout
   // In Main Pipe:
     // tag_write.ready -> data_write.valid * 8 banks

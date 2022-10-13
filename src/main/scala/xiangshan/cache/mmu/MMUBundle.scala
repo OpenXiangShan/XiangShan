@@ -381,6 +381,8 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val cmd = Output(TlbCmd())
   val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
   val robIdx = Output(new RobPtr)
+  // do not translate, but still do pmp/pma check
+  val no_translate = Output(Bool()) 
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val isFirstIssue = Output(Bool())

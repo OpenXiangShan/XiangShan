@@ -60,6 +60,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
+    val prefetch_in = Flipped(ValidIO(new L1PrefetchReq))
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
@@ -86,9 +87,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     }
   }
 
-  val isSoftPrefetch = LSUOpType.isPrefetch(s0_uop.ctrl.fuOpType)
-  val isSoftPrefetchRead = s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r
-  val isSoftPrefetchWrite = s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w
+  val isPrefetch = WireInit(LSUOpType.isPrefetch(s0_uop.ctrl.fuOpType))
+  val isPrefetchRead = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r)
+  val isPrefetchWrite = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w)
+  val isHWPrefetch = WireInit(false.B)
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid || tryFastpath
@@ -96,14 +98,15 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
   io.dtlbReq.bits.robIdx := s0_uop.robIdx
+  io.dtlbReq.bits.no_translate := false.B
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   // query DCache
   io.dcacheReq.valid := io.in.valid || tryFastpath
-  when (isSoftPrefetchRead) {
+  when (isPrefetchRead) {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFR
-  }.elsewhen (isSoftPrefetchWrite) {
+  }.elsewhen (isPrefetchWrite) {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFW
   }.otherwise {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
@@ -111,7 +114,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
-  when(isSoftPrefetch) {
+  when(isPrefetch) {
     io.dcacheReq.bits.instrtype := SOFT_PREFETCH.U
   }.otherwise {
     io.dcacheReq.bits.instrtype := LOAD_SOURCE.U
@@ -127,7 +130,16 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
-  io.out.valid := (io.in.valid || tryFastpath) && io.dcacheReq.ready && !io.s0_kill
+  // prefetch ctrl signal gen
+  val have_confident_hw_prefetch = io.prefetch_in.valid && (io.prefetch_in.bits.confidence > 0.U)
+  val hw_prefetch_override = io.prefetch_in.valid &&
+    ((io.prefetch_in.bits.confidence > 0.U) || !io.in.valid)
+
+  // load req may come from:
+  // 1) normal read / software prefetch from RS (io.in.valid)
+  // 2) load to load fast path (tryFastpath)
+  // 3) hardware prefetch from prefetchor (hw_prefetch_override)
+  io.out.valid := (io.in.valid || tryFastpath || hw_prefetch_override) && io.dcacheReq.ready && !io.s0_kill
 
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
@@ -136,9 +148,26 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.isSoftPrefetch := isSoftPrefetch
+  io.out.bits.isPrefetch := isPrefetch
+  io.out.bits.isHWPrefetch := isHWPrefetch
 
-  io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
+  when (hw_prefetch_override) {
+    // vaddr based index for dcache
+    io.out.bits.vaddr := io.prefetch_in.bits.getVaddr()
+    io.dcacheReq.bits.addr := io.prefetch_in.bits.getVaddr()
+    // dtlb
+    // send paddr to dcache, send a no_translate signal
+    io.dtlbReq.bits.vaddr := io.prefetch_in.bits.paddr
+    io.dtlbReq.bits.cmd := Mux(io.prefetch_in.bits.is_store, TlbCmd.write, TlbCmd.read)
+    io.dtlbReq.bits.no_translate := true.B
+    // ctrl signal
+    isPrefetch := true.B
+    isHWPrefetch := true.B
+    isPrefetchRead := !io.prefetch_in.bits.is_store
+    isPrefetchWrite := io.prefetch_in.bits.is_store
+  }
+
+  io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready && !have_confident_hw_prefetch)
 
   XSDebug(io.dcacheReq.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
@@ -152,6 +181,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   XSPerfAccumulate("addr_spec_failed", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("addr_spec_success_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
   XSPerfAccumulate("addr_spec_failed_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("hardware_prefetch", io.out.fire && isPrefetch && hw_prefetch_override)
+  XSPerfAccumulate("software_prefetch", io.out.fire && isPrefetch && !hw_prefetch_override)
+  XSPerfAccumulate("hardware_prefetch_blocked", io.prefetch_in.valid && !hw_prefetch_override)
 }
 
 
@@ -227,7 +259,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     !io.loadViolationQueryReq.ready &&
     RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.needLdVioCheckRedo := needLdVioCheckRedo
-  io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo) && !io.s1_kill
+  io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo) && !io.s1_kill && !io.in.bits.isHWPrefetch
   io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict / re do ld-ld violation check
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
@@ -248,7 +280,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
-  io.out.bits.isSoftPrefetch := io.in.bits.isSoftPrefetch
+  io.out.bits.isPrefetch := io.in.bits.isPrefetch
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -293,7 +325,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     pmp.mmio := io.static_pm.bits
   }
 
-  val s2_is_prefetch = io.in.bits.isSoftPrefetch
+  val s2_is_prefetch = io.in.bits.isPrefetch
 
   // exception that may cause load addr to be invalid / illegal
   //
@@ -439,7 +471,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.in.ready := io.out.ready || !io.in.valid
 
   // feedback tlb result to RS
-  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.valid := io.in.valid && !io.in.bits.isHWPrefetch
   val s2_need_replay_from_rs = Wire(Bool())
   if (EnableFastForward) {
     s2_need_replay_from_rs :=
@@ -489,6 +521,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
   XSPerfAccumulate("replay_from_fetch_forward", io.out.valid && debug_forwardFailReplay)
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
+  XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents {
@@ -512,14 +545,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     // provide prefetch info
     val prefetch_train = ValidIO(new LsPipelineBundle())
 
+    // hardware prefetch to l1 cache req
+    val prefetch_req = Flipped(ValidIO(new L1PrefetchReq))
+
+    // load to load fast path
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(new LoadToLoadIO)
     val loadFastMatch = Input(Bool())
     val loadFastImm = Input(UInt(12.W))
 
+    // load ecc
     val s3_delayed_load_error = Output(Bool()) // load ecc error
     // Note that io.s3_delayed_load_error and io.lsq.s3_delayed_load_error is different
 
+    // load unit ctrl
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val s2IsPointerChasing = Output(Bool())
   })
@@ -800,6 +839,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     assert(RegNext(!io.lsq.loadIn.valid) || RegNext(load_s2.io.s2_dcache_require_replay))
   }
 
+  // hareware prefetch to l1
+  io.prefetch_req <> load_s0.io.prefetch_in
+
+  // trigger
   val lastValidData = RegEnable(io.ldout.bits.data, io.ldout.fire)
   val hitLoadAddrTriggerHitVec = Wire(Vec(3, Bool()))
   val lqLoadAddrTriggerHitVec = io.lsq.trigger.lqLoadAddrTriggerHitVec
@@ -814,6 +857,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hitLoadAddrTriggerHitVec
 
+  // hardware performance counter
   val perfEvents = Seq(
     ("load_s0_in_fire         ", load_s0.io.in.fire                                                                                                              ),
     ("load_to_load_forward    ", load_s1.io.out.valid && s1_tryPointerChasing && !cancelPointerChasing                                                           ),

@@ -48,7 +48,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val mode_dup = Seq.fill(Width)(RegNext(mode_tmp))
   val vmEnable_tmp = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
     else (io.csr.satp.mode === 8.U && (mode_tmp < ModeM))
-  val vmEnable_dup = Seq.fill(Width)(RegNext(vmEnable_tmp))
+  val vmEnable_dup = req.map(req => RegNext(vmEnable_tmp && !req.bits.no_translate))
   val sfence_dup = Seq.fill(2)(RegNext(io.sfence))
   val csr_dup = Seq.fill(Width)(RegNext(io.csr))
   val satp = csr_dup.head.satp
