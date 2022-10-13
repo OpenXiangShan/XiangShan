@@ -57,13 +57,13 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val hartId = Input(UInt(8.W))
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
-    val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
-    val delayedLoadError = Vec(LoadPipelineWidth, Input(Bool()))
-    val dcacheRequireReplay = Vec(LoadPipelineWidth, Input(Bool()))
+    val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
+    val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
+    val s3_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -116,9 +116,9 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
-  loadQueue.io.loadDataForwarded <> io.loadDataForwarded
-  loadQueue.io.delayedLoadError <> io.delayedLoadError
-  loadQueue.io.dcacheRequireReplay <> io.dcacheRequireReplay
+  loadQueue.io.s2_load_data_forwarded <> io.s2_load_data_forwarded
+  loadQueue.io.s3_delayed_load_error <> io.s3_delayed_load_error
+  loadQueue.io.s3_dcache_require_replay <> io.s3_dcache_require_replay
   loadQueue.io.ldout <> io.ldout
   loadQueue.io.rob <> io.rob
   loadQueue.io.rollback <> io.rollback
