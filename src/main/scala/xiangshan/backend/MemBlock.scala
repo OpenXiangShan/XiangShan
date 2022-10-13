@@ -71,7 +71,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-    val delayedLoadError = Vec(exuParameters.LduCnt, Output(Bool()))
+    val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -290,15 +290,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
-    lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.s2_load_data_forwarded(i) <> loadUnits(i).io.lsq.s2_load_data_forwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // passdown to lsq (load s3)
-    lsq.io.dcacheRequireReplay(i) <> loadUnits(i).io.lsq.dcacheRequireReplay
-    lsq.io.delayedLoadError(i) <> loadUnits(i).io.delayedLoadError
+    lsq.io.s3_dcache_require_replay(i) <> loadUnits(i).io.lsq.s3_dcache_require_replay
+    lsq.io.s3_delayed_load_error(i) <> loadUnits(i).io.s3_delayed_load_error
 
     // alter writeback exception info
-    io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
+    io.s3_delayed_load_error(i) := loadUnits(i).io.lsq.s3_delayed_load_error
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
