@@ -28,6 +28,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
+import com.fasterxml.jackson.databind.JsonSerializable.Base
 
 case class RSParams
 (
@@ -69,7 +70,21 @@ case class RSParams
   }
 }
 
-class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with HasXSParameter {
+abstract class RSModule(implicit p: Parameters) extends XSModule with HasPerfEvents
+
+trait RSSubMod {
+  def rsGen: (RSParams, Parameters) => BaseReservationStation
+  def rsIOGen: (RSParams, Parameters) => BaseReservationStationIO
+}
+
+trait BaseRSMod extends RSSubMod {
+  override def rsGen: (RSParams, Parameters) => BaseReservationStation =
+    (a: RSParams, b: Parameters) => new BaseReservationStation(a)(b)
+  override def rsIOGen: (RSParams, Parameters) => BaseReservationStationIO =
+    (a: RSParams, b: Parameters) => new BaseReservationStationIO(a)(b)
+}
+
+class BaseReservationStationWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val params = new RSParams
 
   def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {
@@ -130,65 +145,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   def wbFpPriority: Int = params.exuCfg.get.wbFpPriority
 
   override def toString: String = params.toString
-  // for better timing, we limits the size of RS to 2-deq
-  val maxRsDeq = 2
-  def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
-
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
-    require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
-    require(params.numEntries % params.numDeq == 0)
-    val rs = (0 until numRS).map(i => {
-      val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
-      val numEnq = params.numEnq / numRS
-      val numEntries = numDeq * params.numEntries / params.numDeq
-      val rsParam = params.copy(numEnq = numEnq, numDeq = numDeq, numEntries = numEntries)
-      val updatedP = p.alter((site, here, up) => {
-        case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-          IssQueSize = numEntries
-        )
-      })
-      Module(new ReservationStation(rsParam)(updatedP))
-    })
-
-    val updatedP = p.alter((site, here, up) => {
-      case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-        IssQueSize = rs.map(_.size).max
-      )
-    })
-    val io = IO(new ReservationStationIO(params)(updatedP))
-
-    rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
-    io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
-    io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
-    if (io.fpRegValue.isDefined) {
-      io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
-    }
-    io.deq <> rs.flatMap(_.io.deq)
-    rs.foreach(_.io.fastUopsIn <> io.fastUopsIn)
-    rs.foreach(_.io.fastDatas <> io.fastDatas)
-    rs.foreach(_.io.slowPorts <> io.slowPorts)
-    if (io.fastWakeup.isDefined) {
-      io.fastWakeup.get <> rs.flatMap(_.io.fastWakeup.get)
-    }
-    if (io.jump.isDefined) {
-      rs.foreach(_.io.jump.get <> io.jump.get)
-    }
-    if (io.feedback.isDefined) {
-      io.feedback.get <> rs.flatMap(_.io.feedback.get)
-    }
-    if (io.checkwait.isDefined) {
-     rs.foreach(_.io.checkwait.get <> io.checkwait.get)
-    }
-    if (io.load.isDefined) {
-      io.load.get <> rs.flatMap(_.io.load.get)
-    }
-    if (io.fmaMid.isDefined) {
-      io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
-    }
-
-    val perfEvents = rs.flatMap(_.getPerfEvents)
-    generatePerfEvent()
-  }
 
   var fastWakeupIdx = 0
   def connectFastWakeup(uop: ValidIO[MicroOp], data: UInt): Unit = {
@@ -201,9 +157,77 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       connectFastWakeup(u, d)
     }
   }
+
+  // for better timing, we limits the size of RS to 2-deq
+  // duplicate with ModuleImp, fix it later
+  val maxRsDeq = 2
+  def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
+
+  lazy val module = new BaseReservationStationImp(params, this)
 }
 
-class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStationWrapper) extends LazyModuleImp(wrapper) with BaseRSMod with HasPerfEvents {
+  // for better timing, we limits the size of RS to 2-deq
+  val maxRsDeq = 2
+  def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
+
+  require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
+  require(params.numEntries % params.numDeq == 0)
+  val rsParams = (0 until numRS).map(i => {
+    val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
+    val numEnq = params.numEnq / numRS
+    val numEntries = numDeq * params.numEntries / params.numDeq
+    val rsParam = params.copy(numEnq = numEnq, numDeq = numDeq, numEntries = numEntries)
+    val updatedP = p.alter((site, here, up) => {
+      case XSCoreParamsKey => up(XSCoreParamsKey).copy(
+        IssQueSize = numEntries
+      )
+    })
+    (rsParam, updatedP)
+  })
+  val rs = rsParams.map(rsP => Module(rsGen(rsP._1, rsP._2)))
+
+  val updatedP = p.alter((site, here, up) => {
+    case XSCoreParamsKey => up(XSCoreParamsKey).copy(
+      IssQueSize = rsParams.map(rsP => rsP._1.numEntries).max
+    )
+  })
+  val io = IO(rsIOGen(params, updatedP))
+
+  rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
+  io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
+  io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
+  if (io.fpRegValue.isDefined) {
+    io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
+  }
+  io.deq <> rs.flatMap(_.io.deq)
+  rs.foreach(_.io.fastUopsIn <> io.fastUopsIn)
+  rs.foreach(_.io.fastDatas <> io.fastDatas)
+  rs.foreach(_.io.slowPorts <> io.slowPorts)
+  if (io.fastWakeup.isDefined) {
+    io.fastWakeup.get <> rs.flatMap(_.io.fastWakeup.get)
+  }
+  if (io.jump.isDefined) {
+    rs.foreach(_.io.jump.get <> io.jump.get)
+  }
+  if (io.feedback.isDefined) {
+    io.feedback.get <> rs.flatMap(_.io.feedback.get)
+  }
+  if (io.checkwait.isDefined) {
+   rs.foreach(_.io.checkwait.get <> io.checkwait.get)
+  }
+  if (io.load.isDefined) {
+    io.load.get <> rs.flatMap(_.io.load.get)
+  }
+  if (io.fmaMid.isDefined) {
+    io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
+  }
+
+  val perfEvents = rs.flatMap(_.getPerfEvents)
+  generatePerfEvent()
+}
+
+class BaseReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
@@ -236,11 +260,10 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 }
 
-class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule
-  with HasPerfEvents
+class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends RSModule
   with HasCircularQueuePtrHelper
 {
-  val io = IO(new ReservationStationIO(params))
+  val io = IO(new BaseReservationStationIO(params))
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -928,8 +951,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfAccumulate("allocate_num", PopCount(s0_doEnqueue))
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
-
-  def size: Int = params.numEntries
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()

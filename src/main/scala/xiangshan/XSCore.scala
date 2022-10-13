@@ -156,45 +156,61 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.LduCnt == exuParameters.StuCnt) // TODO: remove this limitation
 
   // one RS every 2 MDUs
-  val schedulePorts = Seq(
-    // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
+  val aluScheLaneCfg = ScheLaneConfig(
+    aluRSWrapperGen,
+    AluExeUnitCfg,
+    exuParameters.AluCnt,
+    Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg))
+  val mulScheLaneCfg = ScheLaneConfig(
+    mulRSWrapperGen,
+    MulDivExeUnitCfg,
+    exuParameters.MduCnt,
+    Seq(AluExeUnitCfg, MulDivExeUnitCfg))
+  val jumpScheLaneCfg = ScheLaneConfig(
+    jumpRSWrapperGen,
+    JumpCSRExeUnitCfg,
+    1)
+  val loadScheLaneCfg = ScheLaneConfig(
+    loadRSWrapperGen,
+    LdExeUnitCfg,
+    exuParameters.LduCnt,
+    Seq(AluExeUnitCfg, LdExeUnitCfg))
+  val staScheLaneCfg = ScheLaneConfig(
+    staRSWrapperGen,
+    StaExeUnitCfg,
+    exuParameters.StuCnt)
+  val stdScheLaneCfg = ScheLaneConfig(
+    stdRSWrapperGen,
+    StdExeUnitCfg,
+    exuParameters.StuCnt)
+  val fmaScheLaneCfg = ScheLaneConfig(
+    fmaRSWrapperGen,
+    FmacExeUnitCfg,
+    exuParameters.FmacCnt,
+    Seq(),
+    Seq(FmacExeUnitCfg, FmiscExeUnitCfg))
+  val fmiscScheLaneCfg = ScheLaneConfig(
+    fmiscRSWrapperGen,
+    FmiscExeUnitCfg,
+    exuParameters.FmiscCnt)
+
+  val scheduleCfgs = Seq(
     Seq(
-      ScheLaneBaseConfig(
-        AluExeUnitCfg,
-        exuParameters.AluCnt,
-        Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg)),
-      ScheLaneBaseConfig(
-        MulDivExeUnitCfg,
-        exuParameters.MduCnt,
-        Seq(AluExeUnitCfg, MulDivExeUnitCfg)),
-      ScheLaneBaseConfig(
-        JumpCSRExeUnitCfg,
-        1),
-      ScheLaneBaseConfig(
-        LdExeUnitCfg,
-        exuParameters.LduCnt,
-        Seq(AluExeUnitCfg, LdExeUnitCfg)),
-      ScheLaneBaseConfig(StaExeUnitCfg,
-        exuParameters.StuCnt),
-      ScheLaneBaseConfig(
-        StdExeUnitCfg,
-        exuParameters.StuCnt)
+      aluScheLaneCfg,
+      mulScheLaneCfg,
+      jumpScheLaneCfg,
+      loadScheLaneCfg,
+      staScheLaneCfg,
+      stdScheLaneCfg
     ),
     Seq(
-      ScheLaneBaseConfig(
-        FmacExeUnitCfg,
-        exuParameters.FmacCnt,
-        Seq(),
-        Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
-      ScheLaneBaseConfig(
-        FmiscExeUnitCfg,
-        exuParameters.FmiscCnt)
+      fmaScheLaneCfg,
+      fmiscScheLaneCfg
     )
   )
-
   // should do outer fast wakeup ports here
-  val otherFastPorts: Seq[Seq[Seq[Int]]] = schedulePorts.zipWithIndex.map { case (sche, i) =>
-    val otherCfg = schedulePorts.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
+  val otherFastPorts: Seq[Seq[Seq[Int]]] = scheduleCfgs.zipWithIndex.map { case (sche, i) =>
+    val otherCfg = scheduleCfgs.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
     val outerPorts = sche.map(cfg => {
       // exe units from this scheduler need fastUops from exeunits
       val outerWakeupInSche = sche.filter(_.exuConfig.wakeupFromExu)
@@ -236,7 +252,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val outFpRfReadPorts = Seq(0, StorePipelineWidth)
   val hasIntRf = Seq(true, false)
   val hasFpRf = Seq(false, true)
-  val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
+  val exuBlocks = scheduleCfgs.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
     case (((sche, disp), other), i) =>
       LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
   }

@@ -19,10 +19,11 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
+import xiangshan.backend.issue._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
-import xiangshan.backend.Std
+import xiangshan.backend.{Std, ScheLaneConfig}
 
 package object xiangshan {
   object SrcType {
@@ -786,4 +787,14 @@ package object xiangshan {
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+
+
+  def aluRSWrapperGen(p: Parameters) = new ALURSWrapper()(p)
+  def jumpRSWrapperGen(p: Parameters) = new JumpRSWrapper()(p)
+  def mulRSWrapperGen(p: Parameters) = new MulRSWrapper()(p)
+  def loadRSWrapperGen(p: Parameters) = new LoadRSWrapper()(p)
+  def stdRSWrapperGen(p: Parameters) = new StoreRSWrapper()(p)
+  def staRSWrapperGen(p: Parameters) = new StoreDataRSWrapper()(p)
+  def fmaRSWrapperGen(p: Parameters) = new FMARSWrapper()(p)
+  def fmiscRSWrapperGen(p: Parameters) = new FMiscRSWrapper()(p)
 }

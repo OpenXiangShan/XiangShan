@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.exu._
 
 class ExuBlock(
-  val configs: Seq[ScheLaneBaseConfig],
+  val configs: Seq[ScheLaneConfig],
   val dpPorts: Seq[Seq[DpPortMapConfig]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],

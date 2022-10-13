@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.backend.issue.ReservationStationWrapper
+import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams}
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
@@ -125,18 +125,20 @@ trait HasExuWbHelper {
   * 2. issue unit
   * 3. exe unit
   **/
-case class ScheLaneBaseConfig (
+case class ScheLaneConfig (
+  rsWrapperGen: Parameters => BaseReservationStationWrapper,
   exuConfig: ExuConfig,
   numDeq: Int,
   intFastWakeupTarget: Seq[ExuConfig] = Seq(),
   fpFastWakeupTarget: Seq[ExuConfig] = Seq()
 )
 
+
 case class DpPortMapConfig(rsIdx: Int, dpIdx: Int)
 
 class Scheduler(
   // val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],
-  val configs: Seq[ScheLaneBaseConfig],
+  val configs: Seq[ScheLaneConfig],
   val dpPorts: Seq[Seq[DpPortMapConfig]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
@@ -173,10 +175,10 @@ class Scheduler(
     val numFp = if (config.fpSrcCnt > 0) numFpRfWritePorts else 0
     numInt + numFp
   })
-  val innerIntFastSources: Seq[Seq[(ScheLaneBaseConfig, Int)]] = configs.map(_.exuConfig).map{ cfg =>
+  val innerIntFastSources: Seq[Seq[(ScheLaneConfig, Int)]] = configs.map(_.exuConfig).map{ cfg =>
     configs.zipWithIndex.filter{ case (c, i) => c.intFastWakeupTarget.contains(cfg) && c.exuConfig.wakeupFromRS }
   }
-  val innerFpFastSources: Seq[Seq[(ScheLaneBaseConfig, Int)]] = configs.map(_.exuConfig).map{ cfg =>
+  val innerFpFastSources: Seq[Seq[(ScheLaneConfig, Int)]] = configs.map(_.exuConfig).map{ cfg =>
     configs.zipWithIndex.filter{ case (c, i) => c.fpFastWakeupTarget.contains(cfg) && c.exuConfig.wakeupFromRS }
   }
   val innerFastPorts: Seq[Seq[Int]] = configs.map(_.exuConfig).zipWithIndex.map{ case (config, i) =>
@@ -186,8 +188,8 @@ class Scheduler(
   }
   println(s"inner fast: $innerFastPorts")
   val numAllFastPorts: Seq[Int] = innerFastPorts.zip(outFastPorts).map{ case (i, o) => i.length + o.length }
-  val reservationStations: Seq[ReservationStationWrapper] = configs.zipWithIndex.map{ case (cfg, i) =>
-    val rs = LazyModule(new ReservationStationWrapper())
+  val reservationStations: Seq[BaseReservationStationWrapper] = configs.zipWithIndex.map{ case (cfg, i) =>
+    val rs = LazyModule(cfg.rsWrapperGen(p))
     rs.addIssuePort(cfg.exuConfig, cfg.numDeq)
     rs.addWakeup(wakeupPorts(i))
     rs.addEarlyWakeup(numAllFastPorts(i))
