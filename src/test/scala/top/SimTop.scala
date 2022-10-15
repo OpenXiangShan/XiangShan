@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation
-import device.{AXI4RAMWrapper, SimJTAG}
+import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.{ElaborationArtefacts, Pow2ClockDivider}
@@ -30,7 +30,6 @@ import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
-  val useDRAMSim = debugOpts.UseDRAMSim
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -41,6 +40,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val clock_div2 = Module(new Pow2ClockDivider(1)).io.clock_out
   soc.io.clock_div2 := clock_div2
   soc.io.reset := reset.asAsyncReset
+
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
   val rtcTickCycle = rtcClockDiv / 2
@@ -60,13 +60,15 @@ class SimTop(implicit p: Parameters) extends Module {
   l_simMMIO.io_dma <> soc.dma
   simMMIO.clock := clock_div2
 
-  if(!useDRAMSim){
-    val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.misc.memAXI4SlaveNode, 16L * 1024 * 1024 * 1024, useBlackBox = true
-    ))
+  withClockAndReset(clock_div2, reset.asAsyncReset) {
+    val l_simAXIMem = AXI4MemorySlave(
+      l_soc.misc.memAXI4SlaveNode,
+      16L * 1024 * 1024 * 1024,
+      useBlackBox = true,
+      dynamicLatency = debugOpts.UseDRAMSim
+    )
     val simAXIMem = Module(l_simAXIMem.module)
     l_simAXIMem.io_axi4 <> soc.memory
-    simAXIMem.clock := clock_div2
   }
 
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
@@ -83,8 +85,6 @@ class SimTop(implicit p: Parameters) extends Module {
     val logCtrl = new LogCtrlIO
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
-    val memAXI = if(useDRAMSim) soc.memory.cloneType else null
-    val clock_div2 = Output(Bool())
   })
 
   // NOTE: SimMMIO has a 2-divided clock.
@@ -97,11 +97,6 @@ class SimTop(implicit p: Parameters) extends Module {
   uart_out_valid_sync := Cat(uart_out_valid_sync(0), simMMIO.io.uart.out.valid)
   io.uart.out.valid := uart_out_valid_sync(0) && !uart_out_valid_sync(1)
   io.uart.out.ch := RegNext(simMMIO.io.uart.out.ch)
-
-  if(useDRAMSim){
-    io.memAXI <> soc.memory
-  }
-  io.clock_div2 := clock_div2.asBool
 
   soc.xsx_fscan := DontCare
   soc.mem := DontCare

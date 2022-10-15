@@ -213,10 +213,10 @@ jobs:
           ssh -tt 172.28.10.101 "echo test-ok"
       - name: Generate Verilog for VCS
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --release
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --release --with-dramsim3
       - name: Build SIMV on Remote
         run: |
-          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
+          ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release --with-dramsim3"
       - name: Simple Test - cputest
         run: |
           ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest" 2> /dev/zero

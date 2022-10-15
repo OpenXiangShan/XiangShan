@@ -34,7 +34,7 @@ class XSArgs(object):
     noop_home = os.path.join(os.path.dirname(script_path), "..")
     nemu_home = os.path.join(noop_home, "../NEMU")
     am_home = "/nfs/home/share/southlake-release/workloads/nexus-am"
-    dramsim3_home = os.path.join(noop_home, "../DRAMsim3")
+    dramsim3_home = "/nfs/home/share/southlake-release/workloads/DRAMsim3"
     rvtest_home = "/nfs/home/share/southlake-release/workloads/riscv-tests"
     default_wave_home = os.path.join(noop_home, "build")
     wave_home   = default_wave_home
