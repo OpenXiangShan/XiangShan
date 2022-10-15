@@ -140,6 +140,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
+  val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
@@ -156,6 +157,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
     pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
   })
+  prefetcherOpt match {
+    case Some(pf) => l1_pf_req <> pf.io.l1_req
+    case None =>
+      l1_pf_req.valid := false.B
+      l1_pf_req.bits := DontCare
+  }
   val pf_train_on_hit = RegNextN(io.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
@@ -186,14 +193,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stOut = io.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // prefetch to l1 req
-  loadUnits.map(load_unit => {
-    load_unit.io.prefetch_req.valid <> io.prefetch_req.valid
-    load_unit.io.prefetch_req.bits <> io.prefetch_req.bits
+  loadUnits.foreach(load_unit => {
+    load_unit.io.prefetch_req.valid <> l1_pf_req.valid
+    load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
   // when loadUnits(0) stage 0 is busy, hw prefetch will never use that pipeline
   loadUnits(0).io.prefetch_req.bits.confidence := 0.U
 
-  io.prefetch_req.ready := (io.prefetch_req.bits.confidence > 0.U) ||
+  l1_pf_req.ready := (l1_pf_req.bits.confidence > 0.U) ||
     loadUnits.map(!_.io.ldin.valid).reduce(_ || _)
 
   // TODO: fast load wakeup
