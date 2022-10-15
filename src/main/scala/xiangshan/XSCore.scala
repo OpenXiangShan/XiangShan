@@ -157,40 +157,40 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   // one RS every 2 MDUs
   val aluScheLaneCfg = ScheLaneConfig(
-    aluRSWrapperGen,
+    aluRSMod,
     AluExeUnitCfg,
     exuParameters.AluCnt,
     Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg))
   val mulScheLaneCfg = ScheLaneConfig(
-    mulRSWrapperGen,
+    mulRSMod,
     MulDivExeUnitCfg,
     exuParameters.MduCnt,
     Seq(AluExeUnitCfg, MulDivExeUnitCfg))
   val jumpScheLaneCfg = ScheLaneConfig(
-    jumpRSWrapperGen,
+    jumpRSMod,
     JumpCSRExeUnitCfg,
     1)
   val loadScheLaneCfg = ScheLaneConfig(
-    loadRSWrapperGen,
+    loadRSMod,
     LdExeUnitCfg,
     exuParameters.LduCnt,
     Seq(AluExeUnitCfg, LdExeUnitCfg))
   val staScheLaneCfg = ScheLaneConfig(
-    staRSWrapperGen,
+    staRSMod,
     StaExeUnitCfg,
     exuParameters.StuCnt)
   val stdScheLaneCfg = ScheLaneConfig(
-    stdRSWrapperGen,
+    stdRSMod,
     StdExeUnitCfg,
     exuParameters.StuCnt)
   val fmaScheLaneCfg = ScheLaneConfig(
-    fmaRSWrapperGen,
+    fmaRSMod,
     FmacExeUnitCfg,
     exuParameters.FmacCnt,
     Seq(),
     Seq(FmacExeUnitCfg, FmiscExeUnitCfg))
   val fmiscScheLaneCfg = ScheLaneConfig(
-    fmiscRSWrapperGen,
+    fmiscRSMod,
     FmiscExeUnitCfg,
     exuParameters.FmiscCnt)
 

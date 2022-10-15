@@ -107,12 +107,14 @@ class ImmExtractor(numSrc: Int, dataBits: Int)(implicit p: Parameters) extends X
     val data_out = Vec(numSrc, Output(UInt(dataBits.W)))
   })
   io.data_out := io.data_in
+
+  val jump_pc = IO(Input(UInt(VAddrBits.W)))
+  val jalr_target = IO(Input(UInt(VAddrBits.W)))
+  jump_pc <> DontCare
+  jalr_target <> DontCare
 }
 
 class JumpImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
-  val jump_pc = IO(Input(UInt(VAddrBits.W)))
-  val jalr_target = IO(Input(UInt(VAddrBits.W)))
-
   when (SrcType.isPc(io.uop.ctrl.srcType(0))) {
     io.data_out(0) := SignExt(jump_pc, XLEN)
   }
@@ -146,20 +148,14 @@ class LoadImmExtractor(implicit p: Parameters) extends ImmExtractor(1, 64) {
 }
 
 object ImmExtractor {
-  def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
-           (implicit p: Parameters): Vec[UInt] = {
-    val immExt = if (params.isJump) {
-      val ext = Module(new JumpImmExtractor)
-      ext.jump_pc := pc.get
-      ext.jalr_target := target.get
-      ext
-    }
-    else if (params.isAlu) { Module(new AluImmExtractor) }
-    else if (params.isMul) { Module(new MduImmExtractor) }
-    else if (params.isLoad) { Module(new LoadImmExtractor) }
-    else { Module(new ImmExtractor(params.numSrc, params.dataBits)) }
+  def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt])
+           (implicit p: Parameters) = {
+    val immExt = Module(params.subMod.immExtractorGen(params.numSrc, params.dataBits, p))
     immExt.io.uop := uop
     immExt.io.data_in := data_in
-    immExt.io.data_out
+
+    immExt.jalr_target <> DontCare
+    immExt.jump_pc <> DontCare
+    immExt
   }
 }

@@ -30,8 +30,19 @@ import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import scala.math.max
 import com.fasterxml.jackson.databind.JsonSerializable.Base
 
+case class RSMod
+(
+  var rsWrapperGen: (RSMod, Parameters) => BaseReservationStationWrapper,// =
+    // (p: Parameters) => new BaseReservationStationWrapper()(p),
+  var rsGen: (RSParams, Parameters) => BaseReservationStation,// =
+    // (params, p) => new BaseReservationStation(params)(p),
+  var immExtractorGen: (Int, Int, Parameters) => ImmExtractor =
+    (src: Int, width: Int, p: Parameters) => new ImmExtractor(src,width)(p),
+)
+
 case class RSParams
 (
+  var subMod: RSMod,
   var numEntries: Int = 0,
   var numEnq: Int = 0,
   var numDeq: Int = 0,
@@ -45,7 +56,6 @@ case class RSParams
   var checkWaitBit: Boolean = false,
   // special cases
   var isJump: Boolean = false,
-  var isAlu: Boolean = false,
   var isStore: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
@@ -72,20 +82,8 @@ case class RSParams
 
 abstract class RSModule(implicit p: Parameters) extends XSModule with HasPerfEvents
 
-trait RSSubMod {
-  def rsGen: (RSParams, Parameters) => BaseReservationStation
-  def rsIOGen: (RSParams, Parameters) => BaseReservationStationIO
-}
-
-trait BaseRSMod extends RSSubMod {
-  override def rsGen: (RSParams, Parameters) => BaseReservationStation =
-    (a: RSParams, b: Parameters) => new BaseReservationStation(a)(b)
-  override def rsIOGen: (RSParams, Parameters) => BaseReservationStationIO =
-    (a: RSParams, b: Parameters) => new BaseReservationStationIO(a)(b)
-}
-
-class BaseReservationStationWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  val params = new RSParams
+class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  val params = new RSParams(subMod = modGen)
 
   def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {
     require(params.numEnq == 0, "issue ports should be added before dispatch ports")
@@ -97,7 +95,6 @@ class BaseReservationStationWrapper()(implicit p: Parameters) extends LazyModule
     params.exuCfg = Some(cfg)
     cfg match {
       case JumpCSRExeUnitCfg => params.isJump = true
-      case AluExeUnitCfg => params.isAlu = true
       case StaExeUnitCfg => params.isStore = true
       case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
@@ -166,10 +163,11 @@ class BaseReservationStationWrapper()(implicit p: Parameters) extends LazyModule
   lazy val module = new BaseReservationStationImp(params, this)
 }
 
-class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStationWrapper) extends LazyModuleImp(wrapper) with BaseRSMod with HasPerfEvents {
+class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStationWrapper) extends LazyModuleImp(wrapper) with HasPerfEvents {
   // for better timing, we limits the size of RS to 2-deq
   val maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
+  def isJump = params.isJump
 
   require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
   require(params.numEntries % params.numDeq == 0)
@@ -185,14 +183,17 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
     })
     (rsParam, updatedP)
   })
-  val rs = rsParams.map(rsP => Module(rsGen(rsP._1, rsP._2)))
+  val rs = rsParams.map(rsP => Module(params.subMod.rsGen(rsP._1, rsP._2)))
+  rs.foreach(_.extra <> DontCare)
 
   val updatedP = p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = rsParams.map(rsP => rsP._1.numEntries).max
     )
   })
-  val io = IO(rsIOGen(params, updatedP))
+  val io = IO(new BaseReservationStationIO(params)(updatedP))
+  val extra = IO(new BaseRSExtraIO(params)(updatedP))
+  extra <> DontCare
 
   rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
   io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
@@ -206,9 +207,6 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   rs.foreach(_.io.slowPorts <> io.slowPorts)
   if (io.fastWakeup.isDefined) {
     io.fastWakeup.get <> rs.flatMap(_.io.fastWakeup.get)
-  }
-  if (io.jump.isDefined) {
-    rs.foreach(_.io.jump.get <> io.jump.get)
   }
   if (io.feedback.isDefined) {
     io.feedback.get <> rs.flatMap(_.io.feedback.get)
@@ -241,10 +239,6 @@ class BaseReservationStationIO(params: RSParams)(implicit p: Parameters) extends
   val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
   // extra
   val fastWakeup = if (params.fixedLatency >= 0) Some(Vec(params.numDeq, ValidIO(new MicroOp))) else None
-  val jump = if (params.isJump) Some(new Bundle {
-    val jumpPc = Input(UInt(VAddrBits.W))
-    val jalr_target = Input(UInt(VAddrBits.W))
-  }) else None
   val feedback = if (params.hasFeedback) Some(Vec(params.numDeq,
     Flipped(new MemRSFeedbackIO)
   )) else None
@@ -260,10 +254,20 @@ class BaseReservationStationIO(params: RSParams)(implicit p: Parameters) extends
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 }
 
+class BaseRSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+  val jump = new Bundle {
+    val jumpPc = Input(UInt(VAddrBits.W))
+    val jalr_target = Input(UInt(VAddrBits.W))
+  }
+}
+
 class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends RSModule
   with HasCircularQueuePtrHelper
 {
-  val io = IO(new BaseReservationStationIO(params))
+  val io = IO(new BaseReservationStationIO(params)(p))
+  val extra = IO(new BaseRSExtraIO(params))
+  // DontCare here
+  extra <> DontCare
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -364,7 +368,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
 
-  select.io.balance
+  // select.io.balance
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -596,10 +600,12 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // for read-before-issue, it's done over the enqueue uop (and store the imm in dataArray to save space)
   // TODO: need to bypass data here.
   val immBypassedData = Wire(Vec(params.numEnq, Vec(params.numSrc, UInt(params.dataBits.W))))
-  for (((uop, data), bypass) <- s1_dispatchUops_dup(2).map(_.bits).zip(enqReverse(io.srcRegValue)).zip(immBypassedData)) {
-    val jumpPc = if (io.jump.isDefined) Some(io.jump.get.jumpPc) else None
-    val jalr_target = if (io.jump.isDefined) Some(io.jump.get.jalr_target) else None
-    bypass := ImmExtractor(params, uop, data, jumpPc, jalr_target)
+  val immExts = s1_dispatchUops_dup(2).map(_.bits)
+    .zip(enqReverse(io.srcRegValue))
+    .zip(immBypassedData).map{ case ((uop, data), bypass) =>
+    val immExt = ImmExtractor(params, uop, data)
+    bypass := immExt.io.data_out
+    immExt
   }
 
   /**
@@ -887,25 +893,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
       }
       val cond2Selected = s1_out_fire(i) && VecInit(cond2).asUInt.orR
       XSPerfAccumulate(s"fma_final_selected_cond2_$i", cond2Selected)
-    }
-  }
-
-  if (params.isJump) {
-    val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
-    for (i <- 0 until params.numEntries) {
-      val writeEn = VecInit(dataArray.io.write.map(w => w.enable && w.addr(i))).asUInt.orR
-      when (writeEn) {
-        pcMem(i) := io.jump.get.jumpPc
-      }
-    }
-    for (i <- 0 until params.numDeq) {
-      // currently we assert there's only one enqueue.
-      require(params.numDeq == 1, "only one jump now")
-      val oldestPc = Mux1H(s1_in_oldestPtrOH.bits, pcMem)
-      val issuePc = Mux1H(s1_in_selectPtrOH(i), pcMem)
-      val pcRead = Mux(s1_issue_oldest(i), oldestPc, issuePc)
-      val pcBypass = Mux(s1_select_bypass_s0.asUInt.orR, io.jump.get.jumpPc, pcRead)
-      io.deq(i).bits.uop.cf.pc := RegEnable(pcBypass, s1_out_fire(i))
     }
   }
 

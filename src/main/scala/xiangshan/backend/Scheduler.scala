@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams}
+import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams, RSMod}
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
@@ -126,7 +126,7 @@ trait HasExuWbHelper {
   * 3. exe unit
   **/
 case class ScheLaneConfig (
-  rsWrapperGen: Parameters => BaseReservationStationWrapper,
+  rsModGen: RSMod,
   exuConfig: ExuConfig,
   numDeq: Int,
   intFastWakeupTarget: Seq[ExuConfig] = Seq(),
@@ -189,7 +189,8 @@ class Scheduler(
   println(s"inner fast: $innerFastPorts")
   val numAllFastPorts: Seq[Int] = innerFastPorts.zip(outFastPorts).map{ case (i, o) => i.length + o.length }
   val reservationStations: Seq[BaseReservationStationWrapper] = configs.zipWithIndex.map{ case (cfg, i) =>
-    val rs = LazyModule(cfg.rsWrapperGen(p))
+    val rs = LazyModule(cfg.rsModGen.rsWrapperGen(cfg.rsModGen, p))
+    // rs.addModGen(cfg.rsModGen)
     rs.addIssuePort(cfg.exuConfig, cfg.numDeq)
     rs.addWakeup(wakeupPorts(i))
     rs.addEarlyWakeup(numAllFastPorts(i))
@@ -234,6 +235,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val fpRfConfig = (outer.numFpRfReadPorts > 0 && outer.hasFpRf, outer.numFpRfReadPorts, fpRfWritePorts)
 
   val rs_all = outer.reservationStations
+  rs_all.foreach(_.module.extra <> DontCare)
 
   // print rs info
   println("Scheduler: ")
@@ -444,10 +446,10 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     issueIdx += issueWidth
 
-    if (rs.io.jump.isDefined) {
+    if (rs.isJump) {
       val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
-      rs.io.jump.get.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
-      rs.io.jump.get.jalr_target := RegEnable(io.extra.jalr_target, jumpFire)
+      rs.extra.jump.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
+      rs.extra.jump.jalr_target := RegEnable(io.extra.jalr_target, jumpFire)
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr

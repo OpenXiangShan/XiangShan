@@ -23,18 +23,9 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 
 case class FMARSParams()
 
-trait FMARSMod extends RSSubMod {
-  override def rsGen: (RSParams, Parameters) => FMARS =
-    (a: RSParams, b: Parameters) => new FMARS(a)(b)
-  override def rsIOGen: (RSParams, Parameters) => FMARSIO =
-    (a: RSParams, b: Parameters) => new FMARSIO(a)(b)
-}
-
-class FMARSWrapper(implicit p: Parameters) extends BaseReservationStationWrapper {
+class FMARSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
   override lazy val module = new FMARSImp(params, this)
 }
-
-class FMARSIO(params: RSParams)(implicit p: Parameters) extends BaseReservationStationIO(params)
 
 class FMARSImp(params: RSParams, wrapper: FMARSWrapper) extends BaseReservationStationImp(params, wrapper) {
 }

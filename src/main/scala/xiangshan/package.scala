@@ -788,13 +788,48 @@ package object xiangshan {
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
+  // def jumpRSWrapperGen(p: Parameters) = new JumpRSWrapper()(p)
+  // def mulRSWrapperGen(p: Parameters) = new MulRSWrapper()(p)
+  // def loadRSWrapperGen(p: Parameters) = new LoadRSWrapper()(p)
+  // def stdRSWrapperGen(p: Parameters) = new StdRSWrapper()(p)
+  // def staRSWrapperGen(p: Parameters) = new StaRSWrapper()(p)
+  // def fmaRSWrapperGen(p: Parameters) = new FMARSWrapper()(p)
+  // def fmiscRSWrapperGen(p: Parameters) = new FMiscRSWrapper()(p)
 
-  def aluRSWrapperGen(p: Parameters) = new ALURSWrapper()(p)
-  def jumpRSWrapperGen(p: Parameters) = new JumpRSWrapper()(p)
-  def mulRSWrapperGen(p: Parameters) = new MulRSWrapper()(p)
-  def loadRSWrapperGen(p: Parameters) = new LoadRSWrapper()(p)
-  def stdRSWrapperGen(p: Parameters) = new StdRSWrapper()(p)
-  def staRSWrapperGen(p: Parameters) = new StaRSWrapper()(p)
-  def fmaRSWrapperGen(p: Parameters) = new FMARSWrapper()(p)
-  def fmiscRSWrapperGen(p: Parameters) = new FMiscRSWrapper()(p)
+  val aluRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new ALURSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new ALURS(a)(b),
+    immExtractorGen = (src: Int, width: Int, p: Parameters) => new AluImmExtractor()(p)
+  )
+  val fmaRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new FMARSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new FMARS(a)(b),
+  )
+  val fmiscRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new FMiscRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new FMiscRS(a)(b),
+  )
+  val jumpRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new JumpRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new JumpRS(a)(b),
+    immExtractorGen = (src: Int, width: Int, p: Parameters) => new JumpImmExtractor()(p)
+  )
+  val loadRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new LoadRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new LoadRS(a)(b),
+    immExtractorGen = (src: Int, width: Int, p: Parameters) => new LoadImmExtractor()(p)
+  )
+  val mulRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new MulRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new MulRS(a)(b),
+    immExtractorGen = (src: Int, width: Int, p: Parameters) => new MduImmExtractor()(p)
+  )
+  val staRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new StaRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new StaRS(a)(b),
+  )
+  val stdRSMod = new RSMod(
+    rsWrapperGen = (modGen: RSMod, p: Parameters) => new StdRSWrapper(modGen)(p),
+    rsGen = (a: RSParams, b: Parameters) => new StdRS(a)(b),
+  )
 }
