@@ -365,12 +365,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
-  // l1 prefetch fuzzer, for debug only
-  val debug_l1PrefetchFuzzer = Module(new L1PrefetchFuzzer)
-  debug_l1PrefetchFuzzer.io.req <> memBlock.io.prefetch_req
-  debug_l1PrefetchFuzzer.io.vaddr := memBlock.io.writeback(0).bits.debug.vaddr
-  debug_l1PrefetchFuzzer.io.paddr := memBlock.io.writeback(0).bits.debug.paddr
-
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
   memBlock.io.perfEventsPTW  := ptw.getPerf

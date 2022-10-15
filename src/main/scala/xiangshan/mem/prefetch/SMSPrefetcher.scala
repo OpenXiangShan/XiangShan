@@ -7,6 +7,7 @@ import xiangshan._
 import utils._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
+import xiangshan.mem.L1PrefetchReq
 
 case class SMSParams
 (
@@ -97,6 +98,8 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
   def pht_tag(pc: UInt): UInt = {
     pc(PHT_INDEX_BITS + 2 + PHT_TAG_BITS - 1, PHT_INDEX_BITS + 2)
   }
+
+  def get_alias_bits(region_vaddr: UInt): UInt = region_vaddr(7, 6)
 }
 
 class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -212,6 +215,7 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
   io.s2_gen_req.valid := s2_pf_gen_valid && io.stride_en
   io.s2_gen_req.bits.region_tag := s2_region_tag
   io.s2_gen_req.bits.region_addr := s2_pf_region_addr
+  io.s2_gen_req.bits.alias_bits := get_alias_bits(region_addr(s2_full_vaddr))
   io.s2_gen_req.bits.region_bits := region_offset_to_bits(s2_pf_region_offset)
   io.s2_gen_req.bits.paddr_valid := s2_pf_gen_paddr_valid
   io.s2_gen_req.bits.decr_mode := false.B
@@ -234,6 +238,7 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val region_bits = UInt(REGION_BLKS.W)
   val paddr_valid = Bool()
   val decr_mode = Bool()
+  val alias_bits = UInt(2.W)
 }
 
 class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -438,6 +443,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pf_gen_region_tag = RegEnable(s1_pf_gen_region_tag, s1_pf_gen_valid)
   val s2_pf_gen_decr_mode = RegEnable(s1_pf_gen_decr_mode, s1_pf_gen_valid)
   val s2_pf_gen_region_paddr = RegEnable(s1_pf_gen_region_addr, s1_pf_gen_valid)
+  val s2_pf_gen_alias_bits = RegEnable(get_alias_bits(s1_pf_gen_vaddr), s1_pf_gen_valid)
   val s2_pf_gen_region_bits = RegEnable(s1_pf_gen_region_bits, s1_pf_gen_valid)
   val s2_pf_gen_valid = RegNext(s1_pf_gen_valid, false.B)
   val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
@@ -448,6 +454,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
 
   io.s2_pf_gen_req.bits.region_tag := s2_pf_gen_region_tag
   io.s2_pf_gen_req.bits.region_addr := s2_pf_gen_region_paddr
+  io.s2_pf_gen_req.bits.alias_bits := s2_pf_gen_alias_bits
   io.s2_pf_gen_req.bits.region_bits := s2_pf_gen_region_bits
   io.s2_pf_gen_req.bits.paddr_valid := s2_paddr_valid
   io.s2_pf_gen_req.bits.decr_mode := s2_pf_gen_decr_mode
@@ -688,7 +695,9 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
   val s3_incr_region_vaddr = s3_region_vaddr + 1.U
+  val s3_incr_alias_bits = get_alias_bits(s3_incr_region_vaddr)
   val s3_decr_region_vaddr = s3_region_vaddr - 1.U
+  val s3_decr_alias_bits = get_alias_bits(s3_decr_region_vaddr)
   val s3_incr_region_paddr = Cat(
     s3_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT),
     s3_incr_region_vaddr(REGION_ADDR_PAGE_BIT - 1, 0)
@@ -714,6 +723,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   s4_pf_gen_cur_region_valid := s3_cur_region_valid
   when(s3_cur_region_valid){
     s4_pf_gen_cur_region.region_addr := s3_region_paddr
+    s4_pf_gen_cur_region.alias_bits := get_alias_bits(s3_region_vaddr)
     s4_pf_gen_cur_region.region_tag := s3_cur_region_tag
     s4_pf_gen_cur_region.region_bits := s3_cur_region_bits
     s4_pf_gen_cur_region.paddr_valid := true.B
@@ -723,6 +733,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     (!pf_gen_req_arb.io.in(1).ready && s4_pf_gen_incr_region_valid)
   when(s3_incr_region_valid){
     s4_pf_gen_incr_region.region_addr := Mux(s3_incr_crosspage, s3_incr_region_vaddr, s3_incr_region_paddr)
+    s4_pf_gen_incr_region.alias_bits := s3_incr_alias_bits
     s4_pf_gen_incr_region.region_tag := s3_incr_region_tag
     s4_pf_gen_incr_region.region_bits := s3_incr_region_bits
     s4_pf_gen_incr_region.paddr_valid := !s3_incr_crosspage
@@ -732,6 +743,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     (!pf_gen_req_arb.io.in(2).ready && s4_pf_gen_decr_region_valid)
   when(s3_decr_region_valid){
     s4_pf_gen_decr_region.region_addr := Mux(s3_decr_crosspage, s3_decr_region_vaddr, s3_decr_region_paddr)
+    s4_pf_gen_decr_region.alias_bits := s3_decr_alias_bits
     s4_pf_gen_decr_region.region_tag := s3_decr_region_tag
     s4_pf_gen_decr_region.region_bits := s3_decr_region_bits
     s4_pf_gen_decr_region.paddr_valid := !s3_decr_crosspage
@@ -767,6 +779,7 @@ class PrefetchFilterEntry()(implicit p: Parameters) extends XSBundle with HasSMS
   val region_addr = UInt(REGION_ADDR_BITS.W)
   val region_bits = UInt(REGION_BLKS.W)
   val filter_bits = UInt(REGION_BLKS.W)
+  val alias_bits = UInt(2.W)
   val paddr_valid = Bool()
   val decr_mode = Bool()
 }
@@ -776,6 +789,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val gen_req = Flipped(ValidIO(new PfGenReq()))
     val tlb_req = new TlbRequestIO(2)
     val l2_pf_addr = ValidIO(UInt(PAddrBits.W))
+    val pf_alias_bits = Output(UInt(2.W))
   })
   val entries = Seq.fill(smsParams.pf_filter_size){ Reg(new PrefetchFilterEntry()) }
   val valids = Seq.fill(smsParams.pf_filter_size){ RegInit(false.B) }
@@ -792,6 +806,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   io.tlb_req.req_kill := false.B
   io.l2_pf_addr.valid := pf_req_arb.io.out.valid
   io.l2_pf_addr.bits := pf_req_arb.io.out.bits
+  io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
+    case (entry, i) => (i.U === pf_req_arb.io.chosen) -> entry.alias_bits
+  }))
   pf_req_arb.io.out.ready := true.B
 
   val s1_valid = Wire(Bool())
@@ -866,6 +883,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.paddr_valid := s1_gen_req.paddr_valid
   s1_alloc_entry.decr_mode := s1_gen_req.decr_mode
   s1_alloc_entry.filter_bits := 0.U
+  s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val alloc = s1_valid && !s1_hit && s1_replace_vec(i)
     val update = s1_valid && s1_hit && s1_update_vec(i)
@@ -1034,8 +1052,13 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.pf_addr.valid := false.B //pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+  io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
+  io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
+  io.l1_req.bits.is_store := true.B
+  io.l1_req.bits.confidence := 1.U
+  io.l1_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
 
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
@@ -1043,4 +1066,6 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   XSPerfAccumulate("sms_pht_disabled", pht.io.pf_gen_req.valid && !io_pht_en)
   XSPerfAccumulate("sms_agt_disabled", active_gen_table.io.s2_pf_gen_req.valid && !io_agt_en)
   XSPerfAccumulate("sms_pf_real_issued", io.pf_addr.valid)
+  XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
+  XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
 }
