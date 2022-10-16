@@ -562,8 +562,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val stFtqOffsetS2 = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (i <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(i)
-    rollbackLq(i).valid := detectedRollback._1._1 && RegNext(io.storeIn(i).valid)
-    rollbackLq(i).bits.uop := detectedRollback._1._2
+    rollbackLq(i).valid := detectedRollback._1 && RegNext(io.storeIn(i).valid)
+    rollbackLq(i).bits.uop := detectedRollback._2
     rollbackLq(i).bits.flag := i.U
     stFtqIdxS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqPtr)
     stFtqOffsetS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqOffset)
