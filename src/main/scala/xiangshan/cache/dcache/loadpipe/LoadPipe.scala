@@ -195,25 +195,24 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
+
   // hit, miss, nack, permission checking
-  // dcache side tag match
-  val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
-  val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
-
-  // lsu side tag match
-  val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
-
-  io.lsu.s2_hit := s2_hit_dup_lsu
-
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // redundant
-  val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // redundant
+  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
+  val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_encTag = RegEnable(s1_encTag, s1_fire)
+
+  // dcache side tag match
+  val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
+  val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
+  // lsu side tag match
+  val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu) && s2_has_permission && s2_hit_coh === s2_new_hit_coh
+  io.lsu.s2_hit := s2_hit_dup_lsu
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -234,7 +233,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_flag_error = false.B//RegEnable(s1_flag_error, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
-  assert(!RegNext(s2_valid && (s2_tag_match && !s2_hit)))
+  // assert(!RegNext(s2_valid && (s2_tag_match && !s2_hit))) // may happen if do write prefetch
   assert(!RegNext(s2_valid && (s2_hit_dup_lsu =/= s2_hit)))
 
   // only dump these signals when they are actually valid
