@@ -601,12 +601,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.rollback.valid := rollbackLqVReg.reduce(_|_) &&
                         (!lastCycleRedirect.valid || isBefore(rollbackUop.robIdx, lastCycleRedirect.bits.robIdx)) && 
                         (!lastlastCycleRedirect.valid || isBefore(rollbackUop.robIdx, lastlastCycleRedirect.bits.robIdx))
-
-  XSPerfAccumulate(
-    "sl_vio_rollback",
-    io.rollback.valid
-  )
-
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x robidx %d\n", io.rollback.bits.cfi, io.rollback.bits.robIdx.asUInt)
   }
