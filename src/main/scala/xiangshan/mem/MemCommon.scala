@@ -160,6 +160,25 @@ class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val resp = Flipped(Valid(new LoadViolationQueryResp))
 }
 
+// LoadFastRecoveryQueryReq used to detect store-load violation. 
+// When a store instruction is executed to Store Pipe stage 1, the pipeine will 
+// send a request to Load Pipe to detect store-load violation. If an violation is detected,
+// load instruction need to be re-executed (flush is required in the old design, which will bring
+// a lot of expense).
+class LoadFastRecoveryQueryReq(implicit p: Parameters) extends XSBundle {
+  //  Requestor's (a store instruction) rob index for match logic.
+  val robIdx = new RobPtr
+
+  //  Requestor's (a store instruction) sq index for match logic.
+  val sqIdx = new SqPtr 
+
+  //  Requestor's (a store instruction) physical address for match logic.
+  val paddr = UInt(PAddrBits.W)
+
+  //  Requestor's (a store instruction) data width mask for match logic.
+  val mask = UInt(8.W)
+}
+
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
   val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))

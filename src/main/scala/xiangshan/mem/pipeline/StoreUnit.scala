@@ -97,6 +97,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle())
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
+    val loadFastRecoveryQueryReq = Valid(new LoadFastRecoveryQueryReq)
   })
 
   // mmio cbo decoder
@@ -112,6 +113,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.in.ready := true.B
 
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
+
+  // Store-Load violation dectect request.
+  io.loadFastRecoveryQueryReq.valid := io.in.valid 
+  io.loadFastRecoveryQueryReq.bits.robIdx := io.in.bits.uop.robIdx 
+  io.loadFastRecoveryQueryReq.bits.sqIdx := io.in.bits.uop.sqIdx 
+  io.loadFastRecoveryQueryReq.bits.paddr := s1_paddr 
+  io.loadFastRecoveryQueryReq.bits.mask := io.in.bits.mask
 
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
@@ -209,6 +217,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle)
     val lsq_replenish = Output(new LsPipelineBundle())
     val stout = DecoupledIO(new ExuOutput) // writeback store
+    val loadFastRecoveryQueryReq = Valid(new LoadFastRecoveryQueryReq) 
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -227,6 +236,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq
+  io.loadFastRecoveryQueryReq := store_s1.io.loadFastRecoveryQueryReq
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 

@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.backend.rob.RobPtr
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LqWriteBundle)
@@ -153,7 +154,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class LoadUnit_S1(implicit p: Parameters) extends XSModule {
+class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val s1_kill = Input(Bool())
@@ -167,9 +168,11 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
     val loadViolationQueryReq = Decoupled(new LoadViolationQueryReq)
+    val loadFastRecoveryQueryReq = Vec(StorePipelineWidth, Flipped(Valid(new LoadFastRecoveryQueryReq)))
     val rsFeedback = ValidIO(new RSFeedback)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val needLdVioCheckRedo = Output(Bool())
+    val needFastRecovery = Output(Bool())
   })
 
   val s1_uop = io.in.bits.uop
@@ -212,6 +215,24 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.loadViolationQueryReq.bits.paddr := s1_paddr_dup_lsu
   io.loadViolationQueryReq.bits.uop := s1_uop
 
+  // st-ld violation query request 
+  val needFastRecoveryVec = Wire(Vec(StorePipelineWidth, Bool()))  
+  val needFastRecovery = Wire(Bool())
+
+  for (i <- 0 until StorePipelineWidth) {
+    //  NeedFastRecovery Valid when 
+    //  1. Fast recovery query request Valid.
+    //  2. Load instruction is younger than requestors(store instructions).
+    //  3. Physical address match. 
+    //  4. Data contains.
+    needFastRecoveryVec(i) := io.loadFastRecoveryQueryReq(i).valid &&
+                              isAfter(io.in.bits.uop.robIdx, io.loadFastRecoveryQueryReq(i).bits.robIdx) && 
+                              (s1_paddr_dup_lsu(PAddrBits-1,3) === io.loadFastRecoveryQueryReq(i).bits.paddr(PAddrBits-1, 3)) && 
+                              (s1_mask & io.loadFastRecoveryQueryReq(i).bits.mask).orR 
+  }
+  needFastRecovery := needFastRecoveryVec.asUInt.orR
+  io.needFastRecovery := needFastRecovery
+
   // Generate forwardMaskFast to wake up insts earlier
   val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
   io.fullForwardFast := ((~forwardMaskFast).asUInt & s1_mask) === 0.U
@@ -223,12 +244,50 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     !io.loadViolationQueryReq.ready &&
     RegNext(io.csrCtrl.ldld_vio_check_enable)
   io.needLdVioCheckRedo := needLdVioCheckRedo
-  io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo) && !io.s1_kill
+
+  def getYoungest(valid: Seq[Bool], robIdx: Seq[RobPtr], sqIdx: Seq[SqPtr]): SqPtr = {
+    assert(valid.length != 0)
+    assert(valid.length == robIdx.length)
+    assert(valid.length == sqIdx.length)
+
+    if (valid.length == 1) {
+      sqIdx(0)
+    } else if (valid.length == 2) {
+      Mux(valid(0) && valid(1), 
+        Mux(isAfter(robIdx(0), robIdx(1)), sqIdx(0), sqIdx(1)), 
+          Mux(valid(0) && !valid(1), sqIdx(0), sqIdx(1)))
+    } else {
+      val validVec = VecInit(valid) 
+      val robIdxVec = VecInit(robIdx)
+      val sqIdxVec = VecInit(sqIdx)
+
+      var idx = 0.U
+      for (i <- 1 until valid.length) {
+        idx = Mux(validVec(idx) && validVec(i), 
+                Mux(isAfter(robIdxVec(idx), robIdxVec(i)), idx, i.U), 
+                  Mux(validVec(idx) && !validVec(i), idx, i.U))
+      }
+      sqIdxVec(idx)
+    }
+  }
+
+  // Reservation station feedback Valid when 
+  // 1. Load Pipe Stage 1 Valid.
+  // 2. Bank conflict, load-load violation or store-load violation.
+  // 3. Not kill.
+  io.rsFeedback.valid := io.in.valid && 
+                         (s1_bank_conflict || needLdVioCheckRedo || needFastRecovery) && 
+                         !io.s1_kill
   io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict / re do ld-ld violation check
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
-  io.rsFeedback.bits.sourceType := Mux(s1_bank_conflict, RSFeedbackType.bankConflict, RSFeedbackType.ldVioCheckRedo)
-  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
+
+  //  Priority: Fast recovery (dataInvalid) > s1_bank_conflict (bankConflict) > load-load violation (ldVioCheckRedo) 
+  io.rsFeedback.bits.sourceType := Mux(needFastRecovery, RSFeedbackType.dataInvalid,
+                                    Mux(s1_bank_conflict, RSFeedbackType.bankConflict, RSFeedbackType.ldVioCheckRedo)) 
+  io.rsFeedback.bits.dataInvalidSqIdx := getYoungest(needFastRecoveryVec, 
+                                              io.loadFastRecoveryQueryReq.map(_.bits.robIdx), 
+                                                io.loadFastRecoveryQueryReq.map(_.bits.sqIdx))
 
   // if replay is detected in load_s1,
   // load inst will be canceled immediately
@@ -258,7 +317,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
 // Load Pipeline Stage 2
 // DCache resp
-class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
+class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -275,9 +334,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val dcache_kill = Output(Bool())
     val s3_delayed_load_error = Output(Bool())
     val loadViolationQueryResp = Flipped(Valid(new LoadViolationQueryResp))
+    val loadFastRecoveryQueryReq = Vec(StorePipelineWidth, Flipped(Valid(new LoadFastRecoveryQueryReq)))
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val sentFastUop = Input(Bool())
     val static_pm = Input(Valid(Bool())) // valid for static, bits for mmio
+    val needFastRecovery = Output(Bool())
   })
 
   val pmp = WireInit(io.pmpResp)
@@ -376,7 +437,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   ))
   val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid
+  //  io.out.valid Valid when 
+  //  1. Load Pipe Stage 2 Valid.
+  //  2. TLB Hit.
+  //  3. Data Valid.
+  //  4. Not need to fast recovery. 
+  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needFastRecovery
+
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
@@ -425,17 +492,64 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.in.ready := io.out.ready || !io.in.valid
 
+
+  def getYoungest(valid: Seq[Bool], robIdx: Seq[RobPtr], sqIdx: Seq[SqPtr]): SqPtr = {
+    assert(valid.length != 0)
+    assert(valid.length == robIdx.length)
+    assert(valid.length == sqIdx.length)
+
+    if (valid.length == 1) {
+      sqIdx(0)
+    } else if (valid.length == 2) {
+      Mux(valid(0) && valid(1), 
+        Mux(isAfter(robIdx(0), robIdx(1)), sqIdx(0), sqIdx(1)), 
+          Mux(valid(0) && !valid(1), sqIdx(0), sqIdx(1)))
+    } else {
+      val validVec = VecInit(valid) 
+      val robIdxVec = VecInit(robIdx)
+      val sqIdxVec = VecInit(sqIdx)
+
+      var idx = 0.U
+      for (i <- 1 until valid.length) {
+        idx = Mux(validVec(idx) && validVec(i), 
+                Mux(isAfter(robIdxVec(idx), robIdxVec(i)), idx, i.U), 
+                  Mux(validVec(idx) && !validVec(i), idx, i.U))
+      }
+      sqIdxVec(idx)
+    }
+  }
+
+  // st-ld violation query request 
+  val needFastRecoveryVec = Wire(Vec(StorePipelineWidth, Bool()))  
+  val needFastRecovery = Wire(Bool())
+
+  for (i <- 0 until StorePipelineWidth) {
+    //  NeedFastRecovery Valid when 
+    //  1. Fast recovery query request Valid.
+    //  2. Load instruction is younger than requestors(store instructions).
+    //  3. Physical address match. 
+    //  4. Data contains.
+    needFastRecoveryVec(i) := io.loadFastRecoveryQueryReq(i).valid &&
+                              isAfter(io.in.bits.uop.robIdx, io.loadFastRecoveryQueryReq(i).bits.robIdx) && 
+                              (s2_paddr(PAddrBits-1,3) === io.loadFastRecoveryQueryReq(i).bits.paddr(PAddrBits-1, 3)) && 
+                              (s2_mask & io.loadFastRecoveryQueryReq(i).bits.mask).orR 
+  }
+  needFastRecovery := needFastRecoveryVec.asUInt.orR
+  io.needFastRecovery := needFastRecovery
+
   // feedback tlb result to RS
   io.rsFeedback.valid := io.in.valid
   val s2_need_replay_from_rs = Wire(Bool())
   if (EnableFastForward) {
     s2_need_replay_from_rs :=
+      needFastRecovery ||
       s2_tlb_miss || // replay if dtlb miss
       s2_cache_replay && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation && !s2_mmio && !s2_exception && !fullForward || // replay if dcache miss queue full / busy
       s2_data_invalid && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation // replay if store to load forward data is not ready
   } else {
     // Note that if all parts of data are available in sq / sbuffer, replay required by dcache will not be scheduled
     s2_need_replay_from_rs :=
+      needFastRecovery ||
       s2_tlb_miss || // replay if dtlb miss
       s2_cache_replay && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation && !s2_mmio && !s2_exception && !io.dataForwarded || // replay if dcache miss queue full / busy
       s2_data_invalid && !s2_is_prefetch && !s2_forward_fail && !s2_ldld_violation // replay if store to load forward data is not ready
@@ -446,14 +560,17 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
   // feedback source priority: tlbMiss > dataInvalid > mshrFull
   // general case priority: tlbMiss > exception (include forward_fail / ldld_violation) > mmio > dataInvalid > mshrFull > normal miss / hit
-  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
-    Mux(s2_data_invalid,
-      RSFeedbackType.dataInvalid,
-      RSFeedbackType.mshrFull
-    )
-  )
-  io.rsFeedback.bits.dataInvalidSqIdx.value := io.dataInvalidSqIdx
-  io.rsFeedback.bits.dataInvalidSqIdx.flag := DontCare
+  io.rsFeedback.bits.sourceType := Mux(needFastRecovery, RSFeedbackType.dataInvalid,
+                                    Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
+                                      Mux(s2_data_invalid,
+                                        RSFeedbackType.dataInvalid,
+                                        RSFeedbackType.mshrFull
+                                  )))
+  val youngest = getYoungest(needFastRecoveryVec, 
+                  io.loadFastRecoveryQueryReq.map(_.bits.robIdx), 
+                    io.loadFastRecoveryQueryReq.map(_.bits.sqIdx))
+  io.rsFeedback.bits.dataInvalidSqIdx.value := Mux(needFastRecovery, youngest.value, io.dataInvalidSqIdx)
+  io.rsFeedback.bits.dataInvalidSqIdx.flag := Mux(needFastRecovery, youngest.flag, 0.U)
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   if (EnableFastForward) {
@@ -523,6 +640,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Note that io.s3_delayed_load_error and io.lsq.s3_delayed_load_error is different
 
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+
+    //  store-load violation 
+    val loadFastRecoveryQueryReq = Vec(StorePipelineWidth, Flipped(Valid(new LoadFastRecoveryQueryReq)))
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -553,6 +673,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s1.io.loadViolationQueryReq <> io.lsq.loadViolationQuery.req
   load_s1.io.dcacheBankConflict <> io.dcache.s1_bank_conflict
   load_s1.io.csrCtrl <> io.csrCtrl
+  load_s1.io.loadFastRecoveryQueryReq := io.loadFastRecoveryQueryReq
 
   val s0_doTryPointerChasing = s0_tryPointerChasing && load_s0.io.in.ready && load_s0.io.dcacheReq.ready
   val s1_tryPointerChasing = RegNext(s0_doTryPointerChasing, false.B)
@@ -628,6 +749,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.loadViolationQueryResp <> io.lsq.loadViolationQuery.resp
   load_s2.io.csrCtrl <> io.csrCtrl
   load_s2.io.sentFastUop := io.fastUop.valid
+  load_s2.io.loadFastRecoveryQueryReq := io.loadFastRecoveryQueryReq
 
   // actually load s3
   io.lsq.s3_dcache_require_replay := load_s2.io.s3_dcache_require_replay
@@ -679,8 +801,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       !io.lsq.forward.dataInvalidFast // forward failed
     ) && 
     !RegNext(load_s1.io.needLdVioCheckRedo) && // load-load violation check: load paddr cam struct hazard
+    !RegNext(load_s1.io.needFastRecovery) && // store-load violation
     !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) &&
-    s2_dcache_hit // dcache hit in lsu side
+    (load_s2.io.in.valid && !load_s2.io.needFastRecovery && s2_dcache_hit) // dcache hit in lsu side
   
   io.fastUop.bits := RegNext(load_s1.io.out.bits.uop)
 
