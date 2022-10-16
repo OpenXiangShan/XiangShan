@@ -177,7 +177,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val isHWPrefetch = WireInit(false.B)
 
   // query DTLB
-  io.dtlbReq.valid := s0_valid
+  io.dtlbReq.valid := s0_valid || io.prefetch_in.valid
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
@@ -188,7 +188,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.bits.debug.isFirstIssue := s0_isFirstIssue
 
   // query DCache
-  io.dcacheReq.valid := s0_valid
+  io.dcacheReq.valid := s0_valid || io.prefetch_in.valid
   when (isPrefetchRead) {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFR
   }.elsewhen (isPrefetchWrite) {
@@ -304,6 +304,8 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mask = io.in.bits.mask
+  val s1_is_prefetch = io.in.bits.isPrefetch
+  val s1_is_hw_prefetch = io.in.bits.isHWPrefetch
   val s1_bank_conflict = io.dcacheBankConflict
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
@@ -315,7 +317,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   //io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
   io.dcacheKill := s1_tlb_miss || s1_exception || io.s1_kill
   // load forward query datapath
-  io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill)
+  io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_hw_prefetch)
   io.sbuffer.vaddr := io.in.bits.vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
   io.sbuffer.uop := s1_uop
@@ -323,7 +325,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.sbuffer.mask := s1_mask
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill)
+  io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_hw_prefetch)
   io.lsq.vaddr := io.in.bits.vaddr
   io.lsq.paddr := s1_paddr_dup_lsu
   io.lsq.uop := s1_uop
@@ -333,7 +335,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
   // ld-ld violation query
-  io.loadViolationQueryReq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill)
+  io.loadViolationQueryReq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_hw_prefetch)
   io.loadViolationQueryReq.bits.paddr := s1_paddr_dup_lsu
   io.loadViolationQueryReq.bits.uop := s1_uop
 
@@ -371,7 +373,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   // make nanhu rs feedback port happy
   // if a load flow comes from rs, always feedback hit (no need to replay from rs)
-  io.rsFeedback.valid := Mux(io.in.bits.isLoadReplay, false.B, io.in.valid && !io.s1_kill && !io.in.bits.isHWPrefetch)
+  io.rsFeedback.valid := Mux(io.in.bits.isLoadReplay, false.B, io.in.valid && !io.s1_kill && !s1_is_prefetch)
   io.rsFeedback.bits.hit := true.B // we have found s1_bank_conflict / re do ld-ld violation check
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
@@ -398,8 +400,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
-
-  io.out.bits.isPrefetch := io.in.bits.isPrefetch
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -458,6 +458,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   }
 
   val s2_is_prefetch = io.in.bits.isPrefetch
+  val s2_is_hw_prefetch = io.in.bits.isHWPrefetch
 
   val forward_D_or_mshr_valid = io.forward_result_valid && (io.forward_D || io.forward_mshr)
 
@@ -550,7 +551,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // ))
   // val rdataPartialLoad = rdataHelper(s2_uop, rdataSel) // s2_rdataPartialLoad is not used
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute
+  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute !s2_is_hw_prefetch
   // write_lq_safe is needed by dup logic
   // io.write_lq_safe := !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
@@ -758,8 +759,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
   load_s0.io.s0_kill := false.B
-  // we try pointerchasing when (1. no rs-issued load and 2. no LSQ replayed load)
-  val s0_tryPointerChasing = !io.ldin.valid && !io.lsqOut.valid && io.fastpathIn.valid
+
+  // we try pointerchasing when:
+  // 1) no rs-issued load
+  // 2) no LSQ replayed load
+  // 3) no prefetch request
+  val s0_tryPointerChasing = !io.ldin.valid && !io.lsqOut.valid && io.fastpathIn.valid && !io.prefetch_req.valid
   val s0_pointerChasingVAddr = io.fastpathIn.data(5, 0) +& io.loadFastImm(5, 0)
   load_s0.io.fastpath.valid := io.fastpathIn.valid
   load_s0.io.fastpath.data := Cat(io.fastpathIn.data(XLEN-1, 6), s0_pointerChasingVAddr(5,0))
@@ -782,7 +787,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s1.io.csrCtrl <> io.csrCtrl
   load_s1.io.reExecuteQuery := io.reExecuteQuery
   // provide paddr and vaddr for lq
-  io.lsq.loadPaddrIn.valid := load_s1.io.out.valid
+  io.lsq.loadPaddrIn.valid := load_s1.io.out.valid && !load_s1.io.out.bits.isHWPrefetch
   io.lsq.loadPaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
   io.lsq.loadPaddrIn.bits.paddr := load_s1.io.lsuPAddr
 
@@ -906,6 +911,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fastUop.valid := RegNext(
       !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
       load_s1.io.in.valid && // valid load request
+      !load_s1.io.in.bits.isHWPrefetch && // is not hardware prefetch req
       !load_s1.io.s1_kill && // killed by load-load forwarding
       !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
       !io.lsq.forward.dataInvalidFast // forward failed
@@ -927,7 +933,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // writeback to LSQ
   // Current dcache use MSHR
   // Load queue will be updated at s2 for both hit/miss int/fp load
-  io.lsq.loadIn.valid := load_s2.io.out.valid
+  io.lsq.loadIn.valid := load_s2.io.out.valid && !load_s2.io.out.bits.isHWPrefetch
   // generate LqWriteBundle from LsPipelineBundle
   io.lsq.loadIn.bits.fromLsPipelineBundle(load_s2.io.out.bits)
   
@@ -940,9 +946,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val load_s2_leftFire = load_s1.io.out.valid && load_s2.io.in.ready
   // val write_lq_safe = load_s2.io.write_lq_safe
   load_s2_valid_vec := 0x0.U(6.W)
-  when (load_s2_leftFire) { load_s2_valid_vec := 0x3f.U(6.W)}
+  when (load_s2_leftFire && !load_s1.io.out.bits.isHWPrefetch) { load_s2_valid_vec := 0x3f.U(6.W)} // TODO: refactor me
   when (load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) { load_s2_valid_vec := 0x0.U(6.W) }
-  assert(RegNext(load_s2.io.in.valid === load_s2_valid_vec(0)))
+  assert(RegNext((load_s2.io.in.valid === load_s2_valid_vec(0)) || RegNext(load_s1.io.out.bits.isHWPrefetch)))
   io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools()
 
   // s2_dcache_require_replay signal will be RegNexted, then used in s3

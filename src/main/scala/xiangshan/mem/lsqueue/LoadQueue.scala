@@ -1009,6 +1009,10 @@ def detectRollback(i: Int) = {
 
   // read vaddr for mmio, and only port {1} is used
   vaddrModule.io.raddr(1) := deqPtr
+  // Read vaddr for debug
+  (0 until LoadPipelineWidth).map(i => {
+    vaddrModule.io.raddr(i+1) := loadWbSelGen(i)
+  })
 
   (0 until LoadPipelineWidth).map(i => {
     if(i == 0) {

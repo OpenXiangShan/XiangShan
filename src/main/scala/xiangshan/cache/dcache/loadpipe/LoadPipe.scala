@@ -232,6 +232,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
+
   // hit, miss, nack, permission checking
   // dcache side tag match
   val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
@@ -244,8 +245,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // redundant
-  val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // redundant
+  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
+  val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
