@@ -26,7 +26,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
-import chisel3.util.experimental.BoringUtils
+import chisel3.ExcitingUtils
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -877,13 +877,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
   val stall_loads_bound = WireDefault(0.B)
-  BoringUtils.addSink(stall_loads_bound, "stall_loads_bound")
+  ExcitingUtils.addSink(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
   val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
   val l1d_loads_bound = stall_loads_bound && !have_miss_entry
-  BoringUtils.addSource(l1d_loads_bound, "l1d_loads_bound")
+  ExcitingUtils.addSource(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
   XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
   val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
-  BoringUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss")
+  ExcitingUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireInit(0.U), "stall_l1d_load_miss", ExcitingUtils.Perf)
 
   val perfValidCount = RegNext(validCount)
 

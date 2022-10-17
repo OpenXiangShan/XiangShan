@@ -28,7 +28,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
-import chisel3.util.experimental.BoringUtils
+import chisel3.ExcitingUtils
 
 case class RSParams
 (
@@ -938,7 +938,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   if (params.isLoad) {
     val l1d_loads_bound = WireDefault(0.B)
-    BoringUtils.addSink(l1d_loads_bound, "l1d_loads_bound")
+    ExcitingUtils.addSink(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
     val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
     val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
     val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
