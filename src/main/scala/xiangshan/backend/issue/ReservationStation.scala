@@ -28,6 +28,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
+import chisel3.util.experimental.BoringUtils
 
 case class RSParams
 (
@@ -150,6 +151,13 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       Module(new ReservationStation(rsParam)(updatedP))
     })
 
+    if (params.isJump)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"jumpRS_${index}") }
+    if (params.isAlu)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"aluRS_${index}") }
+    if (params.isStore)     rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"staRS_${index}") }
+    if (params.isStoreData) rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"stdRS_${index}") }
+    if (params.isMul)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"mulRS_${index}") }
+    if (params.isLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"loadRS_${index}") }
+
     val updatedP = p.alter((site, here, up) => {
       case XSCoreParamsKey => up(XSCoreParamsKey).copy(
         IssQueSize = rs.map(_.size).max
@@ -160,6 +168,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
+    io.full <> rs.map(_.io.full).reduce(_ && _)
     if (io.fpRegValue.isDefined) {
       io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
     }
@@ -234,6 +243,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val fastImm = Output(UInt(12.W))
   })) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
+  val full = Output(Bool())
+
 }
 
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule
@@ -925,11 +936,30 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
+  if (params.isLoad) {
+    val l1d_loads_bound = WireDefault(0.B)
+    BoringUtils.addSink(l1d_loads_bound, "l1d_loads_bound")
+    val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
+    val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
+    val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
+    val bankConflict = !mshrFull && !tlbMiss && !dataInvalid && statusArray.io.rsFeedback(RSFeedbackType.bankConflict.litValue.toInt)
+    val ldVioCheckRedo = !mshrFull && !tlbMiss && !dataInvalid && !bankConflict && statusArray.io.rsFeedback(RSFeedbackType.ldVioCheckRedo.litValue.toInt)
+    XSPerfAccumulate("l1d_loads_mshr_bound", l1d_loads_bound && mshrFull)
+    XSPerfAccumulate("l1d_loads_tlb_bound", l1d_loads_bound && tlbMiss)
+    XSPerfAccumulate("l1d_loads_store_data_bound", l1d_loads_bound && dataInvalid)
+    XSPerfAccumulate("l1d_loads_bank_conflict_bound", l1d_loads_bound && bankConflict)
+    XSPerfAccumulate("l1d_loads_vio_check_redo_bound", l1d_loads_bound && ldVioCheckRedo)
+  }
+
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfAccumulate("allocate_num", PopCount(s0_doEnqueue))
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 
   def size: Int = params.numEntries
+
+  XSPerfAccumulate("full", statusArray.io.isValid.andR)
+
+  io.full := statusArray.io.isValid.andR
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()
