@@ -274,6 +274,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
 
+    for (s <- 0 until StorePipelineWidth) {
+      loadUnits(i).io.loadFastRecoveryQueryReq(s) := storeUnits(s).io.loadFastRecoveryQueryReq
+    }
+
     // load to load fast forward: load(i) prefers data(i)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
