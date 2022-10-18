@@ -764,7 +764,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
-  if (params.isLoad) {
+  if (env.EnableTopDown && params.isLoad) {
     val l1d_loads_bound = WireDefault(0.B)
     ExcitingUtils.addSink(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
     val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
