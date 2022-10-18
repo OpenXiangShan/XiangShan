@@ -541,7 +541,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
 
-  if (rs_all.exists(_.params.isLoad)) {
+  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
     val stall_ls_dq = WireDefault(0.B)
     ExcitingUtils.addSink(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
     val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)

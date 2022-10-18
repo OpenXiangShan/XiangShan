@@ -679,7 +679,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   XSPerfAccumulate("icache_bubble_s2_miss",    s2_valid && !s2_fetch_finish )
 
-  val tlb_miss_vec = VecInit((0 until PortNumber).map( i => toITLB(i).valid && s0_can_go && fromITLB(i).bits.miss ))
-  val tlb_has_miss = tlb_miss_vec.reduce(_||_)
+  val tlb_miss_vec = VecInit((0 until PortNumber).map(i => toITLB(i).valid && s0_can_go && fromITLB(i).bits.miss))
+  val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 }
