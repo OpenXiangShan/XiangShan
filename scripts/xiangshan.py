@@ -75,7 +75,8 @@ class XSArgs(object):
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
         self.is_spike = "spike" if args.spike else None
-        self.trace = 1 if args.trace or not args.disable_fork else None
+        self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
+        self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
@@ -120,6 +121,7 @@ class XSArgs(object):
             (self.is_release,    "RELEASE"),
             (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
+            (self.trace_fst,     "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES")
         ]
@@ -474,7 +476,8 @@ if __name__ == "__main__":
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
-    parser.add_argument('--trace', action='store_true', help='enable waveform')
+    parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
+    parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
