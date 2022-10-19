@@ -74,8 +74,6 @@ class FrontendImp (outer: Frontend, parentName:String = "Unknown") extends LazyM
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
-  val triggerEn = csrCtrl.trigger_enable
-  ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
   // bpu ctrl
   bpu.io.reset_vector := io.reset_vector

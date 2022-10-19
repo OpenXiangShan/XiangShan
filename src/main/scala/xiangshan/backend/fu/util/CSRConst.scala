@@ -271,3 +271,4 @@ trait HasCSRConst {
     Mux(!mModeCanWrite && isTriggerReg, debug, true.B)
   }
 }
+object CSRConst extends HasCSRConst
