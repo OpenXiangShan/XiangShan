@@ -312,7 +312,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
 
   when (!pending_write_resp_valid && write_resp_valid && !in.b.ready) {
     pending_write_resp_valid := true.B
-    pending_write_resp_id := pending_write_resp_id
+    pending_write_resp_id := write_resp_id
   }.elsewhen (pending_write_resp_valid && !write_resp_valid && in.b.ready) {
     pending_write_resp_valid := false.B
   }
