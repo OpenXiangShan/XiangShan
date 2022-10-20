@@ -25,6 +25,7 @@ import xiangshan._
 case class JumpRSParams()
 
 class JumpRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.numSrc = 2
   override lazy val module = new JumpRSImp(params, this)
 }
 

@@ -54,12 +54,15 @@ case class RSParams
   var hasFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
+  //
+  var needScheduledBit: Boolean = false,
   // special cases
   var isJump: Boolean = false,
-  var isStore: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
-  var isStoreData: Boolean = false,
+  var isStd: Boolean = false,
+  var isMemAddr: Boolean = false,
+  var isFMA: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
 ){
   def allWakeup: Int = numFastWakeup + numWakeup
@@ -67,12 +70,9 @@ case class RSParams
   // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
   def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
-  def delayedFpRf: Boolean = exuCfg.get == StdExeUnitCfg
-  def delayedSrc: Boolean = delayedFpRf
-  def needScheduledBit: Boolean = hasFeedback || delayedSrc || hasMidState
+  def delayedSrc: Boolean = exuCfg.get == StdExeUnitCfg
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
-  def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
   def optDeqFirstStage: Boolean = !exuCfg.get.readFpRf
 
   override def toString: String = {
@@ -95,15 +95,11 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
     params.exuCfg = Some(cfg)
     cfg match {
       case JumpCSRExeUnitCfg => params.isJump = true
-      case StaExeUnitCfg => params.isStore = true
-      case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
+      case StdExeUnitCfg => params.isStd = true
+      case FmacExeUnitCfg => params.isFMA = true
       case _ =>
-    }
-    // TODO: why jump needs two sources?
-    if (cfg == JumpCSRExeUnitCfg) {
-      params.numSrc = 2
     }
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
       params.hasFeedback = true
@@ -168,6 +164,10 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   val maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
   def isJump = params.isJump
+  def isLoad = params.isLoad
+  def isStd  = params.isStd
+  def checkWaitBit = params.checkWaitBit
+  def hasFeedback = params.hasFeedback
 
   require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
   require(params.numEntries % params.numDeq == 0)
@@ -191,16 +191,13 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
       IssQueSize = rsParams.map(rsP => rsP._1.numEntries).max
     )
   })
-  val io = IO(new BaseReservationStationIO(params)(updatedP))
-  val extra = IO(new BaseRSExtraIO(params)(updatedP))
+  val io = IO(new ReservationStationIO(params)(updatedP))
+  val extra = IO(new RSExtraIO(params)(updatedP))
   extra <> DontCare
 
   rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
   io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
   io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
-  if (io.fpRegValue.isDefined) {
-    io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
-  }
   io.deq <> rs.flatMap(_.io.deq)
   rs.foreach(_.io.fastUopsIn <> io.fastUopsIn)
   rs.foreach(_.io.fastDatas <> io.fastDatas)
@@ -208,29 +205,16 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   if (io.fastWakeup.isDefined) {
     io.fastWakeup.get <> rs.flatMap(_.io.fastWakeup.get)
   }
-  if (io.feedback.isDefined) {
-    io.feedback.get <> rs.flatMap(_.io.feedback.get)
-  }
-  if (io.checkwait.isDefined) {
-   rs.foreach(_.io.checkwait.get <> io.checkwait.get)
-  }
-  if (io.load.isDefined) {
-    io.load.get <> rs.flatMap(_.io.load.get)
-  }
-  if (io.fmaMid.isDefined) {
-    io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
-  }
 
   val perfEvents = rs.flatMap(_.getPerfEvents)
   generatePerfEvent()
 }
 
-class BaseReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
   val srcRegValue = Vec(params.numEnq, Input(Vec(params.numSrc, UInt(params.dataBits.W))))
-  val fpRegValue = if (params.delayedFpRf) Some(Vec(params.numEnq, Input(UInt(params.dataBits.W)))) else None
   // deq
   val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
   // wakeup
@@ -239,33 +223,32 @@ class BaseReservationStationIO(params: RSParams)(implicit p: Parameters) extends
   val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
   // extra
   val fastWakeup = if (params.fixedLatency >= 0) Some(Vec(params.numDeq, ValidIO(new MicroOp))) else None
-  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq,
-    Flipped(new MemRSFeedbackIO)
-  )) else None
-  val checkwait = if (params.checkWaitBit) Some(new Bundle {
-    val stIssuePtr = Input(new SqPtr)
-    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
-  }) else None
-  val load = if (params.isLoad) Some(Vec(params.numDeq, new Bundle {
-    val fastMatch = Output(UInt(exuParameters.LduCnt.W))
-    val fastImm = Output(UInt(12.W))
-  })) else None
-  val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
 }
 
-class BaseRSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+class RSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val jump = new Bundle {
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }
+  val load = Vec(params.numDeq, new Bundle {
+    val fastMatch = Output(UInt(exuParameters.LduCnt.W))
+    val fastImm = Output(UInt(12.W))
+  })
+  val fpRegValue = Vec(params.numEnq, Input(UInt(params.dataBits.W)))
+  val feedback = Vec(params.numDeq, Flipped(new MemRSFeedbackIO))
+  val checkwait = new Bundle {
+    val stIssuePtr = Input(new SqPtr)
+    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+  }
+  val fmaMid = Vec(params.numDeq, Flipped(new FMAMidResultIO))
 }
 
 class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends RSModule
   with HasCircularQueuePtrHelper
 {
-  val io = IO(new BaseReservationStationIO(params)(p))
-  val extra = IO(new BaseRSExtraIO(params))
+  val io = IO(new ReservationStationIO(params)(p))
+  val extra = IO(new RSExtraIO(params))
   // DontCare here
   extra <> DontCare
 
@@ -339,11 +322,11 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     dispatchReady := select.io.allocate.map(_.valid)
   }
 
+  s0_enqFlushed.map(_ := io.redirect.valid)
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := dispatchReady(i)
     XSError(s0_doEnqueue(i) && !select.io.allocate(i).valid, s"port $i should not enqueue\n")
     XSError(!RegNext(io.redirect.valid) && select.io.allocate(i).valid =/= dispatchReady(i), s"port $i performance deviation\n")
-    s0_enqFlushed(i) := (if (params.dropOnRedirect) io.redirect.valid else io.fromDispatch(i).bits.robIdx.needFlush(io.redirect))
     s0_doEnqueue(i) := io.fromDispatch(i).fire && !s0_enqFlushed(i)
     val slowWakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
     val fastWakeup = io.fastUopsIn.map(_.bits.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
@@ -430,37 +413,19 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     when (s0_valid) {
       uop.bits := in.bits
       uop.bits.debugInfo.enqRsTime := GTimer()
-      // a temp fix for blocked. This will release the load wait for some instructions earlier.
-      // copied from status array
-      if (params.checkWaitBit) {
-        val blockNotReleased = isAfter(in.bits.sqIdx, io.checkwait.get.stIssuePtr)
-        val storeAddrWaitforIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
-          io.checkwait.get.memWaitUpdateReq.staIssue(i).valid &&
-            io.checkwait.get.memWaitUpdateReq.staIssue(i).bits.uop.robIdx.value === in.bits.cf.waitForRobIdx.value
-        })).asUInt.orR && !in.bits.cf.loadWaitStrict // is waiting for store addr ready
-        uop.bits.cf.loadWaitBit := in.bits.cf.loadWaitBit &&
-          !storeAddrWaitforIsIssuing &&
-          blockNotReleased
-      }
     }
   })
 
   // update status and payload array
   statusArray.io.redirect := io.redirect
+  s1_delayedSrc.map(s => s.foreach(_ := false.B))
   for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_dispatchUops_dup.head).zipWithIndex) {
-    s1_delayedSrc(i).foreach(_ := false.B)
-    if (params.delayedFpRf) {
-      when (uop.bits.needRfRPort(0, true, false)) {
-        s1_delayedSrc(i)(0) := true.B
-      }
-    }
     statusUpdate.enable := uop.valid
     statusUpdate.addr := s1_allocatePtrOH_dup.head(i)
     statusUpdate.data.valid := true.B
     statusUpdate.data.scheduled := s1_delayedSrc(i).asUInt.orR
-    statusUpdate.data.blocked := params.checkWaitBit.B && uop.bits.cf.loadWaitBit
-    val credit = if (params.delayedFpRf) 2 else 1
-    statusUpdate.data.credit := Mux(s1_delayedSrc(i).asUInt.orR, credit.U, 0.U)
+    statusUpdate.data.blocked := false.B // for checkWaitBit
+    statusUpdate.data.credit := Mux(s1_delayedSrc(i).asUInt.orR, 1.U, 0.U) // credit = 1
     for (j <- 0 until params.numSrc) {
       statusUpdate.data.srcState(j) := uop.bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR
     }
@@ -475,11 +440,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     statusUpdate.data.strictWait := uop.bits.cf.loadWaitStrict
     statusUpdate.data.isFirstIssue := true.B
   }
-  // We need to block issue until the corresponding store issues.
-  if (io.checkwait.isDefined) {
-    statusArray.io.stIssuePtr := io.checkwait.get.stIssuePtr
-    statusArray.io.memWaitUpdateReq := io.checkwait.get.memWaitUpdateReq
-  }
+
   for ((payloadWrite, i) <- payloadArray.io.write.zipWithIndex) {
     payloadWrite.enable := s1_dispatchUops_dup(1)(i).valid
     payloadWrite.addr := s1_allocatePtrOH_dup(1)(i)
@@ -541,37 +502,23 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   }
   s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
+  // WireInit for override at RSFMA
+  val allSrcReady = (0 until params.numDeq).map(_ => WireInit(true.B))
+  val allSrcReady1 = (0 until params.numDeq).map(_ => WireInit(true.B))
   for (i <- 0 until params.numDeq) {
     s1_out(i).valid := s1_issuePtrOH(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect)
-    if (io.feedback.isDefined) {
-      // feedbackSlow
-      statusArray.io.deqResp(2*i).valid := io.feedback.get(i).feedbackSlow.valid
-      statusArray.io.deqResp(2*i).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackSlow.bits.rsIdx)
-      statusArray.io.deqResp(2*i).bits.success := io.feedback.get(i).feedbackSlow.bits.hit
-      statusArray.io.deqResp(2*i).bits.resptype := io.feedback.get(i).feedbackSlow.bits.sourceType
-      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := io.feedback.get(i).feedbackSlow.bits.dataInvalidSqIdx
-      // feedbackFast, for load pipeline only
-      statusArray.io.deqResp(2*i+1).valid := io.feedback.get(i).feedbackFast.valid
-      statusArray.io.deqResp(2*i+1).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackFast.bits.rsIdx)
-      statusArray.io.deqResp(2*i+1).bits.success := io.feedback.get(i).feedbackFast.bits.hit
-      statusArray.io.deqResp(2*i+1).bits.resptype := io.feedback.get(i).feedbackFast.bits.sourceType
-      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
-    } else {
-      // For FMAs that can be scheduled multiple times, only when
-      // all source operands are ready we dequeue the instruction.
-      val allSrcReady = if (params.hasMidState) s1_all_src_ready(i) else true.B
-      statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready && allSrcReady
-      statusArray.io.deqResp(2*i).bits.rsMask := s1_in_selectPtrOH(i)
-      statusArray.io.deqResp(2*i).bits.success := s2_deq(i).ready
-      statusArray.io.deqResp(2*i).bits.resptype := DontCare
-      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := DontCare
-      val allSrcReady1 = if (params.hasMidState) statusArray.io.update(i).data.allSrcReady else true.B
-      statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready && allSrcReady1
-      statusArray.io.deqResp(2*i+1).bits.rsMask := s1_allocatePtrOH_dup.head(i)
-      statusArray.io.deqResp(2*i+1).bits.success := s2_deq(i).ready
-      statusArray.io.deqResp(2*i+1).bits.resptype := DontCare
-      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
-    }
+    // For FMAs that can be scheduled multiple times, only when
+    // all source operands are ready we dequeue the instruction.
+    statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready && allSrcReady(i)
+    statusArray.io.deqResp(2*i).bits.rsMask := s1_in_selectPtrOH(i)
+    statusArray.io.deqResp(2*i).bits.success := s2_deq(i).ready
+    statusArray.io.deqResp(2*i).bits.resptype := DontCare
+    statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := DontCare
+    statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready && allSrcReady1(i)
+    statusArray.io.deqResp(2*i+1).bits.rsMask := s1_allocatePtrOH_dup.head(i)
+    statusArray.io.deqResp(2*i+1).bits.success := s2_deq(i).ready
+    statusArray.io.deqResp(2*i+1).bits.resptype := DontCare
+    statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
 
     if (io.fastWakeup.isDefined) {
       val wakeupQueue = Module(new WakeupQueue(params.fixedLatency))
@@ -585,14 +532,13 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
       XSPerfAccumulate(s"fast_blocked_$i", s1_issuePtrOH(i).valid && fuCheck && !s1_out(i).ready)
     }
   }
-  if (!io.feedback.isDefined) {
-    val allSrcReady = if (params.hasMidState) statusArray.io.allSrcReady.last else true.B
-    statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready)) && allSrcReady
-    statusArray.io.deqResp.last.bits.rsMask := s1_in_oldestPtrOH.bits
-    statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
-    statusArray.io.deqResp.last.bits.resptype := DontCare
-    statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
-  }
+  // fma midstats is different
+  val allSrcReadyLast = WireInit(true.B)
+  statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready)) && allSrcReadyLast
+  statusArray.io.deqResp.last.bits.rsMask := s1_in_oldestPtrOH.bits
+  statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
+  statusArray.io.deqResp.last.bits.resptype := DontCare
+  statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
   statusArray.io.updateMidState := 0.U
 
   // select whether the source is from (whether slowPorts, regfile or imm)
@@ -619,19 +565,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     dataArray.io.write(i).mask := s1_dispatchUops_dup(2)(i).bits.srcIsReady.take(params.numSrc)
     dataArray.io.write(i).addr := s1_allocatePtrOH_dup(2)(i)
     dataArray.io.write(i).data := immBypassedData(i)
-    if (params.delayedSrc) {
-      for (j <- 0 until params.numSrc) {
-        when (s1_delayedSrc(i)(j)) {
-          dataArray.io.write(i).mask(j) := false.B
-        }
-        dataArray.io.delayedWrite(i).data := DontCare
-        if (params.delayedFpRf) {
-          dataArray.io.delayedWrite(i).mask(j) := RegNext(RegNext(s1_dispatchUops_dup.head(i).valid && s1_delayedSrc(i)(j)))
-          dataArray.io.delayedWrite(i).addr    := RegNext(RegNext(dataArray.io.write(i).addr))
-          dataArray.io.delayedWrite(i).data(0) := enqReverse(io.fpRegValue.get)(i)
-        }
-      }
-    }
   }
   // data broadcast: from function units (only slow wakeup date are needed)
   val broadcastValid = io.slowPorts.map(_.valid)
@@ -749,16 +682,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     // payload: send to function units
     // TODO: these should be done outside RS
     PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
-    if (params.hasFeedback) {
-      io.feedback.get(i).rsIdx := s2_issuePtr(i)
-      io.feedback.get(i).isFirstIssue := s2_first_issue(i)
-    }
-    if (params.hasMidState) {
-      io.fmaMid.get(i).waitForAdd := !s2_all_src_ready(i)
-      io.fmaMid.get(i).in.valid := !s2_first_issue(i)
-      XSPerfAccumulate(s"fma_partial2_issue_$i", io.deq(i).fire && io.fmaMid.get(i).waitForAdd)
-      XSPerfAccumulate(s"fma_final_issue_$i", io.deq(i).fire && io.fmaMid.get(i).in.valid)
-    }
+
     s2_deq(i).ready := !s2_deq(i).valid || io.deq(i).ready
     io.deq(i).valid := s2_deq(i).valid
     io.deq(i).bits := s2_deq(i).bits
@@ -786,115 +710,13 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
       }
       bypassNetwork.io.target <> s2_deq(i).bits.src.take(params.numSrc)
 
-      // For load instructions, if its source operand is bypassed from load,
-      // we reduce its latency for one cycle since it does not need to read
-      // from data array. Timing to be optimized later.
-      if (params.isLoad) {
-        // Condition: wakeup by load (to select load wakeup bits)
-        io.load.get(i).fastMatch := Mux(s1_issuePtrOH(i).valid, VecInit(
-          wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
-        ).asUInt, 0.U)
-        io.load.get(i).fastImm := s1_out(i).bits.uop.ctrl.imm
-      }
-
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire && wakeupBypassMask(j).asUInt.orR)
       }
+
     }
   }
 
-  if (params.hasMidState) {
-    // For FMA instrutions whose third operand is not ready, once they are successfully issued (T0),
-    // the FMUL intermediate result will be ready in two clock cycles (T2).
-    // If the third operand is ready at T2, this instruction will be selected in T3 and issued at T4.
-    // Note that at cycle T4, FMUL finishes as well and it is able to proceed to FADD.
-    // Thus, we can set the midState to true two cycles earlier at T0 and forward the result if possible.
-    val midFinished2 = io.fmaMid.get.zip(io.deq).map(x => x._1.waitForAdd && x._2.fire)
-    val updateMid = ParallelMux(midFinished2, s2_issuePtrOH)
-    statusArray.io.updateMidState := updateMid
-
-    // FMUL intermediate results are ready in two cycles
-    val midFinished2T0 = midFinished2.zip(s2_deq).map{ case (v, deq) =>
-      // However, it may be flushed by redirect at T0.
-      // If flushed at T0, new instruction enters at T1 and writes the entry at T2.
-      // This is a rare case because usually instructions enter RS in-order,
-      // unless dispatch2 is blocked.
-      v && !deq.bits.uop.robIdx.needFlush(io.redirect)
-    }
-    val midIssuePtrOHT1 = midFinished2T0.zip(s2_issuePtrOH).map(x => RegEnable(x._2, x._1))
-    val midIssuePtrT1 = midFinished2T0.zip(s2_issuePtr).map(x => RegEnable(x._2, x._1))
-    val midFinished2T1 = midFinished2T0.map(v => RegNext(v))
-    // No flush here: the fma may dequeue at this stage.
-    // If cancelled at T1, data written at T2. However, new instruction writes at least at T3.
-    val midIssuePtrOHT2 = midFinished2T1.zip(midIssuePtrOHT1).map(x => RegEnable(x._2, x._1))
-    val midIssuePtrT2 = midFinished2T1.zip(midIssuePtrT1).map(x => RegEnable(x._2, x._1))
-    val midFinished2T2 = midFinished2T1.map(v => RegNext(v))
-    for (i <- 0 until params.numDeq) {
-      dataArray.io.partialWrite(i).enable := midFinished2T2(i)
-      dataArray.io.partialWrite(i).mask := DontCare
-      dataArray.io.partialWrite(i).addr := midIssuePtrOHT2(i)
-      val writeData = io.fmaMid.get(i).out.bits.asUInt
-      require(writeData.getWidth <= 2 * params.dataBits, s"why ${writeData.getWidth}???")
-      require(writeData.getWidth > params.dataBits, s"why ${writeData.getWidth}???")
-      dataArray.io.partialWrite(i).data(0) := writeData(params.dataBits - 1, 0)
-      dataArray.io.partialWrite(i).data(1) := writeData(writeData.getWidth - 1, params.dataBits)
-      val readData = Cat(io.deq(i).bits.src(1), io.deq(i).bits.src(0))
-      io.fmaMid.get(i).in.bits := readData.asTypeOf(io.fmaMid.get(i).in.bits.cloneType)
-    }
-
-    // How to forward intermediate results:
-    // (1) T0 issued FMA is selected at T1 and issued at T2: forward from FMUL results
-    //     NOTE: In this case, this instruction has been issued and the entry is freed.
-    //           Do NOT write data back to data array.
-    // (2) T0 issued FMA is selected at T2: RegNext FMUL result at the issue stage
-    // Thus, at issue stage:
-    // (1.1) If the instruction matches FMA/FMUL two cycles ealier, we issue it and it goes to FADD
-    // (1.2) If the instruction matches FMA/FMUL two cycles ealier and it's blocked, we need to hold the result
-    // At select stage: (2) bypass FMUL intermediate results from write ports if possible.
-    val issuedAtT0 = midFinished2T2.zip(midIssuePtrT2)
-    for (i <- 0 until params.numDeq) {
-      // cond11: condition (1.1) from different issue ports
-      val cond11 = issuedAtT0.map(x => x._1 && x._2 === s2_issuePtr(i))
-      for ((c, j) <- cond11.zipWithIndex) {
-        when (c) {
-          io.fmaMid.get(i).in.bits := io.fmaMid.get(j).out.bits
-          // We should NOT write the intermediate result back to DataArray,
-          // when this entry has been selected and arrived at the issue stage.
-          // This entry may be allocated for new instructions from dispatch.
-          when (io.deq(i).valid) {
-            dataArray.io.partialWrite(j).enable := false.B
-          }
-        }
-      }
-      val cond11Issued = io.deq(i).fire && io.fmaMid.get(i).in.valid && VecInit(cond11).asUInt.orR
-      XSPerfAccumulate(s"fma_final_issue_cond11_$i", cond11Issued)
-      // cond12: blocked at the issue stage
-      val cond12 = cond11.map(_ && io.deq(i).valid && !io.deq(i).ready)
-      val hasCond12 = VecInit(cond12).asUInt.orR
-      val hasCond12Reg = RegInit(false.B)
-      when (hasCond12) {
-        hasCond12Reg := true.B
-      }.elsewhen (io.deq(i).ready) {
-        hasCond12Reg := false.B
-      }
-      when (hasCond12Reg) {
-        // TODO: remove these unnecessary registers (use pipeline registers instead)
-        io.fmaMid.get(i).in.bits := RegEnable(Mux1H(cond12, io.fmaMid.get.map(_.out.bits)), hasCond12)
-      }
-      val cond12Issued = io.deq(i).fire && io.fmaMid.get(i).in.valid && hasCond12Reg
-      XSPerfAccumulate(s"fma_final_issue_cond12_$i", cond12Issued)
-      // cond2: selected at the select stage
-      val cond2 = issuedAtT0.map(x => x._1 && x._2 === s1_issuePtr(i))
-      for ((c, j) <- cond2.zipWithIndex) {
-        when (c) {
-          s1_out(i).bits.src(0) := dataArray.io.partialWrite(j).data(0)
-          s1_out(i).bits.src(1) := dataArray.io.partialWrite(j).data(1)
-        }
-      }
-      val cond2Selected = s1_out_fire(i) && VecInit(cond2).asUInt.orR
-      XSPerfAccumulate(s"fma_final_selected_cond2_$i", cond2Selected)
-    }
-  }
 
   if (select.io.balance.isDefined) {
     require(params.numDeq == 2)
@@ -910,9 +732,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     XSPerfAccumulate(s"allocate_fire_$i", dispatch.fire)
     XSPerfAccumulate(s"allocate_valid_$i", dispatch.valid)
     XSPerfAccumulate(s"srcState_ready_$i", PopCount(dispatch.bits.srcState.map(_ === SrcState.rdy)))
-    if (params.checkWaitBit) {
-      XSPerfAccumulate(s"load_wait_$i", dispatch.fire && dispatch.bits.cf.loadWaitBit)
-    }
   }
 
   for ((deq, i) <- io.deq.zipWithIndex) {
@@ -920,9 +739,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     XSDebug(deq.valid && !deq.ready, p"deq blocked, robIdx ${deq.bits.uop.robIdx}\n")
     XSPerfAccumulate(s"deq_fire_$i", deq.fire)
     XSPerfAccumulate(s"deq_valid_$i", deq.valid)
-    if (params.hasFeedback) {
-      XSPerfAccumulate(s"deq_not_first_issue_$i", deq.fire && !io.feedback.get(i).isFirstIssue)
-    }
   }
 
   for (i <- 0 until params.numEntries) {

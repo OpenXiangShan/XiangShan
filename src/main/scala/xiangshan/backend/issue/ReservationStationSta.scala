@@ -24,10 +24,12 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 case class StaRSParams()
 
 class StaRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.needScheduledBit = true
   override lazy val module = new StaRSImp(params, this)
 }
 
-class StaRSImp(params: RSParams, wrapper: StaRSWrapper) extends BaseReservationStationImp(params, wrapper) {
-}
+class StaRSImp(params: RSParams, wrapper: StaRSWrapper)
+   extends BaseReservationStationImp(params, wrapper)
+   with RSImpMemAddrIOConnect
 
-class StaRS(params: RSParams)(implicit p: Parameters) extends BaseReservationStation(params)
+class StaRS(params: RSParams)(implicit p: Parameters) extends RSWithMemAddr(params)
