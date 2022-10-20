@@ -552,9 +552,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
-  when (state =/= s_normal) {
+  when (state === s_atomics_0 || state === s_atomics_1) {
+    // use store wb port instead of load
     loadUnits(0).io.ldout.ready := false.B
+    // use load_0's TLB
     atomicsUnit.io.dtlb <> amoTlb
+
+    // hw prefetch should be disabled while executing atomic insts
+    loadUnits.map(i => i.io.prefetch_req.valid := false.B)
 
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)
