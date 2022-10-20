@@ -391,7 +391,7 @@ trait HasXSParameter {
   val refillBothTlb = coreParams.refillBothTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
-  val ld_tlb_ports = if(coreParams.prefetcher.nonEmpty) 3 else 2
+  val ld_tlb_ports = if(coreParams.prefetcher.nonEmpty) coreParams.LoadPipelineWidth + 1 else coreParams.LoadPipelineWidth
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
