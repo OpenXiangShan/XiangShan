@@ -103,7 +103,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
-  def SOFT_PREFETCH = 3
+  def DCACHE_PREFETCH = 3
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)

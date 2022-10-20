@@ -115,7 +115,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
   when(isPrefetch) {
-    io.dcacheReq.bits.instrtype := SOFT_PREFETCH.U
+    io.dcacheReq.bits.instrtype := DCACHE_PREFETCH.U
   }.otherwise {
     io.dcacheReq.bits.instrtype := LOAD_SOURCE.U
   }
@@ -522,7 +522,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
   XSPerfAccumulate("replay_from_fetch_forward", io.out.valid && debug_forwardFailReplay)
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
+  XSPerfAccumulate("prefetch", io.in.fire && s2_is_prefetch)
   XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full
+  XSPerfAccumulate("prefetch_miss", io.in.fire && s2_is_prefetch && s2_cache_miss) // prefetch req miss in l1 
+  XSPerfAccumulate("prefetch_hit", io.in.fire && s2_is_prefetch && !s2_cache_miss) // prefetch req hit in l1 
+  // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("prefetch_accept", io.in.fire && s2_is_prefetch && s2_cache_miss && !s2_cache_replay) 
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents {
