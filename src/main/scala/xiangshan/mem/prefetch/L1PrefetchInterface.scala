@@ -62,8 +62,8 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
 
   // prefetch req queue is not provided, prefetcher must maintain its
   // own prefetch req queue.
-  val rand_offset = LFSR64()(3,0) << 6
-  val rand_addr_select = LFSR64()(3,0) === 0.U
+  val rand_offset = LFSR64(seed=None)(3,0) << 6
+  val rand_addr_select = LFSR64(seed=None)(3,0) === 0.U
 
   // use valid vaddr and paddr
   val rand_vaddr = DelayN(io.vaddr, 2)
@@ -71,7 +71,7 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
 
   io.req.bits.paddr := 0x80000000L.U + rand_offset
   io.req.bits.alias := io.req.bits.paddr(13,12)
-  io.req.bits.confidence := LFSR64()(4,0) === 0.U
-  io.req.bits.is_store := LFSR64()(4,0) === 0.U
-  io.req.valid := LFSR64()(3,0) === 0.U
+  io.req.bits.confidence := LFSR64(seed=None)(4,0) === 0.U
+  io.req.bits.is_store := LFSR64(seed=None)(4,0) === 0.U
+  io.req.valid := LFSR64(seed=None)(3,0) === 0.U
 }
