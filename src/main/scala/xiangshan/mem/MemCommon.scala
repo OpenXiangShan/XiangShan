@@ -85,6 +85,32 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val forward_tlDchannel = Bool()
 }
 
+class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
+  val meta_prefetch = Bool()
+  val meta_access = Bool()
+
+  def fromLsPipelineBundle(input: LsPipelineBundle) = {
+    vaddr := input.vaddr
+    paddr := input.paddr
+    mask := input.mask
+    data := input.data
+    uop := input.uop
+    wlineflag := input.wlineflag
+    miss := input.miss
+    tlbMiss := input.tlbMiss
+    ptwBack := input.ptwBack
+    mmio := input.mmio
+    rsIdx := input.rsIdx
+    forwardMask := input.forwardMask
+    forwardData := input.forwardData
+    isPrefetch := input.isPrefetch
+    isHWPrefetch := input.isHWPrefetch
+    isFirstIssue := input.isFirstIssue
+    meta_prefetch := DontCare
+    meta_access := DontCare
+  }
+}
+
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // queue entry data, except flag bits, will be updated if writeQueue is true,
   // valid bit in LqWriteBundle will be ignored
