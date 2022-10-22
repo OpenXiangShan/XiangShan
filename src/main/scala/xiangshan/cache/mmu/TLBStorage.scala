@@ -110,6 +110,8 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
+  val isSuperPage = Wire(Vec(ports, Bool()))
+
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -131,9 +133,11 @@ class TLBFA(
     if (nWays == 1) {
       resp.bits.ppn(0) := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
       resp.bits.perm(0) := entries(0).perm
+      isSuperPage(i) := entries(0).isSuperPage()
     } else {
       resp.bits.ppn(0) := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
       resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
+      isSuperPage(i) := ParallelMux(hitVecReg zip entries.map(_.isSuperPage()))
     }
     io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
@@ -200,6 +204,11 @@ class TLBFA(
 
   XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
+  for (i <- 0 until ports) {
+    XSPerfAccumulate(s"accessPorts$i", io.r.resp(i).valid)
+    XSPerfAccumulate(s"hitPorts$i", io.r.resp(i).valid && io.r.resp(i).bits.hit)
+    XSPerfAccumulate(s"hitspPorts$i", io.r.resp(i).valid && io.r.resp(i).bits.hit && isSuperPage(i))
+  }
 
   for (i <- 0 until nWays) {
     XSPerfAccumulate(s"access${i}", io.r.resp.zip(io.access.map(acc => UIntToOH(acc.touch_ways.bits))).map{ case (a, b) =>

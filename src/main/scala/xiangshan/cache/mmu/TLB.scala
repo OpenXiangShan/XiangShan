@@ -298,6 +298,7 @@ class TLB(parentName: String = "Unknown", Width: Int, nRespDups: Int = 1, q: TLB
   //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_sp_count", ptw.resp.fire() && !ptw.resp.bits.pf && (ptw.resp.bits.entry.level.get === 0.U || ptw.resp.bits.entry.level.get === 1.U))
 
   // Log
   for(i <- 0 until Width) {
