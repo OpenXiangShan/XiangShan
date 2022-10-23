@@ -26,7 +26,6 @@ import xiangshan._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams, RSMod}
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
@@ -311,7 +310,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
     // misc ports
     val extra = new SchedulerExtraIO
-    val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
 
   // To reduce fanout, we add registers here for redirect.
@@ -374,10 +372,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     busyTable
   } else None
   val allocate = dispatch2.flatMap(_.io.out)
-
-  if (io.fmaMid.isDefined) {
-    io.fmaMid.get <> outer.reservationStations.filter(_.params.isFMA).flatMap(_.module.extra.fmaMid)
-  }
 
   // extract each dispatch-rs port's psrc
   def extractReadRf(numRead: Seq[Int]): Seq[UInt] = {

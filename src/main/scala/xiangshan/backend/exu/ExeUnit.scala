@@ -94,7 +94,6 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   val fmaModules = functionUnits.filter(_.isInstanceOf[FMA]).map(_.asInstanceOf[FMA])
   if (fmaModules.nonEmpty) {
     require(fmaModules.length == 1)
-    fmaModules.head.midResult <> fmaMid.get
   }
 
   if (config.readIntRf) {

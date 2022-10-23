@@ -24,7 +24,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
@@ -69,7 +68,6 @@ case class RSParams
   def indexWidth: Int = log2Up(numEntries)
   // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
-  def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
   def delayedSrc: Boolean = exuCfg.get == StdExeUnitCfg
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
@@ -241,7 +239,6 @@ class RSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }
-  val fmaMid = Vec(params.numDeq, Flipped(new FMAMidResultIO))
 }
 
 class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends RSModule
@@ -429,7 +426,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     for (j <- 0 until params.numSrc) {
       statusUpdate.data.srcState(j) := uop.bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR
     }
-    statusUpdate.data.midState := false.B
     statusUpdate.data.psrc := uop.bits.psrc.take(params.numSrc)
     statusUpdate.data.srcType := uop.bits.ctrl.srcType.take(params.numSrc)
     statusUpdate.data.robIdx := uop.bits.robIdx
@@ -539,7 +535,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
   statusArray.io.deqResp.last.bits.resptype := DontCare
   statusArray.io.deqResp.last.bits.dataInvalidSqIdx := DontCare
-  statusArray.io.updateMidState := 0.U
 
   // select whether the source is from (whether slowPorts, regfile or imm)
   // for read-after-issue, it's done over the selected uop

@@ -23,7 +23,6 @@ import chisel3.util._
 import utils.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu._
-import xiangshan.backend.fu.fpu.FMAMidResultIO
 
 case class ExuParameters
 (
@@ -123,7 +122,6 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   @public val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
   @public val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
   @public val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
-  @public val fmaMid = if (config == FmacExeUnitCfg) Some(IO(new FMAMidResultIO)) else None
 
   val functionUnits = config.fuConfigs.map(cfg => {
     val mod = Module(cfg.fuGen(p))

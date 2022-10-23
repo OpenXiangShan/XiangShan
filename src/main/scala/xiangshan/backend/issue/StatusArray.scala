@@ -40,7 +40,6 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val blocked = Bool()
   val credit = UInt(4.W)
   val srcState = Vec(params.numSrc, Bool())
-  val midState = Bool()
   // data
   val psrc = Vec(params.numSrc, UInt(params.dataIdBits.W))
   val srcType = Vec(params.numSrc, SrcType())
@@ -56,14 +55,11 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   def canIssue: Bool = {
     val scheduledCond = if (params.needScheduledBit) !scheduled else true.B
     val blockedCond = if (params.checkWaitBit) !blocked else true.B
-    val checkedSrcState = if (params.numSrc > 2) srcState.take(2) else srcState
-    val midStateReady = if (params.hasMidState) srcState.last && midState else false.B
-    (VecInit(checkedSrcState).asUInt.andR && scheduledCond || midStateReady) && blockedCond
+    srcState.asUInt.andR && scheduledCond && blockedCond
   }
 
   def allSrcReady: Bool = {
-    val midStateReady = if (params.hasMidState) srcState.last && midState else false.B
-    srcState.asUInt.andR || midStateReady
+    srcState.asUInt.andR
   }
 
   override def toPrintable: Printable = {
@@ -88,7 +84,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // TODO: if more info is needed, put them in a bundle
     val isFirstIssue = Vec(params.numSelect, Output(Bool()))
     val allSrcReady = Vec(params.numSelect, Output(Bool()))
-    val updateMidState = Input(UInt(params.numEntries.W))
     val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1
     val deqResp = Vec(deqRespWidth, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
@@ -224,9 +219,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       // When the instruction enqueues, we always use the wakeup result.
       case ((current, update), wakeup) => wakeup || Mux(updateValid(i), update, current)
     })
-
-    // midState: reset when enqueue; set when receiving feedback
-    statusNext.midState := !updateValid(i) && (io.updateMidState(i) || status.midState)
 
     // static data fields (only updated when instructions enqueue)
     statusNext.psrc := Mux(updateValid(i), updateVal(i).psrc, status.psrc)

@@ -24,7 +24,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
-import xiangshan.backend.fu.fpu.FMAMidResultIO
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -58,7 +57,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     val writeback = Vec(numIn, DecoupledIO(new ExuOutput))
     // misc
     val extra = new FUBlockExtraIO(configs)
-    val fmaMid = if (numFma > 0) Some(Vec(numFma, new FMAMidResultIO)) else None
   })
 
   val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
@@ -98,10 +96,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     if (exu.frm.isDefined) {
       exu.frm.get := io.extra.frm.get
     }
-  }
-
-  if (io.fmaMid.isDefined) {
-    io.fmaMid.get <> exeUnits.map(_.fmaMid).filter(_.isDefined).map(_.get)
   }
 
   for ((iss, i) <- io.issue.zipWithIndex) {

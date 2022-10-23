@@ -158,34 +158,7 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   fflags := Mux1H(outSel, s2.map(_.io.fflags))
 }
 
-class FMAMidResult extends FMULToFADD(FPU.ftypes.last.expWidth, FPU.ftypes.last.precision) {
-
-  def toFloat: FMULToFADD = {
-    val floatMidResult = Wire(new FMULToFADD(FPU.ftypes.head.expWidth, FPU.ftypes.head.precision))
-    floatMidResult.fp_prod.sign := fp_prod.sign
-    floatMidResult.fp_prod.exp := fp_prod.exp
-    floatMidResult.fp_prod.sig := fp_prod.sig
-    floatMidResult.inter_flags := inter_flags
-    floatMidResult
-  }
-
-  def fromFloat(float: FMULToFADD): FMULToFADD = {
-    fp_prod.sign := float.fp_prod.sign
-    fp_prod.exp := float.fp_prod.exp
-    fp_prod.sig := float.fp_prod.sig
-    inter_flags := float.inter_flags
-    this
-  }
-}
-
-class FMAMidResultIO extends Bundle {
-  val in = Flipped(ValidIO(new FMAMidResult))
-  val out = ValidIO(new FMAMidResult)
-  val waitForAdd = Input(Bool())
-}
-
 class FMA(implicit p: Parameters) extends FPUSubModule {
-  val midResult = IO(new FMAMidResultIO)
 
   override val dataModule = null
   val mul_pipe = Module(new FMUL_pipe())
@@ -200,38 +173,26 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
 
   val fpCtrl = io.in.bits.uop.ctrl.fpu
   mul_pipe.io.in <> io.in
-  mul_pipe.io.in.valid := io.in.valid && !fpCtrl.isAddSub && !midResult.in.valid
+  mul_pipe.io.in.valid := io.in.valid && !fpCtrl.isAddSub
 
   // For better timing, we let out.valid be true even if it's flushed.
-  val waitAddOperand = RegEnable(midResult.waitForAdd, !mul_pipe.io.out.valid || mul_pipe.io.out.ready)
-  val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3 && !waitAddOperand
+  val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3
   // However, when sending instructions to add_pipe, we need to determine whether it's flushed.
   val mulFlushed = mul_pipe.io.out.bits.uop.robIdx.needFlush(io.redirectIn)
   val isFMAReg = RegNext(isFMA && !mulFlushed)
 
   add_pipe.mulToAdd <> mul_pipe.toAdd
-  midResult.out.valid := RegNext(mul_pipe.io.out.valid && waitAddOperand && !mulFlushed)
-  midResult.out.bits := mul_pipe.toAdd.getDouble
-  when (RegNext(mul_pipe.io.out.bits.uop.ctrl.fpu.typeTagIn === FPU.S)) {
-    midResult.out.bits.fromFloat(mul_pipe.toAdd.getFloat)
-  }
-  when (midResult.in.valid && !isFMAReg) {
-    add_pipe.mulToAdd.getDouble := midResult.in.bits
-    add_pipe.mulToAdd.getFloat := midResult.in.bits.toFloat
-    add_pipe.mulToAdd.addend := io.in.bits.src(2)
-    add_pipe.mulToAdd.uop := io.in.bits.uop
-  }
 
   // For FADD, it accepts instructions from io.in and FMUL.
   // When FMUL gives an FMA, FADD accepts this instead of io.in.
   // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
-  add_pipe.io.in.valid := io.in.valid && (fpCtrl.isAddSub || midResult.in.valid) || isFMAReg
+  add_pipe.io.in.valid := io.in.valid && fpCtrl.isAddSub || isFMAReg
   add_pipe.io.in.bits.src := io.in.bits.src
   add_pipe.io.in.bits.uop := Mux(isFMAReg, add_pipe.mulToAdd.uop, io.in.bits.uop)
-  add_pipe.isFMA := io.in.valid && midResult.in.valid || isFMAReg
+  add_pipe.isFMA := isFMAReg
 
   // When the in uop is Add/Sub, we check FADD, otherwise fmul is checked.
-  io.in.ready := Mux(fpCtrl.isAddSub || midResult.in.valid,
+  io.in.ready := Mux(fpCtrl.isAddSub,
     !isFMAReg && add_pipe.io.in.ready,
     mul_pipe.io.in.ready
   )
@@ -240,7 +201,7 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   // (1) It always accept FMA from FADD (if an FMA wants FMUL, it's never blocked).
   // (2) It has lower writeback arbitration priority than FADD (and may be blocked when FMUL.out.valid).
   XSError(isFMA && !add_pipe.io.in.ready, "FMA should not be blocked\n")
-  mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid) || waitAddOperand
+  mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid)
   add_pipe.io.out.ready := io.out.ready
 
   io.out.bits.uop := Mux(add_pipe.io.out.valid,
@@ -255,8 +216,5 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
     add_pipe.fflags,
     mul_pipe.fflags
   )
-  io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA && !waitAddOperand)
-
-  XSPerfAccumulate("fma_partial_issue_fire", io.in.fire && midResult.waitForAdd)
-  XSPerfAccumulate("fma_mid_result_in_fire", io.in.fire && midResult.in.valid)
+  io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA)
 }

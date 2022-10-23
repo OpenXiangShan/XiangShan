@@ -53,7 +53,6 @@ class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedSrc) Vec(params.numEnq, new DataArrayDelayedWriteIO(params.numEntries, params.numSrc, params.dataBits)) else null
-  val partialWrite = if (params.hasMidState) Vec(params.numDeq, new DataArrayWriteIO(params.numEntries, params.numSrc - 1, params.dataBits)) else null
 }
 
 class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
@@ -64,13 +63,9 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     val delayedWaddr = if (params.delayedSrc) io.delayedWrite.map(_.addr) else Seq()
     val delayedWdata = if (params.delayedSrc) io.delayedWrite.map(_.data(i)) else Seq()
 
-    val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegNext(w.enable)) else Seq()
-    val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.addr, w.enable)) else Seq()
-    val partialWdata = if (i < 2 && params.hasMidState) io.partialWrite.map(w => RegEnable(w.data(i), w.enable)) else Seq()
-
-    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen ++ partialWen
-    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr ++ partialWaddr
-    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata ++ partialWdata
+    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen
+    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr
+    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata
 
     val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
@@ -78,16 +73,6 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     dataModule.io.wen := wen
     dataModule.io.wvec := waddr
     dataModule.io.wdata := wdata
-
-    if (i < 2 && params.hasMidState) {
-      for (r <- io.read) {
-        val addr_match = partialWaddr.map(addr => (addr & r.addr).asUInt.orR)
-        val bypass = partialWen.zip(addr_match).map(p => p._1 && p._2)
-        when (VecInit(bypass).asUInt.orR) {
-          r.data(i) := Mux1H(bypass, partialWdata)
-        }
-      }
-    }
 
     for (i <- 0 until params.numEntries) {
       val w = VecInit(wen.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
