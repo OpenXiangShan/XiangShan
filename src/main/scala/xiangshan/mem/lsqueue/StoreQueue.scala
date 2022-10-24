@@ -24,6 +24,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.ExceptionNO._
 import difftest._
 import device.RAMHelper
 
@@ -65,6 +66,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val hartId = Input(UInt(8.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
+    val rsStoreIn = Vec(StorePipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // store addr from rs (used by replay)
+    val storeOut = Vec(StorePipelineWidth, Decoupled(new LsPipelineBundle)) // select (rs or sq) req to STA pipeline (used by replay)
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
@@ -106,7 +109,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vaddrModule = Module(new SQAddrModule(
     dataWidth = VAddrBits,
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth + 1, // sbuffer + badvaddr 1 (TODO)
+    numRead = EnsbufferWidth + 3, // sbuffer 2 + badvaddr 1 + replay vaddr 2 (TODO)
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -124,6 +127,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val committed = Reg(Vec(StoreQueueSize, Bool())) // inst has been committed by rob
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
+
+  // replay related
+  val no_need_to_replay = RegInit(VecInit(List.fill(StoreQueueSize)(true.B))) // whether the store need to be replayed
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -144,6 +150,22 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
 
   val commitCount = RegNext(io.rob.scommit)
+
+
+  // used to delay tlb-missed store's re-selecting  
+  val block_ptr = RegInit(VecInit(List.fill(StoreQueueSize)(0.U(2.W)))) // block_ptr is used to index block_cycles
+  val block_cycles = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 5.U(ReSelectLen.W))))
+
+  val credit = RegInit(VecInit(List.fill(StoreQueueSize)(0.U(ReSelectLen.W))))
+  val creditUpdate = WireInit(VecInit(List.fill(StoreQueueSize)(0.U(ReSelectLen.W))))
+  val sel_blocked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
+
+  credit := creditUpdate
+
+  (0 until StoreQueueSize).map(i => {
+    creditUpdate(i) := Mux(credit(i) > 0.U(ReSelectLen.W), credit(i) - 1.U(ReSelectLen.W), credit(i))
+    sel_blocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
+  })
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)
@@ -204,6 +226,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+      // replay related
+      no_need_to_replay(index) := true.B
+      // NOTE: the index will be used when replay
+      uop(index).sqIdx := sqIdx
+      uop(index).lqIdx := io.enq.req(i).bits.lqIdx
+      block_ptr(index) := 0.U
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
     }
@@ -248,26 +276,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * through arbiter with store units. It will later commit as normal.
     */
 
-  // Write addr to sq
+  // Write paddr to sq (in store S1, mmio and pending is updated in store S2)
   for (i <- 0 until StorePipelineWidth) {
     paddrModule.io.wen(i) := false.B
-    vaddrModule.io.wen(i) := false.B
     dataModule.io.mask.wen(i) := false.B
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
       val addr_valid = !io.storeIn(i).bits.miss
       addrvalid(stWbIndex) := addr_valid //!io.storeIn(i).bits.mmio
+      no_need_to_replay(stWbIndex) := addr_valid
       // pending(stWbIndex) := io.storeIn(i).bits.mmio
+
+      // replay needed
+      when(!addr_valid) {
+        creditUpdate(stWbIndex) := block_cycles(block_ptr(stWbIndex))
+        block_ptr(stWbIndex) := Mux(block_ptr(stWbIndex) === 3.U(2.W), block_ptr(stWbIndex), block_ptr(stWbIndex) + 1.U(2.W))
+      }
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
       paddrModule.io.wen(i) := true.B
-
-      vaddrModule.io.waddr(i) := stWbIndex
-      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
-      vaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
-      vaddrModule.io.wen(i) := true.B
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
 
@@ -291,6 +320,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when (storeInFireReg) {
       pending(stWbIndexReg) := io.storeInRe(i).mmio
       mmio(stWbIndexReg) := io.storeInRe(i).mmio
+    }
+  }
+  
+  // Write vaddr to sq (in store S0)
+  for (i <- 0 until StorePipelineWidth) {
+    vaddrModule.io.wen(i) := false.B
+    when (io.rsStoreIn(i).fire()) {
+      val rsStWbIndex = io.rsStoreIn(i).bits.uop.sqIdx.value
+
+      vaddrModule.io.waddr(i) := rsStWbIndex
+      vaddrModule.io.wdata(i) := io.rsStoreIn(i).bits.vaddr
+      vaddrModule.io.wlineflag(i) := io.rsStoreIn(i).bits.wlineflag
+      vaddrModule.io.wen(i) := true.B
     }
 
     when(vaddrModule.io.wen(i)){
@@ -341,6 +383,126 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       dataModule.io.mask.wdata(i) := io.storeMaskIn(i).bits.mask
       dataModule.io.mask.wen(i) := true.B
     }
+  }
+
+  def getEvenBits(input: UInt): UInt = {
+    VecInit((0 until StoreQueueSize/2).map(i => {input(2*i)})).asUInt
+  }
+  def getOddBits(input: UInt): UInt = {
+    VecInit((0 until StoreQueueSize/2).map(i => {input(2*i+1)})).asUInt
+  }
+  def toVec(a: UInt): Vec[Bool] = {
+    VecInit(a.asBools)
+  }
+  def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
+    val length = mask.length
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
+  }
+
+  // replay logic
+  // replay is splited into 2 stages
+
+  // stage1: select 2 entries and read their vaddr
+  val s0_block_store_mask = WireInit(VecInit((0 until StoreQueueSize).map(x=>false.B)))
+  val s1_block_store_mask = RegNext(s0_block_store_mask)
+
+  val storeReplaySel = Wire(Vec(StorePipelineWidth, UInt(log2Up(StoreQueueSize).W))) // index selected last cycle
+  val storeReplaySelV = Wire(Vec(StorePipelineWidth, Bool())) // index selected in last cycle is valid
+
+  val storeReplaySelVec = VecInit((0 until StoreQueueSize).map(i => {
+    val blocked = s1_block_store_mask(i) || sel_blocked(i)
+    allocated(i) && !no_need_to_replay(i) && !blocked
+  })).asUInt() // use uint instead vec to reduce verilog lines
+
+  val evenDeqMask = getEvenBits(deqMask)
+  val oddDeqMask = getOddBits(deqMask)
+  // generate lastCycleSelect mask
+  val evenFireMask = getEvenBits(UIntToOH(storeReplaySel(0)))
+  val oddFireMask = getOddBits(UIntToOH(storeReplaySel(1)))
+
+  val storeReplayEvenSelVecFire = getEvenBits(storeReplaySelVec) & ~evenFireMask
+  val storeReplayOddSelVecFire = getOddBits(storeReplaySelVec) & ~oddFireMask
+  val storeReplayEvenSelVecNotFire = getEvenBits(storeReplaySelVec)
+  val storeReplayOddSelVecNotFire = getOddBits(storeReplaySelVec)
+
+  val replayEvenFire = WireInit(false.B)
+  val replayOddFire  = WireInit(false.B)
+
+  val storeReplayEvenSel = Mux(
+    replayEvenFire,
+    getFirstOne(toVec(storeReplayEvenSelVecFire), evenDeqMask),
+    getFirstOne(toVec(storeReplayEvenSelVecNotFire), evenDeqMask)
+  )
+  val storeReplayOddSel= Mux(
+    replayOddFire,
+    getFirstOne(toVec(storeReplayOddSelVecFire), oddDeqMask),
+    getFirstOne(toVec(storeReplayOddSelVecNotFire), oddDeqMask)
+  )
+
+  val storeReplaySelGen = Wire(Vec(StorePipelineWidth, UInt(log2Up(StoreQueueSize).W)))
+  val storeReplaySelVGen = Wire(Vec(StorePipelineWidth, Bool()))
+  storeReplaySelGen(0) := Cat(storeReplayEvenSel, 0.U(1.W))
+  storeReplaySelVGen(0):= Mux(replayEvenFire, storeReplayEvenSelVecFire.asUInt.orR, storeReplayEvenSelVecNotFire.asUInt.orR)
+  storeReplaySelGen(1) := Cat(storeReplayOddSel, 1.U(1.W))
+  storeReplaySelVGen(1) := Mux(replayOddFire, storeReplayOddSelVecFire.asUInt.orR, storeReplayOddSelVecNotFire.asUInt.orR)
+
+  vaddrModule.io.raddr(StorePipelineWidth + 1) := storeReplaySelGen(0)
+  vaddrModule.io.raddr(StorePipelineWidth + 2) := storeReplaySelGen(1)
+
+  (0 until StorePipelineWidth).map(i => {
+    storeReplaySel(i) := RegNext(storeReplaySelGen(i))
+    storeReplaySelV(i) := RegNext(storeReplaySelVGen(i), init = false.B)
+  })
+
+  // stage2: replay to load pipeline (if no load in S0)
+
+  when(replayEvenFire) {
+    s0_block_store_mask(storeReplaySel(0)) := true.B
+  }
+
+  when(replayOddFire) {
+    s0_block_store_mask(storeReplaySel(1)) := true.B
+  }
+
+  // init
+  replayEvenFire := false.B
+  replayOddFire := false.B
+
+  for(i <- 0 until StorePipelineWidth) {
+    io.storeOut(i) <> io.rsStoreIn(i)
+
+    val replayIdx = storeReplaySel(i)
+    val notRedirectLastCycle = !uop(replayIdx).robIdx.needFlush(RegNext(io.brqRedirect))
+    val canfire_replay = !io.rsStoreIn(i).valid && io.storeOut(i).ready && storeReplaySelV(i) && notRedirectLastCycle
+    
+    when(canfire_replay) {
+      val addrAligned = LookupTree(uop(replayIdx).ctrl.fuOpType(1,0), List(
+        "b00".U   -> true.B,              //b
+        "b01".U   -> (io.storeOut(i).bits.vaddr(0) === 0.U),   //h
+        "b10".U   -> (io.storeOut(i).bits.vaddr(1,0) === 0.U), //w
+        "b11".U   -> (io.storeOut(i).bits.vaddr(2,0) === 0.U)  //d
+      ))
+
+      io.storeOut(i).valid := true.B
+      // should we save uop when rs issues ?
+      io.storeOut(i).bits.uop := uop(replayIdx)
+      io.storeOut(i).bits.vaddr := vaddrModule.io.rdata(StorePipelineWidth + 1 + i)
+      io.storeOut(i).bits.mask := genWmask(vaddrModule.io.rdata(StorePipelineWidth + 1 + i), uop(replayIdx).ctrl.fuOpType(1,0))
+      io.storeOut(i).bits.wlineflag := uop(replayIdx).ctrl.fuOpType === LSUOpType.cbo_zero
+      io.storeOut(i).bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+      io.storeOut(i).bits.isFirstIssue := false.B
+      io.storeOut(i).bits.isStoreReplay := true.B
+      io.storeOut(i).bits.rsIdx := DontCare
+
+      if(i == 0) {
+        replayEvenFire := true.B
+      }else if(i == 1) {
+        replayOddFire := true.B
+      }
+    }
+
   }
 
   /**
