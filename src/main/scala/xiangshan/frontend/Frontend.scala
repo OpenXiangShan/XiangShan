@@ -19,17 +19,18 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import huancun.mbist.MBISTPipeline
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
 
-class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+class Frontend(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
   val instrUncache  = LazyModule(new InstrUncache())
-  val icache        = LazyModule(new ICache())
+  val icache        = LazyModule(new ICache(parentName = parentName + "icache_"))
 
   lazy val module = new FrontendImp(this)
 }
@@ -62,10 +63,16 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu     = Module(new Predictor)
+  val bpu     = Module(new Predictor(parentName = outer.parentName + s"bpu_"))
   val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
-  val ftq = Module(new Ftq)
+  val ftq = Module(new Ftq(parentName = outer.parentName + s"ftq_"))
+
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(4,s"${outer.parentName}_mbistPipe")))
+  } else {
+    None
+  }
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)

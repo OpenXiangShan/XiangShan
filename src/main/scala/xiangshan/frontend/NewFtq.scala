@@ -19,6 +19,7 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import huancun.mbist.MBISTPipeline
 import utils._
 import xiangshan._
 import xiangshan.frontend.icache._
@@ -43,7 +44,7 @@ object FtqPtr {
   }
 }
 
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int, parentName:String = "Unknown")(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
     val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
@@ -55,7 +56,12 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for(i <- 0 until numRead){
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplate(gen = gen, set = FtqSize,
+      bypassWrite = true,
+      hasMbist = coreParams.hasMbist,
+      hasShareBus = coreParams.hasShareBus,
+      parentName = parentName + s"sram${i}_"
+    ))
     sram.io.r.req.valid := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i) := sram.io.r.resp.data(0)
@@ -63,7 +69,11 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
     sram.io.w.req.bits.setIdx := io.waddr
     sram.io.w.req.bits.data := VecInit(io.wdata)
   }
-
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
+  } else {
+    None
+  }
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils with HasBPUConst {
@@ -424,7 +434,7 @@ class FtqPcMemWrapper(numOtherReads: Int)(implicit p: Parameters) extends XSModu
   io.commPtr_rdata      := mem.io.rdata.last
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+class Ftq(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
   with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents
   with HasICacheParameters{
   val io = IO(new Bundle {
@@ -516,7 +526,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
 
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1))
+  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1, parentName = parentName + s"ftq_redirect_sram_"))
   // these info is intended to enq at the last stage of bpu
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
@@ -524,11 +534,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
   println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
-  val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
+  val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1, parentName = parentName + s"ftq_meta_1r_sram_"))
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
+
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(3,s"${parentName}_mbistPipe")))
+  } else {
+    None
+  }
+
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1, "FtqEntry"))
   ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)

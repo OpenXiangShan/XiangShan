@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.internal.naming.chiselName
+import huancun.mbist.MBISTPipeline
 import xiangshan._
 import utils._
 import huancun.utils.SRAMTemplate
@@ -104,7 +105,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 }
 
 @chiselName
-class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
   val ecc = Code.fromString(l2tlbParams.ecc)
@@ -153,8 +154,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2EntryType,
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    hasMbist = coreParams.hasMbist,
+    hasShareBus = coreParams.hasShareBus,
+    parentName = parentName + "l2_"
   ))
+  val mbistL2Pipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistL2Pipe")))
+  } else {
+    None
+  }
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2asids = Reg(Vec(l2tlbParams.l2nSets, Vec(l2tlbParams.l2nWays, UInt(AsidLength.W))))
@@ -177,8 +186,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l3EntryType,
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    hasMbist = coreParams.hasMbist,
+    hasShareBus = coreParams.hasShareBus,
+    parentName = parentName + "l3_"
   ))
+  val mbistL3Pipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistL3Pipe")))
+  } else {
+    None
+  }
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3asids = Reg(Vec(l2tlbParams.l3nSets, Vec(l2tlbParams.l3nWays, UInt(AsidLength.W))))

@@ -38,7 +38,9 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
   case PMParameKey => PMParameters()
-  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
+  case XSTileKey => Seq.tabulate(n){
+    i => XSCoreParameters(HartId = i, hasMbist = true, hasShareBus = true)
+  }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
@@ -237,6 +239,7 @@ class WithNKBL2
         sramDepthDiv = 2,
         tagECC = None,
         dataECC = None,
+        hasShareBus = true,
         simulation = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
@@ -274,6 +277,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         sramDepthDiv = 4,
         tagECC = None,
         dataECC = None,
+        hasShareBus = true,
         simulation = !site(DebugOptionsKey).FPGAPlatform
       ))
     )

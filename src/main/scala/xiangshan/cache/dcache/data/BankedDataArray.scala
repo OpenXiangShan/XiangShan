@@ -19,6 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import huancun.mbist.MBISTPipeline
 import utils.{XSDebug, XSPerfAccumulate}
 import huancun.utils.SRAMTemplate
 
@@ -139,7 +140,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   }
 }
 
-class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
+class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) extends AbstractBankedDataArray {
   def getECCFromEncWord(encWord: UInt) = {
     require(encWord.getWidth == encWordBits)
     encWord(encWordBits - 1, wordBits)
@@ -151,7 +152,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write_dup.foreach(_.ready := true.B)
 
   // wrap data rows of 8 ways
-  class DataSRAMBank(index: Int) extends Module {
+  class DataSRAMBank(index: Int, parentName:String = "Unknown") extends Module {
     val io = IO(new Bundle() {
       val w = Input(new DataSRAMBankWriteReq)
 
@@ -172,15 +173,23 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
 
     // multiway data bank
-    val data_bank = Array.fill(DCacheWays) {
+    val data_bank = Array.tabulate(DCacheWays) {idx =>
       Module(new SRAMTemplate(
         Bits(DCacheSRAMRowBits.W),
         set = DCacheSets,
         way = 1,
         shouldReset = false,
         holdRead = false,
-        singlePort = true
+        singlePort = true,
+        hasMbist = coreParams.hasMbist,
+        hasShareBus = coreParams.hasShareBus,
+        parentName = parentName + s"bank${idx}_"
       ))
+    }
+    val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+      Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+    } else {
+      None
     }
 
     for (w <- 0 until DCacheWays) {
@@ -231,7 +240,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
-  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i)))
+  val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i, parentName = parentName + s"array${i}_")))
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
+  } else {
+    None
+  }
   // val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplate(
   //   Bits(eccBits.W),
   //   set = DCacheSets,

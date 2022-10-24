@@ -24,7 +24,8 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
-import huancun.utils.{ModuleNode, ResetGen, ResetGenNode}
+import huancun.mbist.MBISTPipeline
+import huancun.utils.{ModuleNode, ResetGen, ResetGenNode, SRAMTemplate}
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
@@ -130,7 +131,7 @@ trait HasWritebackSink {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
+abstract class XSCoreBase(val parentName:String = "Unknown")(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
@@ -138,8 +139,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
-  val frontend = LazyModule(new Frontend())
-  val ptw = LazyModule(new PTWWrapper())
+  val frontend = LazyModule(new Frontend(parentName = parentName + "frontend_"))
+  val ptw = LazyModule(new PTWWrapper(parentName = parentName + "ptw_"))
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
@@ -220,7 +221,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
   }
 
-  val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
+  val memBlock = LazyModule(new MemBlock(parentName = parentName + "memblock_")(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = exuBlocks.head.scheduler.memRsEntries.max
     )
@@ -234,7 +235,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 }
 
-class XSCore()(implicit p: config.Parameters) extends XSCoreBase
+class XSCore(parentName:String = "Unknown")(implicit p: config.Parameters) extends XSCoreBase(parentName = parentName)
   with HasXSDts
 {
   lazy val module = new XSCoreImp(this)
@@ -423,6 +424,22 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(Int.MaxValue,s"MBIST_Core")))
+  } else {
+    None
+  }
+  val mbist = if(coreParams.hasMbist && coreParams.hasShareBus) Some(IO(mbistPipeline.get.io.mbist.get.cloneType)) else None
+  if(coreParams.hasMbist && coreParams.hasShareBus){
+    mbist.get <> mbistPipeline.get.io.mbist.get
+  }
+  val sigFromSrams = if(coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+  val mbistBroadCast = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+  if(coreParams.hasMbist) {
+    mbistBroadCast.get <> sigFromSrams.get
+    dontTouch(mbistBroadCast.get)
+  }
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

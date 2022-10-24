@@ -20,12 +20,18 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.chiselName
+import huancun.mbist.MBISTPipeline
 import xiangshan._
 import utils._
 
 @chiselName
-class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
+class Composer(parentName:String = "Unknown")(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, parentName = parentName)
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(3,s"${parentName}_mbistPipe")))
+  } else {
+    None
+  }
   io.out := resp
   // shorter path for s1 pred
   val all_fast_pred = components.filter(_.is_fast_pred)

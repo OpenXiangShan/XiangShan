@@ -69,14 +69,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
-  val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alterPartial({
+  val core_with_l2 = tiles.zipWithIndex.map({case (coreParams,idx) =>
+    LazyModule(new XSTile(s"XSTop_XSTile_")(p.alterPartial({
       case XSCoreParamsKey => coreParams
     })))
-  )
+  })
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
+    LazyModule(new HuanCun("XSTop_L3_")(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param
     })))
   )
@@ -194,17 +194,44 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
+    val mbistBroadCastToTile = if(core_with_l2.head.module.mbistBroadCast.isDefined) {
+      val res = Some(Wire(new huancun.utils.BroadCastBundle))
+      core_with_l2.foreach(_.module.mbistBroadCast.get := res.get)
+      res
+    } else {
+      None
+    }
+    val mbistBroadCastToL3 = if(l3cacheOpt.isDefined) {
+      if(l3cacheOpt.get.module.mbistBroadCast.isDefined){
+        val res = Some(Wire(new huancun.utils.BroadCastBundle))
+        l3cacheOpt.get.module.mbistBroadCast.get := res.get
+        res
+      } else {
+        None
+      }
+    } else {
+      None
+    }
+    val mbistBroadCast = if(mbistBroadCastToTile.isDefined || mbistBroadCastToL3.isDefined){
+      Some(IO(new huancun.utils.BroadCastBundle))
+    } else {
+      None
+    }
+    if(mbistBroadCast.isDefined){
+      if(mbistBroadCastToTile.isDefined){
+        mbistBroadCastToTile.get := mbistBroadCast.get
+      }
+      if(mbistBroadCastToL3.isDefined){
+        mbistBroadCastToL3.get := mbistBroadCast.get
+      }
+    }
+
     withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
       ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
-
-    val sigFromSram = SRAMTemplate.genTopConnector()
-    val mbist = IO(sigFromSram.cloneType)
-    mbist <> sigFromSram
-    dontTouch(mbist)
   }
 }
 

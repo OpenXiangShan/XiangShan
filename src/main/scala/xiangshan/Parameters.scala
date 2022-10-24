@@ -71,6 +71,8 @@ case class XSCoreParameters
   RasSize: Int = 32,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
+  hasMbist:Boolean = true,
+  hasShareBus:Boolean = false,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
     // Seq(( 2048,    2,    8),
@@ -97,14 +99,14 @@ case class XSCoreParameters
   SCCtrBits: Int = 6,
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
-  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters) => {
-      val ftb = Module(new FTB()(p))
+  branchPredictor: Function3[BranchPredictionResp, Parameters, String, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters, parentName:String) => {
+      val ftb = Module(new FTB(parentName = parentName + "ftb_")(p))
       val ubtb =Module(new FauFTB()(p))
       // val bim = Module(new BIM()(p))
-      val tage = Module(new Tage_SC()(p))
+      val tage = Module(new Tage_SC(parentName = parentName + "tage_")(p))
       val ras = Module(new RAS()(p))
-      val ittage = Module(new ITTage()(p))
+      val ittage = Module(new ITTage(parentName = parentName + "ittage_")(p))
       val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
@@ -231,7 +233,8 @@ case class XSCoreParameters
     name = "l2",
     level = 2,
     ways = 8,
-    sets = 1024, // default 512KB L2
+    sets = 1024,// default 512KB L2
+    hasShareBus = true,
     prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
@@ -311,8 +314,8 @@ trait HasXSParameter {
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
 
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
-    coreParams.branchPredictor(resp_in, p)
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, parentName:String = "Unknown") = {
+    coreParams.branchPredictor(resp_in, p, parentName)
   }
   val numBr = coreParams.numBr
   val TageTableInfos = coreParams.TageTableInfos

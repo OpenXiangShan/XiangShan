@@ -134,7 +134,7 @@ class BestOffsetPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   }
 }
 
-class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
+class RecentRequestTable(parentName:String = "Unkown")(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new Bundle {
     val w = Flipped(DecoupledIO(UInt(PAddrBits.W)))
     val r = Flipped(new TestOffsetBundle)
@@ -164,7 +164,11 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
+  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true,
+    hasMbist = coreParams.hasMbist,
+    hasShareBus = coreParams.hasShareBus,
+    parentName = parentName
+  ))
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
@@ -380,14 +384,14 @@ class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule wit
   XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
 }
 
-class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
+class BestOffsetPrefetch(parentName:String = "Unkown")(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new BestOffsetPrefetchIO)
 
   def nEntries = bopParams.nEntries
   def blockBytes = bopParams.blockBytes
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
   val scoreTable = Module(new OffsetScoreTable)
-  val rrTable = Module(new RecentRequestTable)
+  val rrTable = Module(new RecentRequestTable(parentName = parentName + "rrTable_"))
   val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq, nEntries))
   val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish, nEntries))
   val writeRRTableArb = Module(new Arbiter(UInt(PAddrBits.W), nEntries))

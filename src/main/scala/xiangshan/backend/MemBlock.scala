@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import huancun.PrefetchRecv
+import huancun.mbist.MBISTPipeline
 import huancun.utils.{RegNextN, ValidIODelay}
 import utils._
 import xiangshan._
@@ -40,10 +41,10 @@ class Std(implicit p: Parameters) extends FunctionUnit {
   io.out.bits.data := io.in.bits.src(0)
 }
 
-class MemBlock()(implicit p: Parameters) extends LazyModule
+class MemBlock(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
 
-  val dcache = LazyModule(new DCacheWrapper())
+  val dcache = LazyModule(new DCacheWrapper(parentName = parentName + "dcache_"))
   val uncache = LazyModule(new Uncache())
   val pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
@@ -131,7 +132,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val exeUnits = loadUnits ++ storeUnits
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
-      val sms = Module(new SMSPrefetcher())
+      val sms = Module(new SMSPrefetcher(parentName = outer.parentName + "sms_"))
       sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
       sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
@@ -623,6 +624,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(4,s"${outer.parentName}_mbistPipe")))
+  } else {
+    None
+  }
 
   val ldDeqCount = PopCount(io.issue.take(2).map(_.valid))
   val stDeqCount = PopCount(io.issue.drop(2).map(_.valid))

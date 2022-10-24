@@ -6,7 +6,7 @@
    <parameter name="maxFileLength"><![CDATA[800]]></parameter>
   </parameters>
  </check>
- <check level="warning" class="org.scalastyle.file.HeaderMatchesChecker" enabled="true">
+ <check level="warning" class="org.scalastyle.file.HeaderMatchesChecker" enabled="false">
   <parameters>
    <parameter name="header"><![CDATA[// See README.md for license details.]]></parameter>
   </parameters>
@@ -14,7 +14,7 @@
  <check level="warning" class="org.scalastyle.scalariform.SpacesAfterPlusChecker" enabled="true"></check>
  <check level="warning" class="org.scalastyle.file.WhitespaceEndOfLineChecker" enabled="true"></check>
  <check level="warning" class="org.scalastyle.scalariform.SpacesBeforePlusChecker" enabled="true"></check>
- <check level="warning" class="org.scalastyle.file.FileLineLengthChecker" enabled="true">
+ <check level="warning" class="org.scalastyle.file.FileLineLengthChecker" enabled="false">
   <parameters>
    <parameter name="maxLineLength"><![CDATA[120]]></parameter>
    <parameter name="tabSize"><![CDATA[4]]></parameter>
@@ -43,7 +43,7 @@
  </check>
  <check level="warning" class="org.scalastyle.scalariform.ParameterNumberChecker" enabled="true">
   <parameters>
-   <parameter name="maxParameters"><![CDATA[8]]></parameter>
+   <parameter name="maxParameters"><![CDATA[16]]></parameter>
   </parameters>
  </check>
  <check level="warning" class="org.scalastyle.scalariform.MagicNumberChecker" enabled="true">

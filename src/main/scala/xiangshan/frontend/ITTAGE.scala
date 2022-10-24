@@ -28,6 +28,7 @@ import scala.math.min
 import scala.util.matching.Regex
 import scala.{Tuple2 => &}
 import firrtl.passes.wiring.Wiring
+import huancun.mbist.MBISTPipeline
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 
@@ -141,7 +142,8 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
 @chiselName
 class ITTageTable
 (
-  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int
+  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int,
+  parentName:String = "Unknown"
 )(implicit p: Parameters)
   extends ITTageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
@@ -218,8 +220,17 @@ class ITTageTable
   
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
+  val table_banks = Seq.tabulate(nBanks)(idx =>
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true,
+      hasMbist = coreParams.hasMbist,
+      hasShareBus = coreParams.hasShareBus,
+      parentName = parentName + s"bank${idx}_"
+    )))
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+  } else {
+    None
+  }
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -349,17 +360,22 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
 }
 // TODO: check target related logics
 @chiselName
-class ITTage(implicit p: Parameters) extends BaseITTage {
+class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
   val tables = ITTageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
-      val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
+      val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i, parentName = parentName + s"tables${i}_"))
       t.io.req.valid := io.s0_fire(dupForIttage)
       t.io.req.bits.pc := s0_pc_dup(dupForIttage)
       t.io.req.bits.folded_hist := io.in.bits.folded_hist(dupForIttage)
       t
+  }
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
+  } else {
+    None
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
 

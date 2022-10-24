@@ -2,17 +2,19 @@ package xiangshan
 
 import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
+import chisel3.experimental.hierarchy.{Definition, instantiable, public, Instance}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import huancun.debug.TLLogger
+import huancun.mbist.MBISTInterface
 import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{TLClientsMerger, TLEdgeBuffer, IntBuffer}
+import utils.{IntBuffer, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -73,14 +75,13 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   }
 }
 
-class XSTile()(implicit p: Parameters) extends LazyModule
+class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
   with HasXSParameter
-  with HasSoCParameter
-{
-  private val core = LazyModule(new XSCore())
-  private val misc = LazyModule(new XSTileMisc())
-  private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
+  with HasSoCParameter {
+  val core = LazyModule(new XSCore(parentName + "core_"))
+  val misc = LazyModule(new XSTileMisc())
+  val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
+    LazyModule(new HuanCun(parentName = parentName + "L2_")(new Config((_, _, _) => {
       case HCCacheParamsKey => l2param
     })))
   )
@@ -100,7 +101,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   beu_int_source :*= IntBuffer() :*= IntBuffer() :*= misc.beu.intNode
 
 
-
   val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
     val buffer = LazyModule(new TLBuffer)
     misc.l1d_logger := buffer.node := core.memBlock.dcache.clientNode
@@ -108,10 +108,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   }
 
   def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
-    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
-    buffers.zipWithIndex.foreach{ case (b, i) => {
+    val buffers = Seq.fill(depth) {
+      LazyModule(new TLBuffer())
+    }
+    buffers.zipWithIndex.foreach { case (b, i) => {
       b.suggestName(s"${n}_${i}")
-    }}
+    }
+    }
     val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
     (buffers, node)
   }
@@ -144,46 +147,121 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this){
-    val io = IO(new Bundle {
-      val hartId = Input(UInt(64.W))
-      val cpu_halt = Output(Bool())
-    })
+  lazy val module = new XSTileImp(this)
+}
 
-    dontTouch(io.hartId)
+@instantiable
+class XSTileImp(outer: XSTile) extends LazyModuleImp(outer) {
+  @public val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
+    val cpu_halt = Output(Bool())
+  })
+  dontTouch(io.hartId)
 
-    val core_soft_rst = core_reset_sink.in.head._1
+  val core_soft_rst = outer.core_reset_sink.in.head._1
 
-    core.module.io.hartId := io.hartId
-    io.cpu_halt := core.module.io.cpu_halt
-    if(l2cache.isDefined){
-      core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
-    }
-    else {
-      core.module.io.perfEvents <> DontCare
-    }
-
-    misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
-    misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
-    if(l2cache.isDefined){
-      misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
-      misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
-    } else {
-      misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
-    }
-
-    // Modules are reset one by one
-    // io_reset ----
-    //             |
-    //             v
-    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    val resetChain = Seq(
-      Seq(misc.module, core.module) ++
-        l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        l1d_to_l2_bufferOpt.map(_.module) ++
-        l2cache.map(_.module)
-    )
-    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
+  outer.core.module.io.hartId := io.hartId
+  io.cpu_halt := outer.core.module.io.cpu_halt
+  if(outer.l2cache.isDefined){
+    outer.core.module.io.perfEvents.zip(outer.l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
   }
+  else {
+    outer.core.module.io.perfEvents <> DontCare
+  }
+
+  outer.misc.module.beu_errors.icache <> outer.core.module.io.beu_errors.icache
+  outer.misc.module.beu_errors.dcache <> outer.core.module.io.beu_errors.dcache
+  if(outer.l2cache.isDefined){
+    outer.misc.module.beu_errors.l2.ecc_error.valid := outer.l2cache.get.module.io.ecc_error.valid
+    outer.misc.module.beu_errors.l2.ecc_error.bits := outer.l2cache.get.module.io.ecc_error.bits
+  } else {
+    outer.misc.module.beu_errors.l2 <> 0.U.asTypeOf(outer.misc.module.beu_errors.l2)
+  }
+
+  val coreMbistIntf = if(outer.coreParams.hasMbist && outer.coreParams.hasShareBus){
+    val params = outer.core.module.mbistPipeline.get.bd.params
+    val node = outer.core.module.mbistPipeline.get.node
+    val intf = Some(Module(new MBISTInterface(
+      params = Seq(params),
+      ids = Seq(node.children.flatMap(_.array_id)),
+      name = s"MBIST_intf_core",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> outer.core.module.mbist.get
+    outer.core.module.mbistPipeline.get.genCSV(intf.get.info, "MBIST_Core")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    //TODO: add mbist controller connections here
+    intf
+  } else {
+    None
+  }
+
+  val l2MbistIntf = if(outer.l2cache.isDefined){
+    if(p(XSCoreParamsKey).L2CacheParamsOpt.get.hasMbist && p(XSCoreParamsKey).L2CacheParamsOpt.get.hasShareBus){
+      val params = outer.l2cache.get.module.l2TopPipeLine.get.bd.params
+      val node = outer.l2cache.get.module.l2TopPipeLine.get.node
+      val intf = Some(Module(new MBISTInterface(
+        params = Seq(params),
+        ids = Seq(node.children.flatMap(_.array_id)),
+        name = s"MBIST_intf_l2",
+        pipelineNum = 1
+      )))
+      intf.get.toPipeline.head <> outer.l2cache.get.module.l2pipePorts.get
+      outer.l2cache.get.module.l2TopPipeLine.get.genCSV(intf.get.info, "MBIST_L2")
+      intf.get.mbist := DontCare
+      dontTouch(intf.get.mbist)
+      //TODO: add mbist controller connections here
+      intf
+    } else {
+      None
+    }
+  } else {
+    None
+  }
+
+  val mbistBroadCastToCore = if(outer.coreParams.hasMbist) {
+    val res = Some(Wire(new huancun.utils.BroadCastBundle))
+    outer.core.module.mbistBroadCast.get := res.get
+    res
+  } else {
+    None
+  }
+  val mbistBroadCastToL2 = if(outer.coreParams.L2CacheParamsOpt.isDefined) {
+    if(outer.coreParams.L2CacheParamsOpt.get.hasMbist){
+      val res = Some(Wire(new huancun.utils.BroadCastBundle))
+      outer.core.module.mbistBroadCast.get := res.get
+      res
+    } else {
+      None
+    }
+  } else {
+    None
+  }
+  @public val mbistBroadCast = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
+    Some(IO(new huancun.utils.BroadCastBundle))
+  } else {
+    None
+  }
+  if(mbistBroadCast.isDefined){
+    if(mbistBroadCastToCore.isDefined){
+      mbistBroadCastToCore.get := mbistBroadCast.get
+    }
+    if(mbistBroadCastToL2.isDefined){
+      mbistBroadCastToL2.get := mbistBroadCast.get
+    }
+  }
+  // Modules are reset one by one
+  // io_reset ----
+  //             |
+  //             v
+  // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
+  val resetChain = Seq(
+    Seq(outer.misc.module, outer.core.module) ++
+      outer.l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+      outer.ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+      outer.l1d_to_l2_bufferOpt.map(_.module) ++
+      outer.l2cache.map(_.module)
+  )
+  ResetGen(resetChain, reset, !outer.debugOpts.FPGAPlatform)
 }
