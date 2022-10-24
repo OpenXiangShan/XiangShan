@@ -183,6 +183,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     }.otherwise {
       state := s_flush_sbuffer_req
     }
+    // update storeAccessFault bit
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st
   }
 
   when (state === s_flush_sbuffer_req) {
