@@ -218,7 +218,9 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     statusNext.srcState := VecInit(status.srcState.zip(updateVal(i).srcState).zip(stateWakeupEn).map {
       // When the instruction enqueues, we always use the wakeup result.
       case ((current, update), wakeup) => {
-        // XSError(wakeup && Mux(updateValid(i), update, current), s"should not wakeup rdy entry index:$i")
+        // NOTE: Should not wakeup the already rdy entry
+        // Q: why the XSError will be asserted at first instruction
+        XSError(wakeup && Mux(updateValid(i), update, current), s"should not wakeup rdy entry index:$i")
         wakeup || Mux(updateValid(i), update, current)
       }
     })
