@@ -88,19 +88,24 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     return RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
   }
 
-  val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nPrefetchEntries)
-  val data_buffer = InitQueue(new IPFBufferEntryData, size = nPrefetchEntries)
-  val free_list   = RegInit(VecInit(Seq.fill(nPrefetchEntries)(true.B)))
+  val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nIPFBufferSize)
+  val data_buffer = InitQueue(new IPFBufferEntryData, size = nIPFBufferSize)
 
   /** read logic */
   // latch read req address and response in next cycle
-  val r_vidx_s0 = VecInit(io.read.req.bits.vaddr.map(get_idx(_)))
+  val r_vidx_s0   = VecInit(io.read.req.bits.vaddr.map(get_idx(_)))
+  val r_ren_s0    = io.read.req.bits.rvalid
+  val r_rvalid_s0 = io.read.req.fire()
+
   val r_vidx_s1 = RegNext(r_vidx_s0, init = 0.U.asTypeOf(r_vidx_s0.cloneType))
+  val r_ren_s1 = RegNext(r_ren_s0, init=0.U.asTypeOf(r_ren_s0.cloneType))
+  val r_rvalid_s1 = RegNext(r_rvalid_s0, init=false.B)
 
   val r_ptag_s1 = VecInit(io.read.req.bits.paddr.map(get_phy_tag(_)))
 
   val r_hit_oh_s1 = VecInit((0 until PortNumber).map(i =>
-                                 VecInit(meta_buffer.map(entry => entry.valid &&
+                                 VecInit(meta_buffer.map(entry => r_ren_s1(i) &&
+                                                                  entry.valid &&
                                                                   entry.tag === r_ptag_s1(i) &&
                                                                   entry.index === r_vidx_s1(i)))))
 
@@ -109,13 +114,14 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val r_buffer_hit_data_s1 = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh_s1(i), data_buffer.map(_.cachline)) ))
 
 
-  io.read.req.ready := !io.write.valid
+  io.read.req.ready := true.B//TODO: read-wite bypass
   io.read.resp.valid := RegNext(io.read.req.fire(), init = false.B)
   io.read.resp.bits.ipf_hit := r_buffer_hit_s1
   io.read.resp.bits.cacheline := r_buffer_hit_data_s1
 
 
   /** write logic */
+
   when(io.write.valid){
     meta_buffer(io.write.bits.buffIdx).tag := io.write.bits.meta.tag
     meta_buffer(io.write.bits.buffIdx).index := io.write.bits.meta.index
@@ -127,17 +133,22 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
 
   /** move logic */
-  //now we only move port 1 for simplicity
+  //now we only move port 0 for simplicity
   //TODO: move 2 port
-  val r_buffer_hit_s2  = RegNext(r_buffer_hit_s1, init=0.U.asTypeOf(r_buffer_hit_s1.cloneType))
+  val r_buffer_hit_s2     = RegNext(r_buffer_hit_s1, init=0.U.asTypeOf(r_buffer_hit_s1.cloneType))
   val r_buffer_hit_idx_s2 = RegNext(r_buffer_hit_idx_s1)
+  val r_rvalid_s2         = RegNext(r_rvalid_s1, init=false.B)
 
-  io.move.meta_write.valid := RegNext(r_buffer_hit_s2(0), init = false.B)
-  io.move.data_write.valid := RegNext(r_buffer_hit_s2(0), init = false.B)
+  io.move.meta_write.valid := RegNext(r_rvalid_s2 && r_buffer_hit_s2(0), init = false.B)
+  io.move.data_write.valid := RegNext(r_rvalid_s2 && r_buffer_hit_s2(0), init = false.B)
   io.move.meta_write.bits  := DontCare
   io.move.data_write.bits  := DontCare
 
-  when(r_buffer_hit_s2(0)) {
+  XSPerfAccumulate("prefetch_hit_bank_0", r_rvalid_s2 && r_buffer_hit_s2(0))
+  XSPerfAccumulate("prefetch_hit_bank_1", r_rvalid_s2 && r_buffer_hit_s2(1))
+
+  when(io.move.meta_write.valid) {
+    //latch read data
     val moveEntryMeta = RegNext(meta_buffer(r_buffer_hit_idx_s2(0)))
     val moveEntryData = RegNext(data_buffer(r_buffer_hit_idx_s2(0)))
 
@@ -154,6 +165,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       bankIdx = moveEntryMeta.index(0),
       paddr = moveEntryMeta.paddr)
 
+    meta_buffer(r_buffer_hit_idx_s2(0)).valid := false.B
   }
 
   /** fencei: invalid all entries */
@@ -320,7 +332,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
 }
 
-class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
+class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefetchModule
 {
   val io = IO(new Bundle{
     val id          = Input(UInt(log2Ceil(nPrefetchEntries).W))
@@ -349,6 +361,9 @@ class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
   val req_idx = req.vSetIdx                     //virtual index
   val req_tag = get_phy_tag(req.paddr)           //physical tag
 
+  when(io.mem_acquire.fire()){
+    printf("pf_(%d) time:%d addr: %x\n",id.U, GTimer(), req.paddr)
+  }
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
   //8 for 64 bits bus and 2 for 256 bits
@@ -417,6 +432,8 @@ class PIQEntry(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
   io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
   io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
   io.piq_write_ipbuffer.bits.buffIdx := io.id - PortNumber.U
+
+  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())
 
   //mem request
   io.mem_acquire.bits  := edge.Get(

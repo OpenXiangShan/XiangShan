@@ -111,14 +111,15 @@ class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
   /** input */
   val req = Flipped(Decoupled(new Bundle{
     //stage 0: vaddr by s0
-    val vaddr = Vec(PortNumber, UInt(VAddrBits.W))
+    val vaddr  = Vec(PortNumber, UInt(VAddrBits.W))
+    val rvalid = Vec(PortNumber, Bool())
     //stage 1: paddr by s1
     val paddr = Vec(PortNumber, UInt(VAddrBits.W))
   }))
   /** output */
   val resp = ValidIO(new Bundle{
     val ipf_hit      = Vec(PortNumber, Bool())
-    val cacheline    = Vec(PortNumber, Bool())
+    val cacheline    = Vec(PortNumber, UInt(blockBits.W))
   })
 }
 

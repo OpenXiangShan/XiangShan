@@ -102,6 +102,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
+  when(io.mem_acquire.fire()){
+    printf("miss_(%d) time:%d addr: %x\n",id.U, GTimer(), req.vaddr)
+  }
   //cacheline register
   val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
   val respDataReg = Reg(Vec(refillCycles, UInt(beatBits.W)))
@@ -298,7 +301,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   val alloc = Wire(UInt(log2Ceil(nPrefetchEntries).W))
 
   val prefEntries = (PortNumber until PortNumber + nPrefetchEntries) map { i =>
-    val prefetchEntry = Module(new PIQEntry(edge))
+    val prefetchEntry = Module(new PIQEntry(edge, i))
 
     prefetchEntry.io.mem_grant.valid := false.B
     prefetchEntry.io.mem_grant.bits := DontCare
@@ -307,7 +310,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     ipf_write_arb.io.in(i-PortNumber) <> prefetchEntry.io.piq_write_ipbuffer
 
-    when(io.mem_grant.bits.source === PortNumber.U) {
+    when(io.mem_grant.bits.source === i.U) {
       prefetchEntry.io.mem_grant <> io.mem_grant
     }
 

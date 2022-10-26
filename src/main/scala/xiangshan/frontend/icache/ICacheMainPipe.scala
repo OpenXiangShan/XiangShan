@@ -158,8 +158,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     fetch_req(i).bits.vSetIdx      := s0_final_vsetIdx
 
   }
-  toIPF.valid      := s0_valid && !missSwitchBit
-  toIPF.bits.vaddr := s0_req_vaddr
 
 
   /** s0 tlb **/
@@ -188,7 +186,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val itlb_can_go    = toITLB(0).ready && toITLB(1).ready
   //TODO: ipf read not blocking mainpipe
-  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready && toIPF.ready
+  val icache_can_go  = fetch_req(0).ready && fetch_req(1).ready
   val pipe_can_go    = !missSwitchBit && s1_ready
   val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go
   val s0_fetch_fire  = s0_valid && s0_can_go
@@ -197,6 +195,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := s0_can_go) //&& GTimer() > 500.U )
+
+  toIPF.valid       := s0_fire
+  toIPF.bits.vaddr  := s0_req_vaddr
+  toIPF.bits.rvalid(0) := s0_fire
+  toIPF.bits.rvalid(1) := s0_fire && s0_double_line
+
 
   /**
     ******************************************************************************
@@ -289,7 +293,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_ipf_data = fromIPF.bits.cacheline
 
   val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i)))
-  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_port_hit(i),s1_ipf_data(i), s1_hit_data(i))))
+  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), s1_hit_data(i))))
 
   /** <PERF> replace victim way number */
 
@@ -648,7 +652,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     t_w(1).bits    := OHToUInt(s2_waymask(i))
   }
 
-  val s2_hit_datas    = RegEnable(s1_hit_data, s1_fire)
+  val s2_hit_datas    = RegEnable(s1_final_hit_data, s1_fire)
   val s2_datas        = Wire(Vec(2, UInt(blockBits.W)))
 
   s2_datas.zipWithIndex.map{case(bank,i) =>
