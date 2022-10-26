@@ -75,7 +75,8 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   }
 }
 
-class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
+class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyHardenModule[XSTileImp]
+//class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter {
   val core = LazyModule(new XSCore(parentName + "core_"))
@@ -151,11 +152,12 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
 }
 
 @instantiable
-class XSTileImp(outer: XSTile) extends LazyModuleImp(outer) {
+class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   @public val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val cpu_halt = Output(Bool())
   })
+  @public val ireset = reset
   dontTouch(io.hartId)
 
   val core_soft_rst = outer.core_reset_sink.in.head._1

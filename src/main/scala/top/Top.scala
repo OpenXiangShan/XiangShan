@@ -166,8 +166,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
-      core.module.io.hartId := i.U
-      io.riscv_halt(i) := core.module.io.cpu_halt
+      core.moduleInstance.io.hartId := i.U
+      io.riscv_halt(i) := core.moduleInstance.io.cpu_halt
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
@@ -177,7 +177,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
+    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.moduleInstance.ireset.asBool)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := misc.module.reset
 
@@ -194,9 +194,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    val mbistBroadCastToTile = if(core_with_l2.head.module.mbistBroadCast.isDefined) {
+    val mbistBroadCastToTile = if(core_with_l2.head.moduleInstance.mbistBroadCast.isDefined) {
       val res = Some(Wire(new huancun.utils.BroadCastBundle))
-      core_with_l2.foreach(_.module.mbistBroadCast.get := res.get)
+      core_with_l2.foreach(_.moduleInstance.mbistBroadCast.get := res.get)
       res
     } else {
       None
@@ -229,8 +229,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
-      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      val coreResetChain:Seq[Reset] = core_with_l2.map(_.moduleInstance.ireset)
+      val resetChain = Seq(misc.module.reset) ++ l3cacheOpt.map(_.module.reset) ++ coreResetChain
+      ResetGen.applyOneLevel(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
   }
 }
