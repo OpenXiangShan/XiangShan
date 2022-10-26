@@ -68,7 +68,6 @@ case class RSParams
   def indexWidth: Int = log2Up(numEntries)
   // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
-  def delayedSrc: Boolean = exuCfg.get == StdExeUnitCfg
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
   def optDeqFirstStage: Boolean = !exuCfg.get.readFpRf
@@ -381,10 +380,11 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   val s1_slowPorts = RegNext(io.slowPorts)
   val s1_fastUops = RegNext(io.fastUopsIn)
   val s1_dispatchUops_dup = Reg(Vec(3, Vec(params.numEnq, Valid(new MicroOp))))
-  val s1_delayedSrc = Wire(Vec(params.numEnq, Vec(params.numSrc, Bool())))
+  // val s1_delayedSrc = Wire(Vec(params.numEnq, Vec(params.numSrc, Bool())))
   val s1_allocatePtrOH_dup = RegNext(VecInit.fill(3)(VecInit(enqReverse(s0_allocatePtrOH))))
   val s1_allocatePtr = RegNext(VecInit(enqReverse(s0_allocatePtr)))
   val s1_enqWakeup = RegNext(VecInit(enqReverse(s0_enqWakeup)))
+  val s1_enqRfDataSel = WireInit(VecInit(enqReverse(io.srcRegValue)))
   val s1_enqDataCapture = RegNext(VecInit(enqReverse(s0_enqDataCapture)))
   val s1_fastWakeup = RegNext(VecInit(enqReverse(s0_fastWakeup)))
   val s1_in_selectPtr = select.io.grant
@@ -415,14 +415,14 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
 
   // update status and payload array
   statusArray.io.redirect := io.redirect
-  s1_delayedSrc.map(s => s.foreach(_ := false.B))
+  // s1_delayedSrc.map(s => s.foreach(_ := false.B))
   for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_dispatchUops_dup.head).zipWithIndex) {
     statusUpdate.enable := uop.valid
     statusUpdate.addr := s1_allocatePtrOH_dup.head(i)
     statusUpdate.data.valid := true.B
-    statusUpdate.data.scheduled := s1_delayedSrc(i).asUInt.orR
+    statusUpdate.data.scheduled := false.B // s1_delayedSrc(i).asUInt.orR
     statusUpdate.data.blocked := false.B // for checkWaitBit
-    statusUpdate.data.credit := Mux(s1_delayedSrc(i).asUInt.orR, 1.U, 0.U) // credit = 1
+    statusUpdate.data.credit := 0.U //Mux(s1_delayedSrc(i).asUInt.orR, 1.U, 0.U) // credit = 1
     for (j <- 0 until params.numSrc) {
       statusUpdate.data.srcState(j) := uop.bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR
     }
@@ -542,7 +542,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // TODO: need to bypass data here.
   val immBypassedData = Wire(Vec(params.numEnq, Vec(params.numSrc, UInt(params.dataBits.W))))
   val immExts = s1_dispatchUops_dup(2).map(_.bits)
-    .zip(enqReverse(io.srcRegValue))
+    .zip(s1_enqRfDataSel)
     .zip(immBypassedData).map{ case ((uop, data), bypass) =>
     val immExt = ImmExtractor(params, uop, data)
     bypass := immExt.io.data_out

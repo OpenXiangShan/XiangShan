@@ -217,7 +217,10 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // We also don't care whether the instruction can really enqueue.
     statusNext.srcState := VecInit(status.srcState.zip(updateVal(i).srcState).zip(stateWakeupEn).map {
       // When the instruction enqueues, we always use the wakeup result.
-      case ((current, update), wakeup) => wakeup || Mux(updateValid(i), update, current)
+      case ((current, update), wakeup) => {
+        // XSError(wakeup && Mux(updateValid(i), update, current), s"should not wakeup rdy entry index:$i")
+        wakeup || Mux(updateValid(i), update, current)
+      }
     })
 
     // static data fields (only updated when instructions enqueue)

@@ -40,7 +40,7 @@ class RawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, nu
   // write ports
   for (i <- 0 until numEntries) {
     val w = VecInit((0 until numWrite).map(j => io.wen(j) && io.wvec(j)(i)))
-    assert(PopCount(w) <= 1.U)
+    assert(PopCount(w) <= 1.U, s"RawDatModule multi-write index:$i")
     when (w.asUInt.orR) {
       data(i) := Mux1H(w, io.wdata)
     }

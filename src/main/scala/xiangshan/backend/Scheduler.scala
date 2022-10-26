@@ -398,7 +398,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   val intRfReadData = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
-  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else DelayN(VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)), 1)
+  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data))
 
   if (io.extra.intRfReadIn.isDefined) {
     io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
@@ -407,7 +407,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   if (io.extra.fpRfReadIn.isDefined) {
     // Due to distance issues, we RegNext the address for cross-block regfile read
-    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := RegNext(addr)}
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
     require(io.extra.fpRfReadIn.get.length == readFpRf.length)
   }
 
@@ -468,7 +468,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       case (true,  false) => rs.io.slowPorts := intWriteback
       case (false, true) => rs.io.slowPorts := fpWriteback
       // delay fp for extra one cycle
-      case (true,  true) => rs.io.slowPorts := intWriteback ++ RegNext(VecInit(fpWriteback))
+      case (true,  true) => rs.io.slowPorts := intWriteback ++ fpWriteback
       case _ => throw new RuntimeException("unknown wakeup source")
     }
 
@@ -520,15 +520,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     if (numFpRfPorts > 0) {
       val fpRfPorts = VecInit(fpRfReadData.slice(fpReadPort, fpReadPort + numFpRfPorts))
       for (m <- dp) {
-        val mod = rs_all(m.rsIdx).module
+        val rs_mod = rs_all(m.rsIdx).module
         if (numIntRfPorts > 0) {
           require(numFpRfPorts == 1 && numIntRfPorts == 1)
           // dirty code for store
-          mod.extra.fpRegValue(m.dpIdx) := fpRfPorts.head
+          rs_mod.extra.fpRegValue(m.dpIdx) := fpRfPorts.head
         }
         else {
-          val target = mod.io.srcRegValue(m.dpIdx)
-          val isFp = RegNext(mod.io.fromDispatch(m.dpIdx).bits.ctrl.srcType(0) === SrcType.fp)
+          val target = rs_mod.io.srcRegValue(m.dpIdx)
+          val isFp = RegNext(rs_mod.io.fromDispatch(m.dpIdx).bits.ctrl.srcType(0) === SrcType.fp)
           val fromFp = if (numIntRfPorts > 0) isFp else false.B
           when (fromFp) {
             target := fpRfPorts.take(target.length)
