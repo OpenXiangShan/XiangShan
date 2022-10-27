@@ -199,29 +199,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.singlestep := dcsrData.step && !debugMode
 
   // Trigger CSRs
-  val tselectPhy = RegInit(0.U(4.W))
-  val tdata1Init = WireInit(0.U.asTypeOf(new Tdata1Bundle))
+  private val tselectPhy = RegInit(0.U(4.W))
+  private val tdata1Init = WireInit(0.U.asTypeOf(new Tdata1Bundle))
   tdata1Init.type_.value := TrigTypeEnum.disabled
-  val tdataRegsInit = WireInit(0.U.asTypeOf(new TDataRegs))
+  private val tdataRegsInit = WireInit(0.U.asTypeOf(new TDataRegs))
   tdataRegsInit.tdata1 := tdata1Init.asUInt
 
-  val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
-  val tdata2RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
-  val tdata1WireVec = tdata1RegVec.map(_.asTypeOf(new Tdata1Bundle))
-  val tdata2WireVec = tdata2RegVec
-  val tdata1Selected = tdata1RegVec(tselectPhy).asTypeOf(new Tdata1Bundle)
-  val tdata2Selected = tdata2RegVec(tselectPhy)
-//  val type_config = Array(
-//    0.U -> I_Trigger, 1.U -> I_Trigger,
-//    2.U -> S_Trigger, 3.U -> S_Trigger,
-//    4.U -> L_Trigger, 5.U -> L_Trigger, // No.5 Load Trigger
-//    6.U -> I_Trigger, 7.U -> S_Trigger,
-//    8.U -> I_Trigger, 9.U -> L_Trigger
-//  )
-//  def TypeLookup(select: UInt) = MuxLookup(select, I_Trigger, type_config)
-
-//  val tdata1Phy = RegInit(VecInit(List.fill(10) {(2L << 60L).U(64.W)})) // init ttype 2
-//  val tdata2Phy = Reg(Vec(10, UInt(64.W)))
+  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
+  private val tdata2RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
+  private val tdata1WireVec = tdata1RegVec.map(_.asTypeOf(new Tdata1Bundle))
+  private val tdata2WireVec = tdata2RegVec
+  private val tdata1Selected = tdata1RegVec(tselectPhy).asTypeOf(new Tdata1Bundle)
+  private val tdata2Selected = tdata2RegVec(tselectPhy)
+  private val newTriggerChainVec = UIntToOH(tselectPhy, TriggerNum).asBools | tdata1WireVec.map(_.data.asTypeOf(new MControlData).chain)
+  private val newTriggerChainIsLegal = TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
   val tinfo = RegInit(2.U(64.W))
   val tControlPhy = RegInit(0.U(64.W))
 
@@ -627,7 +618,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
     // Todo: support chain length = 2
-    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy), WritableMask, x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), false.B), WritableMask, x => Tdata1Bundle.Read(x)),
+    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy), WritableMask, x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal), WritableMask, x => Tdata1Bundle.Read(x)),
     MaskedRegMap(Tdata2, tdata2RegVec(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
@@ -772,7 +763,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   csrio.customCtrl.frontend_trigger.tEnableVec := fetchTriggerEnableVec
   csrio.customCtrl.mem_trigger.tEnableVec := memAccTriggerEnableVec
-  // Todo: update tdata2 after check trigger type
+
   val tdata1Update = wen && (addr === Tdata1.U)
   val tdata2Update = wen && (addr === Tdata2.U)
   val triggerUpdate = wen && (addr === Tdata1.U || addr === Tdata2.U)
