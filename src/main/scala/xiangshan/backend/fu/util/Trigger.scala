@@ -189,22 +189,22 @@ trait SdtrigExt {
 
   /**
     * Check if triggers can fire
-    * @param TriggerNum
+    * @param triggerNum
     * @param canFireVec
     * @param hitVec
     * @param timingVec
     * @param chainVec
     */
-  def TriggerCheckCanFire(TriggerNum: Int, canFireVec: Vec[Bool], hitVec: Vec[Bool], timingVec: Vec[Bool], chainVec: Vec[Bool]): Unit = {
-    val trigger2ChainVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-    val trigger2TimingSameVec = WireInit(VecInit(Seq.fill(TriggerNum)(true.B)))
-    val trigger2TimingOkVec = WireInit(VecInit(Seq.fill(TriggerNum)(true.B)))
-    val trigger2ChainOkVec = WireInit(VecInit(Seq.fill(TriggerNum)(true.B)))
-    for (i <- 1 until TriggerNum) { // the 0th trigger always chain ok
+  def TriggerCheckCanFire(triggerNum: Int, canFireVec: Vec[Bool], hitVec: Vec[Bool], timingVec: Vec[Bool], chainVec: Vec[Bool]): Unit = {
+    val trigger2ChainVec = WireInit(VecInit(Seq.fill(triggerNum)(false.B)))
+    val trigger2TimingSameVec = WireInit(VecInit(Seq.fill(triggerNum)(true.B)))
+    val trigger2TimingOkVec = WireInit(VecInit(Seq.fill(triggerNum)(true.B)))
+    val trigger2ChainOkVec = WireInit(VecInit(Seq.fill(triggerNum)(true.B)))
+    for (i <- 1 until triggerNum) { // the 0th trigger always chain ok
       trigger2ChainOkVec(i) := chainVec(i - 1) && hitVec(i - 1) || !chainVec(i - 1)
     }
 
-    for (i <- 1 until TriggerNum) { // the 0th trigger always timing same, not chain, timing ok
+    for (i <- 1 until triggerNum) { // the 0th trigger always timing same, not chain, timing ok
       trigger2TimingSameVec(i) := timingVec(i - 1) === timingVec(i)
       trigger2ChainVec(i) := chainVec(i - 1) && !chainVec(i)
       trigger2TimingOkVec(i) := trigger2ChainVec(i) && trigger2TimingSameVec(i) || !chainVec(i - 1)
@@ -220,8 +220,8 @@ trait SdtrigExt {
     * @param chainLen
     * @return true.B if the max length of chain don't exceed the permitted length
     */
-  def TriggerCheckChainLegal(chainVec: Vec[Bool], chainLen: Int): Bool = {
-    ConsecutiveOnes(chainVec, chainLen - 1)
+  def TriggerCheckChainLegal(chainVec: Seq[Bool], chainLen: Int): Bool = {
+    !ConsecutiveOnes(chainVec, chainLen)
   }
 
   /**
