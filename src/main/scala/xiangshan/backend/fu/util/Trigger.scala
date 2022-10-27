@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.XSBundle
 import chipsalliance.rocketchip.config.Parameters
+import utils.ConsecutiveOnes
 
 trait SdtrigExt {
   implicit val p: Parameters
@@ -211,5 +212,35 @@ trait SdtrigExt {
     canFireVec.zipWithIndex.foreach {
       case (canFire, i) => canFire := trigger2ChainOkVec(i) && trigger2TimingOkVec(i) && hitVec(i)
     }
+  }
+
+  /**
+    * Check if chain vector is legal
+    * @param chainVec
+    * @param chainLen
+    * @return true.B if the max length of chain don't exceed the permitted length
+    */
+  def TriggerCheckChainLegal(chainVec: Vec[Bool], chainLen: Int): Bool = {
+    ConsecutiveOnes(chainVec, chainLen - 1)
+  }
+
+  /**
+    * Compare data with trigger data
+    * @param data data compared
+    * @param tdata data from trigger
+    * @param matchType trigger match type in UInt
+    * @param enable if the trigger is enabled
+    * @return true.B if data meet the trigger match condition
+    */
+  def TriggerCmp(data: UInt, tdata: UInt, matchType: UInt, enable: Bool): Bool = {
+    val eq = data === tdata
+    val ge = data >= tdata
+    val lt = data < tdata
+    val res = MuxLookup(matchType, false.B, Seq(
+      TrigMatchEnum.EQ -> eq,
+      TrigMatchEnum.GE -> ge,
+      TrigMatchEnum.LT -> lt
+    ))
+    res && enable
   }
 }
