@@ -40,19 +40,19 @@ class MetaReadReq(implicit p: Parameters) extends DCacheBundle {
   val way_en = UInt(nWays.W)
 }
 
-class MetaWriteReq(implicit p: Parameters) extends MetaReadReq {
+class CohMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
   val meta = new Meta
 }
 
-class ErrorWriteReq(implicit p: Parameters) extends MetaReadReq {
-  val error = Bool()
+class FlagMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
+  val flag = Bool()
 }
 
-class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
+class L1CohMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, new Meta)))
-    val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
+    val write = Vec(writePorts, Flipped(DecoupledIO(new CohMetaWriteReq)))
   })
 
   val meta_array = RegInit(
@@ -103,11 +103,11 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
   }
 }
 
-class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
+class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
-    val write = Vec(writePorts, Flipped(DecoupledIO(new ErrorWriteReq)))
+    val write = Vec(writePorts, Flipped(DecoupledIO(new FlagMetaWriteReq)))
     // customized cache op port 
     // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
@@ -152,7 +152,7 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
           s0_way_wen(way)(wport) := write.valid && wen
           s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
           s1_way_waddr(way)(wport) := RegEnable(write.bits.idx, s0_way_wen(way)(wport))
-          s1_way_wdata(way)(wport) := RegEnable(write.bits.error, s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(write.bits.flag, s0_way_wen(way)(wport))
           when (s1_way_wen(way)(wport)) {
             meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
           }

@@ -160,6 +160,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
 
+  val input_req_is_prefetch = isPrefetch(io.req.bits.cmd)
+
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
   val s_replace_req = RegInit(true.B)
@@ -179,6 +181,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val data_not_refilled = !w_grantfirst
 
   val error = RegInit(false.B)
+  val prefetch = RegInit(false.B)
+  val access = RegInit(false.B)
 
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
@@ -242,6 +246,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     should_refill_data_reg := io.req.bits.isLoad
     error := false.B
+    prefetch := input_req_is_prefetch
+    access := false.B
   }
 
   when (secondary_fire) {
@@ -262,6 +268,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     should_refill_data := should_refill_data_reg || io.req.bits.isLoad
     should_refill_data_reg := should_refill_data
+    when (!input_req_is_prefetch) {
+      access := true.B // when merge non-prefetch req, set access bit
+    }
   }
 
   when (io.mem_acquire.fire()) {
@@ -478,6 +487,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
   refill.error := error
+  refill.prefetch := prefetch
+  refill.access := access
   refill.alias := req.vaddr(13, 12) // TODO
 
   io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast

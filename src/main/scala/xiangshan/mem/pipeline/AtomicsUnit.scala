@@ -47,7 +47,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
+  val s_invalid :: s_tlb_req :: s_tlb_resp :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(9)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
@@ -97,7 +97,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     when (io.in.fire) {
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
-      state := s_tlb
+      state := s_tlb_req
     }
   }
 
@@ -120,7 +120,23 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
 
   // tlb translation, manipulating signals && deal with exception
-  when (state === s_tlb) {
+  // start to send tlb req, and do not accept tlb resp in the first cycle
+  when (state === s_tlb_req) {
+    // send req to dtlb
+    // keep firing until tlb hit
+    io.dtlb.req.valid       := true.B
+    io.dtlb.req.bits.vaddr  := in.src(0)
+    io.dtlb.req.bits.robIdx := in.uop.robIdx
+    io.dtlb.resp.ready      := true.B // actually false.B
+    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
+    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
+    io.dtlb.req.bits.debug.pc := in.uop.cf.pc
+    io.dtlb.req.bits.debug.isFirstIssue := false.B
+    state := s_tlb_resp
+  }
+  
+  // keep sending tlb req, accept tlb resp
+  when (state === s_tlb_resp) {
     // send req to dtlb
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
@@ -175,7 +191,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st
+    val exception_pa = pmp.st || pmp.ld
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -183,6 +199,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     }.otherwise {
       state := s_flush_sbuffer_req
     }
+    // update storeAccessFault bit
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld
   }
 
   when (state === s_flush_sbuffer_req) {
