@@ -5,7 +5,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan._
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.LdPrefetchTrainBundle
+import xiangshan.mem.{LdPrefetchTrainBundle, L1PrefetchReq}
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
