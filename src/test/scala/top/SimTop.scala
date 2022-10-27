@@ -39,7 +39,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.clock := clock
   val clock_div2 = Module(new Pow2ClockDivider(1)).io.clock_out
   soc.io.clock_div2 := clock_div2
-  soc.io.reset := reset.asAsyncReset
+  soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
 
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
@@ -75,7 +75,8 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.riscv_rst_vec.foreach(_ := 0x1ffff80000L.U)
 
   val success = Wire(Bool())
-  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
+  val jtag = Module(new SimJTAG(tickDelay=3)(p))
+  jtag.connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)
   soc.io.systemjtag.reset := reset.asAsyncReset
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
