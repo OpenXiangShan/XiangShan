@@ -127,8 +127,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.vaddr  := in.src(0)
     io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
-    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
-    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
+    io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
@@ -184,7 +183,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       state := s_flush_sbuffer_req
     }
     // update storeAccessFault bit
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {
