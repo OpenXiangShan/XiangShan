@@ -36,7 +36,7 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.{ResetGen, SRAMTemplate}
+import huancun.utils.{ResetGen, SRAMTemplate, DFTResetSignals}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -144,8 +144,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_halt = Output(Vec(NumCores, Bool()))
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
-    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+    val scan_mode = IO(Input(Bool()))
+    val dft_lgc_rst_n = IO(Input(AsyncReset()))
+    val dft_mode = IO(Input(Bool()))
+    val dfx_reset = Wire(new DFTResetSignals())
+    dfx_reset.lgc_rst_n := dft_lgc_rst_n
+    dfx_reset.mode := dft_mode
+    dfx_reset.scan_mode := scan_mode
+
+    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen(2, Some(dfx_reset)) }
+    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, Some(dfx_reset)) }
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -167,6 +175,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.moduleInstance.io.hartId := i.U
+      core.moduleInstance.io.dfx_reset:= dfx_reset
       io.riscv_halt(i) := core.moduleInstance.io.cpu_halt
     }
 
@@ -174,6 +183,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       // tie off core soft reset
       for(node <- core_rst_nodes){
         node.out.head._1 := false.B.asAsyncReset()
+      }
+      if(l3cacheOpt.get.module.dfx_reset.isDefined) {
+        l3cacheOpt.get.module.dfx_reset.get := dfx_reset
       }
     }
 
@@ -194,17 +206,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    val mbistBroadCastToTile = if(core_with_l2.head.moduleInstance.mbistBroadCast.isDefined) {
+    val mbistBroadCastToTile = if(core_with_l2.head.moduleInstance.dft.isDefined) {
       val res = Some(Wire(new huancun.utils.BroadCastBundle))
-      core_with_l2.foreach(_.moduleInstance.mbistBroadCast.get := res.get)
+      core_with_l2.foreach(_.moduleInstance.dft.get := res.get)
       res
     } else {
       None
     }
     val mbistBroadCastToL3 = if(l3cacheOpt.isDefined) {
-      if(l3cacheOpt.get.module.mbistBroadCast.isDefined){
+      if(l3cacheOpt.get.module.dft.isDefined){
         val res = Some(Wire(new huancun.utils.BroadCastBundle))
-        l3cacheOpt.get.module.mbistBroadCast.get := res.get
+        l3cacheOpt.get.module.dft.get := res.get
         res
       } else {
         None
@@ -212,17 +224,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     } else {
       None
     }
-    val mbistBroadCast = if(mbistBroadCastToTile.isDefined || mbistBroadCastToL3.isDefined){
+    val dft = if(mbistBroadCastToTile.isDefined || mbistBroadCastToL3.isDefined){
       Some(IO(new huancun.utils.BroadCastBundle))
     } else {
       None
     }
-    if(mbistBroadCast.isDefined){
+    if(dft.isDefined){
       if(mbistBroadCastToTile.isDefined){
-        mbistBroadCastToTile.get := mbistBroadCast.get
+        mbistBroadCastToTile.get := dft.get
       }
       if(mbistBroadCastToL3.isDefined){
-        mbistBroadCastToL3.get := mbistBroadCast.get
+        mbistBroadCastToL3.get := dft.get
       }
     }
 
@@ -231,7 +243,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val coreResetChain:Seq[Reset] = core_with_l2.map(_.moduleInstance.ireset)
       val resetChain = Seq(misc.module.reset) ++ l3cacheOpt.map(_.module.reset) ++ coreResetChain
-      ResetGen.applyOneLevel(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      val resetDftSigs = ResetGen.applyOneLevel(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      resetDftSigs:= dfx_reset
     }
   }
 }

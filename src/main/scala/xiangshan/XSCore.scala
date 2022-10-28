@@ -25,7 +25,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
 import huancun.mbist.MBISTPipeline
-import huancun.utils.{ModuleNode, ResetGen, ResetGenNode, SRAMTemplate}
+import huancun.utils.{ModuleNode, ResetGen, ResetGenNode, SRAMTemplate, DFTResetSignals}
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
@@ -250,6 +250,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
+    val dfx_reset = Input(new DFTResetSignals())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -435,12 +436,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     mbist.get <> mbistPipeline.get.io.mbist.get
   }
   val sigFromSrams = if(coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
-  val mbistBroadCast = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+  val dft = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
   if(coreParams.hasMbist) {
-    mbistBroadCast.get <> sigFromSrams.get
-    dontTouch(mbistBroadCast.get)
+    dft.get <> sigFromSrams.get
+    dontTouch(dft.get)
   }
-
   // Modules are reset one by one
   val resetTree = ResetGenNode(
     Seq(
@@ -466,6 +466,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     )
   )
 
-  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
+  ResetGen(resetTree, reset, Some(io.dfx_reset), !debugOpts.FPGAPlatform)
 
 }

@@ -11,7 +11,7 @@ import freechips.rocketchip.tilelink._
 import huancun.debug.TLLogger
 import huancun.mbist.MBISTInterface
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.ResetGen
+import huancun.utils.{ResetGen, DFTResetSignals}
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils.{IntBuffer, TLClientsMerger, TLEdgeBuffer}
@@ -156,6 +156,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   @public val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val cpu_halt = Output(Bool())
+    val dfx_reset = Input(new DFTResetSignals())
   })
   @public val ireset = reset
   dontTouch(io.hartId)
@@ -163,6 +164,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   val core_soft_rst = outer.core_reset_sink.in.head._1
 
   outer.core.module.io.hartId := io.hartId
+  outer.core.module.io.dfx_reset := io.dfx_reset
   io.cpu_halt := outer.core.module.io.cpu_halt
   if(outer.l2cache.isDefined){
     outer.core.module.io.perfEvents.zip(outer.l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
@@ -224,7 +226,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
 
   val mbistBroadCastToCore = if(outer.coreParams.hasMbist) {
     val res = Some(Wire(new huancun.utils.BroadCastBundle))
-    outer.core.module.mbistBroadCast.get := res.get
+    outer.core.module.dft.get := res.get
     res
   } else {
     None
@@ -232,7 +234,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   val mbistBroadCastToL2 = if(outer.coreParams.L2CacheParamsOpt.isDefined) {
     if(outer.coreParams.L2CacheParamsOpt.get.hasMbist){
       val res = Some(Wire(new huancun.utils.BroadCastBundle))
-      outer.core.module.mbistBroadCast.get := res.get
+      outer.core.module.dft.get := res.get
       res
     } else {
       None
@@ -240,17 +242,17 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   } else {
     None
   }
-  @public val mbistBroadCast = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
+  @public val dft = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
     Some(IO(new huancun.utils.BroadCastBundle))
   } else {
     None
   }
-  if(mbistBroadCast.isDefined){
+  if(dft.isDefined){
     if(mbistBroadCastToCore.isDefined){
-      mbistBroadCastToCore.get := mbistBroadCast.get
+      mbistBroadCastToCore.get := dft.get
     }
     if(mbistBroadCastToL2.isDefined){
-      mbistBroadCastToL2.get := mbistBroadCast.get
+      mbistBroadCastToL2.get := dft.get
     }
   }
   // Modules are reset one by one
@@ -265,5 +267,5 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
       outer.l1d_to_l2_bufferOpt.map(_.module) ++
       outer.l2cache.map(_.module)
   )
-  ResetGen(resetChain, reset, !outer.debugOpts.FPGAPlatform)
+  ResetGen(resetChain, reset, Some(io.dfx_reset), !outer.debugOpts.FPGAPlatform)
 }
