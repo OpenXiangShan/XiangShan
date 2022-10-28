@@ -210,7 +210,7 @@ trait SdtrigExt {
       trigger2TimingOkVec(i) := trigger2ChainVec(i) && trigger2TimingSameVec(i) || !chainVec(i - 1)
     }
     canFireVec.zipWithIndex.foreach {
-      case (canFire, i) => canFire := trigger2ChainOkVec(i) && trigger2TimingOkVec(i) && hitVec(i)
+      case (canFire, i) => canFire := trigger2ChainOkVec(i) && trigger2TimingOkVec(i) && hitVec(i) && !chainVec(i)
     }
   }
 
