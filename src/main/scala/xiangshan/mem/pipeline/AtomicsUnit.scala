@@ -128,8 +128,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.vaddr  := in.src(0)
     io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
-    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
-    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
+    io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
@@ -176,7 +175,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st
+    val exception_pa = pmp.st || pmp.ld
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -184,6 +183,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     }.otherwise {
       state := s_flush_sbuffer_req
     }
+    // update storeAccessFault bit
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {
