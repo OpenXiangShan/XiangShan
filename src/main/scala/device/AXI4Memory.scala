@@ -305,14 +305,14 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_resp_id = Reg(UInt(in.b.bits.id.getWidth.W))
   val has_write_resp = Wire(Bool())
   val (write_resp_valid, write_resp_id) = writeResponse(!has_write_resp || in.b.fire)
-  has_write_resp := (write_resp_valid && !read_resp_last) || pending_write_resp_valid
+  has_write_resp := write_resp_valid || pending_write_resp_valid
   in.b.valid := write_resp_valid || pending_write_resp_valid
   in.b.bits.id := Mux(pending_write_resp_valid, pending_write_resp_id, write_resp_id)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 
   when (!pending_write_resp_valid && write_resp_valid && !in.b.ready) {
     pending_write_resp_valid := true.B
-    pending_write_resp_id := pending_write_resp_id
+    pending_write_resp_id := write_resp_id
   }.elsewhen (pending_write_resp_valid && !write_resp_valid && in.b.ready) {
     pending_write_resp_valid := false.B
   }
