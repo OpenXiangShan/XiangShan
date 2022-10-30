@@ -302,7 +302,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback = MixedVec(numWbPorts.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
-    val commits = new RobCommitIO
+    val commits = Output(new RobCommitIO)
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
@@ -859,6 +859,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.old_pdest := req.old_pdest
     wdata.ftqIdx := req.cf.ftqPtr
     wdata.ftqOffset := req.cf.ftqOffset
+    wdata.isMove := req.eliminatedMove
     wdata.pc := req.cf.pc
   }
   dispatchData.io.raddr := commitReadAddr_next

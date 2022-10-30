@@ -29,7 +29,7 @@ import xiangshan.mem.mdp._
 class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val robCommits = Flipped(new RobCommitIO)
+    val robCommits = Input(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
@@ -44,12 +44,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // debug arch ports
+    val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
   val intRefCounter = Module(new RefCounter(NRPhyRegs))
   val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
+
+  intRefCounter.io.commit        <> io.robCommits
+  intRefCounter.io.redirect      := io.redirect.valid
+  intRefCounter.io.debug_int_rat <> io.debug_int_rat
+  intFreeList.io.commit    <> io.robCommits
+  intFreeList.io.debug_rat <> io.debug_int_rat
+  fpFreeList.io.commit     <> io.robCommits
+  fpFreeList.io.debug_rat  <> io.debug_fp_rat
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {

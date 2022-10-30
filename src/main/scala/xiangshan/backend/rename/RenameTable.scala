@@ -88,7 +88,7 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
 
 class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val robCommits = Flipped(new RobCommitIO)
+    val robCommits = Input(new RobCommitIO)
     val intReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     val fpReadPorts = Vec(RenameWidth, Vec(4, new RatReadPort))

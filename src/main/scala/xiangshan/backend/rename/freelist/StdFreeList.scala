@@ -35,6 +35,11 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
   val tailPtrOHReg = RegInit(0.U(size.W))
+  val archHeadPtr = RegInit(FreeListPtr(false, 0))
+  val archHeadPtrOH = RegInit(1.U(size.W))
+  val archHeadPtrOHShift = CircularShift(archHeadPtrOH)
+  // may shift [0, CommitWidth] steps
+  val archHeadPtrOHVec = VecInit.tabulate(CommitWidth + 1)(archHeadPtrOHShift.left)
 
   //
   // free committed instructions' `old_pdest` reg
@@ -90,6 +95,15 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
+  val doCommit = !io.walk // TODO: may delete `!io.walk` when using new method?
+  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && info.fpWen }
+  val numArchAllocate = PopCount(archAlloc)
+  val archHeadPtrNext = archHeadPtr + numArchAllocate
+  archHeadPtr := Mux(doCommit, archHeadPtrNext, archHeadPtr)
+  archHeadPtrOH := Mux(doCommit, archHeadPtrOHVec(numArchAllocate), archHeadPtrOH)
+
+  XSError(!isFull(tailPtr, archHeadPtr), "fpArchFreeList should always be full\n")
+  XSError(archHeadPtr.toOH =/= archHeadPtrOH, p"wrong one-hot reg between archHeadPtr: $archHeadPtr and archHeadPtrOH: $archHeadPtrOH")
 
   val enableFreeListCheck = false
   if (enableFreeListCheck) {

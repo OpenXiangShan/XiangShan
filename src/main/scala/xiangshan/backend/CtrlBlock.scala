@@ -441,6 +441,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
+  rename.io.debug_int_rat <> rat.io.debug_int_rat
+  rename.io.debug_fp_rat <> rat.io.debug_fp_rat
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {

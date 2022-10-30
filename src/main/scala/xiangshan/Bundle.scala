@@ -365,20 +365,21 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isMove = Bool()
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Output(Bool())
-  val commitValid = Vec(CommitWidth, Output(Bool()))
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
 
-  val isWalk = Output(Bool())
+  val isWalk = Bool()
   // valid bits optimized for walk
-  val walkValid = Vec(CommitWidth, Output(Bool()))
+  val walkValid = Vec(CommitWidth, Bool())
 
-  val info = Vec(CommitWidth, Output(new RobCommitInfo))
+  val info = Vec(CommitWidth, new RobCommitInfo)
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
