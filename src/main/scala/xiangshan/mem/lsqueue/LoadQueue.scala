@@ -75,8 +75,8 @@ class LqPaddrWriteBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {
-  val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
-  val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
+  val hitLoadAddrTriggerHitVec = Input(Vec(TriggerNum, Bool()))
+  val lqLoadAddrTriggerHitVec = Output(Vec(TriggerNum, Bool()))
 }
 
 // Load Queue
@@ -117,9 +117,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth, "LqVaddr"))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = LoadPipelineWidth + 1, numWrite = LoadPipelineWidth, "LqVaddr"))
   vaddrModule.io := DontCare
-  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth, "LqTrigger"))
+  val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(TriggerNum, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth, "LqTrigger"))
   vaddrTriggerResultModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
@@ -880,7 +880,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.trigger(i).lqLoadAddrTriggerHitVec := Mux(
       loadWbSelV(i),
       vaddrTriggerResultModule.io.rdata(i),
-      VecInit(Seq.fill(3)(false.B))
+      VecInit(Seq.fill(TriggerNum)(false.B))
     )
   })
 

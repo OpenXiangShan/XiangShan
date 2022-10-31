@@ -64,7 +64,6 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val uncacheInter   =  new UncacheInterface
   val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
-  val csrTriggerEnable = Input(Vec(4, Bool()))
   val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
   val iTLBInter       = new BlockTlbRequestIO
   val pmp             =   new ICachePMPBundle
@@ -82,7 +81,6 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data                =  if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
   val frontendTrigger     = new FrontendTdataDistributeIO
-  val csrTriggerEnable    = Vec(4, Bool())
   val pc                  = Vec(PredictWidth, UInt(VAddrBits.W))
 }
 
@@ -313,7 +311,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val preDecoderIn  = preDecoders(i).io.in
     preDecoderIn.data := f2_cut_data(i)
     preDecoderIn.frontendTrigger := io.frontendTrigger  
-    preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
     preDecoderIn.pc  := f2_pc
   }
 
@@ -584,7 +581,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.data   := f3_cut_data
 
   frontendTrigger.io.frontendTrigger  := io.frontendTrigger
-  frontendTrigger.io.csrTriggerEnable := io.csrTriggerEnable
 
   val f3_triggered = frontendTrigger.io.triggered
 
