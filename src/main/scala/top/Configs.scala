@@ -175,7 +175,7 @@ class MinimalConfig(n: Int = 1) extends Config(
               aliasBitsOpt = None
             )
           },
-          simulation = true
+          simulation = !site(DebugOptionsKey).FPGAPlatform
         )),
         L3NBanks = 1
       )
