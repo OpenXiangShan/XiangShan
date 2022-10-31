@@ -314,6 +314,8 @@ class XiangShan(object):
             "cache-alias/aliastest-riscv64-xs.bin",
             "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
+            "pmp/pmp-am/amtest-riscv64-xs.bin",
+            "pmp/hugepage-pmp-atom/amtest-riscv64-xs.bin",
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
