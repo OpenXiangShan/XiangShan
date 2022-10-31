@@ -141,7 +141,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         "b10".U   -> (in.src(0)(1,0) === 0.U), //w
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
-      exceptionVec(storeAddrMisaligned) := !addrAligned
+      exceptionVec(loadAddrMisaligned)  := !addrAligned && isLr
+      exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
