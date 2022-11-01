@@ -737,7 +737,8 @@ package object xiangshan {
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
     replayInst = true,
-    hasLoadError = true
+    hasLoadError = true,
+    trigger = true,
   )
 
   val staCfg = FuConfig(
@@ -746,13 +747,15 @@ package object xiangshan {
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    trigger = true,
   )
 
   val stdCfg = FuConfig(
     "std",
     fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
-    writeIntRf = false, writeFpRf = false, latency = CertainLatency(1)
+    writeIntRf = false, writeFpRf = false, latency = CertainLatency(1),
+    trigger = false, // we don't have store data trigger yet
   )
 
   val mouCfg = FuConfig(
@@ -760,7 +763,8 @@ package object xiangshan {
     null,
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false,
-    latency = UncertainLatency(), exceptionOut = lduCfg.exceptionOut ++ staCfg.exceptionOut
+    latency = UncertainLatency(), exceptionOut = lduCfg.exceptionOut ++ staCfg.exceptionOut,
+    trigger = true,
   )
 
   val mouDataCfg = FuConfig(
