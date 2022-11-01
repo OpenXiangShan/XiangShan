@@ -36,6 +36,7 @@ class RatWritePort(implicit p: Parameters) extends XSBundle {
 
 class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
+    val redirect = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
@@ -48,15 +49,17 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   val spec_table_next = WireInit(spec_table)
   // arch state rename table
   val arch_table = RegInit(rename_table_init)
+  val arch_table_next = WireDefault(arch_table)
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
   // (2) Reading is synchronous now.
   // (3) RAddr at T0 will be used to access the table and get data at T0.
   // (4) WData at T0 is bypassed to RData at T1.
+  val t1_redirect = RegNext(io.redirect, false.B)
   val t1_rdata = io.readPorts.map(p => RegNext(Mux(p.hold, p.data, spec_table_next(p.addr))))
   val t1_raddr = io.readPorts.map(p => RegEnable(p.addr, !p.hold))
-  val t1_wSpec = RegNext(io.specWritePorts)
+  val t1_wSpec = RegNext(Mux(io.redirect, 0.U.asTypeOf(io.specWritePorts), io.specWritePorts))
 
   // WRITE: when instruction commits or walking
   val t1_wSpec_addr = t1_wSpec.map(w => Mux(w.wen, UIntToOH(w.addr), 0.U))
@@ -64,7 +67,7 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
     val matchVec = t1_wSpec_addr.map(w => w(i))
     val wMatch = ParallelPriorityMux(matchVec.reverse, t1_wSpec.map(_.data).reverse)
     // When there's a flush, we use arch_table to update spec_table.
-    next := Mux(VecInit(matchVec).asUInt.orR, wMatch, spec_table(i))
+    next := Mux(t1_redirect, arch_table(i), Mux(VecInit(matchVec).asUInt.orR, wMatch, spec_table(i)))
   }
   spec_table := spec_table_next
 
@@ -72,23 +75,25 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   for ((r, i) <- io.readPorts.zipWithIndex) {
     // We use two comparisons here because r.hold has bad timing but addrs have better timing.
     val t0_bypass = io.specWritePorts.map(w => w.wen && Mux(r.hold, w.addr === t1_raddr(i), w.addr === r.addr))
-    val t1_bypass = RegNext(VecInit(t0_bypass))
+    val t1_bypass = RegNext(Mux(io.redirect, 0.U.asTypeOf(VecInit(t0_bypass)), VecInit(t0_bypass)))
     val bypass_data = ParallelPriorityMux(t1_bypass.reverse, t1_wSpec.map(_.data).reverse)
     r.data := Mux(t1_bypass.asUInt.orR, bypass_data, t1_rdata(i))
   }
 
   for (w <- io.archWritePorts) {
     when (w.wen) {
-      arch_table(w.addr) := w.data
+      arch_table_next(w.addr) := w.data
     }
   }
+  arch_table := arch_table_next
 
   io.debug_rdata := arch_table
 }
 
 class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val robCommits = Flipped(new RobCommitIO)
+    val redirect = Input(Bool())
+    val robCommits = Input(new RobCommitIO)
     val intReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     val fpReadPorts = Vec(RenameWidth, Vec(4, new RatReadPort))
@@ -103,6 +108,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   intRat.io.debug_rdata <> io.debug_int_rat
   intRat.io.readPorts <> io.intReadPorts.flatten
+  intRat.io.redirect := io.redirect
+  fpRat.io.redirect := io.redirect
   val intDestValid = io.robCommits.info.map(_.rfWen)
   for ((arch, i) <- intRat.io.archWritePorts.zipWithIndex) {
     arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && intDestValid(i)
@@ -113,7 +120,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
     spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && intDestValid(i)
     spec.addr := io.robCommits.info(i).ldest
-    spec.data := io.robCommits.info(i).old_pdest
+    spec.data := io.robCommits.info(i).pdest
     XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
@@ -135,7 +142,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   for ((spec, i) <- fpRat.io.specWritePorts.zipWithIndex) {
     spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && io.robCommits.info(i).fpWen
     spec.addr := io.robCommits.info(i).ldest
-    spec.data := io.robCommits.info(i).old_pdest
+    spec.data := io.robCommits.info(i).pdest
   }
   for ((spec, rename) <- fpRat.io.specWritePorts.zip(io.fpRenamePorts)) {
     when (rename.wen) {
