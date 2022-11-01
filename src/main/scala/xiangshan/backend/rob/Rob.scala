@@ -786,7 +786,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (wb.valid) {
       val wbIdx = wb.bits.uop.robIdx.value
       val wbHasException = ExceptionNO.selectByExu(wb.bits.uop.cf.exceptionVec, cfgs).asUInt.orR
-      val wbHasTriggerCanFire = wb.bits.uop.cf.trigger.getBackendCanFire
+      val wbHasTriggerCanFire = if (cfgs.exists(_.trigger)) wb.bits.uop.cf.trigger.getBackendCanFire else false.B
       val wbHasFlushPipe = cfgs.exists(_.flushPipe).B && wb.bits.uop.ctrl.flushPipe
       val wbHasReplayInst = cfgs.exists(_.replayInst).B && wb.bits.uop.ctrl.replayInst
       val block_wb = wbHasException || wbHasFlushPipe || wbHasReplayInst || wbHasTriggerCanFire
@@ -875,8 +875,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exc_wb.bits.crossPageIPFFix := false.B
     // TODO: make trigger configurable
     exc_wb.bits.trigger.clear() // Don't care frontend timing, chain, hit and canFire
-    exc_wb.bits.trigger.backendHit := wb.bits.uop.cf.trigger.backendHit
-    exc_wb.bits.trigger.backendCanFire := wb.bits.uop.cf.trigger.backendCanFire
+    exc_wb.bits.trigger.backendHit := Mux(configs.exists(_.trigger).B, wb.bits.uop.cf.trigger.backendHit,
+      0.U.asTypeOf(chiselTypeOf(exc_wb.bits.trigger.backendHit)))
+    exc_wb.bits.trigger.backendCanFire := Mux(configs.exists(_.trigger).B, wb.bits.uop.cf.trigger.backendCanFire,
+      0.U.asTypeOf(chiselTypeOf(exc_wb.bits.trigger.backendCanFire)))
     println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
       s"flushPipe ${configs.exists(_.flushPipe)}, " +
       s"replayInst ${configs.exists(_.replayInst)}")
