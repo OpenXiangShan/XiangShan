@@ -345,7 +345,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val triggerHitVec     = Reg(Vec(TriggerNum, Bool()))
   triggerHitVec         := VecInit(backendTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
 
-  val triggerCanFireVec = Reg(Vec(TriggerNum, Bool()))
+  val triggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   when(state === s_cache_req){
     // store trigger
     val store_hit = Wire(Vec(TriggerNum, Bool()))
