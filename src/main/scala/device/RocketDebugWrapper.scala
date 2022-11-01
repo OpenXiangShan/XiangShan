@@ -120,6 +120,9 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
   val exit = IO(Output(UInt(32.W)))
 
   def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Reset, done: Bool, tbsuccess: Bool) = {
+    if (!dutio.TRSTn.isEmpty) {
+      dutio.TRSTn.get := jtag.TRSTn.getOrElse(false.B) || !tbreset.asBool
+    }
     dutio.TCK := jtag.TCK
     dutio.TMS := jtag.TMS
     dutio.TDI := jtag.TDI
