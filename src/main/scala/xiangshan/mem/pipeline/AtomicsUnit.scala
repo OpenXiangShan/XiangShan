@@ -368,6 +368,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       )
     }
     backendTriggerHitVec := store_hit.zip(load_hit).map{ case(sh, lh) => sh || lh }
+    // triggerCanFireVec will update at T+1
     TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
   }
 
@@ -375,7 +376,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   // trigger result is used at s_finish
   // thus we can delay it safely
 
-  io.out.bits.uop.cf.trigger.backendHit     := RegNext(triggerHitVec)
+  io.out.bits.uop.cf.trigger.backendHit     := triggerHitVec
   io.out.bits.uop.cf.trigger.backendCanFire := triggerCanFireVec
 
   if (env.EnableDifftest) {
