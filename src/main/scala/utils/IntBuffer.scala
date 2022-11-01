@@ -4,6 +4,7 @@ import chisel3._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.IntAdapterNode
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 class IntBuffer(implicit p: Parameters) extends LazyModule {
 
@@ -11,7 +12,7 @@ class IntBuffer(implicit p: Parameters) extends LazyModule {
 
   lazy val module = new LazyModuleImp(this){
     for(((in, edgeIn), (out, edgeOut)) <- node.in.zip(node.out)){
-      out := RegNext(in, 0.U.asTypeOf(in))
+      out := AsyncResetSynchronizerShiftReg(in, 3)
     }
   }
 

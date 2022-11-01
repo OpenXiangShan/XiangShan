@@ -26,8 +26,9 @@ import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.util.SdtrigExt
 
-class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with SdtrigExt{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))
@@ -127,8 +128,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.vaddr  := in.src(0)
     io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
-    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
-    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
+    io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
@@ -175,7 +175,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st
+    val exception_pa = pmp.st || pmp.ld
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -183,6 +183,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     }.otherwise {
       state := s_flush_sbuffer_req
     }
+    // update storeAccessFault bit
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {
@@ -320,78 +323,60 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   // atomic trigger
   val csrCtrl = io.csrCtrl
-  val tdata = Reg(Vec(6, new MatchTriggerIO))
-  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
-  val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
-  when(csrCtrl.mem_trigger.t.valid) {
-    tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
+  val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
+  val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  tEnableVec := csrCtrl.mem_trigger.tEnableVec
+  when(csrCtrl.mem_trigger.tUpdate.valid) {
+    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
-  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
-  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
+//  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
+//  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
 
-  val backendTriggerHitReg = Reg(Vec(6, Bool()))
-  backendTriggerHitReg := VecInit(Seq.fill(6)(false.B))
+  val frontendTriggerTimingVec  = in.uop.cf.trigger.frontendTiming
+  val frontendTriggerChainVec   = in.uop.cf.trigger.frontendChain
+  val frontendTriggerHitVec     = in.uop.cf.trigger.frontendHit
 
+  val backendTriggerTimingVec   = tdata.map(_.timing)
+  val backendTriggerChainVec    = tdata.map(_.chain)
+  val backendTriggerHitVec      = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+  val triggerTimingVec  = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
+  val triggerChainVec   = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
+  val triggerHitVec     = Reg(Vec(TriggerNum, Bool()))
+  triggerHitVec         := VecInit(backendTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
+
+  val triggerCanFireVec = Reg(Vec(TriggerNum, Bool()))
   when(state === s_cache_req){
     // store trigger
-    val store_hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-        store_hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
-          vaddr,
-          tdata(sTriggerMapping(j)).tdata2,
-          tdata(sTriggerMapping(j)).matchType,
-          tEnable(sTriggerMapping(j))
-        )
-       backendTriggerHitReg(sTriggerMapping(j)) := store_hit(j)
-     }
-
-    when(tdata(0).chain) {
-      backendTriggerHitReg(0) := store_hit(0) && store_hit(1)
-      backendTriggerHitReg(1) := store_hit(0) && store_hit(1)
-    }
-
-    when(!in.uop.cf.trigger.backendEn(0)) {
-      backendTriggerHitReg(4) := false.B
-    }
-
-    // load trigger
-    val load_hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-
-      val addrHit = TriggerCmp(
+    val store_hit = Wire(Vec(TriggerNum, Bool()))
+    for (j <- 0 until TriggerNum) {
+      store_hit(j) := !tdata(j).select && TriggerCmp(
         vaddr,
-        tdata(lTriggerMapping(j)).tdata2,
-        tdata(lTriggerMapping(j)).matchType,
-        tEnable(lTriggerMapping(j))
+        tdata(j).tdata2,
+        tdata(j).matchType,
+        tEnableVec(j) && tdata(j).store
       )
-      load_hit(j) := addrHit && !tdata(lTriggerMapping(j)).select
-      backendTriggerHitReg(lTriggerMapping(j)) := load_hit(j)
     }
-    when(tdata(2).chain) {
-      backendTriggerHitReg(2) := load_hit(0) && load_hit(1)
-      backendTriggerHitReg(3) := load_hit(0) && load_hit(1)
+    // load trigger
+    val load_hit = Wire(Vec(TriggerNum, Bool()))
+    for (j <- 0 until TriggerNum) {
+      load_hit(j) := !tdata(j).select && TriggerCmp(
+        vaddr,
+        tdata(j).tdata2,
+        tdata(j).matchType,
+        tEnableVec(j) && tdata(j).load
+      )
     }
-    when(!in.uop.cf.trigger.backendEn(1)) {
-      backendTriggerHitReg(5) := false.B
-    }
+    backendTriggerHitVec := store_hit.zip(load_hit).map{ case(sh, lh) => sh || lh }
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
   }
 
   // addr trigger do cmp at s_cache_req
   // trigger result is used at s_finish
   // thus we can delay it safely
-  io.out.bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
-  when(isLr){
-    // enable load trigger
-    io.out.bits.uop.cf.trigger.backendHit(2) := backendTriggerHitReg(2)
-    io.out.bits.uop.cf.trigger.backendHit(3) := backendTriggerHitReg(3)
-    io.out.bits.uop.cf.trigger.backendHit(5) := backendTriggerHitReg(5)
-  }.otherwise{
-    // enable store trigger
-    io.out.bits.uop.cf.trigger.backendHit(0) := backendTriggerHitReg(0)
-    io.out.bits.uop.cf.trigger.backendHit(1) := backendTriggerHitReg(1)
-    io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4)
-  }
+
+  io.out.bits.uop.cf.trigger.backendHit     := RegNext(triggerHitVec)
+  io.out.bits.uop.cf.trigger.backendCanFire := triggerCanFireVec
 
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestAtomicEvent)

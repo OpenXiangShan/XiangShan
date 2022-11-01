@@ -230,6 +230,41 @@ object OnesMoreThan {
   }
 }
 
+/** Scan an input signal with fixed length.
+  * Set 1 at the end of the length-fixed scan chain if the scanned bits meet the condition.
+  *
+  * @example {{{
+  * val data = Seq(false.B, true.B, true.B, false.B, true.B)
+  * def condition(input: Seq[Bool]) : Bool = input(0) && input(1)
+  * val onesLen2EndVec = FixLengthScanSetEnd(data, 2, condition)
+  * assert(VecInit(onesLen2EndVec).asUInt === VecInit(Seq(false.B, false.B, true.B, false.B, false.B)).asUInt)
+  * }}}
+  */
+object FixedLengthScanSetEnd {
+  def apply(input: Seq[Bool], scanLen: Int, condition: Seq[Bool] => Bool) : Seq[Bool] = {
+    require(scanLen > 0)
+    val res: Vec[Bool] = VecInit(Seq.fill(input.size)(false.B))
+    for (i <- (scanLen - 1) until input.size) {
+      res(i) := condition((1 - scanLen until 1).map(_ + i).map(input(_)))
+    }
+    res
+  }
+}
+
+object ConsecutiveOnesSetEnd {
+  def apply(input: Seq[Bool], thres: Int): Seq[Bool] = {
+    def condition(input: Seq[Bool]): Bool = input.reduce(_ && _)
+    FixedLengthScanSetEnd(input, thres, condition)
+  }
+}
+
+object ConsecutiveOnes {
+  def apply(input: Seq[Bool], thres: Int): Bool = {
+    require(thres > 0)
+    ConsecutiveOnesSetEnd(input, thres).reduce(_ || _)
+  }
+}
+
 abstract class SelectOne {
   def getNthOH(n: Int): (Bool, Vec[Bool])
 }

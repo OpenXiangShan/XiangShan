@@ -23,6 +23,7 @@ import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
@@ -491,7 +492,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents {
+class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents with SdtrigExt {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
@@ -504,7 +505,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1, send to RS in load_s2
-    val trigger = Vec(3, new LoadUnitTriggerIO)
+    val trigger = Vec(TriggerNum, new LoadUnitTriggerIO)
 
     val tlb = new TlbRequestIO(2)
     val pmp = Flipped(new PMPRespBundle()) // arrive same to tlb now
@@ -801,15 +802,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   }
 
   val lastValidData = RegEnable(io.ldout.bits.data, io.ldout.fire)
-  val hitLoadAddrTriggerHitVec = Wire(Vec(3, Bool()))
+  val hitLoadAddrTriggerHitVec = Wire(Vec(TriggerNum, Bool()))
   val lqLoadAddrTriggerHitVec = io.lsq.trigger.lqLoadAddrTriggerHitVec
-  (0 until 3).map{i => {
+  (0 until TriggerNum).map{i => {
     val tdata2 = io.trigger(i).tdata2
     val matchType = io.trigger(i).matchType
     val tEnable = io.trigger(i).tEnable
 
     hitLoadAddrTriggerHitVec(i) := TriggerCmp(load_s2.io.out.bits.vaddr, tdata2, matchType, tEnable)
-    io.trigger(i).addrHit := Mux(hitLoadOut.valid, hitLoadAddrTriggerHitVec(i), lqLoadAddrTriggerHitVec(i))
+    io.trigger(i).addrHit := RegNext(Mux(hitLoadOut.valid, hitLoadAddrTriggerHitVec(i), lqLoadAddrTriggerHitVec(i)))
     io.trigger(i).lastDataHit := TriggerCmp(lastValidData, tdata2, matchType, tEnable)
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hitLoadAddrTriggerHitVec
