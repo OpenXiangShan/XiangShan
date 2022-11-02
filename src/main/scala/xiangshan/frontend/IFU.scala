@@ -405,7 +405,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  val fromFtqRedirectReg = RegNext(fromFtq.redirect)
+  val fromFtqRedirectReg    = RegNext(fromFtq.redirect,init = 0.U.asTypeOf(fromFtq.redirect))
+  val mmioF3Flush           = RegNext(f3_flush,init = false.B)
   val f3_ftq_flush_self     = fromFtqRedirectReg.valid && RedirectLevel.flushItself(fromFtqRedirectReg.bits.level)
   val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
@@ -415,10 +416,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is_first_instr := false.B
   }
 
-  when(f3_flush && !f3_need_not_flush)               {f3_valid := false.B}
-  .elsewhen(f2_fire && !f2_flush )                   {f3_valid := true.B }
-  .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)          {f3_valid := false.B}
-  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}            {f3_valid := false.B}
+  when(f3_flush && !f3_req_is_mmio)                                                 {f3_valid := false.B}
+  .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush)                    {f3_valid := false.B}
+  .elsewhen(f2_fire && !f2_flush )                                                  {f3_valid := true.B }
+  .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)                                 {f3_valid := false.B}
+  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                                   {f3_valid := false.B}
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
 
