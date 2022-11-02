@@ -102,6 +102,7 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   beu_int_source :*= IntBuffer() :*= misc.beu.intNode
 
 
+
   val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
     val buffer = LazyModule(new TLBuffer)
     misc.l1d_logger := buffer.node := core.memBlock.dcache.clientNode
@@ -109,13 +110,10 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   }
 
   def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
-    val buffers = Seq.fill(depth) {
-      LazyModule(new TLBuffer())
-    }
-    buffers.zipWithIndex.foreach { case (b, i) => {
+    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
+    buffers.zipWithIndex.foreach{ case (b, i) => {
       b.suggestName(s"${n}_${i}")
-    }
-    }
+    }}
     val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
     (buffers, node)
   }
