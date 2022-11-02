@@ -166,7 +166,7 @@ jobs:
   release-emu:
     runs-on: bosc
     continue-on-error: false
-    timeout-minutes: 600
+    timeout-minutes: 720
     name: Test Release Default-EMU
     steps:
       - uses: actions/checkout@v2
