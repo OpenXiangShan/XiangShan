@@ -1060,6 +1060,10 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l1_req.bits.confidence := 1.U
   io.l1_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
 
+  for((train, i) <- io.ld_in.zipWithIndex){
+    XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
+    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && train.bits.meta_prefetch)
+  }
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )

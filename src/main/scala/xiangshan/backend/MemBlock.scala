@@ -328,7 +328,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     prefetcherOpt.foreach(pf => {
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
         loadUnits(i).io.prefetch_train.valid,
-        loadUnits(i).io.prefetch_train.valid && loadUnits(i).io.prefetch_train.bits.miss
+        loadUnits(i).io.prefetch_train.valid && (
+          loadUnits(i).io.prefetch_train.bits.miss || loadUnits(i).io.prefetch_train.bits.meta_prefetch
+          )
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
       pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2IsPointerChasing, io.loadPc(i), RegNext(io.loadPc(i)))
