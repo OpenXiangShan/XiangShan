@@ -77,12 +77,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p))
   jtag.connect(soc.io.systemjtag.jtag, clock, reset.asBool, !reset.asBool, success)
-  if (jtag.jtag.TRSTn.isDefined) {
-    soc.io.systemjtag.reset := (reset.asBool || !jtag.jtag.TRSTn.get).asAsyncReset
-  }
-  else {
-    soc.io.systemjtag.reset := reset.asAsyncReset
-  }
+  soc.io.systemjtag.reset := reset.asAsyncReset
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
