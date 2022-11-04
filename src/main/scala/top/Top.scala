@@ -145,7 +145,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
-    val jtag_reset_sync = withClockAndReset(io.clock.asClock, io.systemjtag.reset) { ResetGen() }
+    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
