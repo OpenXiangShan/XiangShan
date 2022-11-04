@@ -102,7 +102,6 @@ object XSDebugModuleParams {
       hasBusMaster = true,
       baseAddress = BigInt(0x1f10020000L),
       nScratch = 2,
-      crossingHasSafeReset = false
     )
   }
 }
