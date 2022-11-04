@@ -101,8 +101,7 @@ object XSDebugModuleParams {
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
       baseAddress = BigInt(0x38020000),
-      nScratch = 2,
-      crossingHasSafeReset = false
+      nScratch = 2
     )
   }
 }
