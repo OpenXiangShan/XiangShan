@@ -64,7 +64,6 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val uncacheInter   =  new UncacheInterface
   val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
-  val csrTriggerEnable = Input(Vec(4, Bool()))
   val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
   val iTLBInter       = new BlockTlbRequestIO
   val pmp             =   new ICachePMPBundle
@@ -82,7 +81,6 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data                =  if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
   val frontendTrigger     = new FrontendTdataDistributeIO
-  val csrTriggerEnable    = Vec(4, Bool())
   val pc                  = Vec(PredictWidth, UInt(VAddrBits.W))
 }
 
@@ -313,7 +311,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val preDecoderIn  = preDecoders(i).io.in
     preDecoderIn.data := f2_cut_data(i)
     preDecoderIn.frontendTrigger := io.frontendTrigger  
-    preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
     preDecoderIn.pc  := f2_pc
   }
 
@@ -404,7 +401,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  val fromFtqRedirectReg = RegNext(fromFtq.redirect)
+  val fromFtqRedirectReg    = RegNext(fromFtq.redirect,init = 0.U.asTypeOf(fromFtq.redirect))
+  val mmioF3Flush           = RegNext(f3_flush,init = false.B)
   val f3_ftq_flush_self     = fromFtqRedirectReg.valid && RedirectLevel.flushItself(fromFtqRedirectReg.bits.level)
   val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
@@ -414,10 +412,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is_first_instr := false.B
   }
 
-  when(f3_flush && !f3_need_not_flush)               {f3_valid := false.B}
-  .elsewhen(f2_fire && !f2_flush )                   {f3_valid := true.B }
-  .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)          {f3_valid := false.B}
-  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}            {f3_valid := false.B}
+  when(f3_flush && !f3_req_is_mmio)                                                 {f3_valid := false.B}
+  .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush)                    {f3_valid := false.B}
+  .elsewhen(f2_fire && !f2_flush )                                                  {f3_valid := true.B }
+  .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)                                 {f3_valid := false.B}
+  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                                   {f3_valid := false.B}
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
 
@@ -584,7 +583,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.data   := f3_cut_data
 
   frontendTrigger.io.frontendTrigger  := io.frontendTrigger
-  frontendTrigger.io.csrTriggerEnable := io.csrTriggerEnable
 
   val f3_triggered = frontendTrigger.io.triggered
 

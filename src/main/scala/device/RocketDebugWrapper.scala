@@ -62,7 +62,7 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
-    debug.module.io.debug_reset := io.debugIO.reset
+    debug.module.io.debug_reset := io.debugIO.systemjtag.get.reset
     debug.module.io.debug_clock := io.debugIO.clock
     io.debugIO.ndreset := debug.module.io.ctrl.ndreset
     io.debugIO.dmactive := debug.module.io.ctrl.dmactive
@@ -120,6 +120,9 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
   val exit = IO(Output(UInt(32.W)))
 
   def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Reset, done: Bool, tbsuccess: Bool) = {
+    if (!dutio.TRSTn.isEmpty) {
+      dutio.TRSTn.get := jtag.TRSTn.getOrElse(false.B) || !tbreset.asBool
+    }
     dutio.TCK := jtag.TCK
     dutio.TMS := jtag.TMS
     dutio.TDI := jtag.TDI
