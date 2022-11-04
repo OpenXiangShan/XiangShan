@@ -200,7 +200,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
   when(isPrefetch) {
-    io.dcacheReq.bits.instrtype := DCACHE_PREFETCH.U
+    io.dcacheReq.bits.instrtype := DCACHE_PREFETCH_SOURCE.U
   }.otherwise {
     io.dcacheReq.bits.instrtype := LOAD_SOURCE.U
   }
@@ -267,9 +267,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   XSPerfAccumulate("addr_spec_success_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
   XSPerfAccumulate("addr_spec_failed_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
   XSPerfAccumulate("forward_tlDchannel", io.out.bits.forward_tlDchannel)
-  XSPerfAccumulate("hardware_prefetch", io.out.fire && isPrefetch && hw_prefetch_override)
-  XSPerfAccumulate("software_prefetch", io.out.fire && isPrefetch && !hw_prefetch_override)
+  XSPerfAccumulate("hardware_prefetch_fire", io.out.fire && isPrefetch && hw_prefetch_override)
+  XSPerfAccumulate("software_prefetch_fire", io.out.fire && isPrefetch && !hw_prefetch_override)
   XSPerfAccumulate("hardware_prefetch_blocked", io.prefetch_in.valid && !hw_prefetch_override)
+  XSPerfAccumulate("hardware_prefetch_total", io.prefetch_in.valid)
 }
 
 
@@ -697,7 +698,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   XSPerfAccumulate("replay_cache_lq", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_no_replay)
   XSPerfAccumulate("replay_cache_miss_lq", io.replaySlow.valid && !io.replaySlow.cache_hited)
   XSPerfAccumulate("prefetch", io.in.fire && s2_is_prefetch)
-  XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full
+  XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full / miss req port conflict
   XSPerfAccumulate("prefetch_miss", io.in.fire && s2_is_prefetch && s2_cache_miss) // prefetch req miss in l1 
   XSPerfAccumulate("prefetch_hit", io.in.fire && s2_is_prefetch && !s2_cache_miss) // prefetch req hit in l1 
   // prefetch a missed line in l1, and l1 accepted it
