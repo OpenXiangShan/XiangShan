@@ -100,10 +100,12 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   def nSourceType = 10
   def sourceTypeWidth = log2Up(nSourceType)
+  // non-prefetch source < 3
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
-  def DCACHE_PREFETCH = 3
+  // prefetch source >= 3
+  def DCACHE_PREFETCH_SOURCE = 3
   def SOFT_PREFETCH = 4
   def HW_PREFETCH_AGT = 5
   def HW_PREFETCH_PHT_CUR = 6
