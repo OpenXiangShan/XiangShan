@@ -400,7 +400,7 @@ class LFST(implicit p: Parameters) extends XSModule {
       val wptr = allocPtr(waddr)
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
-      robIdxVec(waddr)(wptr) := io.dispatch.req(j).bits.robIdx
+      robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
     }
   })
 
