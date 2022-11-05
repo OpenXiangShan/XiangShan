@@ -377,7 +377,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     if(i > 0){
       (0 until i).map(j =>
         when(hitInDispatchBundleVec(j)){
-          io.dispatch.resp(i).bits.robIdx := io.dispatch.req(i).bits.robIdx
+          io.dispatch.resp(i).bits.robIdx := io.dispatch.req(j).bits.robIdx
         }
       )
     }
