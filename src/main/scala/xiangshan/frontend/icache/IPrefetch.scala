@@ -121,14 +121,23 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
 
   /** write logic */
+  val replacer = ReplacementPolicy.fromString(Some("random"), nIPFBufferSize)
+  val curr_write_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
+  val victim_way = curr_write_ptr + 1.U//replacer.way
 
-  when(io.write.valid){
-    meta_buffer(io.write.bits.buffIdx).tag := io.write.bits.meta.tag
-    meta_buffer(io.write.bits.buffIdx).index := io.write.bits.meta.index
-    meta_buffer(io.write.bits.buffIdx).paddr := io.write.bits.meta.paddr
-    meta_buffer(io.write.bits.buffIdx).valid := true.B
+    when(io.write.valid){
+    meta_buffer(curr_write_ptr).tag := io.write.bits.meta.tag
+    meta_buffer(curr_write_ptr).index := io.write.bits.meta.index
+    meta_buffer(curr_write_ptr).paddr := io.write.bits.meta.paddr
+    meta_buffer(curr_write_ptr).valid := true.B
 
-    data_buffer(io.write.bits.buffIdx).cachline := io.write.bits.data
+    data_buffer(curr_write_ptr).cachline := io.write.bits.data
+
+    //update replacer
+    replacer.access(curr_write_ptr)
+    curr_write_ptr := victim_way
+
+    printf("(%d)write_ptr: %d\n",GTimer(), curr_write_ptr)
   }
 
 

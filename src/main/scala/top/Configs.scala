@@ -63,7 +63,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         LoadQueueSize = 16,
         StoreQueueSize = 12,
         RobSize = 32,
-        FtqSize = 64,
+        FtqSize = 32,
         IBufSize = 16,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
@@ -95,7 +95,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 1,
           nProbeEntries = 2,
           nPrefetchEntries = 4,
-          nPrefBufferEntries = 8,
+          nPrefBufferEntries = 32,
           hasPrefetch = true
         ),
         dcacheParametersOpt = Some(DCacheParameters(
