@@ -129,7 +129,7 @@ class XSTile(parenName:String = "Unknown")(implicit p: Parameters) extends LazyM
     misc.busPMU :=
       TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
       buf_node :=
-      core.ptw_to_l2_buffer.node
+      core.memBlock.ptw_to_l2_buffer.node
     buffers
   } else Seq()
 

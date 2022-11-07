@@ -23,7 +23,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.TLBuffer
 import huancun.mbist.MBISTPipeline
 import huancun.mbist.MBISTPipeline.placePipelines
 import huancun.utils.{DFTResetGen, ModuleNode, ResetGen, ResetGenNode}
@@ -31,7 +30,6 @@ import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
-import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
@@ -141,11 +139,7 @@ abstract class XSCoreBase(parentName:String = "Unknown")(implicit p: config.Para
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend(parentName + "frontend_")(p))
-  val ptw = LazyModule(new PTWWrapper(parentName + "ptw_")(p))
-  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
-
-  ptw_to_l2_buffer.node := ptw.node
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
@@ -261,8 +255,6 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
   val ctrlBlock = outer.ctrlBlock.module
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   ctrlBlock.io.hartId := io.hartId
@@ -372,7 +364,6 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  memBlock.io.perfEventsPTW  := ptw.getPerf
   ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId
@@ -418,14 +409,7 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
-
-  val itlbRepeater1 = PTWRepeater(frontend.io.ptw, fenceio.sfence, csrioIn.tlb)
-  val itlbRepeater2 = PTWRepeater(itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
-  val dtlbRepeater1  = PTWFilter(memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.filterSize)
-  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)
-  ptw.io.sfence <> fenceio.sfence
-  ptw.io.csr.tlb <> csrioIn.tlb
-  ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
+  memBlock.io.itlb <> frontend.io.ptw
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
@@ -439,13 +423,7 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
   // Modules are reset one by one
   val resetTree = ResetGenNode(
     Seq(
-      ModuleNode(memBlock), ModuleNode(dtlbRepeater1),
-      ResetGenNode(Seq(
-        ModuleNode(itlbRepeater2),
-        ModuleNode(ptw),
-        ModuleNode(dtlbRepeater2),
-        ModuleNode(ptw_to_l2_buffer),
-      )),
+      ModuleNode(memBlock),
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
         ResetGenNode(
@@ -454,7 +432,7 @@ class XSCoreImp(parentName:String = "Unknown",outer: XSCoreBase) extends LazyMod
         ResetGenNode(Seq(
           ModuleNode(ctrlBlock),
           ResetGenNode(Seq(
-            ModuleNode(frontend), ModuleNode(itlbRepeater1)
+            ModuleNode(frontend)
           ))
         ))
       ))
