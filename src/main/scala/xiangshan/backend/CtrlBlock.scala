@@ -67,9 +67,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
       val s1_oldest_exu_output = ValidIO(new ExuOutput)
       val s1_real_pc = Input(UInt(VAddrBits.W))
     }
-    //my below
     val isMisspreRedirect = Output(Bool())
-    //my above
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -118,10 +116,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val jumpOut = io.exuMispredict.head
   val allRedirect = VecInit(io.exuMispredict.map(x => getRedirect(x)) :+ io.loadReplay)
-  //my below
   val isMisspreRedirect = VecInit(io.exuMispredict.map(x => getRedirect(x).valid)).asUInt.orR
   io.isMisspreRedirect := isMisspreRedirect
-  //my above
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(io.stage2Redirect) || io.flush))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
@@ -315,7 +311,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val delayed = Wire(Valid(new ExuOutput))
     delayed.valid := RegNext(valid && !killedByOlder, init = false.B)
     delayed.bits := RegEnable(x.bits, x.valid)
-    delayed   
+    delayed
   })
   val loadReplay = Wire(Valid(new Redirect))
   loadReplay.valid := RegNext(io.memoryViolation.valid &&
@@ -410,8 +406,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
     XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
   }
-
-  //my above
 
   decode.io.in <> io.frontend.cfVec
   decode.io.csrCtrl := RegNext(io.csrCtrl)
