@@ -73,6 +73,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
 
   // For store replay
   val isStoreReplay = Bool()
+
+  // For load replay
+  val isLoadReplay = Bool()
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -97,6 +100,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isSoftPrefetch := input.isSoftPrefetch
     isFirstIssue := input.isFirstIssue
     isStoreReplay := input.isStoreReplay
+    isLoadReplay := input.isLoadReplay
 
     lq_data_wen_dup := DontCare
   }

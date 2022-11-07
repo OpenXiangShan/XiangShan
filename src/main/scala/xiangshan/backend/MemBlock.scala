@@ -291,6 +291,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s1)
     lsq.io.loadPaddrIn(i) <> loadUnits(i).io.lsq.loadPaddrIn
+    lsq.io.loadVaddrIn(i) <> loadUnits(i).io.lsq.loadVaddrIn
+
+    lsq.io.replayFast(i) := loadUnits(i).io.lsq.replayFast
+    lsq.io.replaySlow(i) := loadUnits(i).io.lsq.replaySlow
+
+    loadUnits(i).io.lsqIn        <> lsq.io.rsLoadIn(i)
+    loadUnits(i).io.lsqOut       <> lsq.io.loadOut(i)
 
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn

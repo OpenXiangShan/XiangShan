@@ -163,7 +163,7 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
-  ReSelectLen: Int = 5,
+  ReSelectLen: Int = 6,
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,

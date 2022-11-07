@@ -58,6 +58,11 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
+    val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
+    val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
+    val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
+    val rsLoadIn = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) 
+    val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
@@ -96,6 +101,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   storeQueue.io.hartId := io.hartId
 
+  loadQueue.io.storeDataValidVec := storeQueue.io.storeDataValidVec
+
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready
   // Dispatch: send instructions to LSQ only when they are ready
@@ -121,6 +128,11 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadPaddrIn <> io.loadPaddrIn
+  loadQueue.io.rsLoadIn <> io.rsLoadIn
+  loadQueue.io.loadOut <> io.loadOut
+  loadQueue.io.loadVaddrIn <> io.loadVaddrIn
+  loadQueue.io.replayFast <> io.replayFast
+  loadQueue.io.replaySlow <> io.replaySlow
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.s2_load_data_forwarded <> io.s2_load_data_forwarded

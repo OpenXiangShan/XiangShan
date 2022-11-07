@@ -84,6 +84,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val storeDataValidVec = Vec(StoreQueueSize, Output(Bool()))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -167,6 +168,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     sel_blocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
   })
 
+  (0 until StoreQueueSize).map{i => {
+    io.storeDataValidVec(i) := datavalid(i)
+  }}
+
   // Read dataModule
   assert(EnsbufferWidth <= 2)
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
@@ -220,7 +225,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqIdx = enqPtrExt(offset)
     val index = io.enq.req(i).bits.sqIdx.value
     when (canEnqueue(i) && !enqCancel(i)) {
-      uop(index).robIdx := io.enq.req(i).bits.robIdx
+      uop(index) := io.enq.req(i).bits
+      // NOTE: the index will be used when replay
+      uop(index).sqIdx := sqIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       addrvalid(index) := false.B
@@ -228,9 +235,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(index) := false.B
       // replay related
       no_need_to_replay(index) := true.B
-      // NOTE: the index will be used when replay
-      uop(index).sqIdx := sqIdx
-      uop(index).lqIdx := io.enq.req(i).bits.lqIdx
+      credit(index) := 0.U(ReSelectLen.W)
       block_ptr(index) := 0.U
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
@@ -456,7 +461,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     storeReplaySelV(i) := RegNext(storeReplaySelVGen(i), init = false.B)
   })
 
-  // stage2: replay to load pipeline (if no load in S0)
+  // stage2: replay to store pipeline (if no store in S0)
 
   when(replayEvenFire) {
     s0_block_store_mask(storeReplaySel(0)) := true.B
