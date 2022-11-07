@@ -69,6 +69,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
+    val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
@@ -408,8 +409,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_resp) {
-      when(io.uncache.resp.fire()) {
+      when (io.uncacheOutstanding) {
         uncacheState := s_wb
+      } .otherwise {
+        when(io.uncache.resp.fire()) {
+          uncacheState := s_wb
+        }
       }
     }
     is(s_wb) {

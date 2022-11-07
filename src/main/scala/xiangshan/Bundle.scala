@@ -494,6 +494,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val ldld_vio_check_enable = Output(Bool())
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
+  val uncache_write_outstanding_enable = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // Decode
