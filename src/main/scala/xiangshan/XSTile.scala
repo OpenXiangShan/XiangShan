@@ -83,7 +83,7 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   val misc = LazyModule(new XSTileMisc())
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new HuanCun(parentName = parentName + "L2_")(new Config((_, _, _) => {
-      case HCCacheParamsKey => l2param
+      case HCCacheParamsKey => l2param.copy(enableTopDown = env.EnableTopDown)
     })))
   )
 

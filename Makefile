@@ -51,6 +51,11 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# top-down
+ifeq ($(ENABLE_TOPDOWN),1)
+override SIM_ARGS += --enable-topdown
+endif
+
 # emu for the release version
 RELEASE_ARGS = --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   = --enable-difftest
