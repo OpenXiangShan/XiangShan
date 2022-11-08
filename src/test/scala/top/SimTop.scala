@@ -56,6 +56,14 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.sram_config := 0.U
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
+  soc.scan_mode := false.B
+  soc.dft_lgc_rst_n := true.B.asAsyncReset
+  soc.dft_mode := false.B
+  if(soc.dft.isDefined){
+    soc.dft.get.cgen := false.B
+    soc.dft.get.l3dataram_clk := false.B
+    soc.dft.get.l3dataramclk_bypass := false.B
+  }
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay=3)(p))
