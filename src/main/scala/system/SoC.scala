@@ -332,19 +332,20 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   plic.node := peripheralXbar
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
+  val debug_xbar = TLXbar()
   debugModule.debug.node := peripheralXbar
+  // debug module can access both memory and peripheral ports
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+    debug_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
-
   peripheralXbar :=
-    TLBuffer() :=
+    TLBuffer.chainNode(3) :=
     TLFIFOFixer() :=
-    // TLWidthWidget(8) :=
     TLFragmenter(8, 32, holdFirstDeny = true) :=
     TLWidthWidget(32) :=
     TLBuffer() :=
-    l3_xbar
+    debug_xbar
+  l3_xbar := TLBuffer.chainNode(3) := debug_xbar
 
   lazy val module = new LazyModuleImp(this) {
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
