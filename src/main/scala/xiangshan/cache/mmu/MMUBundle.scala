@@ -202,6 +202,12 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
    *  bits0  0: need low 9bits
    *  bits1  0: need mid 9bits
    */
+  def isSuperPage(): Bool = {
+    if (pageSuper)
+      if (pageNormal) (level.get === 3.U || level.get === 1.U)
+      else true.B
+    else false.B
+  }
 
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)

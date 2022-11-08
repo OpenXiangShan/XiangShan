@@ -167,10 +167,10 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
 
 //  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
 //  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.hit
-  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.hit
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.canFire
+  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.canFire
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.hit
+  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.canFire
 }
 
 class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -316,7 +316,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val flagBkup = Mem(RobSize, Bool())
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
-  val interrupt_safe = Mem(RobSize, Bool())
+  val interrupt_safe = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -418,22 +418,22 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       when (enqUop.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
-      val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
+      val enqHasTriggerCanFire = io.enq.req(i).bits.cf.trigger.getFrontendCanFire
       val enqHasException = ExceptionNO.selectFrontend(enqUop.cf.exceptionVec).asUInt.orR
       // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!enqHasTriggerHit && !enqHasException && FuType.isSvinvalBegin(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
+      when(!enqHasTriggerCanFire && !enqHasException && FuType.isSvinvalBegin(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := true.B
       }
       // the end instruction of Svinval enqs so clear doingSvinval
-      when(!enqHasTriggerHit && !enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
+      when(!enqHasTriggerCanFire && !enqHasException && FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe))
       {
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
       assert(!doingSvinval || (FuType.isSvinval(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe) ||
         FuType.isSvinvalEnd(enqUop.ctrl.fuType, enqUop.ctrl.fuOpType, enqUop.ctrl.flushPipe)))
-      when (enqUop.ctrl.isWFI && !enqHasException && !enqHasTriggerHit) {
+      when (enqUop.ctrl.isWFI && !enqHasException && !enqHasTriggerCanFire) {
         hasWFI := true.B
       }
     }
@@ -476,14 +476,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
-    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)
+    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.canFire)
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
-  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitFrontend, "Debug Mode: Deq has frontend trigger exception\n")
-  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitBackend, "Debug Mode: Deq has backend trigger exception\n")
+  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getFrontendCanFire, "Debug Mode: Deq has frontend trigger exception\n")
+  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getBackendCanFire, "Debug Mode: Deq has backend trigger exception\n")
 
   val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
 
@@ -769,9 +769,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
       val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
-      val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
+      val enqHasTriggerCanFire = io.enq.req(i).bits.cf.trigger.getFrontendCanFire
       val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
-      writebacked(allocatePtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
+      writebacked(allocatePtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerCanFire
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(allocatePtrVec(i).value) := !isStu
     }
@@ -786,10 +786,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (wb.valid) {
       val wbIdx = wb.bits.uop.robIdx.value
       val wbHasException = ExceptionNO.selectByExu(wb.bits.uop.cf.exceptionVec, cfgs).asUInt.orR
-      val wbHasTriggerHit = wb.bits.uop.cf.trigger.getHitBackend
+      val wbHasTriggerCanFire = if (cfgs.exists(_.trigger)) wb.bits.uop.cf.trigger.getBackendCanFire else false.B
       val wbHasFlushPipe = cfgs.exists(_.flushPipe).B && wb.bits.uop.ctrl.flushPipe
       val wbHasReplayInst = cfgs.exists(_.replayInst).B && wb.bits.uop.ctrl.replayInst
-      val block_wb = wbHasException || wbHasFlushPipe || wbHasReplayInst || wbHasTriggerHit
+      val block_wb = wbHasException || wbHasFlushPipe || wbHasReplayInst || wbHasTriggerCanFire
       writebacked(wbIdx) := !block_wb
     }
   }
@@ -857,8 +857,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     XSError(canEnqueue(i) && io.enq.req(i).bits.ctrl.replayInst, "enq should not set replayInst")
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
-    exceptionGen.io.enq(i).bits.trigger.clear()
+    exceptionGen.io.enq(i).bits.trigger.clear() // Don't care frontend timing and chain, backend hit and canFire
     exceptionGen.io.enq(i).bits.trigger.frontendHit := io.enq.req(i).bits.cf.trigger.frontendHit
+    exceptionGen.io.enq(i).bits.trigger.frontendCanFire := io.enq.req(i).bits.cf.trigger.frontendCanFire
   }
 
   println(s"ExceptionGen:")
@@ -873,8 +874,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
     // TODO: make trigger configurable
-    exc_wb.bits.trigger.clear()
-    exc_wb.bits.trigger.backendHit := wb.bits.uop.cf.trigger.backendHit
+    exc_wb.bits.trigger.clear() // Don't care frontend timing, chain, hit and canFire
+    exc_wb.bits.trigger.backendHit := Mux(configs.exists(_.trigger).B, wb.bits.uop.cf.trigger.backendHit,
+      0.U.asTypeOf(chiselTypeOf(exc_wb.bits.trigger.backendHit)))
+    exc_wb.bits.trigger.backendCanFire := Mux(configs.exists(_.trigger).B, wb.bits.uop.cf.trigger.backendCanFire,
+      0.U.asTypeOf(chiselTypeOf(exc_wb.bits.trigger.backendCanFire)))
     println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
       s"flushPipe ${configs.exists(_.flushPipe)}, " +
       s"replayInst ${configs.exists(_.replayInst)}")
