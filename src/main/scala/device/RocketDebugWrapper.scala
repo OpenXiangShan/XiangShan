@@ -62,7 +62,7 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
-    debug.module.io.debug_reset := io.debugIO.systemjtag.get.reset
+    debug.module.io.debug_reset := io.debugIO.reset
     debug.module.io.debug_clock := io.debugIO.clock
     io.debugIO.ndreset := debug.module.io.ctrl.ndreset
     io.debugIO.dmactive := debug.module.io.ctrl.dmactive
