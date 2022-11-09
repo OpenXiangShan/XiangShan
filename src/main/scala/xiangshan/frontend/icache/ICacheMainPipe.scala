@@ -153,21 +153,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_only_first  = (0 until partWayNum).map(i => fromFtq.valid && !fromFtqReq(i).crossCacheline)
   val s0_double_line = (0 until partWayNum).map(i => fromFtq.valid &&  fromFtqReq(i).crossCacheline)
 
-  val s0_final_valid       = s0_valid
-  val s0_final_vaddr   = s0_req_vaddr
-  val s0_final_vsetIdx = s0_req_vsetIdx
-  val s0_final_only_first  = s0_only_first
-  val s0_final_double_line = s0_double_line
+  val s0_final_valid        = s0_valid
+  val s0_final_vaddr        = s0_req_vaddr.head
+  val s0_final_vsetIdx      = s0_req_vsetIdx.head
+  val s0_final_only_first   = s0_only_first.head
+  val s0_final_double_line  = s0_double_line.head
 
   /** SRAM request */
   val fetch_req = List(toMeta, toData)
-  for(i <- 0 until 2) {
-    // fetch_req(i).valid             := (s0_valid || tlb_slot.valid) && !missSwitchBit
-    fetch_req(i).valid             := s0_valid && !missSwitchBit
-    fetch_req(i).bits.isDoubleLine := s0_final_double_line
-    fetch_req(i).bits.vSetIdx      := s0_final_vsetIdx
+  for(i <- 0 until partWayNum) {
+    fetch_req.map(_.valid                  := s0_valid && !missSwitchBit)
+    fetch_req.map(_.bits(i).isDoubleLine   := s0_double_line(i))
+    fetch_req.map(_.bits(i).vSetIdx        := s0_req_vsetIdx(i))
   }
-
   /** s0 tlb **/
   toITLB(0).valid         := s0_valid
   toITLB(0).bits.size     := 3.U // TODO: fix the size

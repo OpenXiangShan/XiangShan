@@ -661,7 +661,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
     bypassWrtie.nextlineStart := bpu_in_bypass_buf.tail(i).nextLineAddr
   }
-  
+
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
@@ -761,7 +761,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // to backend pc mem / target
   io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
   io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
-  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf)
+  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf.head)
   io.toBackend.target       := RegNext(last_cycle_update_target)
 
   // *******************************************************************************
