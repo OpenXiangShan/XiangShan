@@ -33,7 +33,7 @@ import system.HasSoCParameter
 
 
 class BackendTop(implicit p: Parameters) extends LazyModule 
-  // with HasWritebackSource
+  with HasWritebackSource
   with HasXSParameter 
   with HasExuWbHelper{
 
@@ -111,26 +111,38 @@ class BackendTop(implicit p: Parameters) extends LazyModule
     case (((sche, disp), other), i) =>
       LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
   }
-  val memBlockSub = LazyModule(new MemBlockSub)
 
   val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
-  wb2Ctrl.addWritebackSink(exuBlocks :+ memBlockSub)
+  wb2Ctrl.addWritebackSink(exuBlocks :+ this)
   val dpExuConfigs = exuBlocks.flatMap(_.scheduler.dispatch2.map(_.configs))
   val ctrlBlock = LazyModule(new CtrlBlock(dpExuConfigs))
   val writebackSources = Seq(Seq(wb2Ctrl), Seq(wbArbiter))
   writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 
   lazy val module = new BackendTopImp(this)
+
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    val params = new WritebackSourceParams
+    params.exuConfigs = (loadExuConfigs ++ storeExuConfigs).map(cfg => Seq(cfg))
+    Seq(params)
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
 class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModuleImp(outer)
-  // with HasWritebackSourceImp 
+  with HasWritebackSourceImp 
   with HasXSParameter
   with HasSoCParameter{
 
   val ctrlBlock = outer.ctrlBlock.module
   val wb2Ctrl = outer.wb2Ctrl.module
   val exuBlocks = outer.exuBlocks.map(_.module)
+
+  val updatedP = p.alter((site, here, up) => {
+    case XSCoreParamsKey => up(XSCoreParamsKey).copy(
+      IssQueSize = outer.exuBlocks.head.scheduler.memRsEntries.max
+    )
+  })
 
   val io = IO(new Bundle {
     // XSCore interface
@@ -171,7 +183,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
     val stIssuePtr = Input(new SqPtr())
 
     val redirect = ValidIO(new Redirect)
-    val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO))
+    val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO()(updatedP)))
 
     val robio = new Bundle {
       // to int block
@@ -182,7 +194,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
 
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuOutput)))
   })
-  outer.memBlockSub.module.io.writeback_in <> io.writeback
+  override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
   ctrlBlock.io.hartId := io.hartId
   exuBlocks.foreach(_.io.hartId := io.hartId)
@@ -203,7 +215,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
 
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
 
-  outer.wb2Ctrl.generateWritebackIO()
+  outer.wb2Ctrl.generateWritebackIO(Some(outer), Some(this))
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
