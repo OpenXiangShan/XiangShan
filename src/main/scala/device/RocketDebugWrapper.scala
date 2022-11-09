@@ -58,7 +58,9 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     })
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
-    debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
+    withClock(io.clock.asClock) {
+      debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
+    }
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
