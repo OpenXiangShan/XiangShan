@@ -80,9 +80,9 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     ******************************************************************************
     */  
 
-  val r0_valid       = io.pipe_req.valid
+  val r0_valid = generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B)
 
-  val r0_req         = io.pipe_req.bits
+  val r0_req         = RegEnable(io.pipe_req.bits, enable = io.pipe_req.fire())
   val r0_req_vidx    = r0_req.vidx
 
   r0_fire        := io.pipe_req.fire()
