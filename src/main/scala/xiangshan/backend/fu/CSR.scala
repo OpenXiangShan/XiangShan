@@ -200,12 +200,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Trigger CSRs
   private val tselectPhy = RegInit(0.U(4.W))
-  private val tdata1Init = WireInit(0.U.asTypeOf(new Tdata1Bundle))
-  tdata1Init.type_.value := TrigTypeEnum.disabled
-  private val tdataRegsInit = WireInit(0.U.asTypeOf(new TDataRegs))
-  tdataRegsInit.tdata1 := tdata1Init.asUInt
 
-  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
+  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(Tdata1Bundle.default)))
   private val tdata2RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
   private val tdata1WireVec = tdata1RegVec.map(_.asTypeOf(new Tdata1Bundle))
   private val tdata2WireVec = tdata2RegVec

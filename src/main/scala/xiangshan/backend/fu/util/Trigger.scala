@@ -31,7 +31,7 @@ trait SdtrigExt {
       this.data.asTypeOf(new MControlData).timing
     }
   }
-  object Tdata1Bundle {
+  object Tdata1Bundle extends Tdata1Bundle {
     def apply(): Tdata1Bundle = new Tdata1Bundle
     def Read(rdata: UInt) : UInt = rdata
     def Write(wdata: UInt, tdata1: UInt, chainable: Bool) : UInt = {
@@ -46,6 +46,9 @@ trait SdtrigExt {
         tdata1_new.data.value := 0.U
       }
       tdata1_new.asUInt
+    }
+    def default : UInt = {
+      (TrigTypeEnum.disabled.litValue << (XLEN - 4)).U
     }
   }
 
