@@ -209,7 +209,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   private val tdata2Selected = tdata2RegVec(tselectPhy)
   private val newTriggerChainVec = UIntToOH(tselectPhy, TriggerNum).asBools | tdata1WireVec.map(_.data.asTypeOf(new MControlData).chain)
   private val newTriggerChainIsLegal = TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
-  val tinfo = RegInit(2.U(64.W))
+  val tinfo = RegInit((BigInt(1) << TrigTypeEnum.MCONTROL.litValue.toInt).U(XLEN.W)) // This value should be 4.U
   val tControlPhy = RegInit(0.U(64.W))
 
   def WriteTselect(wdata: UInt) = {
