@@ -210,14 +210,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   private val newTriggerChainVec = UIntToOH(tselectPhy, TriggerNum).asBools | tdata1WireVec.map(_.data.asTypeOf(new MControlData).chain)
   private val newTriggerChainIsLegal = TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
   val tinfo = RegInit((BigInt(1) << TrigTypeEnum.MCONTROL.litValue.toInt).U(XLEN.W)) // This value should be 4.U
-  val tControlPhy = RegInit(0.U(64.W))
+
 
   def WriteTselect(wdata: UInt) = {
     Mux(wdata < TriggerNum.U, wdata(3, 0), tselectPhy)
   }
-
-  val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
-
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: UInt): MatchTriggerIO = {
     val res = Wire(new MatchTriggerIO)
@@ -617,7 +614,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy), WritableMask, x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal), WritableMask, x => Tdata1Bundle.Read(x)),
     MaskedRegMap(Tdata2, tdata2RegVec(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
-    MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
