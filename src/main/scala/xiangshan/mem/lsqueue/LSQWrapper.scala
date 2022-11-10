@@ -94,6 +94,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+
+    val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -102,6 +104,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.hartId := io.hartId
 
   loadQueue.io.storeDataValidVec := storeQueue.io.storeDataValidVec
+
+  io.try_replay := loadQueue.io.try_replay
 
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready

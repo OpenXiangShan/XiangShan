@@ -124,6 +124,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
 
     val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
+
+    val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
   })
 
   println("LoadQueue: size:" + LoadQueueSize)
@@ -328,6 +330,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   (0 until LoadPipelineWidth).map(i => {
     loadReplaySel(i) := RegNext(loadReplaySelGen(i))
     loadReplaySelV(i) := RegNext(loadReplaySelVGen(i), init = false.B)
+  })
+  
+  (0 until LoadPipelineWidth).map(i => {
+    io.try_replay(i) := loadReplaySelV(i)
   })
   
   // stage2: replay to load pipeline (if no load in S0)

@@ -591,6 +591,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     val lsqIn = Decoupled(new LsPipelineBundle)
     val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
+
+    val try_replay = Input(Bool())
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -607,9 +609,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
   load_s0.io.s0_kill := false.B
-  val s0_tryPointerChasing = !io.ldin.valid && io.fastpathIn.valid
+  val s0_tryPointerChasing = !io.ldin.valid && io.fastpathIn.valid && !io.try_replay
   val s0_pointerChasingVAddr = io.fastpathIn.data(5, 0) +& io.loadFastImm(5, 0)
-  load_s0.io.fastpath.valid := io.fastpathIn.valid
+  load_s0.io.fastpath.valid := io.fastpathIn.valid && !io.try_replay
   load_s0.io.fastpath.data := Cat(io.fastpathIn.data(XLEN-1, 6), s0_pointerChasingVAddr(5,0))
 
   val s1_data = PipelineConnect(load_s0.io.out, load_s1.io.in, true.B,
