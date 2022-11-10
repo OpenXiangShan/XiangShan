@@ -611,7 +611,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
     // Todo: support chain length = 2
-    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy), WritableMask, x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal), WritableMask, x => Tdata1Bundle.Read(x)),
+    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy),
+      WritableMask,
+      x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal, debug_mode = debugMode),
+      WritableMask,
+      x => Tdata1Bundle.Read(x)),
     MaskedRegMap(Tdata2, tdata2RegVec(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
