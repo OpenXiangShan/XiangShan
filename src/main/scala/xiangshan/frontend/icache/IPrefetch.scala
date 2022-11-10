@@ -387,6 +387,14 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   io.req.ready := state === s_idle
   io.mem_acquire.valid := state === s_memReadReq
 
+  val needFlushReg = RegInit(false.B)
+  when(state === s_idle || state === s_finish){
+    needFlushReg := false.B
+  }
+  when((state === s_memReadReq || state === s_memReadResp || state === s_write_back) && io.fencei){
+    needFlushReg := true.B
+  }
+  val needFlush = needFlushReg || io.fencei
   //flush register
 //  val needFlush = generateState(enable = io.fencei && (state =/= s_idle) && (state =/= s_finish), release = (state=== s_wait_free))
 //
@@ -434,7 +442,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
 
   //refill write and meta write
   //WARNING: Maybe could not finish refill in 1 cycle
-  io.piq_write_ipbuffer.valid := (state === s_write_back) //&& !needFlush
+  io.piq_write_ipbuffer.valid := (state === s_write_back) && !needFlush
   io.piq_write_ipbuffer.bits.meta.tag := req_tag
   io.piq_write_ipbuffer.bits.meta.index := req_idx
   io.piq_write_ipbuffer.bits.meta.paddr := req.paddr

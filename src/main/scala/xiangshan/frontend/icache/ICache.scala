@@ -466,6 +466,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   /* CSR control signal */
   val csr_pf_enable = Input(Bool())
   val csr_parity_enable = Input(Bool())
+  val fencei = Input(Bool())
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -518,8 +519,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
 
   //TODO: ipfBuffer fencei
-  ipfBuffer.io.fencei := false.B
-  missUnit.io.fencei := false.B
+  ipfBuffer.io.fencei := io.fencei
+  missUnit.io.fencei := io.fencei
 
   ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
