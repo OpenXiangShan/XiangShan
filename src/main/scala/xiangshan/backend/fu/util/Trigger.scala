@@ -31,21 +31,24 @@ trait SdtrigExt {
       this.data.asTypeOf(new MControlData).timing
     }
   }
-  object Tdata1Bundle {
+  object Tdata1Bundle extends Tdata1Bundle {
     def apply(): Tdata1Bundle = new Tdata1Bundle
     def Read(rdata: UInt) : UInt = rdata
-    def Write(wdata: UInt, tdata1: UInt, chainable: Bool) : UInt = {
+    def Write(wdata: UInt, tdata1: UInt, chainable: Bool, debug_mode: Bool) : UInt = {
       val tdata1_old = WireInit(tdata1.asTypeOf(new Tdata1Bundle))
       val tdata1_new = Wire(new Tdata1Bundle)
       val wdata_new = WireInit(wdata.asTypeOf(new Tdata1Bundle))
       tdata1_new.type_ := wdata_new.type_.legalize
-      tdata1_new.dmode := false.B // not support yet
+      tdata1_new.dmode := wdata_new.dmode && debug_mode // dmode only support write in debug mode
       when (wdata_new.type_.asUInt === TrigTypeEnum.MCONTROL) {
-        tdata1_new.data.value := MControlData.Write(wdata_new.data.asUInt, tdata1_old.data.asUInt, chainable)
+        tdata1_new.data.value := MControlData.Write(wdata_new.asUInt, tdata1_old.data.asUInt, chainable)
       }.otherwise {
         tdata1_new.data.value := 0.U
       }
       tdata1_new.asUInt
+    }
+    def default : UInt = {
+      (TrigTypeEnum.disabled.litValue << (XLEN - 4)).U
     }
   }
 
@@ -108,7 +111,8 @@ trait SdtrigExt {
     def Read(rdata: UInt) : UInt = rdata
     def Write(wdata: UInt, tdata1data: UInt, chainable: Bool) : UInt = {
       val mcontrol_old = WireInit(tdata1data.asTypeOf(new MControlData))
-      val mcontrol_new = WireInit(wdata.asTypeOf(new MControlData))
+      val tdata1_new = WireInit(wdata.asTypeOf(new Tdata1Bundle))
+      val mcontrol_new = WireInit(tdata1_new.data.asTypeOf(new MControlData))
       val wdata_new = WireInit(wdata.asTypeOf(new MControlData))
       mcontrol_new.maskmax  := 0.U
       mcontrol_new.zero1    := 0.U
@@ -117,7 +121,7 @@ trait SdtrigExt {
       mcontrol_new.select   := wdata_new.execute && wdata_new.select // not support rdata/wdata trigger
       mcontrol_new.timing   := false.B // only support trigger fires before its execution
       mcontrol_new.sizelo   := 0.U
-      mcontrol_new.action   := wdata_new.action.legalize
+      mcontrol_new.action   := wdata_new.action.legalize(tdata1_new.dmode)
       mcontrol_new.chain    := chainable && wdata_new.chain
       mcontrol_new.match_   := wdata_new.match_.legalize
       mcontrol_new.zero2    := 0.U
@@ -138,11 +142,11 @@ trait SdtrigExt {
       * @param data action checked
       * @return true.B, If XS support such trigger action type
       */
-    def isLegal : Bool = {
-      this.asUInt === this.BKPT_EXCPT || this.asUInt === this.DEBUG_MODE
+    def isLegal(dmode: Bool) : Bool = {
+      this.asUInt === this.BKPT_EXCPT || this.asUInt === this.DEBUG_MODE && dmode
     }
-    def legalize : TrigActionEnum = {
-      Mux(this.isLegal, this.asUInt, this.default).asTypeOf(new TrigActionEnum)
+    def legalize(dmode: Bool) : TrigActionEnum = {
+      Mux(this.isLegal(dmode), this.asUInt, this.default).asTypeOf(new TrigActionEnum)
     }
   }
   object TrigActionEnum extends TrigActionEnum {

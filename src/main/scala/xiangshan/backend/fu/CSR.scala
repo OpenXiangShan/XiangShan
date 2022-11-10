@@ -200,12 +200,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Trigger CSRs
   private val tselectPhy = RegInit(0.U(4.W))
-  private val tdata1Init = WireInit(0.U.asTypeOf(new Tdata1Bundle))
-  tdata1Init.type_.value := TrigTypeEnum.disabled
-  private val tdataRegsInit = WireInit(0.U.asTypeOf(new TDataRegs))
-  tdataRegsInit.tdata1 := tdata1Init.asUInt
 
-  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
+  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(Tdata1Bundle.default)))
   private val tdata2RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
   private val tdata1WireVec = tdata1RegVec.map(_.asTypeOf(new Tdata1Bundle))
   private val tdata2WireVec = tdata2RegVec
@@ -213,15 +209,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   private val tdata2Selected = tdata2RegVec(tselectPhy)
   private val newTriggerChainVec = UIntToOH(tselectPhy, TriggerNum).asBools | tdata1WireVec.map(_.data.asTypeOf(new MControlData).chain)
   private val newTriggerChainIsLegal = TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
-  val tinfo = RegInit(2.U(64.W))
-  val tControlPhy = RegInit(0.U(64.W))
+  val tinfo = RegInit((BigInt(1) << TrigTypeEnum.MCONTROL.litValue.toInt).U(XLEN.W)) // This value should be 4.U
+
 
   def WriteTselect(wdata: UInt) = {
     Mux(wdata < TriggerNum.U, wdata(3, 0), tselectPhy)
   }
-
-  val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
-
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: UInt): MatchTriggerIO = {
     val res = Wire(new MatchTriggerIO)
@@ -618,10 +611,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
     // Todo: support chain length = 2
-    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy), WritableMask, x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal), WritableMask, x => Tdata1Bundle.Read(x)),
+    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy),
+      WritableMask,
+      x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal, debug_mode = debugMode),
+      WritableMask,
+      x => Tdata1Bundle.Read(x)),
     MaskedRegMap(Tdata2, tdata2RegVec(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
-    MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),

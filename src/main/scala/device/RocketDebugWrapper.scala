@@ -58,11 +58,13 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     })
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
-    debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
+    withClock(io.clock.asClock) {
+      debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
+    }
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
-    debug.module.io.debug_reset := io.debugIO.systemjtag.get.reset
+    debug.module.io.debug_reset := io.debugIO.reset
     debug.module.io.debug_clock := io.debugIO.clock
     io.debugIO.ndreset := debug.module.io.ctrl.ndreset
     io.debugIO.dmactive := debug.module.io.ctrl.dmactive
@@ -101,7 +103,8 @@ object XSDebugModuleParams {
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
       baseAddress = BigInt(0x38020000),
-      nScratch = 2
+      nScratch = 2,
+      crossingHasSafeReset = false
     )
   }
 }
