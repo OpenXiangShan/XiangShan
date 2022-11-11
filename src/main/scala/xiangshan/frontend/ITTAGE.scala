@@ -221,7 +221,7 @@ class ITTageTable
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=false, holdRead=true, singlePort=true)))
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -413,9 +413,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_valid = io.update.valid
   val update = io.update.bits
   val updateValid =
-    update.full_pred.is_jalr && !update.full_pred.is_ret && u_valid && update.ftb_entry.jmpValid &&
-    !(update.full_pred.real_br_taken_mask().reduce(_||_))
-  val updateFhist = update.folded_hist
+    update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
+    update.jmp_taken
+  val updateFhist = update.spec_info.folded_hist
 
   // meta is splited by composer
   val updateMeta = update.meta.asTypeOf(new ITTageMeta)
@@ -485,7 +485,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSDebug(io.s2_fire, p"hit_taken_jalr:")
 
   when(s3_tageTaken) {
-    io.out.resp.s3.full_pred.jalr_target := s3_tageTarget
+    io.out.s3.full_pred.jalr_target := s3_tageTarget
   }
 
   resp_meta.provider.valid    := s3_provided
@@ -656,7 +656,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b, taken=%b\n",
-      debug_pc_s2, io.out.resp.s2.getTarget, s2_provided, s2_tageTaken)
+      debug_pc_s2, io.out.s2.getTarget, s2_provided, s2_tageTaken)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,
