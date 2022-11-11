@@ -271,7 +271,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   when (secondary_fire) {
-    assert(io.req.bits.req_coh.state <= req.req_coh.state)
+    assert(io.req.bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(io.req.bits.isFromAMO || req.isFromAMO))
     // use the most uptodate meta
     req.req_coh := io.req.bits.req_coh
@@ -378,7 +378,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     w_mainpipe_resp := true.B
   }
 
-  def before_read_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
+  def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
     acquire_not_sent && (req.isFromLoad || req.isFromPrefetch) && (new_req.isFromLoad || new_req.isFromStore)
   }
   
@@ -392,7 +392,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match &&
     (
-      before_read_sent_can_merge(new_req) ||
+      before_req_sent_can_merge(new_req) ||
       before_data_refill_can_merge(new_req)
     )
   }
@@ -410,7 +410,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     req_valid &&
       Mux(
         block_match,
-        !before_read_sent_can_merge(new_req) &&
+        !before_req_sent_can_merge(new_req) &&
           !before_data_refill_can_merge(new_req),
         set_match && new_req.way_en === req.way_en
       )
