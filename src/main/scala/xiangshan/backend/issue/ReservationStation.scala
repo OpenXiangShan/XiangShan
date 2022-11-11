@@ -41,6 +41,7 @@ case class RSParams
   var numFastWakeup: Int = 0,
   var numWakeup: Int = 0,
   var hasFeedback: Boolean = false,
+  var lsqFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
   // special cases
@@ -95,7 +96,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       params.numSrc = 2
     }
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
-      params.hasFeedback = true
+      params.lsqFeedback = true
       params.checkWaitBit = true
     }
     if (cfg.hasCertainLatency) {
