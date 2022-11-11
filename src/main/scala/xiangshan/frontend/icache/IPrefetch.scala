@@ -136,8 +136,6 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     //update replacer
     replacer.access(curr_write_ptr)
     curr_write_ptr := victim_way
-
-    printf("(%d)write_ptr: %d\n",GTimer(), curr_write_ptr)
   }
 
 
@@ -370,9 +368,6 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   val req_idx = req.vSetIdx                     //virtual index
   val req_tag = get_phy_tag(req.paddr)           //physical tag
 
-  when(io.mem_acquire.fire()){
-    printf("pf_(%d) time:%d addr: %x\n",id.U, GTimer(), req.paddr)
-  }
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
   //8 for 64 bits bus and 2 for 256 bits
