@@ -976,7 +976,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       prefetch_is_to_send := true.B
       prefetch_addr := last_cycle_update_target
     }
-    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send
+    val distance_between_prefetch_ifu = prefetchPtr.value - ifuPtr.value
+    //TODO: Parameterize it
+    val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
+    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send && !prefetch_faraway_from_ifu
     io.toPrefetch.req.bits.target := prefetch_addr
 
     when(redirectVec.map(r => r.valid).reduce(_||_)){
