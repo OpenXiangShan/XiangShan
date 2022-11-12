@@ -30,6 +30,11 @@ import huancun.{PreferCacheKey}
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
+//TODO: remove this
+object DebugFlags {
+  val fdip = true
+}
+
 class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
   val paddr      = UInt(PAddrBits.W)
   val vSetIdx   = UInt(idxBits.W)
@@ -136,6 +141,10 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     //update replacer
     replacer.access(curr_write_ptr)
     curr_write_ptr := victim_way
+
+    if(DebugFlags.fdip){
+      printf("(%d)write into buffer, curr_write_ptr: %d, addr: 0x%x\n",GTimer(), curr_write_ptr,io.write.bits.meta.paddr)
+    }
   }
 
 
@@ -337,6 +346,22 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   p3_ready := toMissUnit.enqReq.ready || !enableBit
   p3_fire  := toMissUnit.enqReq.fire()
 
+  if (DebugFlags.fdip) {
+    when(toMissUnit.enqReq.fire()){
+      printf("PIQ enqueue:time: %d, vaddr: 0x%x, paddr: 0x%x\n",GTimer(),p3_vaddr,p3_paddr)
+    }
+    when(p1_discard) {
+      printf("[%d] discard in p1, vaddr: 0x%x\n", GTimer(),p1_vaddr)
+    }
+    when(p2_discard) {
+      printf("[%d] discard in p2, vaddr: 0x%x\n", GTimer(), p2_vaddr)
+    }
+    when(p1_discard) {
+      printf("[%d] discard in p3, vaddr: 0x%x\n", GTimer(), p3_vaddr)
+    }
+
+  }
+
 }
 
 class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefetchModule
@@ -367,6 +392,15 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   val req = Reg(new PIQReq)
   val req_idx = req.vSetIdx                     //virtual index
   val req_tag = get_phy_tag(req.paddr)           //physical tag
+
+  if(DebugFlags.fdip){
+    when(io.mem_acquire.fire()) {
+      printf("acquire_fire_(%d), time:%d, addr: 0x%x\n", id.U, GTimer(), req.paddr)
+    }
+    when(RegNext(state === s_memReadResp) && (state === s_write_back)){
+      printf("grant_done_(%d), writting back. time:%d, addr: 0x%x\n", id.U, GTimer(), req.paddr)
+    }
+  }
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 

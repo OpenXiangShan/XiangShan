@@ -981,6 +981,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
     io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send && !prefetch_faraway_from_ifu
     io.toPrefetch.req.bits.target := prefetch_addr
+    if(DebugFlags.fdip){
+      when(io.toPrefetch.req.fire()) {
+        printf("[%d]FTQ send a request to prefetch, distance of prefetch and ifu: %d, vaddr: 0x%x\n", GTimer(), distance_between_prefetch_ifu, prefetch_addr)
+      }
+    }
+
 
     when(redirectVec.map(r => r.valid).reduce(_||_)){
       val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))

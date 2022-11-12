@@ -102,6 +102,12 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
+  if(DebugFlags.fdip){
+    when(io.mem_acquire.fire()) {
+      printf("miss_(%d) time:%d addr: %x\n", id.U, GTimer(), req.vaddr)
+    }
+  }
+
   //cacheline register
   val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
   val respDataReg = Reg(Vec(refillCycles, UInt(beatBits.W)))
