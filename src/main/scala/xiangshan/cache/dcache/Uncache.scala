@@ -181,8 +181,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  def lgSize: Int = log2Up(UncacheBufferSize)
-  def idRange: Int = lgSize max 8 // Hart Id
+  def idRange: Int = 2
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -220,9 +219,114 @@ class UncacheImp(outer: Uncache)
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
+  //  Uncache Buffer is a circular queue, which contains UncacheBufferSize entries.
+  //  Description:
+  //    enqPtr: Point to an invalid (means that the entry is free) entry. 
+  //    issPtr: Point to a ready entry, the entry is ready to issue. 
+  //    deqPtr: Point to the oldest entry, which was issued but has not accepted response (used to keep order with the program order).
+  //
+  //  When outstanding disabled, only one read/write request can be accepted at a time.
+  //
+  //  Example (Enable outstanding): 
+  //    1. enqPtr: 
+  //       1) Before enqueue
+  //          enqPtr --
+  //                  |
+  //                  |
+  //                  V
+  //          +--+--+--+--+
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          +--+--+--+--+
+  //
+  //      2) After
+  //          enqPtr+1 ---
+  //                     |
+  //                     |
+  //                     V
+  //          +--+--+--+--+
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          +--+--+--+--+
+  //
+  //    2. issPtr: 
+  //      1) Before acquire
+  //          issPtr --
+  //                  |
+  //                  |
+  //                  V
+  //          +--+--+--+--+
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          +--+--+--+--+
+  //
+  //      2) After acquire
+  //          issPtr --                   issPtr+1 --
+  //                  |                             |
+  //                  |                             |
+  //                  V                             V
+  //          +--+--+--+--+       or      +--+--+--+--+
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          +--+--+--+--+               +--+--+--+--+
+  //              (load)                     (store)
+  //
+  //      3) After grant
+  //          issPtr+1 --                    issPtr --
+  //                    |                            |
+  //                    |                            |
+  //                    V                            V
+  //          +--+--+--+--+       or      +--+--+--+--+
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          +--+--+--+--+               +--+--+--+--+
+  //              (load)                     (store)
+  //
+  //
+  //   3. deqPtr: 
+  //      1) Before grant
+  //          deqPtr --
+  //                  |
+  //                  |
+  //                  V
+  //          +--+--+--+--+
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          |  |  |  |  |
+  //          +--+--+--+--+
+  //
+  //      2) After grant
+  //          deqPtr --                    deqPtr+1 --
+  //                  |                              |
+  //                  |                              |
+  //                  V                              V
+  //          +--+--+--+--+       or      +--+--+--+--+
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          +--+--+--+--+               +--+--+--+--+
+  //              (load)                     (store)
+  //
+  //      3) After response
+  //          deqPtr+1 ---                   deqPtr--
+  //                     |                          |
+  //                     |                          |
+  //                     V                          V
+  //          +--+--+--+--+       or      +--+--+--+--+
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          |  |  |  |  |               |  |  |  |  |
+  //          +--+--+--+--+               +--+--+--+--+
+  //              (load)                     (store)
+  //
   val enqPtr = RegInit(0.U.asTypeOf(new UncachePtr))
+  val issPtr = RegInit(0.U.asTypeOf(new UncachePtr))
   val deqPtr = RegInit(0.U.asTypeOf(new UncachePtr))
-  val cmtPtr = RegInit(0.U.asTypeOf(new UncachePtr))
 
   io.lsq.resp.valid := false.B
   io.lsq.resp.bits := DontCare
@@ -241,17 +345,17 @@ class UncacheImp(outer: Uncache)
     }
 
     //  Acquire
-    entry.io.select := (edge.hasData(entry.io.mem_acquire.bits) || cmtPtr === deqPtr /* Load */) && (i.U === deqPtr.value)
+    entry.io.select := (edge.hasData(entry.io.mem_acquire.bits) || issPtr === deqPtr /* Load */) && (i.U === issPtr.value)
 
     //  Grant
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits := DontCare
-    when (i.U === cmtPtr.value) {
+    when (i.U === deqPtr.value) {
       entry.io.mem_grant <> mem_grant
     }
 
     entry.io.resp.ready := false.B
-    when (i.U === cmtPtr.value) {
+    when (i.U === deqPtr.value) {
       io.lsq.resp <> entry.io.resp
     }
 
@@ -266,16 +370,16 @@ class UncacheImp(outer: Uncache)
 
     //  Dequeue
     when (mem_acquire.fire) {
-      deqPtr := Mux(edge.hasData(mem_acquire.bits), deqPtr + 1.U /* Store */, deqPtr /* Load */)
+      issPtr := Mux(edge.hasData(mem_acquire.bits), issPtr + 1.U /* Store */, issPtr /* Load */)
     } .elsewhen (mem_grant.fire && edge.hasData(mem_grant.bits) /* Load */) {
-      deqPtr := deqPtr + 1.U
+      issPtr := issPtr + 1.U
     }
 
     //  Commit
     when (mem_grant.fire) {
-      cmtPtr := Mux(edge.hasData(mem_grant.bits), cmtPtr /* Load */, cmtPtr + 1.U /* Store */)
+      deqPtr := Mux(edge.hasData(mem_grant.bits), deqPtr /* Load */, deqPtr + 1.U /* Store */)
     } .elsewhen (io.lsq.resp.fire /* Load */) {
-      cmtPtr := cmtPtr + 1.U
+      deqPtr := deqPtr + 1.U
     }
   } .otherwise {
     when (io.lsq.resp.fire) {
@@ -286,7 +390,7 @@ class UncacheImp(outer: Uncache)
   }
 
   TLArbiter.lowestFromSeq(edge, mem_acquire, entries.map(_.io.mem_acquire))
-  io.flush.empty := RegNext(cmtPtr === enqPtr)
+  io.flush.empty := RegNext(deqPtr === enqPtr)
 
   println(s"Uncahe Buffer Size: $UncacheBufferSize entries")
 
