@@ -289,8 +289,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port_hit_data
   })
 
-  val s1_ipf_hit  = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid))
-  val s1_ipf_data = fromIPF.bits.cacheline
+  val s1_ipf_hit  = ResultHoldBypass(data = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid)), valid = RegNext(s0_fire))
+  val s1_ipf_data = ResultHoldBypass(data = fromIPF.bits.cacheline, valid = RegNext(s0_fire))
 
   val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i)))
   val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), s1_hit_data(i))))
