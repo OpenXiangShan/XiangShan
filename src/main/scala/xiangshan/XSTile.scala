@@ -39,21 +39,21 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
 {
   val l1_xbar = TLXbar()
-  val mmio_xbar = TLXbar()
+//  val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = TLIdentityNode()
   val beu = LazyModule(new BusErrorUnit(
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
   ))
-  val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
-  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
+//  val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+//  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
-  val i_mmio_port = TLTempNode()
-  val d_mmio_port = TLTempNode()
+//  val i_mmio_port = TLTempNode()
+//  val d_mmio_port = TLTempNode()
 
-  busPMU := l1d_logger
-  l1_xbar :=* busPMU
+//  busPMU := l1d_logger
+//  l1_xbar :=* busPMU
 
   l2_binder match {
     case Some(binder) =>
@@ -62,10 +62,10 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
       memory_port := l1_xbar
   }
 
-  mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
-  mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
-  beu.node := TLBuffer.chainNode(3) := mmio_xbar
-  mmio_port := TLBuffer.chainNode(3) := mmio_xbar
+//  mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
+//  mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
+//  beu.node := TLBuffer.chainNode(3) := mmio_xbar
+//  mmio_port := TLBuffer.chainNode(3) := mmio_xbar
 
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
@@ -99,13 +99,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   core.debug_int_sink :*= IntBuffer() :*= debug_int_sink
   beu_int_source :*= IntBuffer() :*= misc.beu.intNode
 
+  //port merge
+  misc.l1_xbar :=* core.memBlock.busPMU
 
-
-  val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
-    val buffer = LazyModule(new TLBuffer)
-    misc.l1d_logger := buffer.node := core.memBlock.dcache.clientNode
-    buffer
-  }
+//  val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
+//    val buffer = LazyModule(new TLBuffer)
+//    misc.l1d_logger := buffer.node := core.memBlock.dcache.clientNode
+//    buffer
+//  }
 
   def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
     val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
@@ -116,20 +117,20 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     (buffers, node)
   }
 
-  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
-  misc.busPMU :=
-    TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-    l1i_to_l2_buf_node :=
-    core.frontend.icache.clientNode
-
-  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
-    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
-    misc.busPMU :=
-      TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-      buf_node :=
-      core.ptw_to_l2_buffer.node
-    buffers
-  } else Seq()
+//  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
+//  misc.busPMU :=
+//    TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+//    l1i_to_l2_buf_node :=
+//    core.frontend.icache.clientNode
+//
+//  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
+//    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
+//    misc.busPMU :=
+//      TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+//      buf_node :=
+//      core.memBlock.ptw_to_l2_buffer.node
+//    buffers
+//  } else Seq()
 
   l2cache match {
     case Some(l2) =>
@@ -141,8 +142,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case None =>
   }
 
-  misc.i_mmio_port := core.frontend.instrUncache.clientNode
-  misc.d_mmio_port := core.memBlock.uncache.clientNode
+//  misc.i_mmio_port := core.frontend.instrUncache.clientNode
+//  misc.d_mmio_port := core.memBlock.uncache.clientNode
+  misc.beu.node := TLBuffer.chainNode(3) := core.memBlock.mmio_xbar
+  misc.mmio_port := TLBuffer.chainNode(3) := core.memBlock.mmio_xbar
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
@@ -179,9 +182,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
     val resetChain = Seq(
       Seq(misc.module, core.module) ++
-        l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        l1d_to_l2_bufferOpt.map(_.module) ++
+//        l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+//        ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+//        l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
     ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)

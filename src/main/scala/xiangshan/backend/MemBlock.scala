@@ -21,8 +21,11 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import freechips.rocketchip.tilelink.{TLBuffer, TLNode, TLTempNode,TLXbar,TLIdentityNode}
 import huancun.PrefetchRecv
-import huancun.utils.{RegNextN, ValidIODelay}
+import huancun.debug.TLLogger
+import huancun.utils.{ModuleNode, RegNextN, ResetGen, ResetGenNode, ValidIODelay}
+import top.BusPerfMonitor
 import utils._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
@@ -30,7 +33,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
+import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher}
 
@@ -44,11 +47,60 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 class MemBlock()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
 
+  //for merge-port
+  val busPMU = BusPerfMonitor(enable = !p(DebugOptionsKey).FPGAPlatform)
+  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !p(DebugOptionsKey).FPGAPlatform)
+  busPMU := l1d_logger
+
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
+  val ptw = LazyModule(new PTWWrapper())
+  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
+
+  def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
+    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
+    buffers.zipWithIndex.foreach{ case (b, i) => {
+      b.suggestName(s"${n}_${i}")
+    }}
+    val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
+    (buffers, node)
+  }
+
+  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
+
+  val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
+    val buffer = LazyModule(new TLBuffer)
+    l1d_logger := buffer.node := dcache.clientNode
+    buffer
+  }
+
+  busPMU :=
+    TLLogger(s"L2_L1I_${coreParams.HartId}", !p(DebugOptionsKey).FPGAPlatform) :=
+    l1i_to_l2_buf_node
+
+  ptw_to_l2_buffer.node := ptw.node
+
+  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
+    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
+    busPMU :=
+      TLLogger(s"L2_PTW_${coreParams.HartId}", !p(DebugOptionsKey).FPGAPlatform) :=
+      buf_node :=
+      ptw_to_l2_buffer.node
+    buffers
+  } else Seq()
+
+  val mmio_xbar = TLXbar()
+
+  val i_mmio_port = TLTempNode()
+  val d_mmio_port = TLTempNode()
+
+  mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
+  mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
+
+  d_mmio_port := uncache.clientNode
 
   lazy val module = new MemBlockImp(this)
 
@@ -69,7 +121,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 {
 
   val io = IO(new Bundle {
+    //merge-port
+    val beu_errors = Output(new XSL1BusErrors())
+
     val hartId = Input(UInt(8.W))
+    val hartId_out_frontend = Output(UInt(8.W))
+    val hartId_out_backend = Output(UInt(8.W))
+
+    val cpu_halt_in = Input(Bool())
+    val cpu_halt_out = Output(Bool())
+
+    val perfEventsHc_in = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    val perfEventsHc_out = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+
     val redirect = Flipped(ValidIO(new Redirect))
     // in
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
@@ -78,6 +142,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
+    val itlb = Flipped(new TlbPtwIO)
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
@@ -85,7 +150,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(ld_tlb_ports + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -103,11 +167,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
-    val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(2.W))
   })
+
+  io.cpu_halt_out := io.cpu_halt_in
+  io.perfEventsHc_out := io.perfEventsHc_in
+  io.hartId_out_frontend := io.hartId
+  io.hartId_out_backend := io.hartId
+
+  final val reset_sink_backend: Reset   = IO(Output(reset.cloneType)).suggestName("reset_sink_backend")
+  final val reset_sink_frontend: Reset  = IO(Output(reset.cloneType)).suggestName("reset_sink_frontend")
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
@@ -189,12 +260,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.hartId := io.hartId
   atomicsUnit.io.hartId := io.hartId
 
+  // l2 tlb
+  val ptw = outer.ptw.module
+  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  ptw.io.sfence <> io.sfence
+  ptw.io.csr.tlb <> io.tlbCsr
+  ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  ptw.io.tlb(0) <> io.itlb
+
   // dtlb
   val total_tlb_ports = ld_tlb_ports + exuParameters.StuCnt
   val NUMSfenceDup = 3
   val NUMTlbCsrDup = 8
   val sfence_dup = Seq.fill(NUMSfenceDup)(RegNext(io.sfence))
   val tlbcsr_dup = Seq.fill(NUMTlbCsrDup)(RegNext(io.tlbCsr))
+  val ptwio = Wire(new BTlbPtwIO(ld_tlb_ports + exuParameters.StuCnt))
 
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLB(ld_tlb_ports, 2, ldtlbParams))
@@ -214,33 +294,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace)
 
     val replace = Module(new TlbReplace(total_tlb_ports, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(ld_tlb_ports, ldtlbParams))
-      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-      replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
   }
 
-  val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
+  val ptw_resp_next = RegEnable(ptwio.resp.bits, ptwio.resp.valid)
   val ptw_resp_v = RegNext(
-    io.ptw.resp.valid && !(RegNext(sfence_dup.last.valid && tlbcsr_dup.last.satp.changed)),
+    ptwio.resp.valid && !(RegNext(sfence_dup.last.valid && tlbcsr_dup.last.satp.changed)),
     init = false.B
   )
-  io.ptw.resp.ready := true.B
+  ptwio.resp.ready := true.B
 
   dtlb.flatMap(a => a.ptw.req)
     .zipWithIndex
-    .foreach{ case (tlb, i) =>
-    tlb <> io.ptw.req(i)
+    .foreach{ case (tlb, i) => {
+      tlb.ready := ptwio.req(i).ready
+      ptwio.req(i).bits := tlb.bits
+    }
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < ld_tlb_ports) Cat(ptw_resp_next.vector.take(ld_tlb_ports)).orR
       else Cat(ptw_resp_next.vector.drop(ld_tlb_ports)).orR
-    io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
+    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.entry.hit(tlb.bits.vpn, RegNext(tlbcsr_dup(i).satp.asid), allType = true, ignoreAsid = true))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
@@ -251,6 +333,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(ld_tlb_ports)).orR)
   }
 
+  val dtlbRepeater1  = PTWFilter(ptwio, io.sfence, io.tlbCsr, l2tlbParams.filterSize)
+  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, dtlbRepeater1.io.ptw, ptw.io.tlb(1), io.sfence, io.tlbCsr)
+
+  val perfEventsPTW = Wire(Vec(19, new PerfEvent))
+  perfEventsPTW := ptw.getPerf
 
   // pmp
   val pmp = Module(new PMP())
@@ -267,8 +354,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
   pmp_check_ptw.io.apply(
     tlbcsr_pmp.last.priv.dmode,
-    pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
-    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt
+    pmp.io.pmp, pmp.io.pma, ptwio.resp.valid,
+    Cat(ptwio.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt
   )
   dtlb.foreach(_.ptw_replenish := pmp_check_ptw.io.resp)
 
@@ -647,7 +734,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   )
 
   val perfFromUnits = (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
-  val perfFromIO    = io.perfEventsPTW.map(x => ("perfEventsPTW", x.value))
+  val perfFromIO    = perfEventsPTW.map(x => ("perfEventsPTW", x.value))
   val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
                           ("stDeqCount", stDeqCount))
   // let index = 0 be no event
@@ -662,4 +749,26 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
+
+  val (backend_rst_agent, frontend_rst_agent, mem_block_agent) = (Module(new ResetAgent), Module(new ResetAgent),Module(new ResetAgent))
+
+  // Modules are reset one by one
+  val resetTree = ResetGenNode(
+        Seq(
+          ModuleNode(mem_block_agent),  //skip match
+          ResetGenNode(Seq(
+            ModuleNode(backend_rst_agent),
+            ResetGenNode(Seq(
+              ResetGenNode(Seq(
+                ModuleNode(frontend_rst_agent)
+              ))
+            ))
+          ))
+        )
+      )
+
+  reset_sink_frontend := frontend_rst_agent.reset
+  reset_sink_backend  := backend_rst_agent.reset
+
+  ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
 }

@@ -43,7 +43,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val hartId = Input(UInt(8.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
-    val ptw = new TlbPtwIO(6)
+    val ptw = new TlbPtwIO
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -112,7 +112,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   // ifu.io.iTLBInter.resp  <> itlb_requestors(1).resp
   // icache.io.itlb(1).resp <> itlb_requestors(1).resp
 
-  io.ptw <> TLB(
+  val ptw = Wire(new TlbPtwIO(6))
+  ptw <> TLB(
     //in = Seq(icache.io.itlb(0), icache.io.itlb(1)),
     in = Seq(itlb_requestors(0),itlb_requestors(1),itlb_requestors(2),itlb_requestors(3),itlb_requestors(4),itlb_requestors(5)),
     sfence = DelayN(io.sfence, 1),
@@ -122,6 +123,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     shouldBlock = true,
     itlbParams
   )
+
+  val itlbRepeater1 = PTWRepeater(ptw, io.sfence, io.tlbCsr)
+  val itlbRepeater2 = PTWRepeater(itlbRepeater1.io.ptw, io.ptw, io.sfence, io.tlbCsr)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
