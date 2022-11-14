@@ -85,6 +85,43 @@ class LqTriggerIO(implicit p: Parameters) extends XSBundle {
   val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
 }
 
+class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
+  val enq = new LqEnqIO
+  val brqRedirect = Flipped(ValidIO(new Redirect))
+  val rsLoadIn = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // load issued from rs
+  val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) // select load from rs or lq to load pipeline 
+  val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
+  val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
+  val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
+  val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+  val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
+  val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
+  val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
+  val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
+  val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+  val ldRawDataOut = Vec(2, Output(new LoadDataFromLQBundle))
+  val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
+  val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
+  val rob = Flipped(new RobLsqIO)
+  val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
+  val dcache = Flipped(ValidIO(new Refill)) // TODO: to be renamed
+  val release = Flipped(ValidIO(new Release))
+  val uncache = new UncacheWordIO
+  val exceptionAddr = new ExceptionAddrIO
+  val lqFull = Output(Bool())
+  val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
+  val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+
+  // for load replay (recieve feedback from load pipe line)
+  val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
+  val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
+
+  val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
+
+  // TODO : remove this 
+  val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
+}
+
 // Load Queue
 class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -92,41 +129,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
 {
-  val io = IO(new Bundle() {
-    val enq = new LqEnqIO
-    val brqRedirect = Flipped(ValidIO(new Redirect))
-    val rsLoadIn = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // load issued from rs
-    val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) // select load from rs or lq to load pipeline 
-    val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
-    val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
-    val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
-    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
-    val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
-    val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
-    val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
-    val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
-    val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
-    val rob = Flipped(new RobLsqIO)
-    val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-    val refill = Flipped(ValidIO(new Refill))
-    val release = Flipped(ValidIO(new Release))
-    val uncache = new UncacheWordIO
-    val exceptionAddr = new ExceptionAddrIO
-    val lqFull = Output(Bool())
-    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+  val io = IO(new LoadQueueIOBundle())
 
-    // for load replay (recieve feedback from load pipe line)
-    val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
-    val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
-
-    val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
-
-    val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
-  })
+  // dontTouch(io)
 
   println("LoadQueue: size:" + LoadQueueSize)
 
@@ -533,6 +538,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         // try to replay this load in next cycle
         s1_block_load_mask(idx) := false.B
         s2_block_load_mask(idx) := false.B
+
+        when(idx(0) === 0.U) {
+          loadReplaySelGen(0) := idx
+          loadReplaySelVGen(0) := true.B
+        }.otherwise {
+          loadReplaySelGen(1) := idx
+          loadReplaySelVGen(1) := true.B
+        }
       }
     }
 
