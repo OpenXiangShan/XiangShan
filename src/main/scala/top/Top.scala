@@ -128,10 +128,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(AsyncReset())
-      val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
-      val pll0_lock = Input(Bool())
-      val pll0_ctrl = Output(Vec(6, UInt(32.W)))
       val systemjtag = new Bundle {
         val jtag = Flipped(new JTAGIO(hasTRSTn = false))
         val reset = Input(AsyncReset()) // No reset allowed on top
@@ -168,10 +165,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
-    misc.module.pll0_lock := io.pll0_lock
     misc.module.cacheable_check <> io.cacheable_check
-
-    io.pll0_ctrl <> misc.module.pll0_ctrl
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.moduleInstance.io.hartId := i.U

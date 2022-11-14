@@ -53,8 +53,6 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.clock := clock.asBool
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
-  soc.io.sram_config := 0.U
-  soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
   soc.scan_mode := false.B
   soc.dft_lgc_rst_n := true.B.asAsyncReset

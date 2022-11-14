@@ -270,14 +270,6 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   plic.intnode := plicSource.sourceNode
   plic.node := peripheralXbar
 
-  val pll_node = TLRegisterNode(
-    address = Seq(AddressSet(0x3a000000L, 0xfff)),
-    device = new SimpleDevice("pll_ctrl", Seq()),
-    beatBytes = 8,
-    concurrency = 1
-  )
-  pll_node := peripheralXbar
-
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
@@ -293,8 +285,6 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    val pll0_lock = IO(Input(Bool()))
-    val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
 
     debugModule.module.io <> debug_module_io
@@ -314,25 +304,5 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val tick = cnt === 0.U
     cnt := Mux(tick, (freq - 1).U, cnt - 1.U)
     clint.module.io.rtcTick := tick
-
-    val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
-    val pll_lock = RegNext(next = pll0_lock, init = false.B)
-
-    pll0_ctrl <> VecInit(pll_ctrl_regs)
-
-    pll_node.regmap(
-      0x000 -> RegFieldGroup(
-        "Pll", Some("PLL ctrl regs"),
-        pll_ctrl_regs.zipWithIndex.map{
-          case (r, i) => RegField(32, r, RegFieldDesc(
-            s"PLL_ctrl_$i",
-            desc = s"PLL ctrl register #$i"
-          ))
-        } :+ RegField.r(32, Cat(0.U(31.W), pll_lock), RegFieldDesc(
-          "PLL_lock",
-          "PLL lock register"
-        ))
-      )
-    )
   }
 }

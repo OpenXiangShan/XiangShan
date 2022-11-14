@@ -281,10 +281,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           )
         },
         enablePerf = true,
-        ctrl = Some(CacheCtrl(
-          address = 0x39000000,
-          numCores = tiles.size
-        )),
+        ctrl = None,
         sramClkDivBy2 = true,
         sramDepthDiv = 4,
         tagECC = None,
