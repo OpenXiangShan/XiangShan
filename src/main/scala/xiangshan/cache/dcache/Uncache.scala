@@ -384,8 +384,8 @@ class UncacheImp(outer: Uncache)
   } .otherwise {
     when (io.lsq.resp.fire) {
       enqPtr := enqPtr + 1.U
+      issPtr := issPtr + 1.U
       deqPtr := deqPtr + 1.U
-      cmtPtr := cmtPtr + 1.U
     }
   }
 
@@ -414,11 +414,11 @@ class UncacheImp(outer: Uncache)
   def isStore: Bool = io.lsq.req.bits.cmd === MemoryOpConstants.M_XWR
   XSPerfAccumulate("mmio_store", io.lsq.req.fire && isStore)
   XSPerfAccumulate("mmio_load", io.lsq.req.fire && !isStore)
-  XSPerfAccumulate("mmio_outstanding", mem_acquire.fire && (cmtPtr =/= deqPtr))
+  XSPerfAccumulate("mmio_outstanding", mem_acquire.fire && (deqPtr =/= issPtr))
   val perfEvents = Seq(
     ("mmio_store", io.lsq.req.fire && isStore),
     ("mmio_load", io.lsq.req.fire && !isStore),
-    ("mmio_outstanding", mem_acquire.fire && (cmtPtr =/= deqPtr))
+    ("mmio_outstanding", mem_acquire.fire && (deqPtr =/= issPtr))
   )
 
   generatePerfEvent()
