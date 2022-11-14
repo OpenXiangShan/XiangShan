@@ -508,7 +508,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // rob to int block
   io.robio.toCSR <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
-  rob.io.csr.wfiEvent := io.robio.toCSR.wfiEvent || !decode.io.csrCtrl.wfi_enable
+  rob.io.csr.wfiEvent := io.robio.toCSR.wfiEvent
+  rob.io.wfi_enable := decode.io.csrCtrl.wfi_enable
   io.robio.toCSR.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.uop.cf.pc := flushPC
