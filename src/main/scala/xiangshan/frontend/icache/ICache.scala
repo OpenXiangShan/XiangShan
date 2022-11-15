@@ -75,6 +75,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val ICacheSameVPAddrLength = 12
   val ReplaceIdWid = 5
 
+  val missUnitIDStart      = 0
+  val iprefetchUnitIDStart = missUnitIDStart + PortNumber
+  val releaseUnitIDStart   = iprefetchUnitIDStart + cacheParams.nPrefetchEntries
+
   val ICacheWordOffset = 0
   val ICacheSetOffset = ICacheWordOffset + log2Up(blockBytes)
   val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
@@ -461,14 +465,13 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries),
+      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries + cacheParams.nPrefetchEntries),
       supportsProbe = TransferSizes(blockBytes),
       supportsHint = TransferSizes(blockBytes)
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields
   )
-
   val clientNode = TLClientNode(Seq(clientParameters))
 
   lazy val module = new ICacheImp(this)
