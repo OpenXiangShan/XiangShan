@@ -301,6 +301,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val entry = Module(new ICacheMissEntry(edge, i))
 
     entry.io.id := i.U
+    println(s"miss entry ID: ${i}")
 
     // entry req
     entry.io.req.valid := io.req(i).valid
@@ -339,7 +340,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   val alloc = Wire(UInt(log2Ceil(nPrefetchEntries).W))
 
-  val prefEntries = (PortNumber until PortNumber + nPrefetchEntries) map { i =>
+  val prefEntries = (iprefetchUnitIDStart until iprefetchUnitIDStart + nPrefetchEntries) map { i =>
     val prefetchEntry = Module(new IPrefetchEntry(edge, PortNumber))
 
     prefetchEntry.io.mem_hint_ack.valid := false.B
@@ -353,6 +354,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     prefetchEntry.io.req.bits  := io.prefetch_req.bits
 
     prefetchEntry.io.id := i.U
+    println(s"prefetch entry ID: ${i}")
 
     prefetchEntry
   }
