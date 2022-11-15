@@ -20,10 +20,12 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan._
 
 case class MulRSParams()
 
 class MulRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.exuCfg = Some(MulDivExeUnitCfg)
   override lazy val module = new MulRSImp(params, this)
 }
 

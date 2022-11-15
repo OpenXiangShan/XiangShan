@@ -226,10 +226,9 @@ class Scheduler(
   }
   val numSTDPorts: Int = reservationStations.filter(_.params.exuCfg.get == StdExeUnitCfg).map(_.params.numDeq).sum
 
-  val numDpPortIntRead: Seq[Int] = dpPorts.map(_.map(_.rsIdx).map(configs(_).exuConfig.intSrcCnt).max)
-  val numIntRfReadPorts: Int = numDpPortIntRead.sum + outIntRfReadPorts
-  val numDpPortFpRead: Seq[Int] = dpPorts.map(_.map(_.rsIdx).map(configs(_).exuConfig.fpSrcCnt).max)
-  val numFpRfReadPorts: Int = numDpPortFpRead.sum + outFpRfReadPorts
+  val numIntRfReadPorts: Int = reservationStations.map(p => (p.params.numDeq) * p.numIntRfPorts).sum + outIntRfReadPorts
+
+  val numFpRfReadPorts: Int = reservationStations.map(p => (p.params.numDeq) * p.numFpRfPorts).sum + outFpRfReadPorts
 
   lazy val module = new SchedulerImp(this)
 
@@ -393,13 +392,16 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   } else None
   val allocate = dispatch2.flatMap(_.io.out)
 
-  // extract each dispatch-rs port's psrc
-  def extractReadRf(numRead: Seq[Int]): Seq[UInt] = {
-    require(numRead.length == allocate.length)
-    allocate.map(_.bits.psrc).zip(numRead).flatMap{ case (src, num) => src.take(num) }
+  def extractReadRf(isInt: Boolean): Seq[UInt] = {
+    if (isInt) {
+      rs_all.flatMap(_.module.readIntRf_asyn).map(_.addr)
+    }
+    else {
+      rs_all.flatMap(_.module.readFpRf_asyn).map(_.addr)
+    }
   }
-  def readIntRf: Seq[UInt] = extractReadRf(outer.numDpPortIntRead) ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
-  def readFpRf: Seq[UInt] = extractReadRf(outer.numDpPortFpRead) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
+  def readIntRf: Seq[UInt] = extractReadRf(true) ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
+  def readFpRf: Seq[UInt] = extractReadRf(false) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
 
   def genRegfile(isInt: Boolean): Seq[UInt] = {
     val wbPorts = if (isInt) io.writebackInt else io.writebackFp
@@ -419,8 +421,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
-  val intRfReadData = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
-  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data))
+  val intRfReadData_asyn = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
+  val fpRfReadData_asyn = if (fpRfConfig._1) genRegfile(false) else VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data))
+
+  if(intRfReadData_asyn.length>0)
+    rs_all.flatMap(_.module.readIntRf_asyn.map(_.data)).zip(intRfReadData_asyn).foreach{ case (a, b) => a := b}
+  if(fpRfReadData_asyn.length>0)
+    rs_all.flatMap(_.module.readFpRf_asyn).map(_.data).zip(fpRfReadData_asyn).foreach{ case (a, b) => a := b}
 
   if (io.extra.intRfReadIn.isDefined) {
     io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
@@ -434,13 +441,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.intRfReadOut.isDefined) {
-    val extraIntReadData = intRfReadData.dropRight(32).takeRight(outer.outIntRfReadPorts)
+    val extraIntReadData = intRfReadData_asyn.dropRight(32).takeRight(outer.outIntRfReadPorts)
     io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
     require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
   }
 
   if (io.extra.fpRfReadOut.isDefined) {
-    val extraFpReadData = fpRfReadData.dropRight(32).takeRight(outer.outFpRfReadPorts)
+    val extraFpReadData = fpRfReadData_asyn.dropRight(32).takeRight(outer.outFpRfReadPorts)
     io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
     require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
   }
@@ -514,8 +521,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     io.extra.loadFastImm.get := allLoadRS.map(_.map(_.fastImm)).fold(Seq())(_ ++ _)
   }
 
-  var intReadPort = 0
-  var fpReadPort = 0
   for ((dp, i) <- outer.dpPorts.zipWithIndex) {
     // dp connects only one rs: don't use arbiter
     if (dp.length == 1) {
@@ -529,54 +534,24 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rsIn <> arbiterOut
     }
 
-    val numIntRfPorts = dp.map(_.rsIdx).map(rs_all(_).intSrcCnt).max
-    if (numIntRfPorts > 0) {
-      val intRfPorts = VecInit(intRfReadData.slice(intReadPort, intReadPort + numIntRfPorts))
-      for (m <- dp) {
-        val target = rs_all(m.rsIdx).module.io.srcRegValue(m.dpIdx)
-        target := intRfPorts.take(target.length)
-      }
-      intReadPort += numIntRfPorts
-    }
 
-    val numFpRfPorts = dp.map(_.rsIdx).map(rs_all(_).fpSrcCnt).max
-    if (numFpRfPorts > 0) {
-      val fpRfPorts = VecInit(fpRfReadData.slice(fpReadPort, fpReadPort + numFpRfPorts))
-      for (m <- dp) {
-        val rs_mod = rs_all(m.rsIdx).module
-        if (numIntRfPorts > 0) {
-          require(numFpRfPorts == 1 && numIntRfPorts == 1)
-          // dirty code for store
-          rs_mod.extra.fpRegValue(m.dpIdx) := fpRfPorts.head
-        }
-        else {
-          val target = rs_mod.io.srcRegValue(m.dpIdx)
-          val isFp = RegNext(rs_mod.io.fromDispatch(m.dpIdx).bits.ctrl.srcType(0) === SrcType.fp)
-          val fromFp = if (numIntRfPorts > 0) isFp else false.B
-          when (fromFp) {
-            target := fpRfPorts.take(target.length)
-          }
-        }
-      }
-      fpReadPort += numFpRfPorts
-    }
   }
 
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData.takeRight(32))))
+    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData_asyn.takeRight(32))))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
-    val fpReg = fpRfReadData.takeRight(64).take(32)
+    val fpReg = fpRfReadData_asyn.takeRight(64).take(32)
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
     difftest.io.fpr.zip(fpReg).map(r => r._1 := RegNext(RegNext(r._2(XLEN-1, 0))))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
-    val vecReg = fpRfReadData.takeRight(32)
+    val vecReg = fpRfReadData_asyn.takeRight(32)
     val difftest = Module(new DifftestArchVecRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId

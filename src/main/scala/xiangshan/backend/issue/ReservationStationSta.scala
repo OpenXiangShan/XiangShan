@@ -20,11 +20,13 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan._
 
 case class StaRSParams()
 
 class StaRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
   params.needScheduledBit = true
+  params.exuCfg = Some(StaExeUnitCfg)
   override lazy val module = new StaRSImp(params, this)
 }
 

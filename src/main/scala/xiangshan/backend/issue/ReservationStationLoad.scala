@@ -21,11 +21,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import xiangshan._
 
 case class LoadRSParams()
 
 class LoadRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
   params.needScheduledBit = true
+  params.exuCfg = Some(LdExeUnitCfg)
+
   override lazy val module = new LoadRSImp(params, this)
 }
 

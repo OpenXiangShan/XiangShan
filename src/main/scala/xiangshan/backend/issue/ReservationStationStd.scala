@@ -20,22 +20,24 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan._
 
 case class StdRSParams()
 
 class StdRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.exuCfg = Some(StdExeUnitCfg)
   override lazy val module = new StdRSImp(params, this)
 }
 
 class StdRSImp(params: RSParams, wrapper: StdRSWrapper) extends BaseReservationStationImp(params, wrapper) {
-  extra.fpRegValue <> rs.flatMap(_.extra.fpRegValue)
+  // extra.fpRegValue <> rs.flatMap(_.extra.fpRegValue)
 }
 
 class StdRS(params: RSParams)(implicit p: Parameters) extends BaseReservationStation(params)
   with RSDropNotOnRedirect {
-  for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_dispatchUops_dup.head).zipWithIndex) {
-    when (uop.bits.needRfRPort(0, true, false)) {
-      s1_enqRfDataSel(i)(0) := enqReverse(extra.fpRegValue)(i)
+  for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_payloadUops).zipWithIndex) {
+    when (uop.needRfRPort(0, true, false)) {
+      s1_deqRfDataSel(i)(0) := enqReverse(readFpRf_asyn)(i).data
     }
   }
 }

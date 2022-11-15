@@ -277,7 +277,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
 
-
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
   val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
 

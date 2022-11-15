@@ -22,15 +22,15 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import xiangshan._
 
-class RfReadPort(len: Int, width: Int)(implicit p: Parameters) extends XSBundle {
-  val addr = Input(UInt(width.W))
-  val data = Output(UInt(len.W))
+class RfReadPort(dataWidth: Int, addrWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val addr = Input(UInt(addrWidth.W))
+  val data = Output(UInt(dataWidth.W))
 }
 
-class RfWritePort(len: Int, width: Int)(implicit p: Parameters) extends XSBundle {
+class RfWritePort(dataWidth: Int, addrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val wen = Input(Bool())
-  val addr = Input(UInt(width.W))
-  val data = Input(UInt(len.W))
+  val addr = Input(UInt(addrWidth.W))
+  val data = Input(UInt(dataWidth.W))
 }
 
 class Regfile
@@ -53,7 +53,7 @@ class Regfile
   val mem = Reg(Vec(NRPhyRegs, UInt(len.W)))
   for (r <- io.readPorts) {
     val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
-    r.data := RegNext(rdata)
+    r.data := rdata
   }
   for (w <- io.writePorts) {
     when(w.wen) {
