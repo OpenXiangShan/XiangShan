@@ -35,7 +35,17 @@ class ExuBlock(
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource with HasExuWbHelper {
-  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
+  val scheduler = LazyModule(new Scheduler(
+    configs           = configs, 
+    dpPorts           = dpPorts, 
+    intRfWbPorts      = intRfWbPorts, 
+    fpRfWbPorts       = fpRfWbPorts, 
+    outFastPorts      = outFastPorts, 
+    outIntRfReadPorts = outIntRfReadPorts, 
+    outFpRfReadPorts  = outFpRfReadPorts, 
+    hasIntRf          = hasIntRf, 
+    hasFpRf           = hasFpRf
+    ))
 
   val allRfWbPorts: Seq[Seq[ExuConfig]] = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)

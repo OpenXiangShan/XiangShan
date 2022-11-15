@@ -20,10 +20,13 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan._
 
 case class FMiscRSParams()
 
 class FMiscRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.exuCfg = Some(FmiscExeUnitCfg)
+  
   override lazy val module = new FMiscRSImp(params, this)
 }
 

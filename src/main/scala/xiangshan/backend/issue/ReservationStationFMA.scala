@@ -21,11 +21,13 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import xiangshan._
 
 case class FMARSParams()
 
 class FMARSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
   params.needScheduledBit = true
+  params.exuCfg = Some(FmacExeUnitCfg)
 
   override lazy val module = new FMARSImp(params, this)
 }

@@ -26,6 +26,7 @@ case class JumpRSParams()
 
 class JumpRSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
   params.numSrc = 2
+  params.exuCfg = Some(JumpCSRExeUnitCfg)
   override lazy val module = new JumpRSImp(params, this)
 }
 
@@ -35,17 +36,15 @@ class JumpRSImp(params: RSParams, wrapper: JumpRSWrapper) extends BaseReservatio
 
 class JumpRS(params: RSParams)(implicit p: Parameters) extends BaseReservationStation(params) {
 
-  immExts.map { immExt =>
-    immExt.jump_pc := extra.jump.jumpPc
-    immExt.jalr_target := extra.jump.jalr_target
-  }
 
   // special case for jump's pc
   val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
+  val jalrMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
   for (i <- 0 until params.numEntries) {
-    val writeEn = VecInit(dataArray.io.write.map(w => w.enable && w.addr(i))).asUInt.orR
+    val writeEn = VecInit(dataArrayWrite.map(w => w.enable && w.addr(i))).asUInt.orR
     when (writeEn) {
       pcMem(i) := extra.jump.jumpPc
+      jalrMem(i) := extra.jump.jalr_target
     }
   }
   for (i <- 0 until params.numDeq) {
@@ -56,5 +55,14 @@ class JumpRS(params: RSParams)(implicit p: Parameters) extends BaseReservationSt
     val pcRead = Mux(s1_issue_oldest(i), oldestPc, issuePc)
     val pcBypass = Mux(s1_select_bypass_s0.asUInt.orR, extra.jump.jumpPc, pcRead)
     io.deq(i).bits.uop.cf.pc := RegEnable(pcBypass, s1_out_fire(i))
+    immExts(i).jump_pc := pcBypass
+  }
+  for (i <- 0 until params.numDeq) {
+    require(params.numDeq == 1, "only one jump now")
+    val oldestJalr = Mux1H(s1_in_oldestPtrOH.bits, jalrMem)
+    val issueJalr = Mux1H(s1_in_selectPtrOH(i), jalrMem)
+    val jalrRead = Mux(s1_issue_oldest(i), oldestJalr, issueJalr)
+    val jalrBypass = Mux(s1_select_bypass_s0.asUInt.orR, extra.jump.jalr_target, jalrRead)
+    immExts(i).jalr_target := jalrBypass
   }
 }

@@ -271,10 +271,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
-  pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
+  pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)                          // Ftq_RF_Components: startAddr nextLineAddr isNextMask fallThruError
   jalrTargetMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   jalrTargetMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
-  jalrTargetMem.io.wdata.head := RegNext(io.frontend.fromFtq.target)
+  jalrTargetMem.io.wdata.head := RegNext(io.frontend.fromFtq.target)                        // UInt(VAddrBits.W)
   jalrTargetMem.io.wen.tail.head   := RegNext(io.frontend.fromFtq.pd_redirect_waddr.valid)
   jalrTargetMem.io.waddr.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_waddr.bits)
   jalrTargetMem.io.wdata.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_target)

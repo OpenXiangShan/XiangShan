@@ -35,7 +35,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
-  val deqNext = Vec(deqnum, Output(new MicroOp))
+  val deqNext = Vec(deqnum, Output(new MicroOp))  // deqNext >> deq
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle

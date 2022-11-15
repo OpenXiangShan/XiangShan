@@ -20,10 +20,13 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan._
 
 case class ALURSParams()
 
 class ALURSWrapper(modGen: RSMod)(implicit p: Parameters) extends BaseReservationStationWrapper(modGen) {
+  params.exuCfg = Some(AluExeUnitCfg)
+
   override lazy val module = new ALURSImp(params, this)
 }
 
