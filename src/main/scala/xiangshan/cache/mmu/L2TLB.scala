@@ -28,6 +28,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import huancun.mbist.MBISTPipeline
 import huancun.mbist.MBISTPipeline.placePipelines
+import huancun.PreferCacheKey
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -244,6 +245,7 @@ class PTWImp(parentName: String = "Unknown", outer: PTW)(implicit p: Parameters)
   )._2
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.bits.user.lift(PreferCacheKey).foreach(_ := RegNext(io.csr.prefercache, true.B))
   mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
