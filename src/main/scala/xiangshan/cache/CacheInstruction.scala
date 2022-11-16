@@ -154,7 +154,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val data_transfer_cnt = RegInit(0.U(log2Up(maxDataRowSupport).W))
 
   // Translate CSR write to cache op
-  val translated_cache_req = Reg(new CacheCtrlReqInfo)
+  val translated_cache_req                  = RegInit(0.U.asTypeOf(new CacheCtrlReqInfo))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {

@@ -418,28 +418,25 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val fallThruAddr = getFallThroughAddr(s2_pc, ftb_entry.carry, ftb_entry.pftAddr)
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  io.out.resp.s2.full_pred.hit       := s2_hit
-  io.out.resp.s2.pc                  := s2_pc
-  io.out.resp.s2.ftb_entry           := ftb_entry
-  io.out.resp.s2.full_pred.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
-  io.out.resp.s2.is_minimal := false.B
+  io.out.s2.full_pred.hit       := s2_hit
+  io.out.s2.pc                  := s2_pc
+  io.out.s2.full_pred.fromFtbEntry(ftb_entry, s2_pc, Some((s1_pc, io.s1_fire)))
 
-  io.out.resp.s3.full_pred.hit := s3_hit
-  io.out.resp.s3.pc                  := s3_pc
-  io.out.resp.s3.ftb_entry           := s3_ftb_entry
-  io.out.resp.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
-  io.out.resp.s3.is_minimal := false.B
+  io.out.s3.full_pred.hit := s3_hit
+  io.out.s3.pc                  := s3_pc
+  io.out.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
 
+  io.out.last_stage_ftb_entry := s3_ftb_entry
   io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 
   // always taken logic
   for (i <- 0 until numBr) {
-    io.out.resp.s2.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s2.full_pred.br_taken_mask(i) || s2_hit && ftb_entry.always_taken(i)
-    io.out.resp.s3.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s3.full_pred.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
+    io.out.s2.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s2.full_pred.br_taken_mask(i) || s2_hit && ftb_entry.always_taken(i)
+    io.out.s3.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s3.full_pred.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
   }
 
   // Update logic
@@ -479,8 +476,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
   XSDebug("s2_br_taken_mask=%b, s2_real_taken_mask=%b\n",
-    io.in.bits.resp_in(0).s2.full_pred.br_taken_mask.asUInt, io.out.resp.s2.full_pred.real_slot_taken_mask().asUInt)
-  XSDebug("s2_target=%x\n", io.out.resp.s2.getTarget)
+    io.in.bits.resp_in(0).s2.full_pred.br_taken_mask.asUInt, io.out.s2.full_pred.real_slot_taken_mask().asUInt)
+  XSDebug("s2_target=%x\n", io.out.s2.getTarget)
 
   ftb_entry.display(true.B)
 

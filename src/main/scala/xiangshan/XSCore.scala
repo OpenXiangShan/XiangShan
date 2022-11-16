@@ -33,11 +33,9 @@ import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters {
-  def io: Record
-}
+  with HasFPUParameters
 
 //remove this trait after impl module logic
 trait NeedImpl {

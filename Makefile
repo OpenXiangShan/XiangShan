@@ -34,8 +34,8 @@ SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-
 # select firrtl compiler
 ifeq ($(MFC),1)
 override FC_ARGS = --mfc
-override FPGA_MEM_ARGS =
-override SIM_MEM_ARGS =
+override FPGA_MEM_ARGS = --infer-rw
+override SIM_MEM_ARGS = --infer-rw
 endif
 
 

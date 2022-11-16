@@ -68,7 +68,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val io = IO(new SCTableIO(ctrBits))
 
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false, bypassWrite=true))
 
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
@@ -307,20 +307,20 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           s2_agree(w) := s2_tageTakens(w) === pred
           s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
-          // io.out.resp.s2.full_pred.br_taken_mask(w) := pred
+          // io.out.s2.full_pred.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
 
       when (io.ctrl.sc_enable) {
-        io.out.resp.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
+        io.out.s3.full_pred.br_taken_mask(w) := RegEnable(s2_pred, io.s2_fire)
       }
   
       val updateTageMeta = updateMeta
       when (updateValids(w) && updateSCMeta.scUsed(w)) {
         val scPred = updateSCMeta.scPreds(w)
         val tagePred = updateSCMeta.tageTakens(w)
-        val taken = update.full_pred.br_taken_mask(w)
+        val taken = update.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs(w)
         val pvdrCtr = updateTageMeta.providerResps(w).ctr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
