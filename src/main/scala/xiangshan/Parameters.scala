@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -60,7 +60,7 @@ case class XSCoreParameters
   EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
-  EnableUBTB: Boolean = true,
+  EnableFauFTB: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -97,20 +97,12 @@ case class XSCoreParameters
   numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
-      // val loop = Module(new LoopPredictor)
-      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
-      //                             else          Module(new Tage) }
-      //             else          { Module(new FakeTage) })
       val ftb = Module(new FTB()(p))
-      val ubtb = Module(new MicroBTB()(p))
+      val ubtb =Module(new FauFTB()(p))
       // val bim = Module(new BIM()(p))
       val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
-      // val tage = Module(new Tage()(p))
-      // val fake = Module(new FakePredictor()(p))
-
-      // val preds = Seq(loop, tage, btb, ubtb, bim)
       val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
@@ -120,12 +112,12 @@ case class XSCoreParameters
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
       ubtb.io.in.bits.resp_in(0) := resp_in
-      tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
-      ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
-      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
+      tage.io.in.bits.resp_in(0) := ubtb.io.out
+      ftb.io.in.bits.resp_in(0)  := tage.io.out
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out
+      ras.io.in.bits.resp_in(0) := ittage.io.out
 
-      (preds, ras.io.out.resp)
+      (preds, ras.io.out)
     }),
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
@@ -309,6 +301,7 @@ trait HasXSParameter {
   val EnableGHistDiff = coreParams.EnableGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
+  val EnableFauFTB = coreParams.EnableFauFTB
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
