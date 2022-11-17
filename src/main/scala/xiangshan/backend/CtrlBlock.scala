@@ -53,6 +53,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
+    val isMisspreRedirect = Output(Bool())
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -95,6 +96,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
   val oldestExuOutput = Mux1H(io.exuMispredict.indices.map(oldestOneHot), io.exuMispredict)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
+  io.isMisspreRedirect := VecInit(io.exuMispredict.map(x => getRedirect(x).valid)).asUInt.orR
   io.redirectPcRead.ptr := oldestRedirect.bits.ftqIdx
   io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
 
@@ -349,6 +351,39 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pendingRedirect := true.B
   }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
     pendingRedirect := false.B
+  }
+
+  if (env.EnableTopDown) {
+    val stage2Redirect_valid_when_pending = pendingRedirect && stage2Redirect.valid
+
+    val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
+    val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
+    val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
+    val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
+    
+    when(redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
+    when(flushRedirect.valid)              { RobFlushPending := true.B }
+    when(redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
+    
+    when (RegNext(io.frontend.toFtq.redirect.valid)) {
+      when(pendingRedirect) {                             stage2_redirect_cycles := true.B }
+      when(MissPredPending) { MissPredPending := false.B; branch_resteers_cycles := true.B }
+      when(RobFlushPending) { RobFlushPending := false.B; robFlush_bubble_cycles := true.B }
+      when(LdReplayPending) { LdReplayPending := false.B; ldReplay_bubble_cycles := true.B }
+    }
+
+    when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
+      when(stage2_redirect_cycles) { stage2_redirect_cycles := false.B }
+      when(branch_resteers_cycles) { branch_resteers_cycles := false.B }
+      when(robFlush_bubble_cycles) { robFlush_bubble_cycles := false.B }
+      when(ldReplay_bubble_cycles) { ldReplay_bubble_cycles := false.B }
+    }
+
+    XSPerfAccumulate("stage2_redirect_cycles", stage2_redirect_cycles)
+    XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
+    XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
+    XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
+    XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
   }
 
   decode.io.in <> io.frontend.cfVec
