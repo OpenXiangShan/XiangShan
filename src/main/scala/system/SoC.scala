@@ -25,12 +25,12 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{FastToSlow, SlowToFast}
+import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, FastToSlow, SlowToFast}
 import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
 import huancun.debug.TLLogger
-import huancun.utils.{PulseClockSync3, DFTResetGen, ResetGen}
+import huancun.utils.{DFTResetGen, ResetGen}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 
@@ -368,7 +368,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     // sync external interrupts
     require(plicSource.module.in.length == ext_intrs.getWidth)
     for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
-      plic_in := PulseClockSync3(interrupt)
+      plic_in := AsyncResetSynchronizerShiftReg(interrupt, 3)
     }
 
     // positive edge sampling of the lower-speed rtc_clock
