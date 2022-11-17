@@ -88,8 +88,7 @@ class LqTriggerIO(implicit p: Parameters) extends XSBundle {
 class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val enq = new LqEnqIO
   val brqRedirect = Flipped(ValidIO(new Redirect))
-  val rsLoadIn = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // load issued from rs
-  val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) // select load from rs or lq to load pipeline 
+  val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) // select load from lq to load pipeline 
   val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
   val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
   val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
@@ -118,8 +117,7 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
 
   val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
 
-  // TODO : remove this 
-  val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
+  val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 }
 
 // Load Queue
@@ -177,7 +175,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val block_ptr_others = RegInit(VecInit(List.fill(LoadQueueSize)(0.U(2.W))))
 
   // specific cycles to block
-  val block_cycles_tlb = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 50.U(ReSelectLen.W), 30.U(ReSelectLen.W), 10.U(ReSelectLen.W))))
+  val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
+  block_cycles_tlb := io.tlbReplayDelayCycleCtrl
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
 
   val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
@@ -337,10 +336,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     loadReplaySelV(i) := RegNext(loadReplaySelVGen(i), init = false.B)
   })
   
-  (0 until LoadPipelineWidth).map(i => {
-    io.try_replay(i) := loadReplaySelV(i)
-  })
-  
   // stage2: replay to load pipeline (if no load in S0)
 
   when(replayEvenFire) {
@@ -356,30 +351,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   replayOddFire := false.B
 
   for(i <- 0 until LoadPipelineWidth) {
-    io.loadOut(i) <> io.rsLoadIn(i)
-
     val replayIdx = loadReplaySel(i)
     val notRedirectLastCycle = !uop(replayIdx).robIdx.needFlush(RegNext(io.brqRedirect))
-    val canfire_replay = !io.rsLoadIn(i).valid && io.loadOut(i).ready && loadReplaySelV(i) && notRedirectLastCycle
-    
-    when(canfire_replay) {
-      val addrAligned = LookupTree(uop(replayIdx).ctrl.fuOpType(1,0), List(
-        "b00".U   -> true.B,              //b
-        "b01".U   -> (io.loadOut(i).bits.vaddr(0) === 0.U),   //h
-        "b10".U   -> (io.loadOut(i).bits.vaddr(1,0) === 0.U), //w
-        "b11".U   -> (io.loadOut(i).bits.vaddr(2,0) === 0.U)  //d
-      ))
 
-      io.loadOut(i).valid := true.B
-      // should we save uop when rs issues ?
-      io.loadOut(i).bits.uop := uop(replayIdx)
-      io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + 1 + i)
-      io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + 1 + i), uop(replayIdx).ctrl.fuOpType(1,0))
-      io.loadOut(i).bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
-      io.loadOut(i).bits.isFirstIssue := false.B
-      io.loadOut(i).bits.isLoadReplay := true.B
-      io.loadOut(i).bits.rsIdx := DontCare
+    io.loadOut(i).valid := loadReplaySelV(i) && notRedirectLastCycle
 
+    io.loadOut(i).bits := DontCare
+    io.loadOut(i).bits.uop := uop(replayIdx)
+    io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + 1 + i)
+    io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + 1 + i), uop(replayIdx).ctrl.fuOpType(1,0))
+    io.loadOut(i).bits.isFirstIssue := false.B
+    io.loadOut(i).bits.isLoadReplay := true.B
+
+    when(io.loadOut(i).fire) {
       if(i == 0) {
         replayEvenFire := true.B
       }else if(i == 1) {

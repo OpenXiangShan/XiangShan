@@ -61,7 +61,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
     val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
     val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
-    val rsLoadIn = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) 
     val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -94,8 +93,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
-
-    val try_replay = Vec(LoadPipelineWidth, Output(Bool()))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -105,7 +102,9 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   loadQueue.io.storeDataValidVec := storeQueue.io.storeDataValidVec
 
-  io.try_replay := loadQueue.io.try_replay
+  dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
+  val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(11.U(ReSelectLen.W), 50.U(ReSelectLen.W), 30.U(ReSelectLen.W), 10.U(ReSelectLen.W))))
+  loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
 
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready
@@ -132,7 +131,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadPaddrIn <> io.loadPaddrIn
-  loadQueue.io.rsLoadIn <> io.rsLoadIn
   loadQueue.io.loadOut <> io.loadOut
   loadQueue.io.loadVaddrIn <> io.loadVaddrIn
   loadQueue.io.replayFast <> io.replayFast

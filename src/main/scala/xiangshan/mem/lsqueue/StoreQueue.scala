@@ -155,7 +155,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // used to delay tlb-missed store's re-selecting  
   val block_ptr = RegInit(VecInit(List.fill(StoreQueueSize)(0.U(2.W)))) // block_ptr is used to index block_cycles
-  val block_cycles = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 5.U(ReSelectLen.W))))
+  val block_cycles = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 50.U(ReSelectLen.W), 30.U(ReSelectLen.W), 10.U(ReSelectLen.W))))
 
   val credit = RegInit(VecInit(List.fill(StoreQueueSize)(0.U(ReSelectLen.W))))
   val creditUpdate = WireInit(VecInit(List.fill(StoreQueueSize)(0.U(ReSelectLen.W))))
