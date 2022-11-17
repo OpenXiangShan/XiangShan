@@ -485,7 +485,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // Do the read data arbitration
   val s1_is_first_issue = Wire(Vec(params.numDeq, Bool()))
   val s1_all_src_ready = Wire(Vec(params.numDeq, Bool()))
-  val s1_out_addr = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val dataArrayWrite = Wire(Vec(params.numEnq, new Bundle{
     val enable = Bool()
     val addr   = UInt(params.numEntries.W)
@@ -506,8 +505,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     s1_out(i).bits.uop := Mux(s1_issue_oldest(i), payloadArray.io.read.last.data,
       Mux(s1_in_selectPtrValid(i), payloadArray.io.read(i).data, s1_dispatchUops_dup.head(i).bits))
 
-    s1_out_addr(i) := Mux(s1_issue_oldest(i), s1_oldestSel.bits,
-      Mux(s1_in_selectPtrValid(i), select.io.grant(i).bits, dataArrayWrite(i).addr))
   
     s1_is_first_issue(i) := Mux(s1_issue_oldest(i), statusArray.io.isFirstIssue.last,
       Mux(s1_in_selectPtrValid(i), statusArray.io.isFirstIssue(params.numEnq + i),
@@ -663,7 +660,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
           a := b
       }
     }else{
-      readData := readIntRf_asyn.slice(i*numIntRfPorts,(i+1)*numIntRfPorts).map(_.data)
+      readData := DontCare
       val readAddr0 = readIntRf_asyn.slice(i*numIntRfPorts,(i+1)*numIntRfPorts).map(_.addr)
       val readAddr1 = readFpRf_asyn.slice(i*numFpRfPorts,(i+1)*numFpRfPorts).map(_.addr)
       (readAddr0.zip(readAddr1)).zip(readAddr.bits.uop.psrc).foreach{
@@ -681,7 +678,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     immExt
   }
 
-  val dataSlowCaptureAddr = s1_out_addr
+  val dataSlowCaptureAddr = s1_issuePtrOH.map(_.bits)
   for ((port, addr) <- dataSelect.io.fromSlowPorts.zip(dataSlowCaptureAddr)) {
     for (j <- 0 until params.numSrc) {
       port(j) := VecInit(dataArrayMultiWrite.map(w => w.enable && (addr & w.addr(j)).asUInt.orR)).asUInt
