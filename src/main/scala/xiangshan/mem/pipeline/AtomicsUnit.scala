@@ -21,20 +21,20 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{AtomicWordIO, MemoryOpConstants}
+import xiangshan.cache.{AtomicWordIO, MemoryOpConstants, HasDCacheParameters}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 
-class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with HasDCacheParameters{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))
     val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new AtomicWordIO
-    val dtlb          = new TlbRequestIO
+    val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
@@ -47,7 +47,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
+  val s_invalid :: s_tlb_and_flush_sbuffer_req :: s_pm :: s_wait_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_cache_resp_latch :: s_finish :: Nil = Enum(8)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
@@ -65,6 +65,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val resp_data = Reg(UInt())
   val resp_data_wire = WireInit(0.U)
   val is_lrsc_valid = Reg(Bool())
+  // sbuffer is empty or not
+  val sbuffer_empty = io.flush_sbuffer.empty
 
 
   // Difftest signals
@@ -81,7 +83,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   io.dcache.req.valid  := false.B
   io.dcache.req.bits   := DontCare
-  io.dcache.resp.ready := false.B
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
@@ -97,7 +98,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     when (io.in.fire) {
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
-      state := s_tlb
+      state := s_tlb_and_flush_sbuffer_req
     }
   }
 
@@ -120,7 +121,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
 
   // tlb translation, manipulating signals && deal with exception
-  when (state === s_tlb) {
+  // at the same time, flush sbuffer
+  when (state === s_tlb_and_flush_sbuffer_req) {
     // send req to dtlb
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
@@ -131,8 +133,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
+    // send req to sbuffer to flush it if it is not empty
+    io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
+
     when(io.dtlb.resp.fire){
-      paddr := io.dtlb.resp.bits.paddr
+      paddr := io.dtlb.resp.bits.paddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -141,10 +146,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
       exceptionVec(storeAddrMisaligned) := !addrAligned
-      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
-      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
-      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
-      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
+      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
@@ -180,24 +185,22 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       out_valid := true.B
       atom_override_xtval := true.B
     }.otherwise {
-      state := s_flush_sbuffer_req
+      // if sbuffer has been flushed, go to query dcache, otherwise wait for sbuffer.
+      state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
   }
 
-  when (state === s_flush_sbuffer_req) {
-    io.flush_sbuffer.valid := true.B
-    state := s_flush_sbuffer_resp
-  }
-
-  when (state === s_flush_sbuffer_resp) {
-    when (io.flush_sbuffer.empty) {
+  when (state === s_wait_flush_sbuffer_resp) {
+    when (sbuffer_empty) {
       state := s_cache_req
     }
   }
 
   when (state === s_cache_req) {
-    io.dcache.req.valid := true.B
-    io.dcache.req.bits.cmd := LookupTree(in.uop.ctrl.fuOpType, List(
+    val pipe_req = io.dcache.req.bits
+    pipe_req := DontCare
+
+    pipe_req.cmd := LookupTree(in.uop.ctrl.fuOpType, List(
       LSUOpType.lr_w      -> M_XLR,
       LSUOpType.sc_w      -> M_XSC,
       LSUOpType.amoswap_w -> M_XA_SWAP,
@@ -222,76 +225,108 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       LSUOpType.amominu_d -> M_XA_MINU,
       LSUOpType.amomaxu_d -> M_XA_MAXU
     ))
+    pipe_req.miss := false.B
+    pipe_req.probe := false.B
+    pipe_req.probe_need_data := false.B
+    pipe_req.source := AMO_SOURCE.U
+    pipe_req.addr   := get_block_addr(paddr)
+    pipe_req.vaddr  := get_block_addr(in.src(0)) // vaddr
+    pipe_req.word_idx  := get_word(paddr)
+    pipe_req.amo_data  := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
+    pipe_req.amo_mask  := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
 
-    io.dcache.req.bits.addr := paddr
-    io.dcache.req.bits.vaddr := in.src(0) // vaddr
-    io.dcache.req.bits.data := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
-    // TODO: atomics do need mask: fix mask
-    io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
-    io.dcache.req.bits.id   := DontCare
+    io.dcache.req.valid := Mux(
+      io.dcache.req.bits.cmd === M_XLR,
+      !io.dcache.block_lr, // block lr to survive in lr storm
+      data_valid // wait until src(1) is ready
+    )
 
     when(io.dcache.req.fire){
       state := s_cache_resp
-      paddr_reg := io.dcache.req.bits.addr
-      data_reg := io.dcache.req.bits.data
-      mask_reg := io.dcache.req.bits.mask
+      paddr_reg := paddr
+      data_reg := io.dcache.req.bits.amo_data
+      mask_reg := io.dcache.req.bits.amo_mask
       fuop_reg := in.uop.ctrl.fuOpType
     }
   }
 
+  val dcache_resp_data  = Reg(UInt())
+  val dcache_resp_id    = Reg(UInt())
+  val dcache_resp_error = Reg(Bool())
+
   when (state === s_cache_resp) {
-    io.dcache.resp.ready := data_valid
-    when(io.dcache.resp.fire) {
-      is_lrsc_valid := io.dcache.resp.bits.id
-      val rdata = io.dcache.resp.bits.data
-      val rdataSel = LookupTree(paddr(2, 0), List(
-        "b000".U -> rdata(63, 0),
-        "b001".U -> rdata(63, 8),
-        "b010".U -> rdata(63, 16),
-        "b011".U -> rdata(63, 24),
-        "b100".U -> rdata(63, 32),
-        "b101".U -> rdata(63, 40),
-        "b110".U -> rdata(63, 48),
-        "b111".U -> rdata(63, 56)
-      ))
-
-      resp_data_wire := LookupTree(in.uop.ctrl.fuOpType, List(
-        LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.sc_w      -> rdata,
-        LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amoand_w  -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amoor_w   -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amomin_w  -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amomax_w  -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amominu_w -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
-
-        LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.sc_d      -> rdata,
-        LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amoand_d  -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amoor_d   -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amomin_d  -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amomax_d  -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amominu_d -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
-      ))
-
-      when (io.dcache.resp.bits.error && io.csrCtrl.cache_error_enable) {
-        exceptionVec(loadAccessFault)  := isLr
-        exceptionVec(storeAccessFault) := !isLr
-        assert(!exceptionVec(loadAccessFault))
-        assert(!exceptionVec(storeAccessFault))
+    // when not miss
+    // everything is OK, simply send response back to sbuffer
+    // when miss and not replay
+    // wait for missQueue to handling miss and replaying our request
+    // when miss and replay
+    // req missed and fail to enter missQueue, manually replay it later
+    // TODO: add assertions:
+    // 1. add a replay delay counter?
+    // 2. when req gets into MissQueue, it should not miss any more
+    when(io.dcache.resp.fire()) {
+      when(io.dcache.resp.bits.miss) {
+        when(io.dcache.resp.bits.replay) {
+          state := s_cache_req
+        }
+      } .otherwise {
+        dcache_resp_data := io.dcache.resp.bits.data
+        dcache_resp_id := io.dcache.resp.bits.id
+        dcache_resp_error := io.dcache.resp.bits.error
+        state := s_cache_resp_latch
       }
-
-      resp_data := resp_data_wire
-      state := s_finish
-      out_valid := true.B
     }
+  }
+
+  when (state === s_cache_resp_latch) {
+    is_lrsc_valid :=  dcache_resp_id
+    val rdataSel = LookupTree(paddr(2, 0), List(
+      "b000".U -> dcache_resp_data(63, 0),
+      "b001".U -> dcache_resp_data(63, 8),
+      "b010".U -> dcache_resp_data(63, 16),
+      "b011".U -> dcache_resp_data(63, 24),
+      "b100".U -> dcache_resp_data(63, 32),
+      "b101".U -> dcache_resp_data(63, 40),
+      "b110".U -> dcache_resp_data(63, 48),
+      "b111".U -> dcache_resp_data(63, 56)
+    ))
+
+    resp_data_wire := LookupTree(in.uop.ctrl.fuOpType, List(
+      LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.sc_w      -> dcache_resp_data,
+      LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amoand_w  -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amoor_w   -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amomin_w  -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amomax_w  -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amominu_w -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
+
+      LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.sc_d      -> dcache_resp_data,
+      LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amoand_d  -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amoor_d   -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amomin_d  -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amomax_d  -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amominu_d -> SignExt(rdataSel(63, 0), XLEN),
+      LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
+    ))
+
+    when (dcache_resp_error && io.csrCtrl.cache_error_enable) {
+      exceptionVec(loadAccessFault)  := isLr
+      exceptionVec(storeAccessFault) := !isLr
+      assert(!exceptionVec(loadAccessFault))
+      assert(!exceptionVec(storeAccessFault))
+    }
+
+    resp_data := resp_data_wire
+    state := s_finish
+    out_valid := true.B
   }
 
   io.out.valid := out_valid
@@ -396,7 +431,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
     difftest.io.coreid     := io.hartId
-    difftest.io.atomicResp := io.dcache.resp.fire
+    difftest.io.atomicResp := state === s_cache_resp_latch
     difftest.io.atomicAddr := paddr_reg
     difftest.io.atomicData := data_reg
     difftest.io.atomicMask := mask_reg

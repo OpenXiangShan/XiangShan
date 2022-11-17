@@ -19,11 +19,7 @@ package top
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.stage.ChiselGeneratorAnnotation
-import device.{AXI4RAMWrapper, SimJTAG}
-import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
-import utils.GTimer
-import xiangshan.{DebugOptions, DebugOptionsKey}
+import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.ElaborationArtefacts
@@ -34,7 +30,6 @@ import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
-  val useDRAMSim = debugOpts.UseDRAMSim
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -48,13 +43,14 @@ class SimTop(implicit p: Parameters) extends Module {
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4 <> soc.peripheral
 
-  if(!useDRAMSim){
-    val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.misc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
-    ))
-    val simAXIMem = Module(l_simAXIMem.module)
-    l_simAXIMem.io_axi4 <> soc.memory
-  }
+  val l_simAXIMem = AXI4MemorySlave(
+    l_soc.misc.memAXI4SlaveNode,
+    16L * 1024 * 1024 * 1024,
+    useBlackBox = true,
+    dynamicLatency = debugOpts.UseDRAMSim
+  )
+  val simAXIMem = Module(l_simAXIMem.module)
+  l_simAXIMem.io_axi4 <> soc.memory
 
   soc.io.clock := clock.asBool
   soc.io.reset := reset.asBool
@@ -86,14 +82,9 @@ class SimTop(implicit p: Parameters) extends Module {
     val logCtrl = new LogCtrlIO
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
-    val memAXI = if(useDRAMSim) soc.memory.cloneType else null
   })
 
   simMMIO.io.uart <> io.uart
-
-  if(useDRAMSim){
-    io.memAXI <> soc.memory
-  }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
     val timer = GTimer()

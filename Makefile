@@ -34,8 +34,8 @@ SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-
 # select firrtl compiler
 ifeq ($(MFC),1)
 override FC_ARGS = --mfc
-override FPGA_MEM_ARGS =
-override SIM_MEM_ARGS =
+override FPGA_MEM_ARGS = --infer-rw
+override SIM_MEM_ARGS = --infer-rw
 endif
 
 
@@ -45,6 +45,11 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# top-down
+ifeq ($(ENABLE_TOPDOWN),1)
+override SIM_ARGS += --enable-topdown
 endif
 
 # emu for the release version

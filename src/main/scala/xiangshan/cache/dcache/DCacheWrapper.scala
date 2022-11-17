@@ -346,10 +346,23 @@ class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
 }
 
+class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
+  val data    = UInt(DataBits.W)
+  val miss    = Bool()
+  val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+  val replay  = Bool()
+  val error   = Bool()
+
+  val ack_miss_queue = Bool()
+
+  val id     = UInt(reqIdWidth.W)
+}
+
 class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReqWithVaddr)
-  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+  val req  = DecoupledIO(new MainPipeReq)
+  val resp = Flipped(ValidIO(new AtomicsResp))
+  val block_lr = Input(Bool())
 }
 
 // used by load unit
@@ -360,10 +373,15 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_kill  = Output(Bool())
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
-  val s1_paddr = Output(UInt(PAddrBits.W))
-  val s1_hit_way = Input(UInt(nWays.W))
+  val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
+  val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
+  // cycle 2: hit signal
+  val s2_hit = Input(Bool()) // hit signal for lsu, 
+
+  // debug
+  val debug_s1_hit_way = Input(UInt(nWays.W))
 }
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
@@ -448,7 +466,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
-  val atomicsReplayUnit = Module(new AtomicsReplayEntry)
+  // val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
   val missQueue  = Module(new MissQueue(edge))
@@ -549,9 +567,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // atomics
   // atomics not finished yet
-  io.lsu.atomics <> atomicsReplayUnit.io.lsu
-  atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
-  atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
+  // io.lsu.atomics <> atomicsReplayUnit.io.lsu
+  io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
+  io.lsu.atomics.block_lr := mainPipe.io.block_lr
+  // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   //----------------------------------------
   // miss queue
@@ -602,7 +622,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
   arbiter_with_pipereg(
-    in = Seq(missQueue.io.main_pipe_req, atomicsReplayUnit.io.pipe_req),
+    in = Seq(missQueue.io.main_pipe_req, io.lsu.atomics.req),
     out = mainPipe.io.atomic_req,
     name = Some("main_pipe_atomic_req")
   )
@@ -734,7 +754,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     case (a, u) =>
       a.valid := RegNext(u.io.lsu.req.fire()) && !u.io.lsu.s1_kill
       a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.addr))
-      a.bits.tag := get_tag(u.io.lsu.s1_paddr)
+      a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   }
   st_access.valid := RegNext(mainPipe.io.store_req.fire())
   st_access.bits.idx := RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))

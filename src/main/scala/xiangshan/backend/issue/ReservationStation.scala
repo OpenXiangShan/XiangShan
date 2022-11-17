@@ -28,6 +28,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
+import chisel3.ExcitingUtils
 
 case class RSParams
 (
@@ -42,7 +43,6 @@ case class RSParams
   var hasFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
-  var optBuf: Boolean = false,
   // special cases
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
@@ -63,6 +63,7 @@ case class RSParams
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
   def dropOnRedirect: Boolean = !(isLoad || isStore || isStoreData)
+  def optDeqFirstStage: Boolean = !exuCfg.get.readFpRf
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -150,6 +151,13 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       Module(new ReservationStation(rsParam)(updatedP))
     })
 
+    if (params.isJump)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"jumpRS_${index}") }
+    if (params.isAlu)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"aluRS_${index}") }
+    if (params.isStore)     rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"staRS_${index}") }
+    if (params.isStoreData) rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"stdRS_${index}") }
+    if (params.isMul)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"mulRS_${index}") }
+    if (params.isLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"loadRS_${index}") }
+
     val updatedP = p.alter((site, here, up) => {
       case XSCoreParamsKey => up(XSCoreParamsKey).copy(
         IssQueSize = rs.map(_.size).max
@@ -160,6 +168,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
+    io.full <> rs.map(_.io.full).reduce(_ && _)
     if (io.fpRegValue.isDefined) {
       io.fpRegValue.get <> rs.flatMap(_.io.fpRegValue.get)
     }
@@ -180,7 +189,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
      rs.foreach(_.io.checkwait.get <> io.checkwait.get)
     }
     if (io.load.isDefined) {
-      io.load.get.fastMatch <> rs.flatMap(_.io.load.get.fastMatch)
+      io.load.get <> rs.flatMap(_.io.load.get)
     }
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
@@ -229,10 +238,13 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
-  val load = if (params.isLoad) Some(new Bundle {
-    val fastMatch = Vec(params.numDeq, Output(UInt(exuParameters.LduCnt.W)))
-  }) else None
+  val load = if (params.isLoad) Some(Vec(params.numDeq, new Bundle {
+    val fastMatch = Output(UInt(exuParameters.LduCnt.W))
+    val fastImm = Output(UInt(12.W))
+  })) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
+  val full = Output(Bool())
+
 }
 
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule
@@ -339,6 +351,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // select the issue instructions
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
+
+  select.io.balance
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -484,14 +498,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     oldestSelection.io.oldest := s1_in_oldestPtrOH
     // By default, we use the default victim index set in parameters.
     oldestSelection.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
-    // When deq width is two, we have a balance bit to indicate selection priorities.
-    // For better performance, we decide the victim according to selection priorities.
-    if (params.needBalance && params.oldestFirst._2 && params.numDeq == 2) {
-      // When balance2 bit is set, selection prefers the second selection port.
-      // Thus, the first is the victim if balance2 bit is set.
-      oldestSelection.io.canOverride(0) := select.io.grantBalance
-      oldestSelection.io.canOverride(1) := !select.io.grantBalance
-    }
     s1_issue_oldest := oldestSelection.io.isOverrided
   }
 
@@ -753,8 +759,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         }
       }
 
-      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
-      bypassNetwork.io.hold := !s2_deq(i).ready
+      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optDeqFirstStage)
+      bypassNetwork.io.hold := !s2_deq(i).ready || !s1_out(i).valid
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
         by.valid := m
@@ -767,9 +773,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // from data array. Timing to be optimized later.
       if (params.isLoad) {
         // Condition: wakeup by load (to select load wakeup bits)
-        io.load.get.fastMatch(i) := Mux(s1_issuePtrOH(i).valid, VecInit(
+        io.load.get(i).fastMatch := Mux(s1_issuePtrOH(i).valid, VecInit(
           wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
         ).asUInt, 0.U)
+        io.load.get(i).fastImm := s1_out(i).bits.uop.ctrl.imm
       }
 
       for (j <- 0 until params.numFastWakeup) {
@@ -789,10 +796,25 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.updateMidState := updateMid
 
     // FMUL intermediate results are ready in two cycles
+    val midFinished2T0 = midFinished2.zip(s2_deq).map{ case (v, deq) =>
+      // However, it may be flushed by redirect at T0.
+      // If flushed at T0, new instruction enters at T1 and writes the entry at T2.
+      // This is a rare case because usually instructions enter RS in-order,
+      // unless dispatch2 is blocked.
+      v && !deq.bits.uop.robIdx.needFlush(io.redirect)
+    }
+    val midIssuePtrOHT1 = midFinished2T0.zip(s2_issuePtrOH).map(x => RegEnable(x._2, x._1))
+    val midIssuePtrT1 = midFinished2T0.zip(s2_issuePtr).map(x => RegEnable(x._2, x._1))
+    val midFinished2T1 = midFinished2T0.map(v => RegNext(v))
+    // No flush here: the fma may dequeue at this stage.
+    // If cancelled at T1, data written at T2. However, new instruction writes at least at T3.
+    val midIssuePtrOHT2 = midFinished2T1.zip(midIssuePtrOHT1).map(x => RegEnable(x._2, x._1))
+    val midIssuePtrT2 = midFinished2T1.zip(midIssuePtrT1).map(x => RegEnable(x._2, x._1))
+    val midFinished2T2 = midFinished2T1.map(v => RegNext(v))
     for (i <- 0 until params.numDeq) {
-      dataArray.io.partialWrite(i).enable := RegNext(RegNext(midFinished2(i)))
+      dataArray.io.partialWrite(i).enable := midFinished2T2(i)
       dataArray.io.partialWrite(i).mask := DontCare
-      dataArray.io.partialWrite(i).addr := RegNext(RegNext(s2_issuePtrOH(i)))
+      dataArray.io.partialWrite(i).addr := midIssuePtrOHT2(i)
       val writeData = io.fmaMid.get(i).out.bits.asUInt
       require(writeData.getWidth <= 2 * params.dataBits, s"why ${writeData.getWidth}???")
       require(writeData.getWidth > params.dataBits, s"why ${writeData.getWidth}???")
@@ -811,7 +833,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // (1.1) If the instruction matches FMA/FMUL two cycles ealier, we issue it and it goes to FADD
     // (1.2) If the instruction matches FMA/FMUL two cycles ealier and it's blocked, we need to hold the result
     // At select stage: (2) bypass FMUL intermediate results from write ports if possible.
-    val issuedAtT0 = midFinished2.zip(s2_issuePtr).map(x => (RegNext(RegNext(x._1)), RegNext(RegNext(x._2))))
+    val issuedAtT0 = midFinished2T2.zip(midIssuePtrT2)
     for (i <- 0 until params.numDeq) {
       // cond11: condition (1.1) from different issue ports
       val cond11 = issuedAtT0.map(x => x._1 && x._2 === s2_issuePtr(i))
@@ -875,11 +897,18 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
+  if (select.io.balance.isDefined) {
+    require(params.numDeq == 2)
+    val balance = select.io.balance.get
+    balance.tick := (balance.out && !s1_out(0).fire && s1_out(1).fire) ||
+      (!balance.out && s1_out(0).fire && !s1_out(1).fire && !io.fromDispatch(0).fire)
+  }
+
   // logs
   for ((dispatch, i) <- io.fromDispatch.zipWithIndex) {
     XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, robIdx ${dispatch.bits.robIdx}\n")
     XSDebug(dispatch.fire, p"enq fire, robIdx ${dispatch.bits.robIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
-    XSPerfAccumulate(s"allcoate_fire_$i", dispatch.fire)
+    XSPerfAccumulate(s"allocate_fire_$i", dispatch.fire)
     XSPerfAccumulate(s"allocate_valid_$i", dispatch.valid)
     XSPerfAccumulate(s"srcState_ready_$i", PopCount(dispatch.bits.srcState.map(_ === SrcState.rdy)))
     if (params.checkWaitBit) {
@@ -907,11 +936,29 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
   }
 
+  if (env.EnableTopDown && params.isLoad) {
+    val l1d_loads_bound = WireDefault(0.B)
+    ExcitingUtils.addSink(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
+    val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
+    val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
+    val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
+    val bankConflict = !mshrFull && !tlbMiss && !dataInvalid && statusArray.io.rsFeedback(RSFeedbackType.bankConflict.litValue.toInt)
+    val ldVioCheckRedo = !mshrFull && !tlbMiss && !dataInvalid && !bankConflict && statusArray.io.rsFeedback(RSFeedbackType.ldVioCheckRedo.litValue.toInt)
+    XSPerfAccumulate("l1d_loads_mshr_bound", l1d_loads_bound && mshrFull)
+    XSPerfAccumulate("l1d_loads_tlb_bound", l1d_loads_bound && tlbMiss)
+    XSPerfAccumulate("l1d_loads_store_data_bound", l1d_loads_bound && dataInvalid)
+    XSPerfAccumulate("l1d_loads_bank_conflict_bound", l1d_loads_bound && bankConflict)
+    XSPerfAccumulate("l1d_loads_vio_check_redo_bound", l1d_loads_bound && ldVioCheckRedo)
+  }
+
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfAccumulate("allocate_num", PopCount(s0_doEnqueue))
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 
   def size: Int = params.numEntries
+
+  io.full := statusArray.io.isValid.andR
+  XSPerfAccumulate("full", statusArray.io.isValid.andR)
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()

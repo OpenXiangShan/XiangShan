@@ -100,7 +100,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.pmp(2).resp <> pmp_check(2).resp
   ifu.io.pmp.resp <> pmp_check(3).resp
 
-  val itlb = Module(new TLB(4, Seq(true, true, false, true), itlbParams))
+  val itlb = Module(new TLB(4, nRespDups = 1, Seq(true, true, false, true), itlbParams))
   itlb.io.requestor.take(3) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor(3) <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.base_connect(io.sfence, tlbCsr)
@@ -113,15 +113,20 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
+  ftq.io.toIfu.req.ready :=  ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
+
   ftq.io.fromIfu          <> ifu.io.ftqInter.toFtq
   bpu.io.ftq_to_bpu       <> ftq.io.toBpu
   ftq.io.fromBpu          <> bpu.io.bpu_to_ftq
+
+  ftq.io.mmioCommitRead   <> ifu.io.mmioCommitRead
   //IFU-ICache
-  for(i <- 0 until 2){
-    ifu.io.icacheInter(i).req       <>      icache.io.fetch(i).req
-    icache.io.fetch(i).req <> ifu.io.icacheInter(i).req
-    ifu.io.icacheInter(i).resp <> icache.io.fetch(i).resp
-  }
+
+  icache.io.fetch.req <> ftq.io.toICache.req
+  ftq.io.toICache.req.ready :=  ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
+
+  ifu.io.icacheInter.resp <>    icache.io.fetch.resp
+  ifu.io.icacheInter.icacheReady :=  icache.io.toIFU
   icache.io.stop := ifu.io.icacheStop
 
   ifu.io.icachePerfInfo := icache.io.perfInfo

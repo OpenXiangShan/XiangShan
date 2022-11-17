@@ -30,6 +30,7 @@ import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import chisel3.ExcitingUtils
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -218,7 +219,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of replay ports: ${outer.numReplayPorts}")
   println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
   println(s"  number of std ports: ${outer.numSTDPorts}")
-  val numLoadPorts = outer.reservationStations.map(_.module.io.load).filter(_.isDefined).map(_.get.fastMatch.length).sum
+  val numLoadPorts = outer.reservationStations.map(_.module.io.load).filter(_.isDefined).map(_.get.length).sum
   println(s"  number of load ports: ${numLoadPorts}")
   if (intRfConfig._1) {
     println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
@@ -250,6 +251,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
     val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
+    val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -265,6 +267,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    // perf
+    val sqFull = Input(Bool())
+    val lqFull = Input(Bool())
 
   }
 
@@ -422,7 +427,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     if (rs.io.jump.isDefined) {
       val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
       rs.io.jump.get.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
-      rs.io.jump.get.jalr_target := RegEnable(io.extra.jalr_target, jumpFire)
+      rs.io.jump.get.jalr_target := io.extra.jalr_target
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
@@ -466,7 +471,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   require(issueIdx == io.issue.length)
   if (io.extra.loadFastMatch.isDefined) {
     val allLoadRS = outer.reservationStations.map(_.module.io.load).filter(_.isDefined)
-    io.extra.loadFastMatch.get := allLoadRS.map(_.get.fastMatch).fold(Seq())(_ ++ _)
+    io.extra.loadFastMatch.get := allLoadRS.map(_.get.map(_.fastMatch)).fold(Seq())(_ ++ _)
+    io.extra.loadFastImm.get := allLoadRS.map(_.get.map(_.fastImm)).fold(Seq())(_ ++ _)
   }
 
   var intReadPort = 0
@@ -534,6 +540,20 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
+
+  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
+    val stall_ls_dq = WireDefault(0.B)
+    ExcitingUtils.addSink(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
+    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val st_rs_full = !rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val stall_stores_bound = stall_ls_dq && (st_rs_full || io.extra.sqFull)
+    val stall_loads_bound = stall_ls_dq && (ld_rs_full || io.extra.lqFull)
+    val stall_ls_bandwidth_bound = stall_ls_dq && !(st_rs_full || io.extra.sqFull) && !(ld_rs_full || io.extra.lqFull)
+    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
+    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
+    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
+  }
 
   val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
   val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))

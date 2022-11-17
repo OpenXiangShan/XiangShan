@@ -302,7 +302,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback = MixedVec(numWbPorts.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
-    val commits = new RobCommitIO
+    val commits = Output(new RobCommitIO)
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
@@ -364,7 +364,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   /**
     * states of Rob
     */
-  val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
+  val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
 
   /**
@@ -398,7 +398,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
-  when ((io.commits.hasWalkInstr && state =/= s_extrawalk) || io.commits.hasCommitInstr) { hasNoSpecExec:= false.B }
+  when (io.commits.hasWalkInstr || io.commits.hasCommitInstr) { hasNoSpecExec:= false.B }
 
   // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
   // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
@@ -541,15 +541,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val shouldWalkVec = VecInit((0 until CommitWidth).map(_.U < walkCounter))
   val walkFinished = walkCounter <= CommitWidth.U
 
-  // extra space is used when rob has no enough space, but mispredict recovery needs such info to walk regmap
   require(RenameWidth <= CommitWidth)
-  val extraSpaceForMPR = Reg(Vec(RenameWidth, new RobDispatchData))
-  val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
-  when (io.enq.needAlloc.asUInt.orR && io.redirect.valid) {
-    usedSpaceForMPR := io.enq.needAlloc
-    extraSpaceForMPR := dispatchData.io.wdata
-    XSDebug("rob full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", io.enq.needAlloc.asUInt)
-  }
 
   // wiring to csr
   val (wflags, fpWen) = (0 until CommitWidth).map(i => {
@@ -577,7 +569,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val misPredBlock = misPredBlockCounter(0)
   val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
 
-  io.commits.isWalk := state =/= s_idle
+  io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
   val walk_v = VecInit(walkPtrVec.map(ptr => valid(ptr.value)))
   val commit_v = VecInit(deqPtrVec.map(ptr => valid(ptr.value)))
@@ -594,17 +586,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     io.commits.commitValid(i) := commit_v(i) && commit_w(i) && !isBlocked
     io.commits.info(i)  := dispatchDataRead(i)
 
-    io.commits.walkValid(i) := shouldWalkVec(i)
-    when (io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
-      XSError(!walk_v(i), s"why not $i???\n")
-    }
-    when (state === s_extrawalk) {
-      if (i < RenameWidth) {
-        io.commits.walkValid(i) := usedSpaceForMPR(RenameWidth - i - 1)
-        io.commits.info(i) := extraSpaceForMPR(RenameWidth - i - 1)
-      }
-      else {
-        io.commits.walkValid(i) := false.B
+    when (state === s_walk) {
+      io.commits.walkValid(i) := shouldWalkVec(i)
+      when (io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
+        XSError(!walk_v(i), s"why not $i???\n")
       }
     }
 
@@ -623,10 +608,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       io.commits.info(i).rfWen,
       io.commits.info(i).ldest,
       debug_exuData(walkPtrVec(i).value)
-    )
-    XSInfo(state === s_extrawalk && io.commits.walkValid(i), "use extra space walked wen %d ldst %d\n",
-      io.commits.info(i).rfWen,
-      io.commits.info(i).ldest
     )
   }
   if (env.EnableDifftest) {
@@ -649,42 +630,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   /**
     * state changes
-    * (1) exceptions: when exception occurs, cancels all and switch to s_idle
-    * (2) redirect: switch to s_walk or s_extrawalk (depends on whether there're pending instructions in dispatch1)
-    * (3) walk: when walking comes to the end, switch to s_walk
-    * (4) s_extrawalk to s_walk
+    * (1) redirect: switch to s_walk
+    * (2) walk: when walking comes to the end, switch to s_idle
     */
-  // state === s_idle: don't change when walk_no_need
-  // state === s_walk: don't change when walk_no_need && walkFinished
-  // state === s_extrawalk: always continue to walk (because it's not possible for walk_no_need)
-  val zeroWalkDistance = enqPtr - 1.U === io.redirect.bits.robIdx && !io.redirect.bits.flushItself()
-  val noNeedToWalk = zeroWalkDistance && (state === s_idle || (state === s_walk && walkFinished))
-  // update the state depending on whether there is a redirect
-  val state_next = Mux(io.redirect.valid,
-    Mux(io.enq.needAlloc.asUInt.orR,
-      s_extrawalk,
-      Mux(noNeedToWalk, s_idle, s_walk)
-    ),
-    Mux(state === s_walk && walkFinished,
-      s_idle,
-      Mux(state === s_extrawalk,
-        // if no more walk, switch to s_idle
-        Mux(walkCounter === 0.U, s_idle, s_walk),
-        state
-      )
-    )
-  )
+  val state_next = Mux(io.redirect.valid, s_walk, Mux(state === s_walk && walkFinished, s_idle, state))
   XSPerfAccumulate("s_idle_to_idle",            state === s_idle && state_next === s_idle)
   XSPerfAccumulate("s_idle_to_walk",            state === s_idle && state_next === s_walk)
-  XSPerfAccumulate("s_idle_to_extrawalk",       state === s_idle && state_next === s_extrawalk)
   XSPerfAccumulate("s_walk_to_idle",            state === s_walk && state_next === s_idle)
   XSPerfAccumulate("s_walk_to_walk",            state === s_walk && state_next === s_walk)
-  XSPerfAccumulate("s_walk_to_extrawalk",       state === s_walk && state_next === s_extrawalk)
-  XSPerfAccumulate("s_extrawalk_to_idle",       state === s_extrawalk && state_next === s_idle)
-  XSPerfAccumulate("s_extrawalk_to_walk",       state === s_extrawalk && state_next === s_walk)
-  XSPerfAccumulate("s_extrawalk_to_extrawalk",  state === s_extrawalk && state_next === s_extrawalk)
-  XSPerfAccumulate("redirect_bypass_to_idle",   io.redirect.valid && !io.enq.needAlloc.asUInt.orR && noNeedToWalk)
-  XSPerfAccumulate("extra_walk_bypass_to_idle", !io.redirect.valid && state === s_extrawalk && walkCounter === 0.U)
   state := state_next
 
   /**
@@ -712,13 +665,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val thisCycleWalkCount = Mux(walkFinished, walkCounter, CommitWidth.U)
   // next walkPtrVec:
   // (1) redirect occurs: update according to state
-  // (2) walk: move backwards
-  val walkPtrVec_next = Mux(io.redirect.valid && state =/= s_extrawalk,
-    Mux(state === s_walk,
-      VecInit(walkPtrVec.map(_ - thisCycleWalkCount)),
-      VecInit((0 until CommitWidth).map(i => enqPtr - (i+1).U))
-    ),
-    Mux(state === s_walk, VecInit(walkPtrVec.map(_ - CommitWidth.U)), walkPtrVec)
+  // (2) walk: move forwards
+  val walkPtrVec_next = Mux(io.redirect.valid,
+    deqPtrVec_next,
+    Mux(state === s_walk, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrVec := walkPtrVec_next
 
@@ -727,23 +677,24 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
 
-  val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtr, enqPtr - 1.U)
-  val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)
+  val currentWalkPtr = Mux(state === s_walk, walkPtr, deqPtrVec_next(0))
+  val redirectWalkDistance = distanceBetween(io.redirect.bits.robIdx, deqPtrVec_next(0))
   when (io.redirect.valid) {
-    walkCounter := Mux(state === s_walk,
-      // NOTE: +& is used here because:
-      // When rob is full and the head instruction causes an exception,
-      // the redirect robIdx is the deqPtr. In this case, currentWalkPtr is
-      // enqPtr - 1.U and redirectWalkDistance is RobSize - 1.
-      // Since exceptions flush the instruction itself, flushItSelf is true.B.
-      // Previously we use `+` to count the walk distance and it causes overflows
-      // when RobSize is power of 2. We change it to `+&` to allow walkCounter to be RobSize.
-      // The width of walkCounter also needs to be changed.
-      redirectWalkDistance - (thisCycleWalkCount - io.redirect.bits.flushItself()),
-      redirectWalkDistance + io.redirect.bits.flushItself()
-    )
-    XSError(state === s_walk && thisCycleWalkCount < io.redirect.bits.flushItself(),
-      p"walk distance error ($thisCycleWalkCount < ${io.redirect.bits.flushItself()}\n")
+    // full condition:
+    // +& is used here because:
+    // When rob is full and the tail instruction causes a misprediction,
+    // the redirect robIdx is the deqPtr - 1. In this case, redirectWalkDistance
+    // is RobSize - 1.
+    // Since misprediction does not flush the instruction itself, flushItSelf is false.B.
+    // Previously we use `+` to count the walk distance and it causes overflows
+    // when RobSize is power of 2. We change it to `+&` to allow walkCounter to be RobSize.
+    // The width of walkCounter also needs to be changed.
+    // empty condition:
+    // When the last instruction in ROB commits and causes a flush, a redirect
+    // will be raised later. In such circumstances, the redirect robIdx is before
+    // the deqPtrVec_next(0) and will cause underflow.
+    walkCounter := Mux(isBefore(io.redirect.bits.robIdx, deqPtrVec_next(0)), 0.U,
+                       redirectWalkDistance +& !io.redirect.bits.flushItself())
   }.elsewhen (state === s_walk) {
     walkCounter := walkCounter - thisCycleWalkCount
     XSInfo(p"rolling back: $enqPtr $deqPtr walk $walkPtr walkcnt $walkCounter\n")
@@ -759,17 +710,42 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     */
   val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
+  // redirect logic writes 6 valid
+  val redirectHeadVec = Reg(Vec(RenameWidth, new RobPtr))
+  val redirectTail = Reg(new RobPtr)
+  val redirectIdle :: redirectBusy :: Nil = Enum(2)
+  val redirectState = RegInit(redirectIdle)
+  val invMask = redirectHeadVec.map(redirectHead => isBefore(redirectHead, redirectTail))
+  when(redirectState === redirectBusy) {
+    redirectHeadVec.foreach(redirectHead => redirectHead := redirectHead + RenameWidth.U)
+    redirectHeadVec zip invMask foreach {
+      case (redirectHead, inv) => when(inv) {
+        valid(redirectHead.value) := false.B
+      }
+    }
+    when(!invMask.last) {
+      redirectState := redirectIdle
+    }
+  }
+  when(io.redirect.valid) {
+    redirectState := redirectBusy
+    when(redirectState === redirectIdle) {
+      redirectTail := enqPtr
+    }
+    redirectHeadVec.zipWithIndex.foreach { case (redirectHead, i) =>
+      redirectHead := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx + i.U, io.redirect.bits.robIdx + (i + 1).U)
+    }
+  }
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
       valid(allocatePtrVec(i).value) := true.B
     }
   }
-  // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
+  // dequeue logic writes 6 valid
   for (i <- 0 until CommitWidth) {
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
-    val walkValid = io.commits.isWalk && io.commits.walkValid(i) && state =/= s_extrawalk
-    when (commitValid || walkValid) {
+    when (commitValid) {
       valid(commitReadAddr(i)) := false.B
     }
   }
@@ -859,6 +835,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.old_pdest := req.old_pdest
     wdata.ftqIdx := req.cf.ftqPtr
     wdata.ftqOffset := req.cf.ftqOffset
+    wdata.isMove := req.eliminatedMove
     wdata.pc := req.cf.pc
   }
   dispatchData.io.raddr := commitReadAddr_next
@@ -967,7 +944,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire)))
   // XSPerfAccumulate("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
   XSPerfAccumulate("walkInstr", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U))
-  XSPerfAccumulate("walkCycle", state === s_walk || state === s_extrawalk)
+  XSPerfAccumulate("walkCycle", state === s_walk)
   val deqNotWritebacked = valid(deqPtr.value) && !writebacked(deqPtr.value)
   val deqUopCommitType = io.commits.info(0).commitType
   XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
@@ -1168,7 +1145,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     ("rob_commitInstrLoadWait", ifCommitReg(PopCount(RegNext(commitLoadWaitVec)))                     ),
     ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegNext(commitStoreVec)))                        ),
     ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)           ),
-    ("rob_walkCycle          ", (state === s_walk || state === s_extrawalk)                           ),
+    ("rob_walkCycle          ", (state === s_walk)                                                    ),
     ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                       ),
     ("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U    ),
     ("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),

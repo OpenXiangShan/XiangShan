@@ -57,6 +57,7 @@ class MinimalConfig(n: Int = 1) extends Config(
       _.copy(
         DecodeWidth = 2,
         RenameWidth = 2,
+        CommitWidth = 2,
         FetchWidth = 4,
         IssQueSize = 8,
         NRPhyRegs = 64,
@@ -121,7 +122,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
@@ -133,7 +134,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          normalNSets = 4, // when da or sa
+          normalNSets = 16, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
@@ -160,13 +161,25 @@ class MinimalConfig(n: Int = 1) extends Config(
         L2CacheParamsOpt = None // remove L2 Cache
       )
     )
-    case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024,
-        simulation = true
-      )),
-      L3NBanks = 1
-    )
+    case SoCParamsKey =>
+      val tiles = site(XSTileKey)
+      up(SoCParamsKey).copy(
+        L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+          sets = 1024,
+          inclusive = false,
+          clientCaches = tiles.map{ p =>
+            CacheParameters(
+              "dcache",
+              sets = 2 * p.dcacheParametersOpt.get.nSets,
+              ways = p.dcacheParametersOpt.get.nWays + 2,
+              blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets),
+              aliasBitsOpt = None
+            )
+          },
+          simulation = !site(DebugOptionsKey).FPGAPlatform
+        )),
+        L3NBanks = 1
+      )
   })
 )
 
@@ -223,6 +236,7 @@ class WithNKBL2
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
+          blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
         reqField = Seq(PreferCacheField()),

@@ -72,6 +72,32 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
   val isFirstIssue = Bool()
 }
 
+class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  // queue entry data, except flag bits, will be updated if writeQueue is true,
+  // valid bit in LqWriteBundle will be ignored
+  val writeQueueData = Bool()
+
+  def fromLsPipelineBundle(input: LsPipelineBundle) = {
+    vaddr := input.vaddr
+    paddr := input.paddr
+    mask := input.mask
+    data := input.data
+    uop := input.uop
+    wlineflag := input.wlineflag
+    miss := input.miss
+    tlbMiss := input.tlbMiss
+    ptwBack := input.ptwBack
+    mmio := input.mmio
+    rsIdx := input.rsIdx
+    forwardMask := input.forwardMask
+    forwardData := input.forwardData
+    isSoftPrefetch := input.isSoftPrefetch
+    isFirstIssue := input.isFirstIssue
+
+    writeQueueData := false.B
+  }
+}
+
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))

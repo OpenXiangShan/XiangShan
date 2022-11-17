@@ -66,11 +66,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // in
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-    val delayedLoadError = Vec(exuParameters.LduCnt, Output(Bool()))
+    val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -93,6 +94,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
+    val sqFull = Output(Bool())
+    val lqFull = Output(Bool())
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -166,11 +169,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, ldtlbParams))
+    val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLBNonBlock(exuParameters.StuCnt, sttlbParams))
+    val tlb_st = Module(new TLBNonBlock(exuParameters.StuCnt, 1, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st
@@ -282,21 +285,22 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
+    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
 
     // Lsq to load unit's rs
 
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
-    lsq.io.loadDataForwarded(i) <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.s2_load_data_forwarded(i) <> loadUnits(i).io.lsq.s2_load_data_forwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // passdown to lsq (load s3)
-    lsq.io.dcacheRequireReplay(i) <> loadUnits(i).io.lsq.dcacheRequireReplay
-    lsq.io.delayedLoadError(i) <> loadUnits(i).io.delayedLoadError
+    lsq.io.s3_dcache_require_replay(i) <> loadUnits(i).io.lsq.s3_dcache_require_replay
+    lsq.io.s3_delayed_load_error(i) <> loadUnits(i).io.s3_delayed_load_error
 
     // alter writeback exception info
-    io.delayedLoadError(i) := loadUnits(i).io.lsq.delayedLoadError
+    io.s3_delayed_load_error(i) := loadUnits(i).io.lsq.s3_delayed_load_error
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
@@ -552,6 +556,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  io.lqFull := lsq.io.lqFull
+  io.sqFull := lsq.io.sqFull
 
   val ldDeqCount = PopCount(io.issue.take(exuParameters.LduCnt).map(_.valid))
   val stDeqCount = PopCount(io.issue.drop(exuParameters.LduCnt).map(_.valid))

@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.issue.AgeDetector
 
-class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
+class InputBuffer(numEntries: Int, enableBypass: Boolean)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
 
@@ -42,8 +42,12 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   io.in.ready := hasEmpty
   val enqVec = selectEnq._2
 
+  // bypass
+  val tryBypass = WireInit(false.B)
+  val doBypass = WireInit(false.B)
+
   // enqueue
-  val doEnqueue = io.in.fire && !io.in.bits.uop.robIdx.needFlush(io.redirect)
+  val doEnqueue = io.in.fire && !doBypass && !io.in.bits.uop.robIdx.needFlush(io.redirect)
   when (doEnqueue) {
     for (i <- 0 until numEntries) {
       when (enqVec(i)) {
@@ -57,17 +61,31 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val age = Module(new AgeDetector(numEntries, 1))
   age.io.enq(0) := Mux(doEnqueue, enqVec.asUInt, 0.U)
 
-  val isEmpty = RegInit(false.B)
-  isEmpty := !emptyVecNext.asUInt.andR
-  io.out.valid := isEmpty
+  val notEmpty = RegInit(false.B)
+  notEmpty := !emptyVecNext.asUInt.andR
+  io.out.valid := notEmpty || tryBypass
   io.out.bits := Mux1H(age.io.out, data)
-  when (io.out.fire) {
+
+  val doDequeue = io.out.fire && !doBypass
+  when (doDequeue) {
     for (i <- 0 until numEntries) {
       when (age.io.out(i)) {
         emptyVecNext(i) := true.B
         XSError(emptyVec(i), "should not deq an empty entry\n")
       }
     }
+  }
+
+  // assign bypass signals
+  if (enableBypass) {
+    val isEmpty = RegInit(false.B)
+    isEmpty := emptyVecNext.asUInt.andR
+
+    tryBypass := io.in.valid
+    when (isEmpty) {
+      io.out.bits := io.in.bits
+    }
+    doBypass := io.in.valid && io.out.ready && isEmpty
   }
 
   // flush
@@ -79,7 +97,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   }
 
   val flushDeq = VecInit(flushVec).asUInt
-  age.io.deq := Mux(io.out.fire, age.io.out, 0.U) | flushDeq
+  age.io.deq := Mux(doDequeue, age.io.out, 0.U) | flushDeq
 
   val numValid = PopCount(emptyVec.map(e => !e))
   XSPerfHistogram("num_valid", numValid, true.B, 0, numEntries, 1)

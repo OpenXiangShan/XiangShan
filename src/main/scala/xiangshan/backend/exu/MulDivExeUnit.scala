@@ -19,8 +19,8 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utils._
+import xiangshan._
 import xiangshan.backend.fu._
 
 class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
@@ -68,21 +68,6 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
   mul.ctrl.isHi := isH
   mul.ctrl.sign := DontCare
 
-  val isDivSign = MDUOpType.isDivSign(func)
-  val divInputFunc = (x: UInt) => Mux(
-    isW,
-    Mux(isDivSign,
-      SignExt(x(31, 0), XLEN),
-      ZeroExt(x(31, 0), XLEN)
-    ),
-    x
-  )
-  div.io.in.bits.src(0) := divInputFunc(src1)
-  div.io.in.bits.src(1) := divInputFunc(src2)
-  div.ctrl.isHi := isH
-  div.ctrl.isW := isW
-  div.ctrl.sign := isDivSign
-
   XSDebug(io.fromInt.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d)\n",
     io.fromInt.valid, io.fromInt.ready,
     io.out.valid, io.out.ready,
@@ -94,4 +79,3 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
     io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc
   )
 }
-

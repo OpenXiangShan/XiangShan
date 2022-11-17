@@ -29,10 +29,16 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     val allocate = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val deallocate = Vec(CommitWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val freeRegs = Vec(CommitWidth, ValidIO(UInt(PhyRegIdxWidth.W)))
+    val commit = Input(new RobCommitIO)
+    val redirect = Input(Bool())
+    // debug arch ports
+    val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
-  val allocate = RegNext(io.allocate)
+  val allocate = RegNext(io.allocate) // TODO: why no init value here?
   val deallocate = RegNext(io.deallocate)
+  val commit = RegNext(io.commit, 0.U.asTypeOf(io.commit))
+  val redirect = RegNext(io.redirect, false.B)
   // recording referenced times of each physical registers
   // refCounter: increase at rename; decrease at walk/commit
   // Originally 0-31 registers have counters of ones.
@@ -41,9 +47,28 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
   val refCounterDec = WireInit(refCounter)
   val refCounterNext = WireInit(refCounter)
 
+  val archRefCounter = RegInit(VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
+  val archRefCounterNext = WireDefault(archRefCounter)
+
   // One-hot Encoding for allocation and de-allocation
   val allocateOH = allocate.map(alloc => UIntToOH(alloc.bits))
   val deallocateOH = deallocate.map(dealloc => UIntToOH(dealloc.bits))
+  val commitPdestOH = commit.info.map(info => UIntToOH(info.pdest))
+  val commitOldPdestOH = commit.info.map(info => UIntToOH(info.old_pdest))
+
+  // Arch state maintainance
+  val archRefIncSeq = commit.commitValid zip commit.info zip commitPdestOH map {
+    case ((valid, info), pdest) => pdest.asBools.map(_ && valid && info.rfWen)
+  }
+  val archRefDecSeq = commit.commitValid zip commit.info zip commitOldPdestOH map {
+    case ((valid, info), old_pdest) => old_pdest.asBools.map(_ && valid && info.rfWen)
+  }
+  val archRefInc = archRefIncSeq(0).indices.map(i => PopCount(archRefIncSeq.map(_(i))))
+  val archRefDec = archRefDecSeq(0).indices.map(i => PopCount(archRefDecSeq.map(_(i))))
+
+  archRefCounterNext zip archRefCounter zip archRefInc zip archRefDec foreach {
+    case (((archRefNext, archRef), inc), dec) => when(commit.isCommit) { archRefNext := archRef + inc - dec }
+  }
 
   /**
     * De-allocation: when refCounter becomes zero, the register can be released to freelist
@@ -55,7 +80,9 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     val isFreed = refCounter(de.bits) + refCounterInc(de.bits) === refCounterDec(de.bits)
     io.freeRegs(i).valid := RegNext(isNonZero && !blockedByDup) && RegNext(isFreed)
     val isFreed1 = refCounter(RegNext(de.bits)) === 0.U
-    XSError(RegNext(isFreed) =/= isFreed1, p"why isFreed ${RegNext(isFreed)} $isFreed1\n")
+    when(!RegNext(redirect, false.B)) {
+      XSError(RegNext(isFreed) =/= isFreed1, p"why isFreed ${RegNext(isFreed)} $isFreed1\n")
+    }
     io.freeRegs(i).bits := RegNext(deallocate(i).bits)
   }
 
@@ -84,8 +111,17 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     XSError(refCounterDec(i) =/= numDealloc1, p"why numDealloc ${refCounterDec(i)} $numDealloc1??")
     refCounterNext(i) := refCounter(i) + refCounterInc(i) - refCounterDec(i)
     XSError(RegNext(refCounter(i) + refCounterInc(i) < refCounterDec(i)), p"why $i?\n")
-    refCounter(i) := refCounterNext(i)
+    refCounter(i) := Mux(redirect, archRefCounterNext(i), refCounterNext(i))
+    archRefCounter(i) := archRefCounterNext(i)
   }
+
+  // assertion of consistancy between arch rename table and refCounter
+  val archRefCounterFromRAT = RegNext(VecInit((0 until size).map(i => PopCount(io.debug_int_rat.map(_ === i.U)))),
+                                      VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
+  (1 until size).foreach(i =>
+    XSError(archRefCounter(i) =/= archRefCounterFromRAT(i),
+            p"archRefCounter_$i: ${archRefCounter(i)} =/= archRefCounterFromRAT_$i: ${archRefCounterFromRAT(i)}\n")
+  )
 
   for (i <- 0 until RobSize) {
     val numCounters = PopCount(refCounter.map(_ === i.U))

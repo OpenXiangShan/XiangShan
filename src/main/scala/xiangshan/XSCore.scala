@@ -33,11 +33,9 @@ import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters {
-  def io: Record
-}
+  with HasFPUParameters
 
 //remove this trait after impl module logic
 trait NeedImpl {
@@ -274,7 +272,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val rfWriteback = outer.wbArbiter.module.io.out
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  wb2Ctrl.io.delayedLoadError <> memBlock.io.delayedLoadError
+  wb2Ctrl.io.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
 
   wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
@@ -330,6 +328,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
+  exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
 
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
@@ -342,6 +341,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
+    exu.scheExtra.lqFull := memBlock.io.lqFull
+    exu.scheExtra.sqFull := memBlock.io.sqFull
     exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
       sink.bits := src.bits
       sink.valid := src.valid

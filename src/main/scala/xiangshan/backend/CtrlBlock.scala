@@ -53,6 +53,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
+    val isMisspreRedirect = Output(Bool())
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -95,6 +96,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
   val oldestExuOutput = Mux1H(io.exuMispredict.indices.map(oldestOneHot), io.exuMispredict)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
+  io.isMisspreRedirect := VecInit(io.exuMispredict.map(x => getRedirect(x).valid)).asUInt.orR
   io.redirectPcRead.ptr := oldestRedirect.bits.ftqIdx
   io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
 
@@ -264,20 +266,13 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + robFlush (1)
-  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 5, 1))
-  val jalrTargetMem = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), FtqSize, 2, 2))
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + robFlush (1)
+  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6, 1, "BackendPC"))
   val rob = outer.rob.module
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
-  jalrTargetMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
-  jalrTargetMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
-  jalrTargetMem.io.wdata.head := RegNext(io.frontend.fromFtq.target)
-  jalrTargetMem.io.wen.tail.head   := RegNext(io.frontend.fromFtq.pd_redirect_waddr.valid)
-  jalrTargetMem.io.waddr.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_waddr.bits)
-  jalrTargetMem.io.wdata.tail.head := RegNext(io.frontend.fromFtq.pd_redirect_target)
 
 
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
@@ -358,6 +353,39 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pendingRedirect := false.B
   }
 
+  if (env.EnableTopDown) {
+    val stage2Redirect_valid_when_pending = pendingRedirect && stage2Redirect.valid
+
+    val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
+    val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
+    val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
+    val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
+    
+    when(redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
+    when(flushRedirect.valid)              { RobFlushPending := true.B }
+    when(redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
+    
+    when (RegNext(io.frontend.toFtq.redirect.valid)) {
+      when(pendingRedirect) {                             stage2_redirect_cycles := true.B }
+      when(MissPredPending) { MissPredPending := false.B; branch_resteers_cycles := true.B }
+      when(RobFlushPending) { RobFlushPending := false.B; robFlush_bubble_cycles := true.B }
+      when(LdReplayPending) { LdReplayPending := false.B; ldReplay_bubble_cycles := true.B }
+    }
+
+    when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
+      when(stage2_redirect_cycles) { stage2_redirect_cycles := false.B }
+      when(branch_resteers_cycles) { branch_resteers_cycles := false.B }
+      when(robFlush_bubble_cycles) { robFlush_bubble_cycles := false.B }
+      when(ldReplay_bubble_cycles) { ldReplay_bubble_cycles := false.B }
+    }
+
+    XSPerfAccumulate("stage2_redirect_cycles", stage2_redirect_cycles)
+    XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
+    XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
+    XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
+    XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
+  }
+
   decode.io.in <> io.frontend.cfVec
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
@@ -387,6 +415,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   lfst.io.csrCtrl <> RegNext(io.csrCtrl)
   lfst.io.dispatch <> dispatch.io.lfst
 
+  rat.io.redirect := stage2Redirect.valid
   rat.io.robCommits := rob.io.commits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
@@ -441,6 +470,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
+  rename.io.debug_int_rat <> rat.io.debug_int_rat
+  rename.io.debug_fp_rat <> rat.io.debug_fp_rat
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -499,10 +530,13 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val jumpPcRead0 = pcMem.io.rdata(0).getPc(RegNext(intDq.io.deqNext(0).cf.ftqOffset))
   val jumpPcRead1 = pcMem.io.rdata(1).getPc(RegNext(intDq.io.deqNext(2).cf.ftqOffset))
   io.jumpPc := Mux(pingpong && (exuParameters.AluCnt > 2).B, jumpPcRead1, jumpPcRead0)
-  jalrTargetMem.io.raddr(0) := intDq.io.deqNext(0).cf.ftqPtr.value
-  jalrTargetMem.io.raddr(1) := intDq.io.deqNext(2).cf.ftqPtr.value
-  val jalrTargetRead = jalrTargetMem.io.rdata
-  io.jalr_target := Mux(pingpong && (exuParameters.AluCnt > 2).B, jalrTargetRead(1), jalrTargetRead(0))
+  val jalrTargetReadPtr = Mux(pingpong && (exuParameters.AluCnt > 2).B,
+    io.dispatch(2).bits.cf.ftqPtr,
+    io.dispatch(0).bits.cf.ftqPtr)
+  pcMem.io.raddr(4) := (jalrTargetReadPtr + 1.U).value
+  val jalrTargetRead = pcMem.io.rdata(4).startAddr
+  val read_from_newest_entry = RegNext(jalrTargetReadPtr) === RegNext(io.frontend.fromFtq.newest_entry_ptr)
+  io.jalr_target := Mux(read_from_newest_entry, RegNext(io.frontend.fromFtq.newest_entry_target), jalrTargetRead)
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)

@@ -231,8 +231,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
 
     // stageDelay, but check for l1
-    val hitPPN = DataHoldBypass(ParallelMux(hitVec zip l1.map(_.ppn)), stageDelay_valid_1cycle)
-    val hitPre = DataHoldBypass(ParallelMux(hitVec zip l1.map(_.prefetch)), stageDelay_valid_1cycle)
+    val hitPPN = DataHoldBypass(ParallelPriorityMux(hitVec zip l1.map(_.ppn)), stageDelay_valid_1cycle)
+    val hitPre = DataHoldBypass(ParallelPriorityMux(hitVec zip l1.map(_.prefetch)), stageDelay_valid_1cycle)
     val hit = DataHoldBypass(ParallelOR(hitVec), stageDelay_valid_1cycle)
 
     when (hit && stageDelay_valid_1cycle) { ptwl1replace.access(OHToUInt(hitVec)) }

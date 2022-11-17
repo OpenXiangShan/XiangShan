@@ -51,7 +51,7 @@ case class FuConfig
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
   fastImplemented: Boolean = false,
-  hasInputBuffer: Boolean = false,
+  hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut: Seq[Int] = Seq(),
   hasLoadError: Boolean = false,
   flushPipe: Boolean = false,
