@@ -35,9 +35,7 @@ class StdRSImp(params: RSParams, wrapper: StdRSWrapper) extends BaseReservationS
 
 class StdRS(params: RSParams)(implicit p: Parameters) extends BaseReservationStation(params)
   with RSDropNotOnRedirect {
-  for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_payloadUops).zipWithIndex) {
-    when (uop.needRfRPort(0, true, false)) {
-      s1_deqRfDataSel(i)(0) := enqReverse(readFpRf_asyn)(i).data
-    }
+  for ((uop, i) <- s1_payloadUops.zipWithIndex) {
+    s1_deqRfDataSel(i)(0) := Mux(uop.needRfRPort(0, true, true), readFpRf_asyn(i).data, readIntRf_asyn(i).data)
   }
 }
