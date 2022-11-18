@@ -158,10 +158,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
-  def refill_addr_hit(a: UInt, b: UInt): Bool = {
-    a(PAddrBits-1, DCacheIndexOffset) === b(PAddrBits-1, DCacheIndexOffset)
-  }
-
   def arbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
