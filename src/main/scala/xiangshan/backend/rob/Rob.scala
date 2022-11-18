@@ -286,6 +286,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val csr = new RobCSRIO
     val robFull = Output(Bool())
     val cpu_halt = Output(Bool())
+    val wfi_enable = Input(Bool())
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -316,7 +317,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val flagBkup = Mem(RobSize, Bool())
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
-  val interrupt_safe = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
+  val interrupt_safe = RegInit(VecInit(Seq.fill(RobSize)(true.B)))
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -440,6 +441,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   io.enq.isEmpty   := RegNext(isEmpty && !VecInit(io.enq.req.map(_.valid)).asUInt.orR)
+
+  when (!io.wfi_enable) {
+    hasWFI := false.B
+  }
 
   /**
     * Writeback (from execution units)

@@ -155,14 +155,15 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 
   val entry = Module(new RealeaseEntry(edge))
 
-  entry.io.id := 0.U
+  entry.io.id := releaseUnitIDStart.U
+  println(s"release entry ID: ${releaseUnitIDStart}")
 
   // entry req
   entry.io.req.valid := io.req.valid
   entry.io.req.bits  := io.req.bits
   io.req.ready    := entry.io.req.ready
 
-  entry.io.mem_grant.valid := (0.U === io.mem_grant.bits.source) && io.mem_grant.valid
+  entry.io.mem_grant.valid := (releaseUnitIDStart.U === io.mem_grant.bits.source) && io.mem_grant.valid
   entry.io.mem_grant.bits  := io.mem_grant.bits
   io.mem_grant.ready := entry.io.mem_grant.ready
 
