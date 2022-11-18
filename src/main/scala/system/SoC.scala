@@ -127,7 +127,7 @@ trait HaveSlaveAXI4Port {
   private val errorDevice = LazyModule(new TLError(
     params = DevNullParams(
       // requests to address below memory will be granted with erros
-      address = paddrRange.subtract(getAddressSet("memory") ++ getAddressSet("peripheral")),
+      address = paddrRange.subtract(getAddressSet("memory")),
       maxAtomic = 8,
       maxTransfer = 64),
     beatBytes = L3InnerBusWidth / 8
@@ -192,11 +192,6 @@ trait HaveAXI4MemPort {
     TLBuffer.chainNode(2) :=*
     TLCacheCork() :=*
     bankedNode
-
-  // mem_xbar :=
-  //   TLWidthWidget(8) :=
-  //   TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
-  //   peripheralXbar
 
   class MemPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
     val memoryNode = AXI4IdentityNode()
