@@ -34,11 +34,35 @@ class L2TlbPrefetchIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPt
 class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbPrefetchIO())
 
+  val OldRecordSize = 4
+  val old_reqs = Reg(Vec(OldRecordSize, UInt(vpnLen.W)))
+  val old_v = VecInit(Seq.fill(OldRecordSize)(RegInit(false.B)))
+  val old_index = RegInit(0.U(log2Ceil(OldRecordSize).W))
+
+  def already_have(vpn: UInt): Bool = {
+    Cat(old_reqs.zip(old_v).map{ case (o,v) => dup(o,vpn) && v}).orR
+  }
+
   val flush = io.sfence.valid || io.csr.satp.changed
-  val next_line = RegEnable(get_next_line(io.in.bits.vpn), io.in.valid)
-  val v = ValidHold(io.in.valid && !flush, io.out.fire(), flush)
+  val next_line = get_next_line(io.in.bits.vpn)
+  val next_req = RegEnable(next_line, io.in.valid)
+  val input_valid = io.in.valid && !flush && !already_have(next_line)
+  val v = ValidHold(input_valid, io.out.fire(), flush)
 
   io.out.valid := v
-  io.out.bits.vpn := next_line
+  io.out.bits.vpn := next_req
   io.out.bits.source := prefetchID.U
+
+  when (io.out.fire) {
+    old_v(old_index) := true.B
+    old_reqs(old_index) := next_req
+    old_index := Mux((old_index === (OldRecordSize-1).U), 0.U, old_index + 1.U)
+  }
+
+  when (flush) {
+    old_v.map(_ := false.B)
+  }
+
+  XSPerfAccumulate("l2tlb_prefetch_input_count", input_valid)
+  XSPerfAccumulate("l2tlb_prefetch_output_count", io.out.fire())
 }
