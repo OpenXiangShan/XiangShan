@@ -294,7 +294,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // passdown to lsq (load s3)
-    lsq.io.s3_dcache_require_replay(i) <> loadUnits(i).io.lsq.s3_dcache_require_replay
+    lsq.io.s2_dcache_require_replay(i) <> loadUnits(i).io.lsq.s2_dcache_require_replay
+    lsq.io.s3_replay_from_fetch(i) <> loadUnits(i).io.lsq.s3_replay_from_fetch
     lsq.io.s3_delayed_load_error(i) <> loadUnits(i).io.s3_delayed_load_error
 
     // alter writeback exception info
