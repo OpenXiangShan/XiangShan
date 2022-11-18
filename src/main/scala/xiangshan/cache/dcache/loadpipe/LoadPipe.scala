@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
+import xiangshan.cache.dcache.IdealWPU
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val io = IO(new DCacheBundle {
@@ -128,9 +129,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
 
   // dcache side tag match
-  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
-  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
-  val s1_tag_match = s1_tag_match_way.orR
+  val idealWPU = Module(new IdealWPU)
+  val s1_vaddr_dup_dcache = 0.U(PAddrBits.W)    // TODO: vaddr set idx
+  idealWPU.io.req.bits.idx := addr_to_dcache_set(s1_vaddr_dup_dcache)
+  idealWPU.io.req.valid := true.B
+  idealWPU.io.idealIf.all_tags <> tag_resp
+  idealWPU.io.idealIf.all_metas <> meta_resp
+  idealWPU.io.idealIf.real_tag := get_tag(s1_paddr_dup_dcache)
+  val predict_way = idealWPU.io.resp.bits.predict_way
+  val s1_tag_match_way = wayMap(w => predict_way===w.U).asUInt
+  val s1_tag_match = idealWPU.io.resp.valid
+
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way) <= 1.U), "tag should not match with more than 1 way")
 
   val s1_fake_meta = Wire(new Meta)
@@ -140,9 +149,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
-  val s1_hit_meta = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
+  val s1_hit_meta = Mux(s1_tag_match, meta_resp(predict_way), s1_fake_meta)
   val s1_hit_coh = s1_hit_meta.coh
-  val s1_hit_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => io.error_flag_resp(w))), false.B)
+  val s1_hit_error = Mux(s1_tag_match, io.error_flag_resp(predict_way), false.B)
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
