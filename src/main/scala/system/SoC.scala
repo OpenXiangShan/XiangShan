@@ -157,12 +157,13 @@ trait HaveSlaveAXI4Port {
 
   val dma_xbar = TLXbar()
   dma_xbar :=
+    TLBuffer() :=
     TLRationalCrossingSink(SlowToFast) :=
     dmaClkDiv2Domain.rationalNode
   // Illegal DMA requests are sent to the error device.
-  errorDevice.node := dma_xbar
+  errorDevice.node := TLBuffer() := dma_xbar
   // Legal DMA requests should access memory only.
-  l3_xbar := dma_xbar
+  l3_xbar := TLBuffer.chainNode(2) := dma_xbar
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
