@@ -155,10 +155,14 @@ trait HaveSlaveAXI4Port {
   val dmaClkDiv2Domain = LazyModule(new DMAPortClockDivDomain)
   dmaClkDiv2Domain.dmaNode := l3FrontendAXI4Node
 
-  l3_xbar :=
+  val dma_xbar = TLXbar()
+  dma_xbar :=
     TLRationalCrossingSink(SlowToFast) :=
     dmaClkDiv2Domain.rationalNode
-  errorDevice.node := l3_xbar
+  // Illegal DMA requests are sent to the error device.
+  errorDevice.node := dma_xbar
+  // Legal DMA requests should access memory only.
+  l3_xbar := dma_xbar
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
