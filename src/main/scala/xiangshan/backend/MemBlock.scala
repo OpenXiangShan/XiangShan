@@ -134,6 +134,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val perfEventsHc_in = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val perfEventsHc_out = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
 
+    val externalInterrupt_in = new ExternalInterruptIO
+    val externalInterrupt_out = Flipped(new ExternalInterruptIO)
+
     val redirect = Flipped(ValidIO(new Redirect))
     // in
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
@@ -174,6 +177,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   io.cpu_halt_out := io.cpu_halt_in
   io.perfEventsHc_out := io.perfEventsHc_in
+  io.externalInterrupt_out := io.externalInterrupt_in
   io.hartId_out_frontend := io.hartId
   io.hartId_out_backend := io.hartId
 

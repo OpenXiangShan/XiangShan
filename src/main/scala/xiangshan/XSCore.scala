@@ -201,9 +201,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val fenceio = backendTop.io.fenceio
 
   frontend.io.backend <> backendTop.io.frontend
-  frontend.io.sfence <> fenceio.sfence
-  frontend.io.tlbCsr <> csrioIn.tlb
-  frontend.io.csrCtrl <> csrioIn.customCtrl
+  frontend.io.sfence <> backendTop.io.sfenceFrontend
+  frontend.io.tlbCsr <> backendTop.io.tlbCsrFrontend
+  frontend.io.csrCtrl <> backendTop.io.csrCtrlFrontend
   frontend.io.fencei := fenceio.fencei
 
   backendTop.io.stIn <> memBlock.io.stIn
@@ -226,7 +226,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backendTop.io.stIssuePtr <> memBlock.io.stIssuePtr
   backendTop.io.stIn := memBlock.io.stIn
 
-  csrioIn.hartId <> memBlock.io.hartId_out_backend
   csrioIn.perf <> DontCare
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
@@ -238,24 +237,30 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
-  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+  memBlock.io.externalInterrupt_in.msip := outer.clint_int_sink.in.head._1(0)
+  memBlock.io.externalInterrupt_in.mtip := outer.clint_int_sink.in.head._1(1)
+  memBlock.io.externalInterrupt_in.meip := outer.plic_int_sink.in.head._1(0)
+  memBlock.io.externalInterrupt_in.seip := outer.plic_int_sink.in.last._1(0)
+  memBlock.io.externalInterrupt_in.debug := outer.debug_int_sink.in.head._1(0)
+
+  csrioIn.externalInterrupt.msip := memBlock.io.externalInterrupt_out.msip 
+  csrioIn.externalInterrupt.mtip := memBlock.io.externalInterrupt_out.mtip 
+  csrioIn.externalInterrupt.meip := memBlock.io.externalInterrupt_out.meip 
+  csrioIn.externalInterrupt.seip := memBlock.io.externalInterrupt_out.seip 
+  csrioIn.externalInterrupt.debug := memBlock.io.externalInterrupt_out.debug
 
   csrioIn.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
   csrioIn.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
   csrioIn.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
   csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
-  fenceio.sfence <> memBlock.io.sfence
+  backendTop.io.sfenceMemBlock <> memBlock.io.sfence
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> backendTop.io.redirect
   memBlock.io.rsfeedback <> backendTop.io.rsfeedback
-  memBlock.io.csrCtrl <> csrioIn.customCtrl
-  memBlock.io.tlbCsr <> csrioIn.tlb
+  memBlock.io.csrCtrl <> backendTop.io.csrCtrlMemBlock
+  memBlock.io.tlbCsr <> backendTop.io.tlbCsrMemBlock
   memBlock.io.itlb <> frontend.io.ptw
   memBlock.io.lsqio.rob <> backendTop.io.robio.lsq
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(backendTop.io.robio.exception.bits.uop.ctrl.commitType)

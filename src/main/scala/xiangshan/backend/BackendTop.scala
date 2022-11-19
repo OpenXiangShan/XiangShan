@@ -146,7 +146,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
 
   val io = IO(new Bundle {
     // XSCore interface
-    val hartId = Input(UInt(64.W))
+    val hartId = Input(UInt(8.W))
     val cpu_halt = Output(Bool())
 
     // val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
@@ -156,6 +156,14 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
     val csrio   = new CSRFileIO
     val fenceio = new FenceIO
 
+    val tlbCsrFrontend = Output(new TlbCsrBundle)
+    val tlbCsrMemBlock = Output(new TlbCsrBundle)
+
+    val csrCtrlFrontend = Output(new CustomCSRCtrlIO)
+    val csrCtrlMemBlock = Output(new CustomCSRCtrlIO)
+
+    val sfenceFrontend = Output(new SfenceBundle)
+    val sfenceMemBlock = Output(new SfenceBundle)
     // frontend
     val frontend = Flipped(new FrontendToCtrlIO)
     // memblock
@@ -164,7 +172,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
     //
     val enqLsq = Flipped(new LsqEnqIO)
 
-    val sqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
+    val sqDeq = Input(UInt(2.W))
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
 
@@ -225,7 +233,16 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
 
   io.frontend <> ctrlBlock.io.frontend
 
+  io.tlbCsrFrontend := csrioIn.tlb
+  io.tlbCsrMemBlock := csrioIn.tlb
+
+  io.csrCtrlFrontend := csrioIn.customCtrl
+  io.csrCtrlMemBlock := csrioIn.customCtrl
+
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
+
+  io.sfenceFrontend := fenceio.sfence
+  io.sfenceMemBlock := fenceio.sfence
 
   val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
   ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
@@ -302,6 +319,7 @@ class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModul
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
+  csrioIn.hartId <> io.hartId
   csrioIn.perf.retiredInstr <> ctrlBlock.io.robio.toCSR.perfinfo.retiredInstr
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
 
