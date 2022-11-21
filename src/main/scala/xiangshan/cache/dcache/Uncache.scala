@@ -210,6 +210,7 @@ class UncacheImp(outer: Uncache)
   val mem_grant   = bus.d
 
   val req_ready = WireInit(false.B)
+  val load_fence = RegInit(Bool(), false.B)
 
   // assign default values to output signals
   bus.b.ready := false.B
@@ -345,7 +346,7 @@ class UncacheImp(outer: Uncache)
     }
 
     //  Acquire
-    entry.io.select := (edge.hasData(entry.io.mem_acquire.bits) || issPtr === deqPtr /* Load */) && (i.U === issPtr.value)
+    entry.io.select := !load_fence && (i.U === issPtr.value)
 
     //  Grant
     entry.io.mem_grant.valid := false.B
@@ -380,6 +381,13 @@ class UncacheImp(outer: Uncache)
       deqPtr := Mux(edge.hasData(mem_grant.bits), deqPtr /* Load */, deqPtr + 1.U /* Store */)
     } .elsewhen (io.lsq.resp.fire /* Load */) {
       deqPtr := deqPtr + 1.U
+    }
+
+    //  Load fence
+    when (mem_acquire.fire && edge.hasData(mem_acquire.bits)) {
+      load_fence := true.B 
+    } .elsewhen (io.lsq.resp.fire) {
+      load_fence := false.B
     }
   } .otherwise {
     when (io.lsq.resp.fire) {
