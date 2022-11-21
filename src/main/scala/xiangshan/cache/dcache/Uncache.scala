@@ -384,7 +384,7 @@ class UncacheImp(outer: Uncache)
     }
 
     //  Load fence
-    when (mem_acquire.fire && edge.hasData(mem_acquire.bits)) {
+    when (mem_acquire.fire && !edge.hasData(mem_acquire.bits)) {
       load_fence := true.B 
     } .elsewhen (io.lsq.resp.fire) {
       load_fence := false.B
