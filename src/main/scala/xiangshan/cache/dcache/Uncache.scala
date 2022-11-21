@@ -346,7 +346,7 @@ class UncacheImp(outer: Uncache)
     }
 
     //  Acquire
-    entry.io.select := !load_fence && (i.U === issPtr.value)
+    entry.io.select := !load_fence && (edge.hasData(entry.io.mem_acquire.bits) || issPtr === deqPtr) && (i.U === issPtr.value)
 
     //  Grant
     entry.io.mem_grant.valid := false.B
