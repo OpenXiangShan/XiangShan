@@ -181,7 +181,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  def idRange: Int = 2
+  def idRange: Int = 8
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -210,7 +210,6 @@ class UncacheImp(outer: Uncache)
   val mem_grant   = bus.d
 
   val req_ready = WireInit(false.B)
-  val load_fence = RegInit(Bool(), false.B)
 
   // assign default values to output signals
   bus.b.ready := false.B
@@ -346,7 +345,7 @@ class UncacheImp(outer: Uncache)
     }
 
     //  Acquire
-    entry.io.select := !load_fence && (edge.hasData(entry.io.mem_acquire.bits) || issPtr === deqPtr) && (i.U === issPtr.value)
+    entry.io.select := (edge.hasData(entry.io.mem_acquire.bits) || issPtr === deqPtr) && (i.U === issPtr.value)
 
     //  Grant
     entry.io.mem_grant.valid := false.B
@@ -383,12 +382,6 @@ class UncacheImp(outer: Uncache)
       deqPtr := deqPtr + 1.U
     }
 
-    //  Load fence
-    when (mem_acquire.fire && !edge.hasData(mem_acquire.bits)) {
-      load_fence := true.B 
-    } .elsewhen (io.lsq.resp.fire) {
-      load_fence := false.B
-    }
   } .otherwise {
     when (io.lsq.resp.fire) {
       enqPtr := enqPtr + 1.U
