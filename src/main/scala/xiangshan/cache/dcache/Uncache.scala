@@ -181,7 +181,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  def idRange: Int = 8
+  def idRange: Int = 2
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
