@@ -26,7 +26,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import huancun.PreferCacheKey
+import huancun.{PreferCacheKey, PreferCacheField}
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -36,7 +36,8 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
+    )),
+    requestFields = Seq(PreferCacheField())
   )))
 
   lazy val module = new PTWImp(this)
