@@ -537,9 +537,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
   println("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
-  csrio.customCtrl.move_elim_enable := srnctl(0)
+  val srnctl = RegInit(UInt(XLEN.W), "h7".U)
+  csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.svinval_enable := srnctl(1)
+  csrio.customCtrl.wfi_enable := srnctl(2)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)

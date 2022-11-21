@@ -93,7 +93,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 10000
+  val timeOutThreshold = 5000
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -251,6 +251,17 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   def from_pre(source: UInt) = {
     (source === prefetchID.U)
   }
+
+  def sel_data(data: UInt, index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+
+  // vpn1 and vpn2 is at same cacheline
+  def dup(vpn1: UInt, vpn2: UInt): Bool = {
+    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
+  }
+
 
   def printVec[T <: Data](x: Seq[T]): Printable = {
     (0 until x.length).map(i => p"(${i.U})${x(i)} ").reduce(_+_)

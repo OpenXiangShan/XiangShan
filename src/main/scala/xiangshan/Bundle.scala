@@ -62,6 +62,8 @@ object RSFeedbackType {
   val bankConflict = 3.U(3.W)
   val ldVioCheckRedo = 4.U(3.W)
 
+  val feedbackInvalid = 7.U(3.W)
+
   def apply() = UInt(3.W)
 }
 
@@ -101,7 +103,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.rasSp := entry.rasSp
-    this.rasEntry := entry.rasEntry
+    this.rasEntry := entry.rasTop
     this
   }
 }
@@ -496,7 +498,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val cache_error_enable = Output(Bool())
   val uncache_write_outstanding_enable = Output(Bool())
   // Rename
-  val move_elim_enable = Output(Bool())
+  val fusion_enable = Output(Bool())
+  val wfi_enable = Output(Bool())
   // Decode
   val svinval_enable = Output(Bool())
 

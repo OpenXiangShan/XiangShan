@@ -95,6 +95,7 @@ class TageReq(implicit p: Parameters) extends TageBundle {
 class TageResp(implicit p: Parameters) extends TageBundle {
   val ctr = UInt(TageCtrBits.W)
   val u = Bool()
+  val unconf = Bool()
 }
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
@@ -152,7 +153,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
+  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -301,9 +302,8 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = withReset(reset.asBool || io.update.reset_u.reduce(_||_)) {
-      Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true))
-  }
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -313,10 +313,10 @@ class TageTable
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
   val s0_bank_req_1h = get_bank_mask(s0_idx)
 
-  for (b <- 0 until nBanks) {
-    table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
-    table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
-  }
+    for (b <- 0 until nBanks) {
+      table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
+      table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+    }
 
   us.io.r.req.valid := io.req.fire
   us.io.r.req.bits.setIdx := s0_idx
@@ -327,26 +327,30 @@ class TageTable
   val s1_tag = RegEnable(s0_tag, io.req.fire)
   val s1_pc  = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
-  val s1_bank_has_write_last_cycle = RegNext(VecInit(table_banks.map(_.io.w.req.valid)))
+  val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
+  val resp_invalid_by_write = Wire(Bool())
   
   val tables_r = table_banks.map(_.io.r.resp.data) // s1
+  val unconfs = tables_r.map(r => VecInit(r.map(e => WireInit(unconf(e.ctr))))) // do unconf cal in parallel
+  val hits = tables_r.map(r => VecInit(r.map(e => e.tag === s1_tag && e.valid && !resp_invalid_by_write))) // do tag compare in parallel
   
   val resp_selected = Mux1H(s1_bank_req_1h, tables_r)
-  val resp_invalid_by_write = Mux1H(s1_bank_req_1h, s1_bank_has_write_last_cycle)
+  val unconf_selected = Mux1H(s1_bank_req_1h, unconfs)
+  val hit_selected = Mux1H(s1_bank_req_1h, hits)
+  resp_invalid_by_write := Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
 
 
   val per_br_resp = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), resp_selected)))
+  val per_br_unconf = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), unconf_selected)))
+  val per_br_hit = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), hit_selected)))
   val per_br_u    = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr), us.io.r.resp.data)))
-  
-  val req_rhits = VecInit((0 until numBr).map(i =>
-    per_br_resp(i).valid && per_br_resp(i).tag === s1_tag && !resp_invalid_by_write
-  ))
 
   for (i <- 0 until numBr) {
-    io.resps(i).valid := req_rhits(i)
+    io.resps(i).valid := per_br_hit(i)
     io.resps(i).bits.ctr := per_br_resp(i).ctr
     io.resps(i).bits.u := per_br_u(i)
+    io.resps(i).bits.unconf := per_br_unconf(i)
   }
 
   if (EnableGHistDiff) {
@@ -379,7 +383,7 @@ class TageTable
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
-      valid   = io.update.mask.reduce(_||_) && update_req_bank_1h(b) && per_bank_not_silent_update(b).reduce(_||_),
+      valid   = per_bank_update_way_mask(b).orR && update_req_bank_1h(b),
       data    = per_bank_update_wdata(b),
       setIdx  = update_idx_in_bank,
       waymask = per_bank_update_way_mask(b)
@@ -415,7 +419,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRowsPerBr/nBanks), tagWidth=tagLen))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, 1, tagWidth=tagLen))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
@@ -427,16 +431,17 @@ class TageTable
       val wrbypass_io = Mux1H(UIntToOH(br_lidx, numBr), bank_wrbypasses(b).map(_.io))
       val wrbypass_hit = wrbypass_io.hit
       val wrbypass_ctr = wrbypass_io.hit_data(0).bits
+      val wrbypass_data_valid = wrbypass_hit && wrbypass_io.hit_data(0).valid
       update_wdata.ctr :=
         Mux(io.update.alloc(br_lidx),
           Mux(io.update.takens(br_lidx), 4.U, 3.U),
-          Mux(wrbypass_hit,
+          Mux(wrbypass_data_valid,
             inc_ctr(wrbypass_ctr,               io.update.takens(br_lidx)),
             inc_ctr(io.update.oldCtrs(br_lidx), io.update.takens(br_lidx))
           )
         )
       not_silent_update(pi) :=
-        Mux(wrbypass_hit,
+        Mux(wrbypass_data_valid,
           !silentUpdate(wrbypass_ctr,               io.update.takens(br_lidx)),
           !silentUpdate(io.update.oldCtrs(br_lidx), io.update.takens(br_lidx))) ||
         io.update.alloc(br_lidx)
@@ -491,8 +496,8 @@ class TageTable
     p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
     p"idx=$s0_idx, tag=$s0_tag\n")
   for (i <- 0 until numBr) {
-    XSDebug(RegNext(io.req.fire) && req_rhits(i),
-      p"TageTableResp_br_$i: idx=$s1_idx, hit:${req_rhits(i)}, " +
+    XSDebug(RegNext(io.req.fire) && per_br_hit(i),
+      p"TageTableResp_br_$i: idx=$s1_idx, hit:${per_br_hit(i)}, " +
       p"ctr:${io.resps(i).bits.ctr}, u:${io.resps(i).bits.u}\n")
     XSDebug(io.update.mask(i),
       p"update Table_br_$i: pc:${Hexadecimal(u.pc)}}, " +
@@ -502,7 +507,7 @@ class TageTable
     XSDebug(io.update.mask(i),
       p"update Table_$i: writing tag:$update_tag, " +
       p"ctr: ${per_bank_update_wdata(bank)(pi).ctr} in idx ${update_idx}\n")
-    XSDebug(RegNext(io.req.fire) && !req_rhits(i), p"TageTableResp_$i: not hit!\n")
+    XSDebug(RegNext(io.req.fire) && !per_br_hit(i), p"TageTableResp_$i: not hit!\n")
   }
 
   // ------------------------------Debug-------------------------------------
@@ -588,20 +593,18 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire)
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire)
 
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
 
-  // val ftb_hit = io.in.bits.resp_in(0).s2.full_pred.hit
-  val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry
-  val resp_s2 = io.out.resp.s2
+  val resp_s2 = io.out.s2
 
   // Update logic
   val u_valid = io.update.valid
   val update = io.update.bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
-      !(PriorityEncoder(update.full_pred.br_taken_mask) < w.U)))
-  val updateFHist = update.folded_hist
+      !(PriorityEncoder(update.br_taken_mask) < w.U)))
+  val updateFHist = update.spec_info.folded_hist
 
   val updateMeta = update.meta.asTypeOf(new TageMeta)
 
@@ -624,14 +627,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
   class TageTableInfo(implicit p: Parameters) extends XSBundle {
     val resp = new TageResp
     val tableIdx = UInt(log2Ceil(TageNTables).W)
+    val use_alt_on_unconf = Bool()
   }
   // access tag tables and output meta info
 
   for (i <- 0 until numBr) {
+    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
+    val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
+
     val s1_per_br_resp = VecInit(s1_resps.map(_(i)))
     val inputRes = s1_per_br_resp.zipWithIndex.map{case (r, idx) => {
       val tableInfo = Wire(new TageTableInfo)
       tableInfo.resp := r.bits
+      tableInfo.use_alt_on_unconf := r.bits.unconf && useAltOnNa
       tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
       (r.valid, tableInfo)
     }}
@@ -668,19 +676,16 @@ class Tage(implicit p: Parameters) extends BaseTage {
     
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
-    val providerUnconf = unconf(providerInfo.resp.ctr)
-    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
-    val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
     val s1_bimCtr = bt.io.s1_cnt(i)
     s1_tageTakens(i) := 
-      Mux(!provided || providerUnconf && useAltOnNa,
+      Mux(!provided || providerInfo.use_alt_on_unconf,
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
-    s1_altUsed(i)       := !provided || providerUnconf && useAltOnNa
+    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
-    s1_useAltOnNa(i)    := providerUnconf && useAltOnNa
+    s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire)
     resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens(i), io.s2_fire)
@@ -694,7 +699,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     //---------------- update logics below ------------------//
     val hasUpdate = updateValids(i)
     val updateMispred = updateMisPreds(i)
-    val updateTaken = hasUpdate && update.full_pred.br_taken_mask(i)
+    val updateTaken = hasUpdate && update.br_taken_mask(i)
 
     val updateProvided     = updateMeta.providers(i).valid
     val updateProvider     = updateMeta.providers(i).bits
@@ -881,7 +886,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val m = updateMeta
     // val bri = u.metas(b)
     XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
-      b.U, update.pc, 0.U, update.full_pred.br_taken_mask(b), update.mispred_mask(b),
+      b.U, update.pc, 0.U, update.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.providers(b).valid, m.providers(b).bits, m.altDiffers(b), m.providerResps(b).u,
       m.providerResps(b).ctr, m.allocates(b)
     )
@@ -890,7 +895,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
   XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
   XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hits=%b, takens=%b\n",
-    debug_pc_s2, io.out.resp.s2.getTarget, s2_provideds.asUInt, s2_tageTakens.asUInt)
+    debug_pc_s2, io.out.s2.getTarget, s2_provideds.asUInt, s2_tageTakens.asUInt)
 
   for (b <- 0 until TageBanks) {
     for (i <- 0 until TageNTables) {
