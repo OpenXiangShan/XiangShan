@@ -28,7 +28,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import huancun.mbist.MBISTPipeline
 import huancun.mbist.MBISTPipeline.placePipelines
-import huancun.PreferCacheKey
+import huancun.{PreferCacheKey, PreferCacheField}
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -38,7 +38,8 @@ class PTW(parentName: String = "Unknown")(implicit p: Parameters) extends LazyMo
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
+    )),
+    requestFields = Seq(PreferCacheField())
   )))
 
   lazy val module = new PTWImp(parentName, this)
