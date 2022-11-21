@@ -601,7 +601,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.fpu := fpDecoder.io.fpCtrl
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
+  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U && !io.csrCtrl.singlestep
 
   // read src1~3 location
   cs.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
