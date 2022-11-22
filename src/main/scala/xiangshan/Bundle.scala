@@ -62,6 +62,8 @@ object RSFeedbackType {
   val bankConflict = 3.U(3.W)
   val ldVioCheckRedo = 4.U(3.W)
 
+  val feedbackInvalid = 7.U(3.W)
+
   def apply() = UInt(3.W)
 }
 
@@ -495,7 +497,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
   // Rename
-  val move_elim_enable = Output(Bool())
+  val fusion_enable = Output(Bool())
+  val wfi_enable = Output(Bool())
   // Decode
   val svinval_enable = Output(Bool())
 

@@ -822,6 +822,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && io.toIbuffer.fire() )
   XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire() )
   XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire() )
+  XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), io.toIbuffer.fire, 0, PredictWidth + 1, 1)
 
   val fetchToIBufferTable = ChiselDB.createTable("FetchToIBuffer" + p(XSCoreParamsKey).HartId.toString, new FetchToIBufferDB)
   val ifuWbToFtqTable = ChiselDB.createTable("IfuWbToFtq" + p(XSCoreParamsKey).HartId.toString, new IfuWbToFtqDB)
@@ -857,6 +858,4 @@ class NewIFU(implicit p: Parameters) extends XSModule
     reset = reset
   )
 
-
 }
-
