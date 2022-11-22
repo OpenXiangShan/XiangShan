@@ -289,14 +289,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // Lsq to load unit's rs
 
+    // passdown to lsq (load s1)
+    lsq.io.loadPaddrIn(i) <> loadUnits(i).io.lsq.loadPaddrIn
+
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.ldout
+    lsq.io.ldRawDataOut(i) <> loadUnits(i).io.lsq.ldRawData
     lsq.io.s2_load_data_forwarded(i) <> loadUnits(i).io.lsq.s2_load_data_forwarded
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     // passdown to lsq (load s3)
-    lsq.io.s3_dcache_require_replay(i) <> loadUnits(i).io.lsq.s3_dcache_require_replay
+    lsq.io.s2_dcache_require_replay(i) <> loadUnits(i).io.lsq.s2_dcache_require_replay
+    lsq.io.s3_replay_from_fetch(i) <> loadUnits(i).io.lsq.s3_replay_from_fetch
     lsq.io.s3_delayed_load_error(i) <> loadUnits(i).io.s3_delayed_load_error
 
     // alter writeback exception info
@@ -364,8 +369,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
-    // Lsq to load unit's rs
+    // Lsq to sta unit
+    lsq.io.storeMaskIn(i) <> stu.io.storeMaskOut
+
+    // Lsq to std unit's rs
     lsq.io.storeDataIn(i) := stData(i)
+
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
@@ -450,7 +459,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.memoryViolation    <> lsq.io.rollback
-  lsq.io.uncache        <> uncache.io.lsq
+  // lsq.io.uncache        <> uncache.io.lsq
+  AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
+  AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
   // delay dcache refill for 1 cycle for better timing
   lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
