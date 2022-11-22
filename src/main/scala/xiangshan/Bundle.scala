@@ -517,6 +517,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val wfi_enable = Output(Bool())
   // Decode
   val svinval_enable = Output(Bool())
+  val move_elim_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
