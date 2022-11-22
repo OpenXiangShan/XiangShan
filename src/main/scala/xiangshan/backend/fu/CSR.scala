@@ -446,10 +446,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
+  val srnctl = RegInit(UInt(XLEN.W), "hb".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.svinval_enable := srnctl(1)
   csrio.customCtrl.wfi_enable := srnctl(2)
+  csrio.customCtrl.move_elim_enable := srnctl(3)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)
