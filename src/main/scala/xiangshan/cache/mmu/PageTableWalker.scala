@@ -144,15 +144,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
   
   when(sent_to_pmp && mem_addr_update === false.B){
-    when(accessFault === false.B){
-      s_pmp_check := true.B
-      s_mem_req := false.B
-    }.elsewhen(accessFault){
-      s_pmp_check := true.B
-      idle := true.B 
-      s_mem_req := true.B
-      w_mem_resp := true.B
-    }
+    s_mem_req := false.B
+    s_pmp_check := true.B
+  }
+
+  when(accessFault){
+    s_pmp_check := true.B
+    s_mem_req := true.B
+    w_mem_resp := true.B
+    s_llptw_req := true.B
+    mem_addr_update := true.B
   }
 
   when (mem.req.fire()){
@@ -163,6 +164,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem.resp.fire()){
     w_mem_resp := true.B
     af_level := af_level + 1.U
+    s_llptw_req := false.B
     mem_addr_update := true.B
   }
   
@@ -170,21 +172,20 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     when(level === 0.U && !(find_pte||accessFault)){
       level := levelNext
       s_mem_req := false.B 
-      s_pmp_check := true.B
+      s_llptw_req := true.B
       mem_addr_update := false.B
-    }.elsewhen(to_find_pte && !accessFault){
-      s_llptw_req := false.B
+    }.elsewhen(io.llptw.fire()){
+      idle := true.B
+      s_llptw_req := true.B
       mem_addr_update := false.B
     }.elsewhen(io.resp.fire()){
       idle := true.B
+      s_llptw_req := true.B
       mem_addr_update := false.B
+      accessFault := false.B
     }
   }
   
-  when(io.llptw.fire()){
-    idle := true.B
-    s_llptw_req := true.B
-  }
   
   when (sfence.valid) {
     idle := true.B
