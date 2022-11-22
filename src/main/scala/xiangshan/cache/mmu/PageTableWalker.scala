@@ -89,17 +89,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s_pmp_check = RegInit(true.B)
   val s_mem_req = RegInit(true.B)
   val s_llptw_req = RegInit(true.B)
-
-  // val w_pmp_check = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
   // for updating "level"
   val mem_addr_update = RegInit(false.B)
 
-  // val idle = s_pmp_check && s_mem_req && s_llptw_req && w_mem_resp
   val idle = RegInit(true.B)
-  val resp_valid = RegInit(false.B)
-  val sent_to_pmp = s_pmp_check === false.B
-  val wait_pmp = RegInit(false.B)
+  val sent_to_pmp = s_pmp_check === false.B || mem_addr_update
+
   val pageFault = memPte.isPf(level)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
@@ -113,7 +109,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
 
-  io.resp.valid := resp_valid && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
+  io.resp.valid := mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
 
@@ -122,12 +118,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.ppn := memPte.ppn
 
-  io.pmp.req.valid := DontCare
+  io.pmp.req.valid := DontCare // samecycle, do not use valid
   io.pmp.req.bits.addr := mem_addr
-  io.pmp.req.bits.size := 3.U
+  io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
 
-  mem.req.valid := s_mem_req === false.B && s_pmp_check && !mem.mask && !accessFault && s_pmp_check
+  mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
   mem.req.bits.addr := mem_addr
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
@@ -144,65 +140,53 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     l1Hit := req.l1Hit
     accessFault := false.B
     s_pmp_check := false.B
-    s_mem_req := false.B
     idle := false.B
   }
-
-  when(s_mem_req === false.B){
-    when (mem.req.fire()){
+  
+  when(sent_to_pmp && mem_addr_update === false.B){
+    when(accessFault === false.B){
+      s_pmp_check := true.B
+      s_mem_req := false.B
+    }.elsewhen(accessFault){
+      s_pmp_check := true.B
+      idle := true.B 
       s_mem_req := true.B
-      w_mem_resp := false.B
+      w_mem_resp := true.B
     }
+  }
+
+  when (mem.req.fire()){
+    s_mem_req := true.B
+    w_mem_resp := false.B
+  } 
+    
+  when(mem.resp.fire()){
+    w_mem_resp := true.B
+    af_level := af_level + 1.U
+    mem_addr_update := true.B
   }
   
-  when(sent_to_pmp && wait_pmp === false.B){
-    wait_pmp := true.B
-  }
-
-  when(sent_to_pmp && wait_pmp){
-    wait_pmp := false.B
-    s_pmp_check := true.B
-    when(accessFault){
-      idle := true.B 
-      resp_valid := true.B
-      s_mem_req := true.B
-      w_mem_resp := true.B
-    }
-  }
-
-  when(w_mem_resp === false.B && s_pmp_check){
-    when(mem.resp.fire()){
-      w_mem_resp := true.B
-      af_level := af_level + 1.U
-      mem_addr_update := true.B
-    }
-  }
   when(mem_addr_update){
-    mem_addr_update := false.B
     when(level === 0.U && !(find_pte||accessFault)){
       level := levelNext
       s_mem_req := false.B 
-      s_pmp_check := false.B
+      s_pmp_check := true.B
+      mem_addr_update := false.B
     }.elsewhen(to_find_pte && !accessFault){
       s_llptw_req := false.B
-    }.otherwise{
-      resp_valid := true.B
+      mem_addr_update := false.B
+    }.elsewhen(io.resp.fire()){
       idle := true.B
+      mem_addr_update := false.B
     }
   }
-  when(io.resp.fire()){
-    resp_valid := false.B
+  
+  when(io.llptw.fire()){
+    idle := true.B
+    s_llptw_req := true.B
   }
-  when(s_llptw_req === false.B){
-    when(io.llptw.valid){
-      when(io.llptw.fire()){
-        idle := true.B
-        s_llptw_req := true.B
-      }
-    }
-  }
+  
   when (sfence.valid) {
-    resp_valid := false.B
     idle := true.B
     s_pmp_check := true.B
     s_mem_req := true.B
