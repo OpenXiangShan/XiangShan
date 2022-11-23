@@ -407,7 +407,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
-  XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
+  // XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
