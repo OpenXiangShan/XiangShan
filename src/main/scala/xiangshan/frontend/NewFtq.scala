@@ -965,9 +965,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val distance_between_prefetch_ifu = prefetchPtr.value - ifuPtr.value
     //TODO: Parameterize it
     val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
-    val prefetch_too_late = prefetchPtr.value <= ifuPtr.value
-    when(prefetch_too_late && prefetchPtr =/= bpuPtr){
-      prefetchPtr := ifuPtr + 1.U
+    val prefetch_too_late = isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)
+    when(prefetch_too_late){
+      when(prefetchPtr =/= bpuPtr){
+        prefetchPtr := ifuPtr + 1.U
+      }.otherwise{
+        prefetchPtr := ifuPtr
+      }
     }
 
     when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
@@ -992,7 +996,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     io.toPrefetch.req.bits.target := prefetch_addr
     if(DebugFlags.fdip){
       when(io.toPrefetch.req.fire()) {
-        printf("[%d]FTQ send a request to prefetch, distance of prefetch and ifu: %d, vaddr: 0x%x\n", GTimer(), distance_between_prefetch_ifu, prefetch_addr)
+        printf("[%d] FTQ send a request to prefetch, distance of prefetch and ifu: %d, ifu: %d, prefetch: %d, bpu: %d, vaddr: 0x%x\n",
+          GTimer(), distance_between_prefetch_ifu, ifuPtr.value, prefetchPtr.value, bpuPtr.value, prefetch_addr)
       }
     }
 
@@ -1004,7 +1009,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
 
     XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
+//    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
   }
   else {
     io.toPrefetch.req <> DontCare

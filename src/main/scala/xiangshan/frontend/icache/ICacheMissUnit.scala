@@ -104,7 +104,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   if(DebugFlags.fdip){
     when(io.mem_acquire.fire()) {
-      printf("miss_(%d) time:%d addr: %x\n", id.U, GTimer(), req.vaddr)
+      printf("{%d} Miss unit: send an acquire, source id: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), id.U, req.vaddr, addrAlign(req.vaddr, blockBytes, VAddrBits))
     }
   }
 
@@ -255,7 +255,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val fencei = Input(Bool())
     val piq_write_ipbuffer = ValidIO(new IPFBufferWrite)
 
-
+    val to_main_pipe = Vec(nPrefetchEntries, new PIQToMainPipe)
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
@@ -302,6 +302,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   }
 
   val alloc = Wire(UInt(log2Ceil(nPrefetchEntries).W))
+  val toMainPipe = io.to_main_pipe.map(_.info)
 
   val prefEntries = (PortNumber until PortNumber + nPrefetchEntries) map { i =>
     val prefetchEntry = Module(new PIQEntry(edge, i))
@@ -326,6 +327,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   }
   alloc := PriorityEncoder(prefEntries.map(_.io.req.ready))
   io.prefetch_req.ready := ParallelOR(prefEntries.map(_.io.req.ready))
+  (0 until nPrefetchEntries).foreach(i => toMainPipe(i) <> prefEntries(i).io.prefetch_entry_data)
   val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, tl_a_chanel:_*)
 

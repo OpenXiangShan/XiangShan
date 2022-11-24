@@ -515,11 +515,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
+  mainPipe.io.PIQ <> missUnit.io.to_main_pipe
   ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
   meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
   data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
 
-  //TODO: ipfBuffer fencei
   ipfBuffer.io.fencei := io.fencei
   missUnit.io.fencei := io.fencei
 

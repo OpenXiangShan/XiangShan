@@ -40,6 +40,17 @@ class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
   val vSetIdx   = UInt(idxBits.W)
 }
 
+class PIQData(implicit p: Parameters) extends IPrefetchBundle {
+  val ptage = UInt(tagBits.W)
+  val vSetIdx = UInt(idxBits.W)
+  val cacheline = UInt(blockBits.W)
+  val writeBack = Bool()
+}
+
+class PIQToMainPipe(implicit  p: Parameters) extends IPrefetchBundle{
+  val info = DecoupledIO(new PIQData)
+}
+
 class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
   val enqReq  = DecoupledIO(new PIQReq)
 }
@@ -132,7 +143,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val curr_write_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
   val victim_way = curr_write_ptr + 1.U//replacer.way
 
-  when(io.write.valid){
+  when(io.write.valid) {
     meta_buffer(curr_write_ptr).tag := io.write.bits.meta.tag
     meta_buffer(curr_write_ptr).index := io.write.bits.meta.index
     meta_buffer(curr_write_ptr).paddr := io.write.bits.meta.paddr
@@ -147,7 +158,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     curr_write_ptr := victim_way
 
     if(DebugFlags.fdip){
-      printf("(%d)write into buffer, curr_write_ptr: %d, addr: 0x%x\n",GTimer(), curr_write_ptr,io.write.bits.meta.paddr)
+      printf("(%d) IPrefetchBuffer: write into buffer, curr_write_ptr: %d, addr: 0x%x\n",GTimer(), curr_write_ptr,io.write.bits.meta.paddr)
     }
   }
 
@@ -379,9 +390,36 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit
   p3_discard := p3_valid && p3_req_cancel
 
-  toMissUnit.enqReq.valid             := p3_valid && !p3_req_cancel
-  toMissUnit.enqReq.bits.paddr        := p3_paddr
-  toMissUnit.enqReq.bits.vSetIdx        := get_idx(p3_vaddr)
+  class p3QueueEntry(implicit p: Parameters) extends IPrefetchBundle{
+    val paddr = UInt(PAddrBits.W)
+    val vSetIdx = UInt(idxBits.W)
+  }
+  //Is the buffer size suitable?
+  val p3_wait_buffer  = RegInit(VecInit(Seq.fill(nPrefetchEntries)(0.U.asTypeOf(new p3QueueEntry))))
+  val p3_enqueue_ptr  = RegInit(0.U(log2Ceil(nPrefetchEntries).W))
+  val p3_write_ptr    = RegInit(0.U(log2Ceil(nPrefetchEntries).W))
+  val p3_issue        = p3_valid && !p3_req_cancel
+  val p3_buffer_empty = p3_enqueue_ptr === p3_write_ptr
+  val p3_buffer_full  = (p3_write_ptr + 1.U) === p3_enqueue_ptr
+
+  //When wait buffer is not empty or PIQ is not ready to enqueue, write into p3 buffer.
+  val p3_buffer_fire = WireInit(false.B)
+  when(p3_issue && (!p3_buffer_empty || !toMissUnit.enqReq.ready) && !p3_buffer_full) {
+    p3_buffer_fire := true.B
+
+    p3_write_ptr := p3_write_ptr + 1.U
+    p3_wait_buffer(p3_write_ptr).paddr   := p3_paddr
+    p3_wait_buffer(p3_write_ptr).vSetIdx := get_idx(p3_vaddr)
+  }
+  when(toMissUnit.enqReq.fire() && !p3_buffer_empty) {
+    p3_enqueue_ptr := p3_enqueue_ptr + 1.U
+  }
+
+  val enq_paddr   = Mux(p3_buffer_empty, p3_paddr, p3_wait_buffer(p3_enqueue_ptr).paddr)
+  val enq_vSetIdx = Mux(p3_buffer_empty, get_idx(p3_vaddr), p3_wait_buffer(p3_enqueue_ptr).vSetIdx)
+  toMissUnit.enqReq.valid               := p3_issue || !p3_buffer_empty
+  toMissUnit.enqReq.bits.paddr          := enq_paddr
+  toMissUnit.enqReq.bits.vSetIdx        := enq_vSetIdx
 
 
   when(reachMaxSize){
@@ -392,27 +430,27 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     maxPrefetchCoutner := maxPrefetchCoutner + 1.U
 
     prefetch_dir(maxPrefetchCoutner).valid := true.B
-    prefetch_dir(maxPrefetchCoutner).paddr := p3_paddr
+    prefetch_dir(maxPrefetchCoutner).paddr := enq_paddr
   }
 
-  p3_ready := toMissUnit.enqReq.ready || !enableBit
-  p3_fire  := toMissUnit.enqReq.fire()
+  p3_ready := !p3_buffer_full || !enableBit
+  p3_fire  := toMissUnit.enqReq.fire() || p3_buffer_fire
 
   if (DebugFlags.fdip) {
     when(toMissUnit.enqReq.fire()){
-      printf("PIQ enqueue:time: %d, vaddr: 0x%x, paddr: 0x%x\n",GTimer(),p3_vaddr,p3_paddr)
+      printf("(%d) PIQ enqueue, vaddr: 0x%x, paddr: 0x%x\n",GTimer(), p3_vaddr, p3_paddr)
     }
     when(p0_discard) {
-      printf("[%d] discard in p0, vaddr: 0x%x\n", GTimer(),p0_vaddr)
+      printf("[%d] discard in p0, aligned vaddr: 0x%x, vaddr: 0x%x\n", GTimer(), p0_vaddr, fromFtq.req.bits.target)
     }
     when(p1_discard) {
-      printf("[%d] discard in p1, vaddr: 0x%x\n", GTimer(),p1_vaddr)
+      printf("[%d] discard in p1, aligned vaddr: 0x%x\n", GTimer(), p1_vaddr)
     }
     when(p2_discard) {
-      printf("[%d] discard in p2, vaddr: 0x%x\n", GTimer(), p2_vaddr)
+      printf("[%d] discard in p2, aligned vaddr: 0x%x\n", GTimer(), p2_vaddr)
     }
     when(p3_discard) {
-      printf("[%d] discard in p3, vaddr: 0x%x\n", GTimer(), p3_vaddr)
+      printf("[%d] discard in p3, aligned vaddr: 0x%x\n", GTimer(), p3_vaddr)
     }
 
   }
@@ -432,8 +470,10 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     //write back to Prefetch Buffer
     val piq_write_ipbuffer = DecoupledIO(new IPFBufferWrite)
 
-    //TOO: fencei flush instructions
+    //TODO: fencei flush instructions
     val fencei      = Input(Bool())
+
+    val prefetch_entry_data = DecoupledIO(new PIQData)
 //    //hit in prefetch buffer
 //    val hitFree     = Input(Bool())
 //    //free as a victim
@@ -450,10 +490,10 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
 
   if(DebugFlags.fdip){
     when(io.mem_acquire.fire()) {
-      printf("acquire_fire_(%d), time:%d, addr: 0x%x\n", id.U, GTimer(), req.paddr)
+      printf("(%d) PIQEntry: acquire_fire, source id: %d, paddr: 0x%x\n", GTimer(), id.U, req.paddr)
     }
     when(RegNext(state === s_memReadResp) && (state === s_write_back)){
-      printf("grant_done_(%d), writting back. time:%d, addr: 0x%x\n", id.U, GTimer(), req.paddr)
+      printf("(%d) PIQEntry: grant_done, source id: %d, paddr: 0x%x\n", GTimer(), id.U,  req.paddr)
     }
   }
 
@@ -462,6 +502,13 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   //8 for 64 bits bus and 2 for 256 bits
   val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
   val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
+
+  //to main pipe s1
+  io.prefetch_entry_data.valid := state =/= s_idle
+  io.prefetch_entry_data.bits.vSetIdx := req_idx
+  io.prefetch_entry_data.bits.ptage := req_tag
+  io.prefetch_entry_data.bits.cacheline := respDataReg.asUInt
+  io.prefetch_entry_data.bits.writeBack := state === s_write_back
 
   //initial
   io.mem_acquire.bits := DontCare
@@ -530,7 +577,6 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   io.piq_write_ipbuffer.bits.meta.tag := req_tag
   io.piq_write_ipbuffer.bits.meta.index := req_idx
   io.piq_write_ipbuffer.bits.meta.paddr := req.paddr
-  io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
   io.piq_write_ipbuffer.bits.data := respDataReg.asUInt
   io.piq_write_ipbuffer.bits.buffIdx := io.id - PortNumber.U
 
