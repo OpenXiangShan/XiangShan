@@ -18,6 +18,7 @@ class WPUReq(implicit p: Parameters) extends WPUBuddle {
 
 class WPUResp(implicit p:Parameters) extends WPUBuddle{
   val predict_way = UInt(wayBits.W)
+  val predict_way_oh = UInt(nWays.W)
 }
 
 class WPUUpdate(implicit p:Parameters) extends WPUBuddle{
@@ -82,4 +83,15 @@ class IdealWPU(implicit p:Parameters) extends WPUModule{
 
   io.resp.valid := pred_way =/= nWays.U
   io.resp.bits.predict_way := pred_way
+  io.resp.bits.predict_way_oh := VecInit((0 until nWays).map(x => x.U === pred_way)).asUInt
+  
+  /* 
+  val predict_way_oh = VecInit((0 until nWays).map(x =>
+    io.idealIf.all_tags(x.U) === io.idealIf.real_tag && io.idealIf.all_metas(x.U).coh.isValid()
+  )).asUInt
+  io.resp.valid := predict_way_oh.orR
+  io.resp.bits.predict_way_oh := predict_way_oh
+  io.resp.bits.predict_way := OHToUInt(predict_way_oh)
+  assert(RegNext(PopCount(io.resp.bits.predict_way_oh===0.U)<=1.U),"predict_way_oh")
+   */
 }

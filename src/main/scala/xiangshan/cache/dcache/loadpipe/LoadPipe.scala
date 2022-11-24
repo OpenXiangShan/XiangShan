@@ -40,7 +40,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
-    val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
+    val banked_data_resp = Input(new L1BankedDataReadResult())
     val read_error_delayed = Input(Bool())
 
     // banked data read conflict
@@ -137,7 +137,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   idealWPU.io.idealIf.all_metas <> meta_resp
   idealWPU.io.idealIf.real_tag := get_tag(s1_paddr_dup_dcache)
   val predict_way = idealWPU.io.resp.bits.predict_way
-  val s1_tag_match_way = wayMap(w => predict_way===w.U).asUInt
+  val s1_tag_match_way = idealWPU.io.resp.bits.predict_way_oh
   val s1_tag_match = idealWPU.io.resp.valid
 
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way) <= 1.U), "tag should not match with more than 1 way")
@@ -231,9 +231,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
-  val banked_data_resp = io.banked_data_resp
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
-  val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
+  val banked_data_resp_word = io.banked_data_resp
   dontTouch(s2_bank_addr)
 
   val s2_instrtype = s2_req.instrtype

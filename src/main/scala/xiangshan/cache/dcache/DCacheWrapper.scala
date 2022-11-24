@@ -537,13 +537,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.readline <> mainPipe.io.data_read
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
-  mainPipe.io.data_resp := bankedDataArray.io.resp
+  mainPipe.io.data_resp := bankedDataArray.io.readline_resp
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
+    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp(i)
 
     ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
