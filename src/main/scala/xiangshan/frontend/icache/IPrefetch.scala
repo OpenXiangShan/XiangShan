@@ -184,7 +184,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val curr_move_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
   val curr_hit_ptr  = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
 
-  val move_repeat = meta_buffer(r_buffer_hit_idx_s2(0)).move === true.B
+  val move_repeat = meta_buffer(r_buffer_hit_idx_s2(0)).move
 
   when(s2_move_valid && !move_repeat) {
     when(meta_buffer(r_buffer_hit_idx_s2(0)).confidence === (maxIPFMoveConf-1).U) {
@@ -199,22 +199,20 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       curr_hit_ptr := curr_hit_ptr + 1.U
     }
   }
-  
+
   val move_queue_empty = curr_move_ptr === curr_hit_ptr
   val move_valid = !move_queue_empty && meta_buffer(move_queue(curr_move_ptr)).move
   val move_jump  = !move_queue_empty && !meta_buffer(move_queue(curr_move_ptr)).move
-  io.move.meta_write.valid := move_valid
-  io.move.data_write.valid := move_valid
+  //latch for better timing
+  io.move.meta_write.valid := RegNext(move_valid)
+  io.move.data_write.valid := RegNext(move_valid)
   io.move.meta_write.bits  := DontCare
   io.move.data_write.bits  := DontCare
+  val move_idx = RegNext(move_queue(curr_move_ptr))
+  val moveEntryMeta = RegNext(meta_buffer(move_idx))
+  val moveEntryData = RegNext(data_buffer(move_idx))
 
   when(io.move.meta_write.fire()) {
-    //latch read data
-    val move_idx = move_queue(curr_move_ptr)
-    val moveEntryMeta = meta_buffer(move_idx)
-    val moveEntryData = data_buffer(move_idx)
-
-
     io.move.meta_write.bits.generate(tag = moveEntryMeta.tag,
       coh = ClientMetadata(ClientStates.Branch),
       idx = moveEntryMeta.index,
