@@ -945,6 +945,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val cfiIndex_valid_wen = r_valid && r_offset === cfiIndex_vec(r_idx).bits
     when (cfiIndex_bits_wen || cfiIndex_valid_wen) {
       cfiIndex_vec(r_idx).valid := cfiIndex_bits_wen || cfiIndex_valid_wen && r_taken
+    } .elsewhen (r_valid && !r_taken && r_offset =/= cfiIndex_vec(r_idx).bits) {
+      cfiIndex_vec(r_idx).valid :=false.B
     }
     when (cfiIndex_bits_wen) {
       cfiIndex_vec(r_idx).bits := r_offset
@@ -981,14 +983,21 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifuWbPtr_write := next
     ifuPtrPlus1_write := idx + 2.U
     ifuPtrPlus2_write := idx + 3.U
-    when (notIfu) {
-      commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-        when(i.U > offset || i.U === offset && flushItSelf){
+
+  }
+  when(RegNext(redirectVec.map(r => r.valid).reduce(_||_))){
+    val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
+    val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
+    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, RedirectLevel.flushItself(r.level))
+    when (RegNext(notIfu)) {
+      commitStateQueue(RegNext(idx.value)).zipWithIndex.foreach({ case (s, i) =>
+        when(i.U > RegNext(offset) || i.U === RegNext(offset) && RegNext(flushItSelf)){
           s := c_invalid
         }
       })
     }
   }
+
 
   // only the valid bit is actually needed
   io.toIfu.redirect.bits    := backendRedirect.bits
@@ -1059,10 +1068,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   val commit_state = RegNext(commitStateQueue(commPtr.value))
   val can_commit_cfi = WireInit(cfiIndex_vec(commPtr.value))
-  when (commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited) {
-    can_commit_cfi.valid := false.B
-  }
+  //
+  //when (commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited) {
+  //  can_commit_cfi.valid := false.B
+  //}
   val commit_cfi = RegNext(can_commit_cfi)
+  val debug_cfi = RegNext(commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited && can_commit_cfi.valid)
 
   val commit_mispredict = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
     case (mis, state) => mis && state === c_commited
@@ -1104,6 +1115,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.full_target := commit_target
   update.from_stage  := commit_stage
   update.spec_info   := commit_spec_meta
+  XSError(commit_valid && do_commit && debug_cfi, "\ncommit cfi can be non c_commited\n")
 
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
