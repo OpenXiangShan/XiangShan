@@ -92,6 +92,8 @@ jobs:
         run: |
           sed -i -e "s/AlwaysBasicDiff: Boolean = true/AlwaysBasicDiff: Boolean = false/g" \
             $GITHUB_WORKSPACE/src/main/scala/xiangshan/Parameters.scala
+          sed -i -e "s/sramClkDivBy2 = true/sramClkDivBy2 = false/g" \
+            $GITHUB_WORKSPACE/src/main/scala/top/Configs.scala
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py \
             --generate --nanhu --config FPGAConfig
       - name: release

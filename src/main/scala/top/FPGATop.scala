@@ -210,9 +210,9 @@ class TopPeripheralAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
 
   def reMapAddress(addr: UInt): UInt = {
     // Peripheral:
-    // (1) UART: 0x1f_0005_0000 --> 0x4060_0000
+    // (1) UART: 0x1f_0005_0000 --> 0x310b_0000
     // (2) QSPI: 0x1f_fff8_0000 --> 0x1000_0000
-    Mux(addr(31), addr - (0x1ffff80000L - 0x10000000L).U, addr - (0x1f00050000L - 0x40600000L).U)
+    Mux(addr(31), addr - (0x1ffff80000L - 0x10000000L).U, addr - (0x1f00050000L - 0x310b0000L).U)
   }
   peripheral.elts.zip(l_adapter.io_slave.elts).foreach{ case (p, a) =>
     p.ar.bits.addr := reMapAddress(a.ar.bits.addr)
