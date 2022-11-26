@@ -965,7 +965,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val distance_between_prefetch_ifu = prefetchPtr.value - ifuPtr.value
     //TODO: Parameterize it
     val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
-    val prefetch_too_late = isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)
+    val prefetch_too_late = (isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)) || (prefetchPtr === ifuPtr)
     when(prefetch_too_late){
       when(prefetchPtr =/= bpuPtr){
         prefetchPtr := ifuPtr + 1.U

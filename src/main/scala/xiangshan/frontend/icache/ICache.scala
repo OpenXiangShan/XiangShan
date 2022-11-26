@@ -503,13 +503,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray = Module(new ICacheMetaArray)
+  val metaArrayCopy = Module(new ICacheMetaArray)
   val dataArray = Module(new ICacheDataArray)
   val mainPipe = Module(new ICacheMainPipe)
   val missUnit = Module(new ICacheMissUnit(edge))
   val prefetchPipe = Module(new IPrefetchPipe)
   val ipfBuffer  = Module(new PrefetchBuffer)
 
-  val meta_read_arb = Module(new Arbiter(new ICacheReadBundle, 2))
+  val meta_read_arb = Module(new Arbiter(new ICacheReadBundle, 1))
   val data_read_arb = Module(new Arbiter(new ICacheReadBundle, 1))
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(), 2))
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
@@ -526,11 +527,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
   meta_read_arb.io.in(0) <> mainPipe.io.metaArray.toIMeta
-  meta_read_arb.io.in(1) <> prefetchPipe.io.toIMeta
   metaArray.io.read <> meta_read_arb.io.out
+  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
 
   mainPipe.io.metaArray.fromIMeta <> metaArray.io.readResp
-  prefetchPipe.io.fromIMeta <> metaArray.io.readResp
+  prefetchPipe.io.fromIMeta <> metaArrayCopy.io.readResp
 
   data_read_arb.io.in(0) <> mainPipe.io.dataArray.toIData
   dataArray.io.read <> data_read_arb.io.out
@@ -543,6 +544,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   data_write_arb.io.in(0) <> missUnit.io.data_write
 
   metaArray.io.write <> meta_write_arb.io.out
+  metaArrayCopy.io.write <> meta_write_arb.io.out
   dataArray.io.write <> data_write_arb.io.out
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
@@ -616,6 +618,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
