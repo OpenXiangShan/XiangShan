@@ -22,9 +22,18 @@ import utils._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
-import xiangshan.L1CacheErrorInfo
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import huancun.utils.ChiselDB
 
 import scala.math.max
+
+class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
+  val addr = Vec(LoadPipelineWidth, Bits(PAddrBits.W))
+  val set_index = Vec(LoadPipelineWidth, UInt((DCacheAboveIndexOffset - DCacheSetOffset).W))
+  val bank_index = UInt((DCacheSetOffset - DCacheBankOffset).W)
+  val way_index = UInt(wayBits.W)
+  val fake_rr_bank_conflict = Bool()
+}
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -247,7 +256,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read conflict
   val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
-    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en
+    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
   ))
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
@@ -445,4 +454,37 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
     0.U
   )
+
+  val tableName =  "BankConflict" + p(XSCoreParamsKey).HartId.toString
+  val siteName = "BankedDataArray" + p(XSCoreParamsKey).HartId.toString
+  val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB)
+  val bankConflictData = Wire(new BankConflictDB)
+  for (i <- 0 until LoadPipelineWidth) {
+    bankConflictData.set_index(i) := set_addrs(i)
+    bankConflictData.addr(i) := io.read(i).bits.addr
+  }
+
+  // FIXME: rr_bank_conflict(0)(1) no generalization
+  when(rr_bank_conflict(0)(1)) {
+    bankConflictData.bank_index := bank_addrs(0)
+    bankConflictData.way_index  := OHToUInt(way_en(0))
+    bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1)
+  }.otherwise {
+    bankConflictData.bank_index := 0.U
+    bankConflictData.way_index := 0.U
+    bankConflictData.fake_rr_bank_conflict := false.B
+  }
+
+  bankConflictTable.log(
+    data = bankConflictData,
+    en = rr_bank_conflict(0)(1),
+    site = siteName,
+    clock = clock,
+    reset = reset
+  )
+
+  (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
+    XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x)===set_addrs(y))
+  ))
+
 }
