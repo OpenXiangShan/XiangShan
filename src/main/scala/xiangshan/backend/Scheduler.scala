@@ -178,7 +178,7 @@ class Scheduler(
 
   val numIssuePorts = configs.map(_._2).sum
   val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
-  val memRsNum = reservationStations.filter(_.params.hasFeedback == true).map(_.numRS)
+  val memRsNum = reservationStations.filter(_.params.lsqFeedback == true).map(_.numRS)
   val numLsqReplayPorts = reservationStations.filter(_.params.lsqFeedback == true).map(_.params.numDeq).sum
   val memRsEntries = reservationStations.filter(_.params.lsqFeedback == true).map(_.params.numEntries)
   val getMemRsEntries = {

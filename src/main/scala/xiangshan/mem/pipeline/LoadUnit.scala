@@ -175,7 +175,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
-  io.dtlbReq.bits.robIdx := s0_uop.robIdx
+  io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.debug.robIdx := s0_uop.robIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := s0_isFirstIssue
 

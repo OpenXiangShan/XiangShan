@@ -103,7 +103,7 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
   val rob = Flipped(new RobLsqIO)
   val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-  val dcache = Flipped(ValidIO(new Refill)) // TODO: to be renamed
+  val refill = Flipped(ValidIO(new Refill)) // TODO: to be renamed
   val release = Flipped(ValidIO(new Release))
   val uncache = new UncacheWordIO
   val exceptionAddr = new ExceptionAddrIO
@@ -888,8 +888,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       b // sel b
     )
   }
-  val lastCycleRedirect = RegNext(io.brqRedirect)
-  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
   // S2: select rollback (part1) and generate rollback request
   // rollback check
