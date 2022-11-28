@@ -28,13 +28,13 @@ class WakeupQueue(number: Int)(implicit p: Parameters) extends XSModule {
     val out = ValidIO(new MicroOp)
     val redirect = Flipped(ValidIO(new Redirect))
   })
-  if (number < 0) {
+  if (number == 0) {
     io.out.valid := false.B
     io.out.bits := DontCare
-  } else if(number == 0) {
-    io.in <> io.out
-    io.out.valid := io.in.valid
-    // NOTE: no delay bypass don't care redirect
+  // } else if(number == 1) {
+  //   io.in <> io.out
+  //   io.out.valid := io.in.valid
+  //   // NOTE: no delay bypass don't care redirect
   } else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()

@@ -385,18 +385,18 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
-  val rsIdx = UInt(log2Up(IssQueSize).W)
+  val rsIdx = UInt(log2Up(IssQueSize).W)                         // 要重发的指令在保留站中的位置
   val hit = Bool()
   val flushState = Bool()
-  val sourceType = RSFeedbackType()
+  val sourceType = RSFeedbackType()                              // 重发原因
   val dataInvalidSqIdx = new SqPtr
 }
 
 class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
   // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
   // for instance: MemRSFeedbackIO()(updateP)
-  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
-  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss // load stage 1 阶段的重发端口
+  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict                     // load stage 3 阶段的重发端口
   val rsIdx = Input(UInt(log2Up(IssQueSize).W))
   val isFirstIssue = Input(Bool())
 }

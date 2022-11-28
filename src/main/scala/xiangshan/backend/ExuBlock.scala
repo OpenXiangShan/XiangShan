@@ -186,7 +186,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     val fuWbValid = if (cfg.hasFastUopOut) RegNext(fuWb.valid) else fuWb.valid
     val fuWbRobIdx = if (cfg.hasFastUopOut) RegNext(fuWb.bits.uop.robIdx) else fuWb.bits.uop.robIdx
     XSError((wbOut.valid || fuWbValid) && wbOut.bits.uop.robIdx =/= fuWbRobIdx,
-      "different instruction between rs.fastUopOut and fu.writeback\n")}
+      s"different instruction between rs.fastUopOut and fu.writeback in $i \n")}
   }
 
   // (3) If the reservation station has fastUopOut for all instructions in this exu,

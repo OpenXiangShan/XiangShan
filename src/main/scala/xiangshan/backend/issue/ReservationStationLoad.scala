@@ -53,11 +53,13 @@ class LoadRS(params: RSParams)(implicit p: Parameters) extends RSWithMemAddr(par
     for (j <- 0 until params.numFastWakeup) {
       for (k <- 0 until params.numSrc) {
         wakeupBypassMask(j)(k) := Mux(isNormalIssue, normalFastWakeupMatch(k)(j), s1_fastWakeup(i)(k)(j))
+        // 在 fastWakeupMatch（和statusArray中表项匹配） 和 s1_fastWakeup（和入队表项匹配） 之间选择
       }
     }
     // Condition: wakeup by load (to select load wakeup bits)
     extra.load(i).fastMatch := Mux(s1_issuePtrOH(i).valid, VecInit(
       wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
+      // 只有来自 load单元的快速唤醒信号 才有可能 fastMatch
     ).asUInt, 0.U)
     extra.load(i).fastImm := s1_out(i).bits.uop.ctrl.imm
   }

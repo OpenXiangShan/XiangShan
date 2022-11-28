@@ -219,13 +219,13 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
   // deq
-  val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
+  val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))                                                        // output
   // wakeup
   val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
   val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
   val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
   // extra
-  val fastWakeup = if (params.fixedLatency >= 0) Some(Vec(params.numDeq, ValidIO(new MicroOp))) else None
+  val fastWakeup = if (params.fixedLatency >= 0) Some(Vec(params.numDeq, ValidIO(new MicroOp))) else None       // output
 }
 
 class RSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
@@ -233,11 +233,11 @@ class RSExtraIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }
-  val load = Vec(params.numDeq, new Bundle {
+  val load = Vec(params.numDeq, new Bundle {                                                                   // output
     val fastMatch = Output(UInt(exuParameters.LduCnt.W))
     val fastImm = Output(UInt(12.W))
   })
-  val feedback = Vec(params.numDeq, Flipped(new MemRSFeedbackIO))
+  val feedback = Vec(params.numDeq, Flipped(new MemRSFeedbackIO))                 // feedbackSlow feedbackFast
   val checkwait = new Bundle {
     val stIssuePtr = Input(new SqPtr)
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
@@ -262,6 +262,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   val payloadArray = Module(new PayloadArray(new MicroOp, params))
 
   val s2_deq = Wire(io.deq.cloneType)
+  val s3_deq = Wire(io.deq.cloneType)
 
   /**
     * S0: Update status (from wakeup) and schedule possible instructions to issue.
@@ -454,17 +455,17 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // Issue with priorities: (1) oldest uop; (2) selected uops; (3) dispatched uops.
 
   for ((issueGrant, i) <- statusArray.io.issueGranted.take(params.numEnq).zipWithIndex) {
-    issueGrant.valid := (if (i >= params.numDeq) false.B else s1_issue_dispatch(i) && s1_out(i).ready)
+    issueGrant.valid := (if (i >= params.numDeq) false.B else s1_issue_dispatch(i) && s1_out(i).ready) // 选中的入队即发射的表项
     issueGrant.bits := s1_allocatePtrOH_dup.head(i)
     XSPerfAccumulate(s"deq_dispatch_bypass_$i", issueGrant.valid)
   }
   for ((issueGrant, i) <- statusArray.io.issueGranted.drop(params.numEnq).take(params.numDeq).zipWithIndex) {
-    issueGrant.valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready
+    issueGrant.valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready              // 非最老的正常出队表项
     issueGrant.bits := s1_in_selectPtrOH(i)
     XSPerfAccumulate(s"deq_select_$i", issueGrant.valid)
   }
   if (params.oldestFirst._1) {
-    statusArray.io.issueGranted.last.valid := ParallelMux(s1_issue_oldest, s1_out.map(_.ready))
+    statusArray.io.issueGranted.last.valid := ParallelMux(s1_issue_oldest, s1_out.map(_.ready))        // 最老的出队表项
     statusArray.io.issueGranted.last.bits := s1_in_oldestPtrOH.bits
     XSPerfAccumulate(s"deq_oldest", statusArray.io.issueGranted.last.valid)
   }
@@ -484,7 +485,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
 
   // Do the read data arbitration
   val s1_is_first_issue = Wire(Vec(params.numDeq, Bool()))
-  val s1_all_src_ready = Wire(Vec(params.numDeq, Bool()))
   val dataArrayWrite = Wire(Vec(params.numEnq, new Bundle{
     val enable = Bool()
     val addr   = UInt(params.numEntries.W)
@@ -509,34 +509,29 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     s1_is_first_issue(i) := Mux(s1_issue_oldest(i), statusArray.io.isFirstIssue.last,
       Mux(s1_in_selectPtrValid(i), statusArray.io.isFirstIssue(params.numEnq + i),
         statusArray.io.update(i).data.isFirstIssue))
-    s1_all_src_ready(i) := Mux(s1_issue_oldest(i), statusArray.io.allSrcReady.last,
-        Mux(s1_in_selectPtrValid(i), statusArray.io.allSrcReady(params.numEnq + i),
-          statusArray.io.update(i).data.allSrcReady))
 
     XSPerfAccumulate(s"deq_oldest_override_select_$i", s1_issue_oldest(i) && s1_in_selectPtrValid(i) && s1_out(i).ready)
   }
   s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
   // WireInit for override at RSFMA
-  val allSrcReady = (0 until params.numDeq).map(_ => WireInit(true.B))
-  val allSrcReady1 = (0 until params.numDeq).map(_ => WireInit(true.B))
   for (i <- 0 until params.numDeq) {
     s1_out(i).valid := s1_issuePtrOH(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect)
     // For FMAs that can be scheduled multiple times, only when
     // all source operands are ready we dequeue the instruction.
-    statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready && allSrcReady(i)
+    statusArray.io.deqResp(2*i).valid := s1_in_selectPtrValid(i) && !s1_issue_oldest(i) && s1_out(i).ready
     statusArray.io.deqResp(2*i).bits.rsMask := s1_in_selectPtrOH(i)
     statusArray.io.deqResp(2*i).bits.success := s2_deq(i).ready
     statusArray.io.deqResp(2*i).bits.resptype := DontCare
     statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := DontCare
-    statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready && allSrcReady1(i)
+    statusArray.io.deqResp(2*i+1).valid := s1_issue_dispatch(i) && s1_out(i).ready
     statusArray.io.deqResp(2*i+1).bits.rsMask := s1_allocatePtrOH_dup.head(i)
     statusArray.io.deqResp(2*i+1).bits.success := s2_deq(i).ready
     statusArray.io.deqResp(2*i+1).bits.resptype := DontCare
     statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
 
     if (io.fastWakeup.isDefined) {
-      val wakeupQueue = Module(new WakeupQueue(params.fixedLatency))
+      val wakeupQueue = Module(new WakeupQueue(params.fixedLatency+1))
       val fuCheck = if (params.isMul) s1_out(i).bits.uop.ctrl.fuType === FuType.mul else true.B
       // TODO: optimize timing here since ready may be slow
       wakeupQueue.io.in.valid := s1_issuePtrOH(i).valid && s1_out(i).ready && fuCheck
@@ -548,8 +543,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     }
   }
   // fma midstats is different
-  val allSrcReadyLast = WireInit(true.B)
-  statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready)) && allSrcReadyLast
+  statusArray.io.deqResp.last.valid := s1_issue_oldest.asUInt.orR && ParallelMux(s1_issue_oldest, s1_out.map(_.ready))
   statusArray.io.deqResp.last.bits.rsMask := s1_in_oldestPtrOH.bits
   statusArray.io.deqResp.last.bits.success := ParallelMux(s1_issue_oldest, s2_deq.map(_.ready))
   statusArray.io.deqResp.last.bits.resptype := DontCare
@@ -706,23 +700,31 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     * S2: to function units
     */
   val s1_out_fire = s1_out.zip(s2_deq).map(x => x._1.valid && x._2.ready)
+  val s2_deq_fire = s2_deq.zip(s3_deq).map(x => x._1.valid && x._2.ready)
   val s2_issuePtr = s1_issuePtr.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
+  val s3_issuePtr = s2_issuePtr.zip(s2_deq_fire).map(x => RegEnable(x._1, x._2))
   val s2_issuePtrOH = s1_issuePtrOH.map(_.bits).zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
   val s2_first_issue = s1_is_first_issue.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
-  val s2_all_src_ready = s1_all_src_ready.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
+  val s3_first_issue = s2_first_issue.zip(s2_deq_fire).map(x => RegEnable(x._1, x._2))
+  // if (params.numFastWakeup > 0) {
+  //   val fastWakeupBypassMask = Wire(Vec(params.numDeq,Vec(params.numFastWakeup, Vec(params.numSrc, Bool()))))
+  // }
   for (i <- 0 until params.numDeq) {
     // payload: send to function units
     // TODO: these should be done outside RS
     PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
+    PipelineConnect(s2_deq(i), s3_deq(i), s3_deq(i).ready || s3_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
+    // left right rightOutFire isFlush
 
-    s2_deq(i).ready := !s2_deq(i).valid || io.deq(i).ready
-    io.deq(i).valid := s2_deq(i).valid
-    io.deq(i).bits := s2_deq(i).bits
+    s2_deq(i).ready := !s2_deq(i).valid || s3_deq(i).ready
+    s3_deq(i).ready := !s3_deq(i).valid || io.deq(i).ready
+    io.deq(i).valid := s3_deq(i).valid
+    io.deq(i).bits := s3_deq(i).bits
     io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
 
     // data: send to bypass network
     // TODO: these should be done outside RS
-    if (params.numFastWakeup > 0) {
+    if (params.numFastWakeup > 0) {           // 每个出队都对应一个 BypassNetwork
       val isNormalIssue = s1_issue_oldest(i) || s1_in_selectPtrValid(i)
       val normalIssuePtrOH = Mux(s1_issue_oldest(i), s1_in_oldestPtrOH.bits, s1_in_selectPtrOH(i))
       val normalFastWakeupMatch = Mux1H(normalIssuePtrOH, fastWakeupMatch)
@@ -730,6 +732,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
       for (j <- 0 until params.numFastWakeup) { // 5
         for (k <- 0 until params.numSrc) {      // 2
           wakeupBypassMask(j)(k) := Mux(isNormalIssue, normalFastWakeupMatch(k)(j), s1_fastWakeup(i)(k)(j))
+          // 现有表项和快速唤醒的匹配情况  入队表项和快速唤醒的匹配情况
         }
       }
 
@@ -737,10 +740,11 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
       bypassNetwork.io.hold := !s2_deq(i).ready || !s1_out(i).valid
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
+        // wakeupBypassMask : numFastWakeup个数据 bypass到 改出队端口numSrc个源操作数 的 情况
         by.valid := m
         by.data := d
       }
-      bypassNetwork.io.target <> s2_deq(i).bits.src.take(params.numSrc)
+      bypassNetwork.io.target <> s2_deq(i).bits.src.take(params.numSrc) // bypass后结果（numSrc个数据） 送到 s2_deq中
 
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire && wakeupBypassMask(j).asUInt.orR)

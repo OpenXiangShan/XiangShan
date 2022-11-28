@@ -58,10 +58,6 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
     srcState.asUInt.andR && scheduledCond && blockedCond
   }
 
-  def allSrcReady: Bool = {
-    srcState.asUInt.andR
-  }
-
   override def toPrintable: Printable = {
     p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $robIdx"
   }
@@ -78,13 +74,12 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val flushed = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
     val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
-    val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
+    val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))              // fast+slow
     val wakeupMatch = Vec(params.numEntries, Vec(params.numSrc, Output(UInt(params.allWakeup.W))))
     val issueGranted = Vec(params.numSelect, Flipped(ValidIO(UInt(params.numEntries.W))))
     // TODO: if more info is needed, put them in a bundle
     val isFirstIssue = Vec(params.numSelect, Output(Bool()))
-    val allSrcReady = Vec(params.numSelect, Output(Bool()))
-    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1
+    val deqRespWidth = if (params.hasFeedback) params.numDeq * 2 else params.numDeq + params.numDeq + 1  // hasFeedback 对应访存情况
     val deqResp = Vec(deqRespWidth, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
@@ -95,7 +90,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val memWaitUpdateReq = if (params.checkWaitBit) Flipped(new MemWaitUpdateReq) else null
   })
 
-  val statusArray = Reg(Vec(params.numEntries, new StatusEntry(params)))
+  val statusArray = Reg(Vec(params.numEntries, new StatusEntry(params))) // 16
   val statusArrayNext = WireInit(statusArray)
   statusArray := statusArrayNext
   when (reset.asBool) {
@@ -120,8 +115,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     (stateMatch, dataMatch)
   }
 
-  def deqRespSel(i: Int) : (Bool, Bool, UInt, SqPtr) = {
-    val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i)))
+  def deqRespSel(i: Int) : (Bool, Bool, UInt, SqPtr) = { // i = 0 : 15
+    val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i))) // 16 个 5bits
     XSError(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
     val deqValid = mask.asUInt.orR
     val successVec = io.deqResp.map(_.bits.success)
@@ -146,22 +141,23 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     // valid: when the entry holds a valid instruction, mark it true.
     // Set when (1) not (flushed or deq); AND (2) update.
-    val realValid = updateValid(i) || status.valid
+    val realValid = updateValid(i) || status.valid                                               // 入队指令有效 或者 原先有效
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
     flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
-    statusNext.valid := realValid && !(isFlushed || deqRespSucc)
+    statusNext.valid := realValid && !(isFlushed || deqRespSucc)                                 // 且 没有冲刷 或者 出队成功
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
-    XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
+    XSError(deqRespValid && !realValid, p"deqRespValid: ${deqRespValid} updateValid(i) : ${updateValid(i)} status.valid : ${status.valid} should not deq an invalid entry $i\n")
     if (params.hasFeedback) {
       XSError(deqRespValid && !statusArray(i).scheduled, p"should not deq an un-scheduled entry $i\n")
+      // 第i个表项需要重发 但 statusArray中显示该表项没有
     }
 
     // scheduled: when the entry is scheduled for issue, mark it true.
     // Set when (1) scheduled for issue; (2) enq blocked.
     // Reset when (1) deq is not granted (it needs to be scheduled again); (2) only one credit left.
     val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
-    val deqNotGranted = deqRespValid && !deqRespSucc
+    val deqNotGranted = deqRespValid && !deqRespSucc                                                     // 给出了反馈，但无需重发？
     statusNext.scheduled := false.B
     if (params.needScheduledBit) {
       // An entry keeps in the scheduled state until its credit comes to zero or deqFailed.
@@ -211,7 +207,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       p"instructions $i with credit ${status.credit} must not be scheduled\n")
 
     // srcState: indicate whether the operand is ready for issue
-    val (stateWakeupEn, dataWakeupEnVec) = statusNext.psrc.zip(statusNext.srcType).map(wakeupMatch).unzip
+    val (stateWakeupEn, dataWakeupEnVec) = statusNext.psrc.zip(statusNext.srcType).map(wakeupMatch).unzip // io.wakeup 和 statusNext.psrc 的 匹配情况
     io.wakeupMatch(i) := dataWakeupEnVec.map(en => Mux(updateValid(i) || status.valid, en, 0.U))
     // For best timing of srcState, we don't care whether the instruction is valid or not.
     // We also don't care whether the instruction can really enqueue.
@@ -240,7 +236,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   io.isValidNext := VecInit(statusArrayNext.map(_.valid)).asUInt
   io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => RegNext(v && r) }).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
-  io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
 
   val validEntries = PopCount(statusArray.map(_.valid))
