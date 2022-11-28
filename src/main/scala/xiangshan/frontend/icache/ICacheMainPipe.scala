@@ -298,20 +298,46 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** check in PIQ, if hit, wait until prefetch port hit */
   //TODO: move this to PIQ
+  val PIQ_hold_res = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   fromPIQ.foreach(_.ready := true.B)
   val PIQ_hit_oh = VecInit((0 until PortNumber).map(i =>
     VecInit(fromPIQ.map(entry => entry.valid &&
       entry.bits.vSetIdx === s1_req_vsetIdx(i) &&
       entry.bits.ptage === s1_req_ptags(i)))))
-  val PIQ_hit = VecInit(PIQ_hit_oh.map(_.reduce(_||_)))
-  val PIQ_hit_idx = VecInit(PIQ_hit.map(PriorityEncoder(_)))
-  val PIQ_hit_data = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
-  val PIQ_data_valid = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
-  val s1_wait_vec = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && !PIQ_data_valid(i)))
+  val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line))
+  val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
+  val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
+  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  val s1_PIQ_hit      = VecInit((0 until PortNumber).map(i => PIQ_write_back(i) || PIQ_hold_res(i)))
   s1_wait := s1_wait_vec(0) || (s1_double_line && s1_wait_vec(1))
 
-  val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i) || (PIQ_hit(i) && PIQ_data_valid(i))))
-  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), Mux(s1_port_hit(i),s1_hit_data(i),PIQ_data_valid(i)))))
+  (0 until PortNumber).foreach(i =>
+      when(s2_ready){
+        PIQ_hold_res(i) := false.B
+      }.elsewhen(PIQ_write_back(i)){
+        PIQ_hold_res(i) := true.B
+      }
+  )
+
+  if(DebugFlags.fdip){
+    when(s1_valid && (RegNext(!s1_wait) && s1_wait)){
+      printf("|%d| ICache main pipe stage1: Hit in PIQ, waitting for prefetch\n", GTimer())
+    }
+    (0 until PortNumber).map(
+      i =>
+         when(s1_fire && !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i)){
+          printf("|%d| ICache main pipe stage1: Get prefetch data from PIQ, port: %d\n", GTimer(), i.U)
+        }
+    )
+  }
+  val s1_PIQ_data = VecInit((0 until PortNumber).map(
+    i =>
+      ResultHoldBypass(data = PIQ_hit_data(i), valid = PIQ_write_back(i))
+  ))
+
+  val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i) || s1_PIQ_hit(i)))
+  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), Mux(s1_port_hit(i),s1_hit_data(i),s1_PIQ_data(i)))))
 
   /** <PERF> replace victim way number */
 
