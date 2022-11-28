@@ -378,7 +378,7 @@ class Release(implicit p: Parameters) extends DCacheBundle
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new BankedDCacheWordResp))
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
@@ -598,10 +598,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
-  })
-
-  (0 until LoadPipelineWidth).map(i => {
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
   })
 
   //----------------------------------------

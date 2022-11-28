@@ -266,7 +266,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val rsFeedback = ValidIO(new RSFeedback)
-    val dcacheResp = Flipped(DecoupledIO(new BankedDCacheWordResp))
+    val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val pmpResp = Flipped(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val dataInvalidSqIdx = Input(UInt())
@@ -400,9 +400,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
 
-  io.loadDataFromDcache.bankedDcacheData := io.dcacheResp.bits.bank_data
-  io.loadDataFromDcache.bank_oh := io.dcacheResp.bits.bank_oh
-  // io.loadDataFromDcache.dcacheData := io.dcacheResp.bits.data
+  // io.loadDataFromDcache.bankedDcacheData := io.dcacheResp.bits.bank_data
+  // io.loadDataFromDcache.bank_oh := io.dcacheResp.bits.bank_oh
+  io.loadDataFromDcache.dcacheData := io.dcacheResp.bits.data
   io.loadDataFromDcache.forwardMask := forwardMask
   io.loadDataFromDcache.forwardData := forwardData
   io.loadDataFromDcache.uop := io.out.bits.uop
