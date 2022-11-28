@@ -368,8 +368,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
     stu.io.lsq_replenish <> lsq.io.storeInRe(i)
-    stu.io.lsqIn        <> lsq.io.rsStoreIn(i)
-    stu.io.lsqOut        <> lsq.io.storeOut(i)
     // dtlb
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt)(i)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp

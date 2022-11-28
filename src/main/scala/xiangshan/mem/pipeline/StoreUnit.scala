@@ -32,10 +32,6 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
-    // wire from store pipeline to sq
-    val lsqIn = Decoupled(new LsPipelineBundle)
-    // wire from sq to store pipeline
-    val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
   })
@@ -50,39 +46,39 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
 
+  io.dtlbReq.bits.vaddr := saddr
+  io.dtlbReq.valid := io.in.valid
+  io.dtlbReq.bits.cmd := TlbCmd.write
+  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
+  io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
+  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
+
+  io.out.bits := DontCare
+  io.out.bits.vaddr := saddr
+
+  // Now data use its own io
+  // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.miss := DontCare
+  io.out.bits.rsIdx := io.rsIdx
+  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
+  io.out.valid := io.in.valid
+  io.in.ready := io.out.ready
+
   // exception check
   val addrAligned = LookupTree(io.in.bits.uop.ctrl.fuOpType(1,0), List(
     "b00".U   -> true.B,              //b
-    "b01".U   -> (saddr(0) === 0.U),   //h
-    "b10".U   -> (saddr(1,0) === 0.U), //w
-    "b11".U   -> (saddr(2,0) === 0.U)  //d
+    "b01".U   -> (io.out.bits.vaddr(0) === 0.U),   //h
+    "b10".U   -> (io.out.bits.vaddr(1,0) === 0.U), //w
+    "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
 
-  io.lsqIn.bits := DontCare
-  io.lsqIn.bits.vaddr := saddr
-  io.lsqIn.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.lsqIn.bits.uop := io.in.bits.uop
-  io.lsqIn.bits.miss := DontCare
-  io.lsqIn.bits.isStoreReplay := false.B
-  io.lsqIn.bits.rsIdx := io.rsIdx
-  io.lsqIn.bits.mask := genWmask(saddr, io.in.bits.uop.ctrl.fuOpType(1,0))
-  io.lsqIn.bits.isFirstIssue := io.isFirstIssue
-  io.lsqIn.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
-  io.lsqIn.valid := io.in.valid
-  io.lsqIn.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
-
-  io.in.ready := io.lsqIn.ready
-
-  io.dtlbReq.bits.vaddr := io.lsqOut.bits.vaddr
-  io.dtlbReq.valid := io.lsqOut.valid
-  io.dtlbReq.bits.cmd := TlbCmd.write
-  io.dtlbReq.bits.size := LSUOpType.size(io.lsqOut.bits.uop.ctrl.fuOpType)
-  io.dtlbReq.bits.kill := DontCare
-  io.dtlbReq.bits.debug.robIdx := io.lsqOut.bits.uop.robIdx
-  io.dtlbReq.bits.debug.pc := io.lsqOut.bits.uop.cf.pc
-  io.dtlbReq.bits.debug.isFirstIssue := io.lsqOut.bits.isFirstIssue
-
-  io.lsqOut <> io.out
+  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -120,9 +116,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
-  io.rsFeedback.valid := Mux(io.in.bits.isStoreReplay, false.B, io.in.valid)
-  // fool rs to evict this entry
-  io.rsFeedback.bits.hit := true.B
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !s1_tlb_miss
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
@@ -217,8 +212,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stout = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val storeMaskOut = Valid(new StoreMaskBundle)
-    val lsqIn = Decoupled(new LsPipelineBundle)
-    val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -235,9 +228,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.storeMaskOut.valid := store_s0.io.in.valid
   io.storeMaskOut.bits.mask := store_s0.io.out.bits.mask
   io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
-
-  io.lsqIn <> store_s0.io.lsqIn
-  io.lsqOut <> store_s0.io.lsqOut
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
