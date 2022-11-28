@@ -94,9 +94,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     */
 
   val singleStepStatus = RegInit(false.B)
+  val inst0actualOut = io.enqRob.req(0).valid
   when (io.redirect.valid) {
     singleStepStatus := false.B
-  }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
+  }.elsewhen (io.singleStep && io.fromRename(0).fire() && inst0actualOut) {
     singleStepStatus := true.B
   }
   XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
@@ -166,8 +167,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(io.fromRename.map(
-    r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR || r.bits.ctrl.singleStep || r.bits.cf.trigger.getFrontendCanFire))
+  val hasException = VecInit(io.fromRename.zip(updatedUop).map {
+    case (fromRename: DecoupledIO[MicroOp], uop: MicroOp) =>
+      selectFrontend(fromRename.bits.cf.exceptionVec).asUInt.orR || uop.ctrl.singleStep || fromRename.bits.cf.trigger.getFrontendCanFire
+  })
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isNoSpecExec(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)

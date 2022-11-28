@@ -292,7 +292,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
-    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U))
+    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U(log2Up(l2tlbParams.l2nWays).W)))
     val eccError = hitWayEntry.decode()
 
     ridx.suggestName(s"l2_ridx")
@@ -338,7 +338,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
     val hit = ParallelOR(hitVec)
-    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U))
+    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U(log2Up(l2tlbParams.l3nWays).W)))
     val eccError = hitWayEntry.decode()
 
     when (hit && stageCheck_valid_1cycle) { ptwl3replace.access(genPtwL3SetIdx(check_vpn), hitWay) }
@@ -422,7 +422,7 @@ class PtwCache(parentName:String = "Unknown")(implicit p: Parameters) extends XS
   io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
-  XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
+  // XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
