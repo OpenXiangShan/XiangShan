@@ -28,7 +28,7 @@ object CacheRegMap{
   }
 }
 
-trait CacheControlConst{
+trait CacheControlConst{ 
   def maxDataRowSupport = 8
 }
 
@@ -141,6 +141,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
+    val cache_req_dup = Vec(11, Valid(new CacheCtrlReqInfo))
+    val cacheOp_req_bits_opCode_dup = Output(Vec(11, UInt(XLEN.W)))
     val error = Flipped(new L1CacheErrorInfo)
   })
 
@@ -155,6 +157,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Translate CSR write to cache op
   val translated_cache_req = Reg(new CacheCtrlReqInfo)
+  val translated_cache_req_opCode_dup = Reg(Vec(11, UInt(XLEN.W)))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
@@ -176,6 +179,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   update_cache_req_when_write("CACHE_OP", translated_cache_req.opCode)
+  translated_cache_req_opCode_dup.map(dup => update_cache_req_when_write("CACHE_OP", dup))
   update_cache_req_when_write("CACHE_LEVEL", translated_cache_req.level)
   update_cache_req_when_write("CACHE_WAY", translated_cache_req.wayNum)
   update_cache_req_when_write("CACHE_IDX", translated_cache_req.index)
@@ -200,10 +204,14 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Send cache op to cache
   io.cache.req.valid := RegNext(cache_op_start)
+  io.cache_req_dup.map( dup => dup.valid := RegNext(cache_op_start) )
   io.cache.req.bits := translated_cache_req
+  io.cache_req_dup.map( dup => dup.bits := translated_cache_req )
   when(io.cache.req.fire()){
     wait_cache_op_resp := true.B
   }
+
+  io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := translated_cache_req_opCode_dup(i) }
 
   // Receive cache op resp from cache
   val raw_cache_resp = Reg(new CacheCtrlRespInfo)
@@ -233,8 +241,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.csr.update.w.valid := schedule_csr_op_resp_data || schedule_csr_op_resp_finish
   io.csr.update.w.bits := DontCare
 
-  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req.opCode))
-  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req.opCode))
+  val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req_opCode_dup(0)))
+  val isReadDataECC = WireInit(CacheInstrucion.isReadDataECC(translated_cache_req_opCode_dup(0)))
   val isReadTag = WireInit(CacheInstrucion.isReadTag(translated_cache_req.opCode))
   val isReadData = WireInit(CacheInstrucion.isReadData(translated_cache_req.opCode))
 

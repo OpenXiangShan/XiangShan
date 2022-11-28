@@ -522,9 +522,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
-  csrio.customCtrl.move_elim_enable := srnctl(0)
+  val srnctl = RegInit(UInt(XLEN.W), "h7".U)
+  csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.svinval_enable := srnctl(1)
+  csrio.customCtrl.wfi_enable := srnctl(2)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)
@@ -671,8 +672,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
-    MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
-    MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
+    MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
+    MaskedRegMap(Medeleg, medeleg, "hb3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
