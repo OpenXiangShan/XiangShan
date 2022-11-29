@@ -56,7 +56,7 @@ trait HasBPUConst extends HasXSParameter {
   val numBpStages = BP_STAGES.length
 
   val debug = true
-  val resetVector = 0x10000000L
+  val resetVector = bootAddress
   // TODO: Replace log2Up by log2Ceil
 }
 

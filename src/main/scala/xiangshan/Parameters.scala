@@ -73,6 +73,7 @@ case class XSCoreParameters
   FtbWays: Int = 4,
   hasMbist:Boolean = true,
   hasShareBus:Boolean = false,
+  bootAddress:Long = 0x10000000L,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
     // Seq(( 2048,    2,    8),
@@ -315,6 +316,7 @@ trait HasXSParameter {
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
+  val bootAddress = coreParams.bootAddress
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, parentName:String = "Unknown") = {
     coreParams.branchPredictor(resp_in, p, parentName)

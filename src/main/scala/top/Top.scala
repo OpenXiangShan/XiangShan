@@ -137,7 +137,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
-      val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
     })
 
@@ -165,7 +164,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
-    misc.module.cacheable_check <> io.cacheable_check
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.moduleInstance.io.hartId := i.U
