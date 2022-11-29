@@ -40,8 +40,8 @@ endif
 ifeq ($(CONSIDER_FSDB),1)
 	RUN_OPTS += +dump-wave=fsdb
 endif
-#RUN_OPTS += +diff=$(ABS_WORK_DIR)/ready-to-run/riscv64-nemu-interpreter-so
-RUN_OPTS += +no-diff
+RUN_OPTS += +diff=$(ABS_WORK_DIR)/ready-to-run/riscv64-nemu-interpreter-so
+# RUN_OPTS += +no-diff
 RUN_OPTS += -fgp=num_threads:4,num_fsdb_threads:4
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -153,7 +153,7 @@ simv_rtl-run:
 	$(shell if [ -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir ];then rm -rf $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir; fi)
 	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv
 	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv.daidir $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir
-	cd sim/rtl/$(RUN_BIN) && (./simv $(RUN_OPTS) | tee -a sim.log)
+	cd sim/rtl/$(RUN_BIN) && (./simv $(RUN_OPTS) | tee sim.log)
 
 verdi_rtl:
 	cd sim/rtl/$(RUN_BIN) && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
