@@ -398,7 +398,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
-  // memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
+  memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
