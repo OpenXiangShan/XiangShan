@@ -138,6 +138,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
 
+  // uncache
+  val uncacheIdxBits = log2Up(StoreQueueSize) max log2Up(LoadQueueSize)
+
   // parameters about duplicating regs to solve fanout
   // In Main Pipe:
     // tag_write.ready -> data_write.valid * 8 banks
@@ -381,10 +384,18 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new BankedDCacheWordResp))
 }
 
+class UncacheWordReq(implicit p: Parameters) extends DCacheWordReq {
+  override val id = UInt(uncacheIdxBits.W)
+}
+
+class UncacheWorResp(implicit p: Parameters) extends DCacheWordRespWithError {
+  override val id = UInt(uncacheIdxBits.W)
+}
+
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+  val req  = DecoupledIO(new UncacheWordReq)
+  val resp = Flipped(DecoupledIO(new UncacheWorResp))
 }
 
 class AtomicsResp(implicit p: Parameters) extends DCacheBundle {

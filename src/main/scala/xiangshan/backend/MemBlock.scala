@@ -453,6 +453,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
+  
+  //  Uncahce
+  uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
+  uncache.io.hartId := io.hartId
+  lsq.io.uncacheOutstanding := io.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   lsq.io.rob            <> io.lsqio.rob

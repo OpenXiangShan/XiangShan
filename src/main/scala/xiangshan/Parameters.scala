@@ -156,12 +156,14 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
+  UncacheBufferSize: Int = 8,
   EnableLoadToLoadForward: Boolean = true,
   EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
@@ -378,6 +380,7 @@ trait HasXSParameter {
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
+  val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnsbufferWidth = coreParams.EnsbufferWidth
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward
@@ -385,6 +388,7 @@ trait HasXSParameter {
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
+  val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

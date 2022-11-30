@@ -816,14 +816,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     is(s_req) {
       when(io.uncache.req.fire()) {
-        uncacheState := s_resp
-      }
-    }
-    is(s_resp) {
-      when(io.uncache.resp.fire()) {
         uncacheState := s_wait
       }
     }
+    // is(s_resp) {
+    //   when(io.uncache.resp.fire()) {
+    //     uncacheState := s_wait
+    //   }
+    // }
     is(s_wait) {
       when(RegNext(io.rob.commit)) {
         uncacheState := s_idle // ready for next mmio
@@ -839,7 +839,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.data := dataModule.io.uncache.rdata.data
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
 
-  io.uncache.req.bits.id   := DontCare
+  io.uncache.req.bits.id   := deqPtrExtNext.value
   io.uncache.req.bits.instrtype := DontCare
 
   io.uncache.resp.ready := true.B
@@ -859,8 +859,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // (3) response from uncache channel: mark as datavalid
   dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
-    datavalid(deqPtr) := true.B
-    dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
+    val uncacheDeqPtr = io.uncache.resp.bits.id
+
+    datavalid(uncacheDeqPtr) := true.B
+    dataModule.io.uncacheWrite(uncacheDeqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
 
     XSDebug("uncache resp: data %x\n", io.refill.bits.data)

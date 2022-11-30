@@ -70,6 +70,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
@@ -93,7 +94,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val storeQueue = Module(new StoreQueue)
 
   storeQueue.io.hartId := io.hartId
-
+  storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
+  
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready
   // Dispatch: send instructions to LSQ only when they are ready
@@ -171,8 +173,9 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   switch(pendingstate){
     is(s_idle){
-      when(io.uncache.req.fire()){
-        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, s_store)
+      when(io.uncache.req.fire() && !io.uncacheOutstanding){
+        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, 
+                          Mux(io.uncacheOutstanding, s_idle, s_store))
       }
     }
     is(s_load){
@@ -196,15 +199,24 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise{
     io.uncache.req <> storeQueue.io.uncache.req
   }
-  when(pendingstate === s_load){
-    io.uncache.resp <> loadQueue.io.uncache.resp
-  }.otherwise{
-    io.uncache.resp <> storeQueue.io.uncache.resp
+
+  when (io.uncacheOutstanding) {
+    io.uncache.resp <> loadQueue.io.uncache.resp  
+  } .otherwise {
+    when(pendingstate === s_load){
+      io.uncache.resp <> loadQueue.io.uncache.resp
+    }.otherwise{
+      io.uncache.resp <> storeQueue.io.uncache.resp
+    }
   }
+  
 
   assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
-  assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
+
+  when (!io.uncacheOutstanding) {
+    assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
+  }
 
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull
