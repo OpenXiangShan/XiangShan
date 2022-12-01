@@ -81,7 +81,7 @@ class IdealWPU(implicit p:Parameters) extends WPUModule{
     }
   )
 
-  io.resp.valid := pred_way =/= nWays.U
+  io.resp.valid := true.B
   io.resp.bits.predict_way := pred_way
   io.resp.bits.predict_way_oh := VecInit((0 until nWays).map(x => x.U === pred_way)).asUInt
   
@@ -92,6 +92,5 @@ class IdealWPU(implicit p:Parameters) extends WPUModule{
   io.resp.valid := predict_way_oh.orR
   io.resp.bits.predict_way_oh := predict_way_oh
   io.resp.bits.predict_way := OHToUInt(predict_way_oh)
-  assert(RegNext(PopCount(io.resp.bits.predict_way_oh===0.U)<=1.U),"predict_way_oh")
    */
 }

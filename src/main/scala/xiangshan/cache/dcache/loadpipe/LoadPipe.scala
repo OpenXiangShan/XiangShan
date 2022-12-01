@@ -130,15 +130,22 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // dcache side tag match
   val idealWPU = Module(new IdealWPU)
-  val s1_vaddr_dup_dcache = 0.U(PAddrBits.W)    // TODO: vaddr set idx
-  idealWPU.io.req.bits.idx := addr_to_dcache_set(s1_vaddr_dup_dcache)
+  val s1_vaddr_dup_dc = Wire(UInt(PAddrBits.W))
+  s1_vaddr_dup_dc := RegEnable(s0_req.addr, s0_fire)
+  idealWPU.io.req.bits.idx := addr_to_dcache_set(s1_vaddr_dup_dc)
   idealWPU.io.req.valid := true.B
-  idealWPU.io.idealIf.all_tags <> tag_resp
-  idealWPU.io.idealIf.all_metas <> meta_resp
+  idealWPU.io.idealIf.all_tags := tag_resp
+  idealWPU.io.idealIf.all_metas := meta_resp
   idealWPU.io.idealIf.real_tag := get_tag(s1_paddr_dup_dcache)
-  val predict_way = idealWPU.io.resp.bits.predict_way
-  val s1_tag_match_way_dup_dc = idealWPU.io.resp.bits.predict_way_oh
-  val s1_tag_match_dup_dc = idealWPU.io.resp.valid
+
+  val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
+  when (idealWPU.io.resp.valid){
+    s1_tag_match_way_dup_dc := idealWPU.io.resp.bits.predict_way_oh
+  }.otherwise {
+    val s1_tag_eq_way_dup_dc = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
+    s1_tag_match_way_dup_dc := wayMap((w: Int) => s1_tag_eq_way_dup_dc(w) && meta_resp(w).coh.isValid()).asUInt
+  }
+  val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
 
   // lsu side tag match
@@ -153,9 +160,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
-  val s1_hit_meta = Mux(s1_tag_match_dup_dc, meta_resp(predict_way), s1_fake_meta)
+  val s1_hit_meta = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
   val s1_hit_coh = s1_hit_meta.coh
-  val s1_hit_error = Mux(s1_tag_match_dup_dc, io.error_flag_resp(predict_way), false.B)
+  val s1_hit_error = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.error_flag_resp(w))), false.B)
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
@@ -234,7 +241,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
-  val banked_data_resp_word = io.banked_data_resp
   dontTouch(s2_bank_addr)
 
   val s2_instrtype = s2_req.instrtype
@@ -272,7 +278,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.valid := s2_valid
   resp.bits := DontCare
   // resp.bits.data := s2_word_decoded
-  resp.bits.data := banked_data_resp_word.raw_data
+  // resp.bits.data := banked_data_resp_word.raw_data
   // * on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
@@ -303,12 +309,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // --------------------------------------------------------------------------------
   // stage 3
   // --------------------------------------------------------------------------------
-  // report ecc error
+  // report ecc error and get selected dcache data
 
   val s3_valid = RegNext(s2_valid)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
 
+  val s3_banked_data_resp_word = io.banked_data_resp.raw_data
   val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
@@ -316,6 +323,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
+  resp.bits.data_delayed := s3_banked_data_resp_word
   
   // report tag / data / l2 error (with paddr) to bus error unit
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())

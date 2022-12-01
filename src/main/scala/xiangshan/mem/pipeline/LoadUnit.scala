@@ -402,11 +402,18 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // io.loadDataFromDcache.bankedDcacheData := io.dcacheResp.bits.bank_data
   // io.loadDataFromDcache.bank_oh := io.dcacheResp.bits.bank_oh
+  /* 
   io.loadDataFromDcache.dcacheData := io.dcacheResp.bits.data
   io.loadDataFromDcache.forwardMask := forwardMask
   io.loadDataFromDcache.forwardData := forwardData
   io.loadDataFromDcache.uop := io.out.bits.uop
   io.loadDataFromDcache.addrOffset := s2_paddr(2, 0)
+  */
+  io.loadDataFromDcache.dcacheData := io.dcacheResp.bits.data_delayed
+  io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
+  io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
+  io.loadDataFromDcache.uop := RegEnable(io.out.bits.uop, io.in.valid)
+  io.loadDataFromDcache.addrOffset := RegEnable(s2_paddr(2, 0), io.in.valid)
 
   io.s2_can_replay_from_fetch := !s2_mmio && !s2_is_prefetch && !s2_tlb_miss
   // if forward fail, replay this inst from fetch
@@ -734,7 +741,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_rdataPartialLoadLQ = rdataHelper(s3_loadDataFromLQ.uop, s3_rdataSelLQ)
 
   // data from dcache hit
-  val s3_loadDataFromDcache = RegEnable(load_s2.io.loadDataFromDcache, load_s2.io.in.valid)
+  val s3_loadDataFromDcache = load_s2.io.loadDataFromDcache
   val s3_rdataDcache = s3_loadDataFromDcache.mergedData()
   val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(
     "b000".U -> s3_rdataDcache(63, 0),

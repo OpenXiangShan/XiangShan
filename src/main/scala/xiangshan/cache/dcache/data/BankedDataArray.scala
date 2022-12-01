@@ -97,7 +97,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data for readline and loadpipe
     val readline_resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Output(Bool())
-    val read_resp = Output(Vec(LoadPipelineWidth, new L1BankedDataReadResult()))
+    val read_resp_delayed = Output(Vec(LoadPipelineWidth, new L1BankedDataReadResult()))
     val read_error_delayed = Output(Vec(LoadPipelineWidth, Bool()))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
@@ -141,7 +141,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   def dumpResp() = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
-      XSDebug(s"cycle: $r data: %x\n", io.read_resp(r).raw_data)
+      XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r).raw_data)
     }
   }
 
@@ -189,10 +189,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       singlePort = true
     ))
 
-    data_sram.io.w.req.valid := io.w.en
+    val wenReg = RegNext(io.w.en)
+    val waddrReg = RegNext(io.w.addr)
+    val wdataReg = RegNext(io.w.data)
+    data_sram.io.w.req.valid := wenReg
     data_sram.io.w.req.bits.apply(
-      setIdx = io.w.addr,
-      data = io.w.data,
+      setIdx = waddrReg,
+      data = wdataReg,
       waymask = 1.U
     )
     data_sram.io.r.req.valid := io.r.en
@@ -254,7 +257,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
-  val rwhazard = io.write.valid
+  val rwhazard = RegNext(io.write.valid)
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     set_addrs(rport_index) := addr_to_dcache_set(io.read(rport_index).bits.addr)
@@ -312,6 +315,25 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(read_result)
   dontTouch(read_error_delayed_result)
   for (bank_index <- 0 until DCacheBanks) {
+    // read ECC
+    val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+      bank_addrs(i) === bank_index.U && io.read(i).valid
+    })))
+    val readline_match = Wire(Bool())
+    if (ReduceReadlineConflict) {
+      readline_match := io.readline.valid && io.readline.bits.rmask(bank_index)
+    } else {
+      readline_match := io.readline.valid
+    }
+    val bank_set_addr = Mux(readline_match,
+      addr_to_dcache_set(io.readline.bits.addr),
+      PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
+    )
+    val read_enable = bank_addr_matchs.asUInt.orR || readline_match
+    val ecc_bank = ecc_banks(bank_index)
+    ecc_bank.io.r.req.valid := read_enable
+    ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
+    // read data
     for (way_index <- 0 until DCacheWays) {
       //     Set Addr & Read Way Mask
       //
@@ -335,26 +357,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       } else {
         readline_en := io.readline.valid && io.readline.bits.way_en(way_index)
       }
-      val bank_way_en = Mux(readline_en,
+      val ecc_way_en = Mux(readline_en,
         io.readline.bits.way_en,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> way_en(i)))
       )
-      val bank_set_addr = Mux(readline_en,
+      val sram_set_addr = Mux(readline_en,
         addr_to_dcache_set(io.readline.bits.addr),
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> set_addrs(i)))
       )
-      val read_enable = loadpipe_en.asUInt.orR || readline_en
-
+      val read_en = loadpipe_en.asUInt.orR || readline_en
       // read raw data
       val data_bank = data_banks(bank_index)(way_index)
-      data_bank.io.r.en := read_enable
-      data_bank.io.r.addr := bank_set_addr
+      data_bank.io.r.en := read_en
+      data_bank.io.r.addr := sram_set_addr
       read_result(bank_index)(way_index).raw_data := data_bank.io.r.data
-      // read ECC
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.r.req.valid := read_enable
-      ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
-      read_result(bank_index)(way_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
+      read_result(bank_index)(way_index).ecc := Mux1H(RegNext(ecc_way_en), ecc_bank.io.r.resp.data)
 
       // use ECC to check error
       val ecc_data = read_result(bank_index)(way_index).asECCData()
@@ -365,9 +382,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
 
   // read result: expose banked read result
+  /*
   (0 until LoadPipelineWidth).map(i => {
     io.read_resp(i) := read_result(RegNext(bank_addrs(i)))(RegNext(OHToUInt(way_en(i))))
    })
+  */
+  val read_result_delayed = RegNext(read_result)
+  (0 until LoadPipelineWidth).map(i => {
+    io.read_resp_delayed(i) := read_result_delayed(RegNext(RegNext(bank_addrs(i))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+  })
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
   })
