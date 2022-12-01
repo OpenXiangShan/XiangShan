@@ -273,13 +273,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val lastCycleRedirect = RegNext(io.brqRedirect)
   val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
-  def getEvenBits(input: UInt): UInt = {
-    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i)})).asUInt
-  }
-  def getOddBits(input: UInt): UInt = {
-    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i+1)})).asUInt
-  }
-
   // replay logic
   // replay is splited into 2 stages
 
@@ -296,40 +289,36 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     allocated(i) && (!tlb_hited(i) || !ld_ld_check_ok(i) || !cache_bank_no_conflict(i) || !cache_no_replay(i) || !forward_data_valid(i)) && !blocked
   })).asUInt() // use uint instead vec to reduce verilog lines
 
-  val evenDeqMask = getEvenBits(deqMask)
-  val oddDeqMask = getOddBits(deqMask)
+  val remReplayDeqMask = Seq.tabulate(LoadPipelineWidth)(getRemBits(deqMask)(_))
+
   // generate lastCycleSelect mask
-  val replayEvenFireMask = getEvenBits(UIntToOH(loadReplaySel(0)))
-  val replayOddFireMask = getOddBits(UIntToOH(loadReplaySel(1)))
+  val remReplayFireMask = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(UIntToOH(loadReplaySel(rem)))(rem))
 
-  val loadReplayEvenSelVecFire = getEvenBits(loadReplaySelVec) & ~replayEvenFireMask
-  val loadReplayOddSelVecFire = getOddBits(loadReplaySelVec) & ~replayOddFireMask
-  val loadReplayEvenSelVecNotFire = getEvenBits(loadReplaySelVec)
-  val loadReplayOddSelVecNotFire = getOddBits(loadReplaySelVec)
+  val loadReplayRemSelVecFire = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadReplaySelVec)(rem) & ~remReplayFireMask(rem))
+  val loadReplayRemSelVecNotFire = Seq.tabulate(LoadPipelineWidth)(getRemBits(loadReplaySelVec)(_))
 
-  val replayEvenFire = WireInit(false.B)
-  val replayOddFire  = WireInit(false.B)
+  val replayRemFire = Seq.tabulate(LoadPipelineWidth)(rem => WireInit(false.B))
 
-  val loadReplayEvenSel = Mux(
-    replayEvenFire,
-    getFirstOne(toVec(loadReplayEvenSelVecFire), evenDeqMask),
-    getFirstOne(toVec(loadReplayEvenSelVecNotFire), evenDeqMask)
-  )
-  val loadReplayOddSel= Mux(
-    replayOddFire,
-    getFirstOne(toVec(loadReplayOddSelVecFire), oddDeqMask),
-    getFirstOne(toVec(loadReplayOddSelVecNotFire), oddDeqMask)
-  )
+  val loadReplayRemSel = Seq.tabulate(LoadPipelineWidth)(rem => Mux(
+    replayRemFire(rem),
+    getFirstOne(toVec(loadReplayRemSelVecFire(rem)), remReplayDeqMask(rem)),
+    getFirstOne(toVec(loadReplayRemSelVecNotFire(rem)), remReplayDeqMask(rem))
+  ))
 
   val loadReplaySelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadReplaySelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
-  loadReplaySelGen(0) := Cat(loadReplayEvenSel, 0.U(1.W))
-  loadReplaySelVGen(0):= Mux(replayEvenFire, loadReplayEvenSelVecFire.asUInt.orR, loadReplayEvenSelVecNotFire.asUInt.orR)
-  loadReplaySelGen(1) := Cat(loadReplayOddSel, 1.U(1.W))
-  loadReplaySelVGen(1) := Mux(replayOddFire, loadReplayOddSelVecFire.asUInt.orR, loadReplayOddSelVecNotFire.asUInt.orR)
 
-  vaddrModule.io.raddr(LoadPipelineWidth + 1) := loadReplaySelGen(0)
-  vaddrModule.io.raddr(LoadPipelineWidth + 2) := loadReplaySelGen(1)
+  (0 until LoadPipelineWidth).foreach(index => {
+    loadReplaySelGen(index) := (
+      if (LoadPipelineWidth > 1) Cat(loadReplayRemSel(index), index.U(log2Ceil(LoadPipelineWidth).W))
+      else loadReplayRemSel(index)
+    )
+    loadReplaySelVGen(index) := Mux(replayRemFire(index), loadReplayRemSelVecFire(index).asUInt.orR, loadReplayRemSelVecNotFire(index).asUInt.orR)
+  })
+
+  (0 until LoadPipelineWidth).map(i => {
+    vaddrModule.io.raddr(LoadPipelineWidth + 1 + i) := loadReplaySelGen(i)
+  })
 
   (0 until LoadPipelineWidth).map(i => {
     loadReplaySel(i) := RegNext(loadReplaySelGen(i))
@@ -337,18 +326,16 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })
   
   // stage2: replay to load pipeline (if no load in S0)
-
-  when(replayEvenFire) {
-    s0_block_load_mask(loadReplaySel(0)) := true.B
-  }
-
-  when(replayOddFire) {
-    s0_block_load_mask(loadReplaySel(1)) := true.B
-  }
+  (0 until LoadPipelineWidth).map(i => {
+    when(replayRemFire(i)) {
+      s0_block_load_mask(loadReplaySel(i)) := true.B
+    }
+  })
   
   // init
-  replayEvenFire := false.B
-  replayOddFire := false.B
+  (0 until LoadPipelineWidth).map(i => {
+    replayRemFire(i) := false.B
+  })
 
   for(i <- 0 until LoadPipelineWidth) {
     val replayIdx = loadReplaySel(i)
@@ -364,11 +351,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.isLoadReplay := true.B
 
     when(io.loadOut(i).fire) {
-      if(i == 0) {
-        replayEvenFire := true.B
-      }else if(i == 1) {
-        replayOddFire := true.B
-      }
+      replayRemFire(i) := true.B
     }
 
   }
@@ -523,13 +506,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         s1_block_load_mask(idx) := false.B
         s2_block_load_mask(idx) := false.B
 
-        when(idx(0) === 0.U) {
-          loadReplaySelGen(0) := idx
-          loadReplaySelVGen(0) := true.B
-        }.otherwise {
-          loadReplaySelGen(1) := idx
-          loadReplaySelVGen(1) := true.B
-        }
+        // replay this load in next cycle
+        loadReplaySelGen(idx(log2Ceil(LoadPipelineWidth) - 1, 0)) := idx
+        loadReplaySelVGen(idx(log2Ceil(LoadPipelineWidth) - 1, 0)) := true.B
       }
     }
 
