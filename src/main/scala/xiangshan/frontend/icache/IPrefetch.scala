@@ -388,37 +388,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit
   p3_discard := p3_valid && p3_req_cancel
 
-  class p3QueueEntry(implicit p: Parameters) extends IPrefetchBundle{
-    val paddr = UInt(PAddrBits.W)
-    val vSetIdx = UInt(idxBits.W)
-  }
-  //Is the buffer size suitable?
-  val p3_wait_buffer  = RegInit(VecInit(Seq.fill(nPrefetchEntries)(0.U.asTypeOf(new p3QueueEntry))))
-  val p3_enqueue_ptr  = RegInit(0.U(log2Ceil(nPrefetchEntries).W))
-  val p3_write_ptr    = RegInit(0.U(log2Ceil(nPrefetchEntries).W))
-  val p3_issue        = p3_valid && !p3_req_cancel
-  val p3_buffer_empty = p3_enqueue_ptr === p3_write_ptr
-  val p3_buffer_full  = (p3_write_ptr + 1.U) === p3_enqueue_ptr
-
-  //When wait buffer is not empty or PIQ is not ready to enqueue, write into p3 buffer.
-  val p3_buffer_fire = WireInit(false.B)
-  when(p3_issue && (!p3_buffer_empty || !toMissUnit.enqReq.ready) && !p3_buffer_full) {
-    p3_buffer_fire := true.B
-
-    p3_write_ptr := p3_write_ptr + 1.U
-    p3_wait_buffer(p3_write_ptr).paddr   := p3_paddr
-    p3_wait_buffer(p3_write_ptr).vSetIdx := get_idx(p3_vaddr)
-  }
-  when(toMissUnit.enqReq.fire() && !p3_buffer_empty) {
-    p3_enqueue_ptr := p3_enqueue_ptr + 1.U
-  }
-
-  val enq_paddr   = Mux(p3_buffer_empty, p3_paddr, p3_wait_buffer(p3_enqueue_ptr).paddr)
-  val enq_vSetIdx = Mux(p3_buffer_empty, get_idx(p3_vaddr), p3_wait_buffer(p3_enqueue_ptr).vSetIdx)
-  toMissUnit.enqReq.valid               := p3_issue || !p3_buffer_empty
-  toMissUnit.enqReq.bits.paddr          := enq_paddr
-  toMissUnit.enqReq.bits.vSetIdx        := enq_vSetIdx
-
+  toMissUnit.enqReq.valid := p3_valid && !p3_req_cancel
+  toMissUnit.enqReq.bits.paddr := p3_paddr
+  toMissUnit.enqReq.bits.vSetIdx := get_idx(p3_vaddr)
 
   when(reachMaxSize){
     maxPrefetchCoutner := 0.U
@@ -428,11 +400,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     maxPrefetchCoutner := maxPrefetchCoutner + 1.U
 
     prefetch_dir(maxPrefetchCoutner).valid := true.B
-    prefetch_dir(maxPrefetchCoutner).paddr := enq_paddr
+    prefetch_dir(maxPrefetchCoutner).paddr := p3_paddr
   }
 
-  p3_ready := !p3_buffer_full || !enableBit
-  p3_fire  := toMissUnit.enqReq.fire() || p3_buffer_fire
+  p3_ready := toMissUnit.enqReq.ready || !enableBit
+  p3_fire  := toMissUnit.enqReq.fire()
 
   if (DebugFlags.fdip) {
     when(toMissUnit.enqReq.fire()){
