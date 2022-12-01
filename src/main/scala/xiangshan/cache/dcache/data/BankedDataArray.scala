@@ -357,10 +357,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       } else {
         readline_en := io.readline.valid && io.readline.bits.way_en(way_index)
       }
-      val ecc_way_en = Mux(readline_en,
+      /* val ecc_way_en = Mux(readline_en,
         io.readline.bits.way_en,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> way_en(i)))
-      )
+      ) */
       val sram_set_addr = Mux(readline_en,
         addr_to_dcache_set(io.readline.bits.addr),
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> set_addrs(i)))
@@ -371,7 +371,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       data_bank.io.r.en := read_en
       data_bank.io.r.addr := sram_set_addr
       read_result(bank_index)(way_index).raw_data := data_bank.io.r.data
-      read_result(bank_index)(way_index).ecc := Mux1H(RegNext(ecc_way_en), ecc_bank.io.r.resp.data)
+      read_result(bank_index)(way_index).ecc := ecc_bank.io.r.resp.data(way_index) // Mux1H(RegNext(ecc_way_en), ecc_bank.io.r.resp.data)
 
       // use ECC to check error
       val ecc_data = read_result(bank_index)(way_index).asECCData()
