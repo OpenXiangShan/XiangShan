@@ -81,6 +81,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val storeDataValidVec = Vec(StoreQueueSize, Output(Bool()))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -145,6 +146,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val commitCount = RegNext(io.rob.scommit)
 
+  (0 until StoreQueueSize).map{i => {
+    io.storeDataValidVec(i) := datavalid(i)
+  }}
+
   // Read dataModule
   assert(EnsbufferWidth <= 2)
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
@@ -198,12 +203,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqIdx = enqPtrExt(offset)
     val index = io.enq.req(i).bits.sqIdx.value
     when (canEnqueue(i) && !enqCancel(i)) {
-      uop(index).robIdx := io.enq.req(i).bits.robIdx
+      uop(index) := io.enq.req(i).bits
+      // NOTE: the index will be used when replay
+      uop(index).sqIdx := sqIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
     }
