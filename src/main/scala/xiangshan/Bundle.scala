@@ -261,7 +261,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
       val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
       val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
       val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
-      val bothStateMatch = Mux(SrcType.regIsFp(srcType), fpMatch, rfStateMatch)
+      val bothStateMatch = Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch)
       val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
       // For data: types are matched and int pdest is not $zero.
       val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B

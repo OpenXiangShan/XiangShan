@@ -27,23 +27,25 @@ import xiangshan.backend.{Std, ScheLaneConfig}
 
 package object xiangshan {
   object SrcType {
-    def reg = "b00".U
-    def pc  = "b01".U
-    def imm = "b01".U
-    def fp  = "b10".U
+    def imm = "b000".U
+    def pc  = "b000".U
+    def xp  = "b001".U
+    def fp  = "b010".U
+    def vp  = "b100".U
 
+    // alias
+    def reg = this.xp
     def DC  = imm // Don't Care
-    def X   = BitPat("b??")
+    def X   = BitPat("b???")
 
-    def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
+    def isReg(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
-    def isPcOrImm(srcType: UInt) = srcType(0)
-    def isRegOrFp(srcType: UInt) = !srcType(0)
-    def regIsFp(srcType: UInt) = srcType(1)
+    def isVp(srcType: UInt) = srcType(2)
+    def isPcOrImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
 
-    def apply() = UInt(2.W)
+    def apply() = UInt(3.W)
   }
 
   object SrcState {
