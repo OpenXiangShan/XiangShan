@@ -498,6 +498,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println("  hasPrefetch: " + cacheParams.hasPrefetch)
   if (cacheParams.hasPrefetch) {
     println("  nPrefetchEntries: " + cacheParams.nPrefetchEntries)
+    println("  nPrefetchBufferEntries: " + cacheParams.nPrefBufferEntries)
   }
 
   val (bus, edge) = outer.clientNode.out.head

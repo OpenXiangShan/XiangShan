@@ -94,7 +94,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2,
           nReleaseEntries = 1,
           nProbeEntries = 2,
-          nPrefetchEntries = 4,
+          nPrefetchEntries = 8,
           nPrefBufferEntries = 32,
           hasPrefetch = true
         ),
