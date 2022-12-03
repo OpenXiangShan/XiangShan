@@ -93,7 +93,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     val index = UInt(idxBits.W)
     val paddr = UInt(PAddrBits.W)
     val valid = Bool()
-    val confidence = UInt(log2Ceil(maxIPFMoveConf).W)
+    val confidence = UInt(log2Ceil(maxIPFMoveConf + 1).W)
     val move = Bool()
   }
 
@@ -187,7 +187,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val move_repeat = meta_buffer(r_buffer_hit_idx_s2(0)).move
 
   when(s2_move_valid && !move_repeat) {
-    when(meta_buffer(r_buffer_hit_idx_s2(0)).confidence === (maxIPFMoveConf-1).U) {
+    when(meta_buffer(r_buffer_hit_idx_s2(0)).confidence === (maxIPFMoveConf).U) {
       meta_buffer(r_buffer_hit_idx_s2(0)).move := true.B
     }.otherwise {
       meta_buffer(r_buffer_hit_idx_s2(0)).confidence := meta_buffer(r_buffer_hit_idx_s2(0)).confidence + 1.U
