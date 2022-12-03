@@ -60,6 +60,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
   val tlbMiss = Bool()
   val ptwBack = Bool()
   val mmio = Bool()
+  val atomic = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 
   val forwardMask = Vec(8, Bool())
@@ -91,6 +92,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     tlbMiss := input.tlbMiss
     ptwBack := input.ptwBack
     mmio := input.mmio
+    atomic := input.atomic
     rsIdx := input.rsIdx
     forwardMask := input.forwardMask
     forwardData := input.forwardData

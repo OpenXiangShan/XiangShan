@@ -140,13 +140,13 @@ trait PMAMethod extends PMAConst {
     // NOTE: all the addr space are default set to DDR, RWXCA
     idx = idx - 1
     addr(idx) := shift_addr(0xFFFFFFFFFL) // all the addr are default ddr, whicn means rwxca
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
+    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B
     mask(idx) := match_mask(addr(idx), cfg(idx))
     idx = idx - 1
 
     // NOTE: (0x0_0000_0000L, 0x0_8000_0000L) are default set to MMIO, only RW
     addr(idx) := get_napot(0x00000000L, 0x80000000L)
-    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).atomic := true.B
     mask(idx) := match_mask(addr(idx), cfg(idx))
     idx = idx - 1
 
@@ -182,22 +182,31 @@ trait PMAMethod extends PMAConst {
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x30050000)
+    //  UART 
+    addr(idx) := shift_addr(0x310D0000)
+    cfg(idx).a := 1.U; cfg(idx).atomic := false.B; cfg(idx).c := false.B; cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0x310B0000)
+    cfg(idx).a := 1.U;cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
+
+    // addr(idx) := shift_addr(0x30050000)
+    // cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    // idx = idx - 1
+    
+    addr(idx) := shift_addr(0x30010000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x30010000)
-    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-
-    addr(idx) := shift_addr( 0x20000000)
+    addr(idx) := shift_addr(0x20000000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
     idx = idx - 1
 
-    addr(idx) := shift_addr( 0x10000000)
+    addr(idx) := shift_addr(0x10000000)
     cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
-    idx = idx - 1
-    
+    // idx = idx - 1
+
     require(idx >= 0)
     addr(idx) := shift_addr(0)
 
@@ -236,6 +245,7 @@ trait PMACheckMethod extends PMPConst {
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAtom(cmd) && cfg.atomic) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := !cfg.c
+    resp.atomic := cfg.atomic
     resp
   }
 
