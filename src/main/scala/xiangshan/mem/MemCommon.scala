@@ -166,6 +166,17 @@ class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val resp = Flipped(Valid(new LoadViolationQueryResp))
 }
 
+class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
+  //  robIdx: Requestor's (a store instruction) rob index for match logic. 
+  val robIdx = new RobPtr
+
+  //  paddr: requestor's (a store instruction) physical address for match logic. 
+  val paddr = UInt(PAddrBits.W)
+
+  //  mask: requestor's (a store instruction) data width mask for match logic.
+  val mask = UInt(8.W)  
+}
+
 // Store byte valid mask write bundle
 //
 // Store byte valid mask write to SQ takes 2 cycles
