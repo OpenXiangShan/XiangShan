@@ -491,7 +491,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // ))
   // val rdataPartialLoad = rdataHelper(s2_uop, rdataSel) // s2_rdataPartialLoad is not used
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid
+  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute
   // write_lq_safe is needed by dup logic
   // io.write_lq_safe := !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
