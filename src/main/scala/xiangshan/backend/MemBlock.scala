@@ -273,7 +273,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
-
+    // st-ld violation query
+    for (s <- 0 until StorePipelineWidth) {
+      loadUnits(i).io.reExecuteQuery(s) := storeUnits(s).io.reExecuteQuery
+    }
     // load to load fast forward: load(i) prefers data(i)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
@@ -382,8 +385,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
-    io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
-    io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
+    // io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
+    // io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
+    io.stIn(i).valid := stu.io.issue.valid 
+    io.stIn(i).bits := stu.io.issue.bits 
 
     stu.io.stout.ready := true.B
 

@@ -98,6 +98,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle())
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
+    val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
   })
 
   // mmio cbo decoder
@@ -113,6 +114,12 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.in.ready := true.B
 
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
+
+  // st-ld violation dectect request.
+  io.reExecuteQuery.valid := io.in.valid && !s1_tlb_miss
+  io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx 
+  io.reExecuteQuery.bits.paddr := s1_paddr 
+  io.reExecuteQuery.bits.mask := io.in.bits.mask
 
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
@@ -214,6 +221,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stout = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val storeMaskOut = Valid(new StoreMaskBundle)
+    val reExecuteQuery = Valid(new LoadReExecuteQueryIO) 
+    val issue = Valid(new ExuInput)
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -232,10 +241,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
-
+  
+  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss 
+  io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.in.valid)
 
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq
+  io.reExecuteQuery := store_s1.io.reExecuteQuery
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
