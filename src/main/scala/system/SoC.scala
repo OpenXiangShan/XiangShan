@@ -169,7 +169,7 @@ trait HaveAXI4MemPort {
     TLToAXI4() :=
     TLSourceShrinker(64) :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
-    TLBuffer.chainNode(2) :=
+    TLBuffer.chainNode(90) :=
     mem_xbar
 
   val memory = InModuleBody {
