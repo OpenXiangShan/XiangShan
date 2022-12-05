@@ -55,6 +55,7 @@ package object xiangshan {
     def apply() = UInt(1.W)
   }
 
+  // Todo: Use OH instead
   object FuType {
     def jmp          = "b0000".U
     def i2f          = "b0001".U
@@ -72,10 +73,13 @@ package object xiangshan {
     def ldu          = "b1100".U
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
-
+    def vipu         = "b10000".U
+    def vfpu         = "b11000".U
+    def vldu         = "b11100".U
+    def vstu         = "b11101".U
     def X            = BitPat("b????")
 
-    def num = 14
+    def num = 18
 
     def apply() = UInt(log2Up(num).W)
 
@@ -125,6 +129,22 @@ package object xiangshan {
   object FuOpType {
     def apply() = UInt(7.W)
     def X = BitPat("b???????")
+  }
+
+  object VipuType {
+    def dummy = 0.U(7.W)
+  }
+
+  object VfpuType {
+    def dummy = 0.U(7.W)
+  }
+
+  object VlduType {
+    def dummy = 0.U(7.W)
+  }
+
+  object VstuType {
+    def dummy = 0.U(7.W)
   }
 
   object CommitType {
