@@ -112,11 +112,11 @@ trait HaveSlaveAXI4Port {
     TLFIFOFixer() :=
     TLWidthWidget(32) :=
     AXI4ToTL() :=
-    AXI4UserYanker(Some(1)) :=
+    AXI4UserYanker(Some(32)) :=
     AXI4Fragmenter() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
-    AXI4IdIndexer(1) :=
+    AXI4IdIndexer(5) :=
     l3FrontendAXI4Node
   errorDevice.node := l3_xbar
 
