@@ -77,6 +77,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
     "b10".U   -> (io.out.bits.vaddr(1,0) === 0.U), //w
     "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
+
   io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
 
   XSPerfAccumulate("in_valid", io.in.valid)

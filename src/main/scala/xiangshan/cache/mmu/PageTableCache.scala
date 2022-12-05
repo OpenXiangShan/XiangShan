@@ -277,7 +277,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
-    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U))
+    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U(log2Up(l2tlbParams.l2nWays).W)))
     val eccError = hitWayEntry.decode()
 
     ridx.suggestName(s"l2_ridx")
@@ -323,7 +323,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
     val hit = ParallelOR(hitVec)
-    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U))
+    val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U(log2Up(l2tlbParams.l3nWays).W)))
     val eccError = hitWayEntry.decode()
 
     when (hit && stageCheck_valid_1cycle) { ptwl3replace.access(genPtwL3SetIdx(check_vpn), hitWay) }

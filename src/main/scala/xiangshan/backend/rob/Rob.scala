@@ -481,6 +481,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(wbIdx).debugInfo.issueTime := wb.bits.uop.debugInfo.issueTime
       debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.uop.debugInfo.writebackTime
 
+      // debug for lqidx and sqidx
+      debug_microOp(wbIdx).lqIdx := wb.bits.uop.lqIdx
+      debug_microOp(wbIdx).sqIdx := wb.bits.uop.sqIdx
+      
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.cf.pc)} wen ${debug_Uop.ctrl.rfWen} " +
@@ -995,7 +999,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
 
   //difftest signals
-  val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
+  val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
 
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
@@ -1009,6 +1013,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
+      // assgin default value
+      difftest.io := DontCare
+
       difftest.io.clock    := clock
       difftest.io.coreid   := io.hartId
       difftest.io.index    := i.U
@@ -1020,6 +1027,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.valid    := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.isCommit)))
       difftest.io.pc       := RegNext(RegNext(RegNext(SignExt(uop.cf.pc, XLEN))))
       difftest.io.instr    := RegNext(RegNext(RegNext(uop.cf.instr)))
+      difftest.io.robIdx   := RegNext(RegNext(RegNext(ZeroExt(ptr, 10))))
+      difftest.io.lqIdx    := RegNext(RegNext(RegNext(ZeroExt(uop.lqIdx.value, 7))))
+      difftest.io.sqIdx    := RegNext(RegNext(RegNext(ZeroExt(uop.sqIdx.value, 7))))
+      difftest.io.isLoad   := RegNext(RegNext(RegNext(io.commits.info(i).commitType === CommitType.LOAD)))
+      difftest.io.isStore  := RegNext(RegNext(RegNext(io.commits.info(i).commitType === CommitType.STORE)))
       difftest.io.special  := RegNext(RegNext(RegNext(CommitType.isFused(io.commits.info(i).commitType))))
       // when committing an eliminated move instruction,
       // we must make sure that skip is properly set to false (output from EXU is random value)

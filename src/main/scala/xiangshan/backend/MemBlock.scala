@@ -67,7 +67,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
-    val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
+    val rsfeedback = Vec(exuParameters.StuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
@@ -255,10 +255,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
-    loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
-    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // NOTE: just for dtlb's perf cnt
+    loadUnits(i).io.rsIdx := DontCare
+    loadUnits(i).io.isFirstIssue := DontCare
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
@@ -291,6 +289,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s1)
     lsq.io.loadPaddrIn(i) <> loadUnits(i).io.lsq.loadPaddrIn
+    lsq.io.loadVaddrIn(i) <> loadUnits(i).io.lsq.loadVaddrIn
+
+    lsq.io.replayFast(i) := loadUnits(i).io.lsq.replayFast
+    lsq.io.replaySlow(i) := loadUnits(i).io.lsq.replaySlow
+
+    loadUnits(i).io.lsqOut       <> lsq.io.loadOut(i)
 
     // passdown to lsq (load s2)
     lsq.io.loadIn(i) <> loadUnits(i).io.lsq.loadIn
@@ -355,10 +359,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.out := DontCare
 
     stu.io.redirect     <> redirect
-    stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
-    stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
+    stu.io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
+    stu.io.rsIdx        <> io.rsfeedback(i).rsIdx
     // NOTE: just for dtlb's perf cnt
-    stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
+    stu.io.isFirstIssue <> io.rsfeedback(i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
     stu.io.lsq_replenish <> lsq.io.storeInRe(i)
@@ -367,7 +371,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
 
     // store unit does not need fast feedback
-    io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
+    io.rsfeedback(i).feedbackFast := DontCare
 
     // Lsq to sta unit
     lsq.io.storeMaskIn(i) <> stu.io.storeMaskOut
@@ -492,6 +496,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val state = RegInit(s_normal)
 
   val atomic_rs = (0 until exuParameters.StuCnt).map(exuParameters.LduCnt + _)
+  val atomic_replay_port_idx = (0 until exuParameters.StuCnt)
   val st_atomics = Seq.tabulate(exuParameters.StuCnt)(i =>
     io.issue(atomic_rs(i)).valid && FuType.storeIsAMO((io.issue(atomic_rs(i)).bits.uop.ctrl.fuType))
   )
@@ -520,7 +525,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
     st_data_atomics(i) -> stData(i).bits))
   atomicsUnit.io.rsIdx    := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
-    st_atomics(i) -> io.rsfeedback(atomic_rs(i)).rsIdx))
+    st_atomics(i) -> io.rsfeedback(atomic_replay_port_idx(i)).rsIdx))
   atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support
@@ -546,7 +551,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   for (i <- 0 until exuParameters.StuCnt) when (state === s_atomics(i)) {
-    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs(i)).feedbackSlow
+    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_replay_port_idx(i)).feedbackSlow
 
     assert(!storeUnits(i).io.feedbackSlow.valid)
   }

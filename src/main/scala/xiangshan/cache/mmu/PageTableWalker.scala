@@ -283,7 +283,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
 
-  val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U))
+  val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U(log2Up(l2tlbParams.llptwsize).W)))
 
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp

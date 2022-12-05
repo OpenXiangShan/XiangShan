@@ -163,6 +163,7 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
+  ReSelectLen: Int = 6,
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -286,6 +287,7 @@ trait HasXSParameter {
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val AsidLength = coreParams.AsidLength
+  val ReSelectLen = coreParams.ReSelectLen
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
