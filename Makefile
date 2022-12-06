@@ -79,6 +79,8 @@ $(TOP_V): $(SCALA_FILE)
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
+		--emission-options disableMemRandomization \
+		--emission-options disableRegisterRandomization \
 		$(RELEASE_ARGS)
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
@@ -101,6 +103,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf  \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
+		--emission-options disableRegisterRandomization \
 		$(SIM_ARGS)
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
