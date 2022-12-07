@@ -171,9 +171,8 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val r_buffer_hit_idx_s2 = RegNext(r_buffer_hit_idx_s1)
   val r_rvalid_s2         = RegNext(r_rvalid_s1, init=false.B)
 
-  val s2_move_valid = r_rvalid_s2 && r_buffer_hit_s2(0)
-
-  
+  val s2_move_valid_0 = r_rvalid_s2 && r_buffer_hit_s2(0)
+  val s2_move_valid_1 = r_rvalid_s2 && r_buffer_hit_s2(1)
 
   XSPerfAccumulate("prefetch_hit_bank_0", r_rvalid_s2 && r_buffer_hit_s2(0))
   XSPerfAccumulate("prefetch_hit_bank_1", r_rvalid_s2 && r_buffer_hit_s2(1))
@@ -183,24 +182,58 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val curr_move_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
   val curr_hit_ptr  = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
 
-  val move_repeat = meta_buffer(r_buffer_hit_idx_s2(0)).move
+  val s2_move_conf_full_0 = meta_buffer(r_buffer_hit_idx_s2(0)).confidence === (maxIPFMoveConf).U
+  val s2_move_conf_full_1 = meta_buffer(r_buffer_hit_idx_s2(1)).confidence === (maxIPFMoveConf).U
 
-  when(s2_move_valid && !move_repeat) {
-    when(meta_buffer(r_buffer_hit_idx_s2(0)).confidence === (maxIPFMoveConf).U) {
+  val move_repeat_0 = meta_buffer(r_buffer_hit_idx_s2(0)).move
+  val move_repeat_1 = meta_buffer(r_buffer_hit_idx_s2(1)).move || (r_buffer_hit_idx_s2(0) === r_buffer_hit_idx_s2(1))
+
+  val s2_move_0 = s2_move_valid_0 && !move_repeat_0
+  val s2_move_1 = s2_move_valid_1 && !move_repeat_1
+
+  val s2_move_enqueue_0 = s2_move_0 && s2_move_conf_full_0
+  val s2_move_enqueue_1 = s2_move_1 && s2_move_conf_full_1
+
+  when(s2_move_0) {
+    when(s2_move_conf_full_0) {
       meta_buffer(r_buffer_hit_idx_s2(0)).move := true.B
     }.otherwise {
       meta_buffer(r_buffer_hit_idx_s2(0)).confidence := meta_buffer(r_buffer_hit_idx_s2(0)).confidence + 1.U
     }
+  }
+  when(s2_move_1) {
+    when(s2_move_conf_full_1) {
+      meta_buffer(r_buffer_hit_idx_s2(1)).move := true.B
+    }.otherwise {
+      meta_buffer(r_buffer_hit_idx_s2(1)).confidence := meta_buffer(r_buffer_hit_idx_s2(1)).confidence + 1.U
+    }
+  }
 
+  when(s2_move_enqueue_0 && !s2_move_enqueue_1) {
     move_queue(curr_hit_ptr) := r_buffer_hit_idx_s2(0)
     
     when((curr_hit_ptr + 1.U) =/= curr_move_ptr){
       curr_hit_ptr := curr_hit_ptr + 1.U
     }
+  }.elsewhen(!s2_move_enqueue_0 && s2_move_enqueue_1) {
+    move_queue(curr_hit_ptr) := r_buffer_hit_idx_s2(1)
+    
+    when((curr_hit_ptr + 1.U) =/= curr_move_ptr){
+      curr_hit_ptr := curr_hit_ptr + 1.U
+    }
+  }.elsewhen(s2_move_enqueue_0 && s2_move_enqueue_1) {
+    move_queue(curr_hit_ptr) := r_buffer_hit_idx_s2(0)
+    move_queue(curr_hit_ptr + 1.U) := r_buffer_hit_idx_s2(1)
+    when((curr_hit_ptr + 2.U) =/= curr_move_ptr){
+      curr_hit_ptr := curr_hit_ptr + 2.U
+    }.otherwise{
+      curr_hit_ptr := curr_hit_ptr + 1.U
+    }
   }
 
   val move_queue_empty = curr_move_ptr === curr_hit_ptr
-  val move_valid = !move_queue_empty && meta_buffer(move_queue(curr_move_ptr)).move
+  val moving = io.move.meta_write.fire()
+  val move_valid = !move_queue_empty && meta_buffer(move_queue(curr_move_ptr)).move && !moving
   val move_jump  = !move_queue_empty && !meta_buffer(move_queue(curr_move_ptr)).move
 
   //latch for better timing
@@ -208,7 +241,8 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   io.move.data_write.valid := RegNext(move_valid)
   io.move.meta_write.bits  := DontCare
   io.move.data_write.bits  := DontCare
-  val move_idx = RegNext(move_queue(curr_move_ptr))
+  val move_idx = move_queue(curr_move_ptr)
+  val move_idx_reg = RegNext(move_idx)
   val moveEntryMeta = RegNext(meta_buffer(move_idx))
   val moveEntryData = RegNext(data_buffer(move_idx))
   io.replace.vsetIdx := meta_buffer(move_idx).index
@@ -228,10 +262,13 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       paddr = moveEntryMeta.paddr)
 
       curr_move_ptr := curr_move_ptr + 1.U
-      meta_buffer(move_idx).valid := false.B
-      meta_buffer(move_idx).move  := false.B
-      meta_buffer(move_idx).confidence := 0.U
-  }.elsewhen(move_jump){
+      meta_buffer(move_idx_reg).valid := false.B
+      meta_buffer(move_idx_reg).move  := false.B
+      meta_buffer(move_idx_reg).confidence := 0.U
+      if(DebugFlags.fdip){
+        printf("<%d> IPrefetchBuffer: moving into ICache,move idx:%d, vidx:%d, waymask:%d, paddr:0x%x\n",GTimer(), move_idx, moveEntryMeta.index, waymask, moveEntryMeta.paddr);
+      }
+  }.elsewhen(move_jump) {
     curr_move_ptr := curr_move_ptr + 1.U
   }
 
