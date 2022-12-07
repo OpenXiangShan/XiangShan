@@ -938,13 +938,23 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
+  // Def: intrVec -> intrBitSet -> csrio.interrupt
+  // T1: CSR.csrio.interrupt -> JumpCSRExeUnit -> FUBlock -> ExuBlock -> CtrlBlock
+  //     -> ROB.io_csr_intrBitSet -> ROB.intrBitSetReg
+  // T2: ROB.intrBitSetReg -> intrEnable/ROB.exceptionHappen -> io_exception_bits_isInterrupt_r
+  // T3: ROB.io_exception_bits_isInterrupt_r -> ROB.io_exception_bits_isInterrupt
+  //     -> CtrlBlock -> ExuBlock -> FuBlock -> JumpCSRExeUnit
+  //     -> DelayN(2).io_in_bits_isInterrupt -> DelayN(2).REG_bits_isInterrupt
+  // T4: DelayN(2).REG_bits_isInterrupt -> DelayN(2).io_out_bits_isInterrupt
+  // Use: DelayN(2).io_out_bits_isInterrupt -> CSR.csrio_exception_bits_isInterrupt -> mcause
+  val intrNOReg = DelayN(intrNO, 4)
   val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
-  XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
-  val hasDebugIntr = intrNO === IRQ_DEBUG.U && hasIntr
+  XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNOReg)
+  val hasDebugIntr = intrNOReg === IRQ_DEBUG.U && hasIntr
 
   // exceptions from rob need to handle
   val exceptionVecFromRob   = csrio.exception.bits.uop.cf.exceptionVec
@@ -976,7 +986,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
   val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(hasExceptionVec(i), i.U, sum))
   val exceptionNO = Mux(hasSingleStep || hasTriggerFire, 3.U, regularExceptionNO)
-  val causeNO = (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO, exceptionNO)
+  val causeNO = (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNOReg, exceptionNO)
 
   val hasExceptionIntr = csrio.exception.valid
 
@@ -987,7 +997,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val ebreakEnterParkLoop = debugMode && hasExceptionIntr
 
   XSDebug(hasExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    dexceptionPC, intrNO, intrVec, exceptionNO, hasExceptionVec.asUInt
+    dexceptionPC, intrNOReg, intrVec, exceptionNO, hasExceptionVec.asUInt
   )
   XSDebug(hasExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
