@@ -1066,9 +1066,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
   io.uncache.req.bits.data := dataModule.io.uncache.rdata.data
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
-
-  io.uncache.req.bits.id   := DontCare
+  io.uncache.req.bits.id   := RegNext(deqPtrExtNext.value)
   io.uncache.req.bits.instrtype := DontCare
+  io.uncache.req.bits.atomic := true.B
 
   io.uncache.resp.ready := true.B
 

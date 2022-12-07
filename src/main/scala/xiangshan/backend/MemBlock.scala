@@ -457,6 +457,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
+  
+  //  Uncahce
+  uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
+  uncache.io.hartId := io.hartId
+  lsq.io.uncacheOutstanding := io.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   lsq.io.rob            <> io.lsqio.rob
@@ -484,11 +489,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  io.fenceToSbuffer.sbIsEmpty := RegNext(sbuffer.io.flush.empty)
+  val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
+  io.fenceToSbuffer.sbIsEmpty := RegNext(stIsEmpty)
+
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
   sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
+  uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
@@ -536,7 +544,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.pmpResp := pmp_check(0).resp
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
-  atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
+  atomicsUnit.io.flush_sbuffer.empty := stIsEmpty
 
   atomicsUnit.io.csrCtrl := csrCtrl
 

@@ -135,6 +135,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.paddr := s1_paddr
   io.out.bits.miss := false.B
   io.out.bits.mmio := s1_mmio
+  io.out.bits.atomic := s1_mmio
   io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
 
@@ -173,6 +174,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   io.in.ready := true.B
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
+  io.out.bits.atomic := io.in.bits.atomic || pmp.atomic
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
   io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
