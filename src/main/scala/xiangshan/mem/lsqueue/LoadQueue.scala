@@ -772,9 +772,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     *
     * Cycle 0: Store Writeback
     *   Generate match vector for store address with rangeMask(stPtr, enqPtr).
-    *   Besides.
     * Cycle 1: Redirect Generation
-    *   There're three possible types of violations, up to 6 possible redirect requests.
+    *   There're up to 2 possible redirect requests.
     *   Choose the oldest load (part 1). 
     * Cycle 2: Redirect Fire
     *   Choose the oldest load (part 2).
