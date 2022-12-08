@@ -42,6 +42,15 @@ trait HasCSRConst {
   val Frm           = 0x002
   val Fcsr          = 0x003
 
+  // Vector Extension CSRs
+  val Vstart        = 0x008
+  val Vxsat         = 0x009
+  val Vxrm          = 0x00A
+  val Vcsr          = 0x00F
+  val Vl            = 0xC20
+  val Vtype         = 0xC21
+  val Vlenb         = 0xC22
+
   // User Counter/Timers
   val Cycle         = 0xC00
   val Time          = 0xC01

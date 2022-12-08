@@ -366,6 +366,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if (HasMExtension) { extList = extList :+ 'm' }
   if (HasCExtension) { extList = extList :+ 'c' }
   if (HasFPU) { extList = extList ++ List('f', 'd') }
+  if (HasVPU) { extList = extList :+ 'v' }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal)
 
@@ -594,6 +595,52 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
 
+  // Vector extension CSRs
+  val vstart = Reg(UInt(XLEN.W))
+  val vcsr = RegInit(0.U(XLEN.W))
+  val vl = Reg(UInt(XLEN.W))
+  val vtype = Reg(UInt(XLEN.W))
+  val vlenb = Reg(UInt(XLEN.W))
+
+  // vcsr is mapped to vxrm and vxsat
+  class VcsrStruct extends Bundle {
+    val reserved = UInt((XLEN-3).W)
+    val vxrm = UInt(2.W)
+    val vxsat = UInt(1.W)
+    assert(this.getWidth == XLEN)
+  }
+
+  def vxrm_wfn(wdata: UInt): UInt = {
+    val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    vcsrOld.vxrm := wdata(1,0)
+    vcsrOld.asUInt
+  }
+  def vxrm_rfn(rdata: UInt): UInt = rdata(2,1)
+
+  def vxsat_wfn(wdata: UInt): UInt = {
+    val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    vcsrOld.vxsat := wdata(0)
+    vcsrOld.asUInt
+  }
+  def vxsat_rfn(rdata: UInt): UInt = rdata(0)
+
+  def vcsr_wfn(wdata: UInt): UInt = {
+    val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    vcsrOld.vxrm := wdata.asTypeOf(vcsrOld).vxrm
+    vcsrOld.vxsat := wdata.asTypeOf(vcsrOld).vxsat
+    vcsrOld.asUInt
+  }
+
+  val vcsrMapping = Map(
+    MaskedRegMap(Vstart, vstart),
+    MaskedRegMap(Vxrm, vcsr, wfn = vxrm_wfn, rfn = vxrm_rfn),
+    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
+    MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
+    MaskedRegMap(Vl, vl),
+    MaskedRegMap(Vtype, vtype),
+    MaskedRegMap(Vlenb, vlenb)
+  )
+
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
@@ -748,6 +795,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                 pmpMapping ++
                 pmaMapping ++
                 (if (HasFPU) fcsrMapping else Nil) ++
+                (if (HasVPU) vcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
   val addr = src2(11, 0)
