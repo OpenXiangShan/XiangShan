@@ -152,6 +152,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
+    val fencei   = Input(Bool())
   }}
 
   io.read.ready := !io.write.valid
@@ -230,6 +231,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
   when(io.write.valid){
     validArray := validArray.bitSet(validPtr, true.B)
+  }
+
+  when(io.fencei){
+    validArray := 0.U
   }
 
   io.readResp.metaData <> DontCare
@@ -528,6 +533,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.fencei := io.fencei
 
   ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
+
+  metaArray.io.fencei     := io.fencei
+  metaArrayCopy.io.fencei := io.fencei
 
   meta_read_arb.io.in(0) <> mainPipe.io.metaArray.toIMeta
   metaArray.io.read <> meta_read_arb.io.out

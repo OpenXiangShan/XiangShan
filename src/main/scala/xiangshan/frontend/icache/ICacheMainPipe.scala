@@ -268,12 +268,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
+  val s1_meta_valids             = ResultHoldBypass(data = metaResp.entryValid, valid = RegNext(s0_fire))
 
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
-  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
+  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid() && s1_meta_valids(k)(w)})))
   val s1_tag_match         = VecInit(s1_tag_match_vec.map(vector => ParallelOR(vector)))
 
   val s1_port_hit          = VecInit(Seq(s1_tag_match(0) && s1_valid  && !tlbExcp(0),  s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcp(1) ))
