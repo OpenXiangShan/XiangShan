@@ -24,6 +24,9 @@ import xiangshan._
 import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants}
 
 // Fake Store buffer for XiangShan Out of Order LSU
+//
+// Note: fake store buffer is out of date, as store buffer is now
+// used as extended dcache miss queue for store
 class FakeSbuffer(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
