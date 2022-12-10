@@ -91,7 +91,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s_llptw_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
   // for updating "level"
-  val mem_addr_update = RegInit(false.B)
+  val mem_addr_update = WireInit(false.B)
 
   val idle = RegInit(true.B)
   val sent_to_pmp = s_pmp_check === false.B || mem_addr_update
