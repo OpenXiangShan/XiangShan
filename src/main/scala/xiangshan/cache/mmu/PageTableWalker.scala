@@ -91,10 +91,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s_llptw_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
   // for updating "level"
-  val mem_addr_update = WireInit(false.B)
-
+  val mem_addr_update = RegInit(false.B)
+  
   val idle = RegInit(true.B)
-  val sent_to_pmp = s_pmp_check === false.B || mem_addr_update
+  val sent_to_pmp = !reset.asBool && (s_pmp_check === false.B || mem_addr_update)
 
   val pageFault = memPte.isPf(level)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
@@ -109,7 +109,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
 
-  io.resp.valid := mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
+  io.resp.valid := !reset.asBool && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
 
