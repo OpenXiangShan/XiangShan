@@ -131,6 +131,7 @@ case class XSCoreParameters
   LoadQueueNWriteBanks: Int = 8,
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8,
+  VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -153,6 +154,9 @@ case class XSCoreParameters
   ),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
+  VecMemSrcInWidth: Int = 2,
+  VecMemInstWbWidth: Int = 1,
+  VecMemDispatchWidth: Int = 1,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -165,7 +169,7 @@ case class XSCoreParameters
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
-  ReSelectLen: Int = 6,
+  ReSelectLen: Int = 6, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -371,6 +375,7 @@ trait HasXSParameter {
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
@@ -380,6 +385,9 @@ trait HasXSParameter {
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
+  val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
+  val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
+  val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
