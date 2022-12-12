@@ -15,6 +15,7 @@
 #***************************************************************************************
 
 TOP = XSTop
+SIM_TOP   = SimTop
 FPGATOP = top.TopMain
 BUILD_DIR = ./build
 TOP_V = $(BUILD_DIR)/$(TOP).v
@@ -31,6 +32,7 @@ ABS_WORK_DIR := $(shell pwd)
 RUN_BIN_DIR ?= $(ABS_WORK_DIR)/ready-to-run
 RUN_BIN ?= coremark-2-iteration
 CONSIDER_FSDB ?= 1
+MFC ?= 0
 
 ifdef FLASH
 	RUN_OPTS := +flash=$(RUN_BIN_DIR)/$(RUN_BIN).bin
@@ -59,14 +61,20 @@ endif
 # emu for the release version
 RELEASE_ARGS = --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   = --enable-difftest
+
+ifeq ($(MFC),1)
+RELEASE_ARGS += -X none -E chirrtl --output-file $(TOP).chirrtl.fir
+DEBUG_ARGS += -X none -E chirrtl --output-file $(SIM_TOP).chirrtl.fir
+else
+RELEASE_ARGS += -E verilog --output-file $(TOP).v
+DEBUG_ARGS += -E verilog --output-file $(SIM_TOP).v
+endif
+
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
 endif
-
-TIMELOG = $(BUILD_DIR)/time.log
-TIME_CMD = time -a -o $(TIMELOG)
 
 .DEFAULT_GOAL = verilog
 
@@ -75,13 +83,15 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                      \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
-		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
-		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
-		--emission-options disableMemRandomization \
-		--emission-options disableRegisterRandomization \
+	time -o $(@D)/time.log mill -i XiangShan.runMain $(FPGATOP) -td $(@D) \
+		--config $(CONFIG) --full-stacktrace --num-cores $(NUM_CORES) \
 		$(RELEASE_ARGS)
+ifeq ($(MFC),1)
+	time -a -o $(@D)/time.log firtool --disable-all-randomization --disable-annotation-unknown \
+	--annotation-file=$(BUILD_DIR)/$(TOP).anno.json --format=fir \
+	--lowering-options=noAlwaysComb,disallowExpressionInliningInPorts,explicitBitcast \
+	--verilog --dedup -o $(TOP_V) $(BUILD_DIR)/$(TOP).chirrtl.fir
+endif
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -93,18 +103,20 @@ $(TOP_V): $(SCALA_FILE)
 
 verilog: $(TOP_V)
 
-SIM_TOP   = SimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
-		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf  \
-		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
-		--emission-options disableRegisterRandomization \
+	time -o $(@D)/time.log mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D) \
+		--config $(CONFIG) --full-stacktrace --num-cores $(NUM_CORES) \
 		$(SIM_ARGS)
+ifeq ($(MFC),1)
+	time -a -o $(@D)/time.log firtool --disable-all-randomization --disable-annotation-unknown \
+	--annotation-file=$(BUILD_DIR)/$(SIM_TOP).anno.json --format=fir \
+	--lowering-options=noAlwaysComb,disallowExpressionInliningInPorts,explicitBitcast \
+	--verilog --dedup -o $(SIM_TOP_V) $(BUILD_DIR)/$(SIM_TOP).chirrtl.fir
+endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__

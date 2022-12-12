@@ -4,7 +4,7 @@ import argparse
 import os
 import re
 from datetime import date
-from shutil import copy, copytree
+from shutil import copy, move
 
 import xlsxwriter
 
@@ -370,29 +370,6 @@ def get_files(build_path):
             files += get_files(file_path)
     return files
 
-def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
-    if file_dirs is None:
-        file_dirs = [filelist_name]
-    filelist_entries = []
-    for file_dir in file_dirs:
-        for filename in os.listdir(os.path.join(out_dir, file_dir)):
-            if filename.endswith(".v") or filename.endswith(".sv"):
-                # check whether it exists in previous directories
-                # this infers an implicit priority between the file_dirs
-                has_found = False
-                for entry in filelist_entries:
-                    if entry.endswith(filename):
-                        has_found = True
-                        break
-                if has_found:
-                    continue
-                filelist_entry = os.path.join(file_dir, filename)
-                filelist_entries.append(filelist_entry)
-    with open(os.path.join(out_dir, f"{filelist_name}.f"), "w") as f:
-        for entry in filelist_entries + extra_lines:
-            f.write(f"{entry}\n")
-
-
 class SRAMConfiguration(object):
     ARRAY_NAME = "sram_array_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
 
@@ -618,67 +595,87 @@ def create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=None
     worksheet.write(0, 0, f"Total size: {total_size / (8 * 1024)} KiB")
     workbook.close()
 
-def create_extra_files(out_dir, build_path):
-    extra_path = os.path.join(out_dir, "extra")
-    copytree("/nfs/home/share/southlake/extra", extra_path)
+def copy_mbist_files(out_dir, build_path):
+    if not (os.path.isdir(out_dir)):
+        os.makedirs(out_dir)
     for f in os.listdir(build_path):
-        file_path = os.path.join(build_path, f)
         if f.endswith(".csv"):
-            copy(file_path, extra_path)
+            src_path = os.path.join(build_path, f)
+            copy(src_path, out_dir)
 
-def replace_sram(out_dir, sram_conf, top_module, module_prefix):
-    replace_sram_dir = "memory_array"
-    replace_sram_path = os.path.join(out_dir, replace_sram_dir)
-    if not os.path.exists(replace_sram_path):
-        os.mkdir(replace_sram_path)
-    sram_wrapper_dir = "memory_wrapper"
-    sram_wrapper_path = os.path.join(out_dir, sram_wrapper_dir)
-    if not os.path.exists(sram_wrapper_path):
-        os.mkdir(sram_wrapper_path)
-    replaced_sram = []
-    with open(sram_conf) as f:
-        for line in f:
-            conf = SRAMConfiguration()
-            conf.from_sram_conf_entry(line)
-            sim_sram_module = VModule(conf.name)
-            sim_sram_path = os.path.join(out_dir, top_module, f"{conf.name}.v")
-            if not os.path.exists(sim_sram_path) and module_prefix is not None:
-                sim_sram_path = os.path.join(out_dir, top_module, f"{module_prefix}{conf.name}.v")
-                sim_sram_module.name = f"{module_prefix}{conf.name}"
-            if not os.path.exists(sim_sram_path):
-                print(f"SRAM Replace: does not find {sim_sram_path}. Skipped.")
-                continue
-            with open(sim_sram_path, "r") as sim_f:
-                sim_sram_module.add_lines(sim_f.readlines())
-            mbist_type = sim_sram_module.get_mbist_type()
-            wrapper, instantiation_v = conf.get_foundry_sram_wrapper(mbist_type)
-            sim_sram_module.replace_with_macro("FOUNDRY_MEM", instantiation_v)
-            output_file = os.path.join(replace_sram_path, f"{sim_sram_module.name}.v")
-            with open(output_file, "w") as f:
-                f.writelines(sim_sram_module.get_lines())
-            # uncomment the following lines to copy the provided memory wrapper
-            # wrapper_dir = "/nfs/home/share/southlake/sram_replace/mem_wrap"
-            # wrapper_path = os.path.join(wrapper_dir, f"{wrapper}.v")
-            # copy(wrapper_path, os.path.join(sram_wrapper_path, f"{wrapper}.v"))
-            replaced_sram.append(sim_sram_module.name)
-    with open(os.path.join(out_dir, f"{sram_wrapper_dir}.f"), "w") as wrapper_f:
-        wrapper_f.write("// FIXME: include your SRAM wrappers here\n")
-    return replace_sram_dir, [f"-F {sram_wrapper_dir}.f"]
+def get_combMem_path(sram_path, rtl_path):
+  combMem_pattern = re.compile(r"^  .*combMem.* .* \(")
+  res = []
+  with open(sram_path, 'r') as f:
+    lines = f.readlines()
+    for l in lines:
+      if combMem_pattern.search(l) != None:
+        combMem_name = l.strip().split(' ')[0]
+        combMem_path = rtl_path + '/' + combMem_name + ".v"
+        res.append(combMem_path)
+  return res
 
+def merge_combMem(cm_list, dst_path):
+  dst_file = open(dst_path,"w")
+  dst_file.write("// VCS coverage exclude_file\n")
+  for cm in cm_list:
+    with open(cm, 'r') as f:
+      dst_file.writelines(f.readlines()[1:])
+    os.remove(cm)
+  dst_file.close()
 
-def replace_mbist_scan_controller(out_dir):
-    target_dir = "scan_mbist_ctrl"
-    target_path = os.path.join(out_dir, target_dir)
-    if not os.path.exists(target_path):
-        os.mkdir(target_path)
-    blackbox_src_dir = "/nfs/home/share/southlake/sram_replace/scan_mbist_ctrl_rpl_rtl"
-    for filename in os.listdir(blackbox_src_dir):
-        if filename.startswith("bosc_") and (filename.endswith(".v") or filename.endswith(".sv")):
-            copy(os.path.join(blackbox_src_dir, filename), target_path)
-    with open(os.path.join(out_dir, "dfx_blackbox.f"), "w") as wrapper_f:
-        wrapper_f.write("// FIXME: include your blackbox mbist/scan controllers here\n")
-    return target_dir, [f"-F dfx_blackbox.f"]
+def export_sram_files(release_path, top_module):
+  out_dir = release_path + "/SRAM"
+  rtl_dir = release_path + "/" + top_module
+  flist_path = release_path + "/" + top_module + ".f"
+  sram_flist_path = release_path + "/cpu_srams.f"
 
+  def dedup(ilist):
+    res = []
+    for e in ilist:
+      if e not in res:
+        res.append(e)
+    return res
+  
+  def key_gen(cm_path):
+    segments = cm_path.strip(".v").split('_')
+    segments.reverse()
+    suffix = segments[0]
+    if re.match(r"\d+", suffix) == None:
+      return 0
+    else:
+      return int(suffix)
+
+  if not (os.path.isdir(out_dir)):
+    os.makedirs(out_dir)
+  sram_pattern = re.compile(r".*sram_array_.p.*v")
+  combMem_list = []
+  
+  for f in os.listdir(rtl_dir):
+    if sram_pattern.search(f) != None:
+      src_path = rtl_dir + '/' + f
+      dst_path = out_dir + '/' + f
+      move(src_path, dst_path)
+      combMem_list += get_combMem_path(dst_path, rtl_dir)
+
+  combMem_list = dedup(combMem_list)
+  combMem_list.sort(key=key_gen)
+  if(len(combMem_list)):
+    merge_combMem(combMem_list, out_dir + '/sram_cobmMem.v')
+
+  with open(sram_flist_path, "w+") as sram_flist_file:
+    if(len(combMem_list)):
+      sram_flist_file.write("SRAM/sram_cobmMem.v\n")
+    for f in os.listdir(out_dir):
+      if sram_pattern.search(f) != None:
+        sram_flist_file.write("SRAM/" + f + '\n')
+    
+  with open(flist_path,"w+") as flist_file:
+    flist_lines = []
+    for f in sorted(os.listdir(rtl_dir)):
+      flist_lines += top_module + '/' + f + '\n'
+    flist_lines.insert(0,"-f cpu_srams.f\n")
+    flist_file.writelines(flist_lines)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
@@ -688,12 +685,9 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, help='module prefix')
     parser.add_argument('--ignore', type=str, default="", help='ignore modules (and their submodules)')
     parser.add_argument('--include', type=str, help='include verilog from more directories')
-    parser.add_argument('--no-filelist', action='store_true', help='do not create filelist')
     parser.add_argument('--no-sram-conf', action='store_true', help='do not create sram configuration file')
     parser.add_argument('--no-sram-xlsx', action='store_true', help='do not create sram configuration xlsx')
-    parser.add_argument('--no-extra-files', action='store_true', help='do not copy extra files')
-    parser.add_argument('--sram-replace', action='store_true', help='replace SRAM libraries')
-    parser.add_argument('--mbist-scan-replace', action='store_true', help='replace mbist and scan controllers')
+    parser.add_argument('--no-mbist-files', action='store_true', help='do not copy mbist configuration files')
 
     args = parser.parse_args()
 
@@ -719,26 +713,16 @@ if __name__ == "__main__":
     print(f"Config:           {config}")
     print(f"Ignored modules:  {ignore_modules}")
     collection, out_dir = create_verilog(files, top_module, config, try_prefix=module_prefix, ignore_modules=ignore_modules)
+    mbist_dir = os.path.join(out_dir, "MBIST/")
     assert(collection)
+
+    export_sram_files(out_dir,top_module)
 
     rtl_dirs = [top_module]
     extra_filelist_lines = []
-    if args.mbist_scan_replace:
-        dfx_ctrl, extra_dfx_lines = replace_mbist_scan_controller(out_dir)
-        rtl_dirs = [dfx_ctrl] + rtl_dirs
-        extra_filelist_lines += extra_dfx_lines
-    if not args.no_filelist:
-        create_filelist(top_module, out_dir, rtl_dirs, extra_filelist_lines)
     if not args.no_sram_conf:
         sram_conf = generate_sram_conf(collection, module_prefix, out_dir)
         if not args.no_sram_xlsx:
             create_sram_xlsx(out_dir, collection, sram_conf, top_module, try_prefix=module_prefix)
-        if args.sram_replace:
-            sram_replace_dir, sram_extra_lines = replace_sram(out_dir, sram_conf, top_module, module_prefix)
-            # We create another filelist for foundry-provided SRAMs
-            if not args.no_filelist:
-                rtl_dirs = [sram_replace_dir] + rtl_dirs
-                extra_filelist_lines += sram_extra_lines
-                create_filelist(f"{top_module}_with_foundry_sram", out_dir, rtl_dirs, extra_filelist_lines)
-    if not args.no_extra_files:
-        create_extra_files(out_dir, build_path)
+    if not args.no_mbist_files:
+        copy_mbist_files(mbist_dir, build_path)
