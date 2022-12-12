@@ -284,6 +284,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
     loadUnits(i).io.loadFastImm := io.loadFastImm(i)
+    loadUnits(i).io.lsq.replayCarry := lsq.io.replayCarry(i)
 
     // Lsq to load unit's rs
 

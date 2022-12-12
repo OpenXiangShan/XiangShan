@@ -26,6 +26,7 @@ import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbRequestIO}
 import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache.dcache.ReplayCarry
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -61,6 +62,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
     val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
     val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
+    val replayCarry = Vec(LoadPipelineWidth, Output(new ReplayCarry))
     val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -130,6 +132,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadPaddrIn <> io.loadPaddrIn
   loadQueue.io.loadOut <> io.loadOut
+  loadQueue.io.replayCarry <> io.replayCarry
   loadQueue.io.loadVaddrIn <> io.loadVaddrIn
   loadQueue.io.replayFast <> io.replayFast
   loadQueue.io.replaySlow <> io.replaySlow

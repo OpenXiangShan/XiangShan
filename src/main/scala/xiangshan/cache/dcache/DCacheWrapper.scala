@@ -29,6 +29,7 @@ import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
 import huancun.utils.FastArbiter
 import mem.{AddPipelineReg}
+import xiangshan.cache.dcache.ReplayCarry
 
 import scala.math.max
 
@@ -278,6 +279,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
+  val replayCarry = new ReplayCarry
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -317,6 +319,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val miss   = Bool()
   // cache miss, and failed to enter the missqueue, replay from RS is needed
   val replay = Bool()
+  val replayCarry = new ReplayCarry
   // data has been corrupted
   val tag_error = Bool() // tag error
   def dump() = {

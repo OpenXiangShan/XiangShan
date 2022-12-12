@@ -27,6 +27,7 @@ import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import chisel3.ExcitingUtils
+import xiangshan.cache.dcache.ReplayCarry
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -112,6 +113,7 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
   // for load replay (recieve feedback from load pipe line)
+  val replayCarry = Vec(LoadPipelineWidth, Output(new ReplayCarry))
   val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
   val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
 
@@ -134,6 +136,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   println("LoadQueue: size:" + LoadQueueSize)
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
+  val replayCarryReg = Reg(Vec(LoadQueueSize, new ReplayCarry))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
@@ -349,6 +352,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + 1 + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
+    io.replayCarry(i) := replayCarryReg(replayIdx)
 
     when(io.loadOut(i).fire) {
       replayRemFire(i) := true.B
@@ -519,6 +523,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       tlb_hited(idx) := io.replaySlow(i).tlb_hited
       cache_no_replay(idx) := io.replaySlow(i).cache_no_replay
       forward_data_valid(idx) := io.replaySlow(i).forward_data_valid
+      replayCarryReg(idx) := io.replaySlow(i).replayCarry
 
       val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
 
@@ -1069,6 +1074,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.id   := DontCare
   io.uncache.req.bits.instrtype := DontCare
+  io.uncache.req.bits.replayCarry := DontCare
 
   io.uncache.resp.ready := true.B
 

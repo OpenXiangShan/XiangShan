@@ -24,6 +24,7 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
+import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
@@ -40,6 +41,7 @@ class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle {
   val forward_data_valid = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
   val data_invalid_sq_idx = Output(UInt(log2Ceil(StoreQueueSize).W))
+  val replayCarry = Output(new ReplayCarry)
 }
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
@@ -57,6 +59,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val trigger = Flipped(new LqTriggerIO)
 
   // for load replay
+  val replayCarry = Input(new ReplayCarry)
   val replayFast = new LoadToLsqFastIO
   val replaySlow = new LoadToLsqSlowIO
 }
@@ -89,6 +92,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val s0_kill = Input(Bool())
     // wire from lq to load pipeline
     val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
+    val replayCarry = Input(new ReplayCarry)
 
     val s0_sqIdx = Output(new SqPtr)
   })
@@ -109,6 +113,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_isFirstIssue = Wire(Bool())
   val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
   val s0_sqIdx = Wire(new SqPtr)
+  val s0_replayCarry = Wire(new ReplayCarry)
+  // default value
+  s0_replayCarry.valid := false.B
+  s0_replayCarry.real_way_en := 0.U
 
   io.s0_sqIdx := s0_sqIdx
 
@@ -137,7 +145,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.lsqOut.bits.isFirstIssue
     s0_rsIdx := io.lsqOut.bits.rsIdx
     s0_sqIdx := io.lsqOut.bits.uop.sqIdx
-
+    s0_replayCarry := io.replayCarry
   }.otherwise {
     if (EnableLoadToLoadForward) {
       tryFastpath := io.fastpath.valid
@@ -197,6 +205,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise {
     io.dcacheReq.bits.instrtype := LOAD_SOURCE.U
   }
+  io.dcacheReq.bits.replayCarry := s0_replayCarry
 
   // TODO: update cache meta
   io.dcacheReq.bits.id   := DontCare
@@ -569,6 +578,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.replaySlow.forward_data_valid := !s2_data_invalid || s2_is_prefetch
   io.replaySlow.ld_idx := io.in.bits.uop.lqIdx.value
   io.replaySlow.data_invalid_sq_idx := io.dataInvalidSqIdx
+  io.replaySlow.replayCarry := io.dcacheResp.bits.replayCarry
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   if (EnableFastForward) {
@@ -642,6 +652,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val load_s2 = Module(new LoadUnit_S2)
 
   load_s0.io.lsqOut <> io.lsqOut
+  load_s0.io.replayCarry := io.lsq.replayCarry
 
   // load s0
   load_s0.io.in <> io.ldin
