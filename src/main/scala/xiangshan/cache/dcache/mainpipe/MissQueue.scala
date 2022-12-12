@@ -106,6 +106,10 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   }
 }
 
+class MissResp(implicit p: Parameters) extends DCacheBundle {
+  val id = UInt(log2Up(cfg.nMissEntries).W)
+}
+
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
@@ -151,6 +155,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     })
+
+    val req_handled_by_this_entry = Output(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -200,6 +206,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
   // merge miss req to current miss queue entry
   val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
+
+  val req_handled_by_this_entry = primary_fire || secondary_fire
+
+  io.req_handled_by_this_entry := req_handled_by_this_entry
 
   when (release_entry && req_valid) {
     req_valid := false.B
@@ -396,13 +406,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val data = refill_and_store_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
-  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
+  // when granted data is all ready, wakeup lq's miss load
+  io.refill_to_ldq.valid := RegNext(w_grantfirst && !w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
   io.refill_to_ldq.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count))
   io.refill_to_ldq.bits.error := RegNext(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied)
   io.refill_to_ldq.bits.refill_done := RegNext(refill_done && io.mem_grant.fire())
   io.refill_to_ldq.bits.hasdata := hasData
   io.refill_to_ldq.bits.data_raw := refill_data_raw.asUInt
+  io.refill_to_ldq.bits.id := io.id
 
   io.mem_acquire.valid := !s_acquire
   val grow_param = req.req_coh.onAccess(req.cmd)._2
@@ -549,6 +561,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val req = Flipped(DecoupledIO(new MissReq))
+    val resp = Output(new MissResp)
     val refill_to_ldq = ValidIO(new Refill)
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -597,6 +610,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val reject = Cat(secondary_reject_vec).orR
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
+
+  val req_handled_vec = entries.map(_.io.req_handled_by_this_entry)
+  assert(PopCount(req_handled_vec) <= 1.U, "Only one mshr can handle a req")
+  io.resp.id := OHToUInt(req_handled_vec)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))

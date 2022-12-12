@@ -332,6 +332,7 @@ class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
 {
   val bank_data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
   val bank_oh = UInt(DCacheBanks.W)
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -365,6 +366,7 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
   }
+  val id     = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class Release(implicit p: Parameters) extends DCacheBundle
@@ -636,6 +638,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+
+  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp.id := missQueue.io.resp.id }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr

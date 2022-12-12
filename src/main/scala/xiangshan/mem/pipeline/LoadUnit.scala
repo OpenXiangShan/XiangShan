@@ -33,13 +33,16 @@ class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
 }
 
-class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle {
+class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val valid = Output(Bool())
   val tlb_hited = Output(Bool())
   val cache_no_replay = Output(Bool())
   val forward_data_valid = Output(Bool())
+  val cache_hited = Output(Bool())
+  val can_forward_full_data = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
   val data_invalid_sq_idx = Output(UInt(log2Ceil(StoreQueueSize).W))
+  val miss_mshr_id = Output(UInt(log2Up(cfg.nMissEntries).W))
 }
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
@@ -388,7 +391,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   when (s2_is_prefetch) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
-  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR && !io.in.bits.tlbMiss // ????????
+  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR && !io.in.bits.tlbMiss
 
   // writeback access fault caused by ecc error / bus error
   //
@@ -560,8 +563,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     io.replaySlow.cache_no_replay := !s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || io.dataForwarded
   }
   io.replaySlow.forward_data_valid := !s2_data_invalid || s2_is_prefetch
+  io.replaySlow.cache_hited := !io.out.bits.miss || io.out.bits.mmio
+  io.replaySlow.can_forward_full_data := io.dataForwarded
   io.replaySlow.ld_idx := io.in.bits.uop.lqIdx.value
   io.replaySlow.data_invalid_sq_idx := io.dataInvalidSqIdx
+  io.replaySlow.miss_mshr_id := io.dcacheResp.bits.mshr_id
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   if (EnableFastForward) {
@@ -591,6 +597,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_lq",  io.replaySlow.valid && (!io.replaySlow.tlb_hited || !io.replaySlow.cache_no_replay || !io.replaySlow.forward_data_valid))
   XSPerfAccumulate("replay_tlb_miss_lq", io.replaySlow.valid && !io.replaySlow.tlb_hited)
   XSPerfAccumulate("replay_cache_lq", io.replaySlow.valid && io.replaySlow.tlb_hited && !io.replaySlow.cache_no_replay)
+  XSPerfAccumulate("replay_cache_miss_lq", io.replaySlow.valid && !io.replaySlow.cache_hited)
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule
