@@ -123,6 +123,18 @@ class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
   })
 }
 
+class IPFBufferFilterRead(implicit p: Parameters) extends  IPrefetchBundle{
+  /** input */
+  val req = Flipped(new Bundle {
+    val vSetIdx = Output(UInt(log2Ceil(nSets).W))
+    val paddr = Output(UInt(PAddrBits.W))
+  })
+  /** output */
+  val resp = new Bundle {
+    val ipf_hit = Output(Bool())
+  }
+}
+
 class IPFBufferWrite(implicit p: Parameters) extends  IPrefetchBundle{
   val buffIdx = UInt(log2Ceil(nPrefetchEntries).W)
   val meta = new PIQMetaWrite

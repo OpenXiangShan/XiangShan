@@ -63,6 +63,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromIMeta       = Input(new ICacheMetaRespBundle)
   val toMissUnit      = new IPrefetchToMissUnit
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
+  val IPFBufferRead   = Flipped(new IPFBufferFilterRead)
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
@@ -75,6 +76,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 {
   val io = IO(new Bundle{
     val read  = new IPFBufferRead
+    val filter_read = new IPFBufferFilterRead
     val write = Flipped(ValidIO(new IPFBufferWrite))
     /** to ICache replacer */
     val replace = new IPFBufferMove
@@ -107,6 +109,13 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
   val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nIPFBufferSize)
   val data_buffer = InitQueue(new IPFBufferEntryData, size = nIPFBufferSize)
+
+  /** filter read logic */
+  val fr_vidx = io.filter_read.req.vSetIdx
+  val fr_ptag = get_phy_tag(io.filter_read.req.paddr)
+
+  val fr_hit = meta_buffer.map(e => e.valid && (e.tag === fr_ptag) && (e.index === fr_vidx)).reduce(_||_)
+  io.filter_read.resp.ipf_hit := fr_hit
 
   /** read logic */
   // latch read req address and response in next cycle
@@ -313,6 +322,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val (toITLB,  fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
   io.iTLBInter.req_kill := false.B
   val (toIMeta, fromIMeta) = (io.toIMeta, io.fromIMeta.metaData(0))
+  val (toIPFBuffer, fromIPFBuffer) = (io.IPFBufferRead.req, io.IPFBufferRead.resp)
   val (toPMP,  fromPMP)   = (io.pmp.req, io.pmp.resp)
   val toMissUnit = io.toMissUnit
 
@@ -377,7 +387,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p1_tag_eq_vec       =  VecInit(p1_meta_ptags.map(_  ===  p1_ptag ))
   val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_cohs(w).isValid()})
   val p1_tag_match        =  ParallelOR(p1_tag_match_vec)
-  val (p1_hit, p1_miss)   =  (p1_valid && p1_tag_match && !p1_has_except, p1_valid && !p1_tag_match && !p1_has_except)
+  toIPFBuffer.vSetIdx := get_idx(p1_vaddr)
+  toIPFBuffer.paddr := tlb_resp_paddr
+  val p1_buffer_hit = fromIPFBuffer.ipf_hit
+  val (p1_hit, p1_miss)   =  (p1_valid && (p1_tag_match || p1_buffer_hit) && !p1_has_except , p1_valid && !p1_tag_match && !p1_has_except && !p1_buffer_hit)
 
   //overriding the invalid req
   val p1_req_cancle = (p1_hit || (tlb_resp_valid && p1_exception.reduce(_ || _))) && p1_valid
