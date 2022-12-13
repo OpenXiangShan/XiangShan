@@ -281,7 +281,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
 
   // send load miss to miss queue
-  io.miss_req.valid := s2_valid && s2_can_send_miss_req
+  io.miss_req.valid := s2_valid && s2_can_send_miss_req && !s2_wpu_pred_fail
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd

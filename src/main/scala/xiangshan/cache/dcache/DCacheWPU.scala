@@ -74,18 +74,15 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
   val real_way_en = VecInit((0 until nWays).map(x =>
     io.check.bits.s1_tag_resp(x.U) === io.check.bits.s1_real_tag && io.check.bits.s1_meta_resp(x.U).coh.isValid()
   )).asUInt
-  val check_way_en = VecInit((0 until nWays).map(x =>
-    io.check.bits.s1_tag_resp(x.U) === io.check.bits.s1_real_tag
-  )).asUInt
   when(io.check.valid) {
-    when(check_way_en.orR){ // not cache miss
-      predict_regs(RegNext(idx)) := check_way_en
+    when(real_way_en.orR){ // not cache miss
+      predict_regs(RegNext(idx)) := real_way_en
     }
   }
 
   // correct in s2 (not in s1 due to meeting the timing requirements)
   // val s2_pred_hit = RegNext(s1_pred_way_en =/= real_way_en && real_way_en.orR)
-  val s2_pred_fail = RegNext(s1_pred_way_en =/= real_way_en)
+  val s2_pred_fail = RegNext(s1_pred_way_en =/= real_way_en && io.resp.valid)
   val s2_real_way_en = Reg(chiselTypeOf(real_way_en))
   s2_real_way_en := real_way_en
   
