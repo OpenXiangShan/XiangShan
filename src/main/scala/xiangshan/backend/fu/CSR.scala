@@ -65,6 +65,24 @@ class FpuCsrIO extends Bundle {
   val frm = Input(UInt(3.W))
 }
 
+class VpuCsrIO(implicit p: Parameters) extends XSBundle {
+  val vstart = Input(UInt(XLEN.W))
+  val vxsat = Input(UInt(1.W))
+  val vxrm = Input(UInt(2.W))
+  val vcsr = Output(Valid(UInt(XLEN.W)))
+  val vl = Input(UInt(XLEN.W))
+  val vtype = Output(Valid(UInt(XLEN.W)))
+  val vlenb = Input(UInt(XLEN.W))
+  val vill = Input(UInt(1.W))
+  val vma = Input(UInt(1.W))
+  val vta = Input(UInt(1.W))
+  val vsew = Input(UInt(3.W))
+  val vlmul = Input(UInt(3.W))
+  val vstart_clr = Output(Bool())
+  val vstart_inc = Output(Bool())
+  val dirty_vs = Output(Bool())
+}
+
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
@@ -108,6 +126,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
+  // to VPU
+  val vpu = Flipped(new VpuCsrIO)
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   // to ROB
@@ -624,6 +644,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Vtype, vtype),
     MaskedRegMap(Vlenb, vlenb)
   )
+
+  csrio.vpu.vstart := vstart
+  csrio.vpu.vxrm := vcsr(2,1)
+  csrio.vpu.vxsat := vcsr(0)
+  csrio.vpu.vl := vl
+  csrio.vpu.vlenb := vlenb
+  csrio.vpu.vill := vtype(XLEN-1)
+  csrio.vpu.vma := vtype(7)
+  csrio.vpu.vta := vtype(6)
+  csrio.vpu.vsew := vtype(5,3)
+  csrio.vpu.vlmul := vtype(2,0)
 
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
