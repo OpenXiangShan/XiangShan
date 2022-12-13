@@ -49,6 +49,7 @@ case class XSCoreParameters
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   HasFPU: Boolean = true,
+  HasVPU: Boolean = false,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
   AsidLength: Int = 16,
@@ -295,6 +296,7 @@ trait HasXSParameter {
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = coreParams.HasFPU
+  val HasVPU = coreParams.HasVPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
