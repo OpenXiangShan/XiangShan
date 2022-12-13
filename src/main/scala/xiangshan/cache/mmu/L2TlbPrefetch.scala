@@ -36,7 +36,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val OldRecordSize = 4
   val old_reqs = Reg(Vec(OldRecordSize, UInt(vpnLen.W)))
-  val old_v = VecInit(Seq.fill(OldRecordSize)(RegInit(false.B)))
+  val old_v = RegInit(VecInit(Seq.fill(OldRecordSize)(false.B)))
   val old_index = RegInit(0.U(log2Ceil(OldRecordSize).W))
 
   def already_have(vpn: UInt): Bool = {
