@@ -97,61 +97,64 @@ trait PMAMethod extends PMAConst {
   /**
    * from  CPU
    * BASE            TOP             Size   Description     Attribute
-   * 0x00_0000_0000	 0x00_0FFF_FFFF         Reserved
-   * 0x00_1000_0000	 0x00_1FFF_FFFF  256MB  QSPI Flash	    RX
-   * 0x00_2000_0000	 0x00_2FFF_FFFF         Reserved
-   * 0x00_3000_0000	 0x00_3000_FFFF  64KB   GPU(V550)	    RW
-   * 0x00_3001_0000	 0x00_3001_FFFF  64KB   G71	            RW
-   * 0x00_3002_0000	 0x00_3003_FFFF         Reserved
-   * 0x00_3004_0000	 0x00_3004_FFFF  64KB   DMA             RW
-   * 0x00_3005_0000	 0x00_3005_FFFF  64KB   SDMMC	        RW
-   * 0x00_3006_0000	 0x00_3015_FFFF  1MB    USB	            RW
-   * 0x00_3016_0000	 0x00_3025_FFFF  1MB    DATA_CPU_BRIDGE RW
-   * 0x00_3026_0000	 0x00_30FF_FFFF         Reserved
-   * 0x00_3100_0000	 0x00_3100_FFFF  64KB   QSPI	        RW
-   * 0x00_3101_0000	 0x00_3101_FFFF  64KB   GMAC	        RW
-   * 0x00_3102_0000	 0x00_3102_FFFF  64KB   HDMI	        RW
-   * 0x00_3103_0000	 0x00_3103_FFFF  64KB   HDMI_PHY	    RW
-   * 0x00_3104_0000	 0x00_3105_FFFF  128KB  DP	            RW
-   * 0x00_3106_0000	 0x00_3106_FFFF  64KB   DDR0	        RW
-   * 0x00_3107_0000	 0x00_3107_FFFF  64KB   DDR0_PHY	    RW
-   * 0x00_3108_0000	 0x00_3108_FFFF  64KB   DDR1	        RW
-   * 0x00_3109_0000	 0x00_3109_FFFF  64KB   DDR1_PHY	    RW
-   * 0x00_310A_0000	 0x00_310A_FFFF  64KB   IIS	            RW
-   * 0x00_310B_0000	 0x00_310B_FFFF  64KB   UART0	        RW
-   * 0x00_310C_0000	 0x00_310C_FFFF  64KB   UART1	        RW
-   * 0x00_310D_0000	 0x00_310D_FFFF  64KB   UART2	        RW
-   * 0x00_310E_0000	 0x00_310E_FFFF  64KB   IIC0	        RW
-   * 0x00_310F_0000	 0x00_310F_FFFF  64KB   IIC1	        RW
-   * 0x00_3110_0000	 0x00_3110_FFFF  64KB   IIC2	        RW
-   * 0x00_3111_0000	 0x00_3111_FFFF  64KB   GPIO	        RW
-   * 0x00_3112_0000	 0x00_3112_FFFF  64KB   CRU	            RW
-   * 0x00_3113_0000	 0x00_3113_FFFF  64KB   WDT	            RW
-   * 0x00_3114_0000	 0x00_3114_FFFF  64KB   USB2_PHY0       RW
-   * 0x00_3115_0000	 0x00_3115_FFFF  64KB   USB2_PHY1       RW
-   * 0x00_3116_0000	 0x00_3116_FFFF  64KB   USB2_PHY2       RW
-   * 0x00_3117_0000	 0x00_3117_FFFF  64KB   USB2_PHY3       RW
-   * 0x00_3118_0000	 0x00_3118_FFFF  64KB   USB3_PHY0       RW
-   * 0x00_3119_0000	 0x00_3119_FFFF  64KB   USB3_PHY1       RW
-   * 0x00_311a_0000	 0x00_311a_FFFF  64KB   USB3_PHY2       RW
-   * 0x00_311b_0000	 0x00_311b_FFFF  64KB   USB3_PHY3       RW
-   * 0x00_311c_0000	 0x00_311c_FFFF  64KB   PCIE0_CFG       RW
-   * 0x00_311d_0000	 0x00_311d_FFFF  64KB   PCIE1_CFG       RW
-   * 0x00_311e_0000	 0x00_311e_FFFF  64KB   PCIE2_CFG       RW
-   * 0x00_311f_0000	 0x00_311f_FFFF  64KB   PCIE3_CFG       RW
-   * 0x00_3120_0000	 0x00_3120_FFFF  64KB   SYSCFG          RW
-   * 0x00_3121_0000	 0x00_3130_FFFF  1MB    DATA_CPU_BRIDGE RW
-   * 0x00_3131_0000	 0x00_37FF_FFFF         Reserved
-   * 0x00_3800_0000	 0x00_3800_FFFF  64KB   CLINT (In cpu)  RW
-   * 0x00_3801_0000	 0x00_3801_FFFF         Reserved
+   * 0x00_0000_0000  0x00_0FFF_FFFF         Reserved
+   * 0x00_1000_0000  0x00_1FFF_FFFF  256MB  QSPI Flash      RX
+   * 0x00_2000_0000  0x00_2FFF_FFFF         Reserved
+   * 0x00_3000_0000  0x00_3000_FFFF  64KB   GPU(V550)       RW
+   * 0x00_3001_0000  0x00_3001_FFFF  64KB   G71             RW
+   * 0x00_3002_0000  0x00_3003_FFFF         Reserved
+   * 0x00_3004_0000  0x00_3004_FFFF  64KB   DMA             RW
+   * 0x00_3005_0000  0x00_3005_FFFF  64KB   SDMMC           RW
+   * 0x00_3006_0000  0x00_3015_FFFF  1MB    USB             RW
+   * 0x00_3016_0000  0x00_3025_FFFF  1MB    DATA_CPU_BRIDGE RW
+   * 0x00_3026_0000  0x00_30FF_FFFF         Reserved
+   * 0x00_3100_0000  0x00_3100_FFFF  64KB   QSPI            RW
+   * 0x00_3101_0000  0x00_3101_FFFF  64KB   GMAC            RW
+   * 0x00_3102_0000  0x00_3102_FFFF  64KB   HDMI            RW
+   * 0x00_3103_0000  0x00_3103_FFFF  64KB   HDMI_PHY        RW
+   * 0x00_3104_0000  0x00_3105_FFFF  128KB  DP              RW
+   * 0x00_3106_0000  0x00_3106_FFFF  64KB   DDR0            RW
+   * 0x00_3107_0000  0x00_3107_FFFF  64KB   DDR0_PHY        RW
+   * 0x00_3108_0000  0x00_3108_FFFF  64KB   DDR1            RW
+   * 0x00_3109_0000  0x00_3109_FFFF  64KB   DDR1_PHY        RW
+   * 0x00_310A_0000  0x00_310A_FFFF  64KB   IIS             RW
+   * 0x00_310B_0000  0x00_310B_FFFF  64KB   UART0           RW
+   * 0x00_310C_0000  0x00_310C_FFFF  64KB   UART1           RW
+   * 0x00_310D_0000  0x00_310D_FFFF  64KB   UART2           RW
+   * 0x00_310E_0000  0x00_310E_FFFF  64KB   IIC0            RW
+   * 0x00_310F_0000  0x00_310F_FFFF  64KB   IIC1            RW
+   * 0x00_3110_0000  0x00_3110_FFFF  64KB   IIC2            RW
+   * 0x00_3111_0000  0x00_3111_FFFF  64KB   GPIO            RW
+   * 0x00_3112_0000  0x00_3112_FFFF  64KB   CRU             RW
+   * 0x00_3113_0000  0x00_3113_FFFF  64KB   WDT             RW
+   * 0x00_3114_0000  0x00_3114_FFFF  64KB   USB2_PHY0       RW
+   * 0x00_3115_0000  0x00_3115_FFFF  64KB   USB2_PHY1       RW
+   * 0x00_3116_0000  0x00_3116_FFFF  64KB   USB2_PHY2       RW
+   * 0x00_3117_0000  0x00_3117_FFFF  64KB   USB2_PHY3       RW
+   * 0x00_3118_0000  0x00_3118_FFFF  64KB   USB3_PHY0       RW
+   * 0x00_3119_0000  0x00_3119_FFFF  64KB   USB3_PHY1       RW
+   * 0x00_311a_0000  0x00_311a_FFFF  64KB   USB3_PHY2       RW
+   * 0x00_311b_0000  0x00_311b_FFFF  64KB   USB3_PHY3       RW
+   * 0x00_311c_0000  0x00_311c_FFFF  64KB   PCIE0_CFG       RW
+   * 0x00_311d_0000  0x00_311d_FFFF  64KB   PCIE1_CFG       RW
+   * 0x00_311e_0000  0x00_311e_FFFF  64KB   PCIE2_CFG       RW
+   * 0x00_311f_0000  0x00_311f_FFFF  64KB   PCIE3_CFG       RW
+   * 0x00_3120_0000  0x00_3120_FFFF  64KB   SYSCFG          RW
+   * 0x00_3121_0000  0x00_3130_FFFF  1MB    DATA_CPU_BRIDGE RW
+   * 0x00_3131_0000  0x00_37FF_FFFF         Reserved
+   * 0x00_3800_0000  0x00_3800_FFFF  64KB   CLINT (In cpu)  RW
+   * 0x00_3801_0000  0x00_3801_FFFF         Reserved
    * 0x00_3802_0000  0x00_3802_0FFF  4KB    Debug (In cpu)  RW
-   * 0x00_3802_1000  0x00_3BFF_FFFF         Reserved
-   * 0x00_3C00_0000	 0x00_3FFF_FFFF         PLIC (In cpu)   RW
-   * 0x00_4000_0000	 0x00_4FFF_FFFF  256MB  PCIe0	        RW
-   * 0x00_5000_0000	 0x00_5FFF_FFFF  256MB  PCIe1	        RW
-   * 0x00_6000_0000	 0x00_6FFF_FFFF  256MB  PCIe2	        RW
-   * 0x00_7000_0000	 0x00_7FFF_FFFF  256MB  PCIe3	        RW
-   * 0x00_8000_0000	 0x1F_FFFF_FFFF  126GB  DDR	            RWXIDSA
+   * 0x00_3802_1000  0x00_38FF_FFFF         Reserved
+   * 0x00_3900_0000  0x00_3900_0FFF  4KB    CacheCtrl       RW
+   * 0x00_3900_1000  0x00_3900_1FFF  4KB    Core Reset      RW
+   * 0x00_3900_2000  0x00_3BFF_FFFF         Reserved
+   * 0x00_3C00_0000  0x00_3FFF_FFFF         PLIC (In cpu)   RW
+   * 0x00_4000_0000  0x00_4FFF_FFFF  256MB  PCIe0           RW
+   * 0x00_5000_0000  0x00_5FFF_FFFF  256MB  PCIe1           RW
+   * 0x00_6000_0000  0x00_6FFF_FFFF  256MB  PCIe2           RW
+   * 0x00_7000_0000  0x00_7FFF_FFFF  256MB  PCIe3           RW
+   * 0x00_8000_0000  0x1F_FFFF_FFFF  126GB  DDR             RWXIDSA
    */
 
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
@@ -189,9 +192,9 @@ trait PMAMethod extends PMAConst {
     addPMA(0x480000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)
     addPMA(0x80000000L, a = 1, w = true, r = true)
     addPMA(0x3c000000L, a = 1)
+    addPMA(0x39002000L, a = 1, w = true, r = true)
+    addPMA(0x39000000L, a = 1)
     addPMA(0x38021000L, a = 1, w = true, r = true)
-    addPMA(0x38020000L, a = 1)
-    addPMA(0x38010000L, a = 1, w = true, r = true)
     addPMA(0x38000000L, a = 1)
     addPMA(0x31310000L, a = 1, w = true, r = true)
     addPMA(0x31000000L, a = 1)
