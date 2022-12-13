@@ -28,6 +28,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
+import huancun.utils.ChiselDB
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -131,6 +132,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     prefetch.io.sfence := sfence_dup(0)
     prefetch.io.csr := csr_dup(0)
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
+
+    val L2TlbPrefetchTable = ChiselDB.createTable("L2TlbPrefetch", new L2TlbPrefetchDB)
+    val L2TlbPrefetchDB = Wire(new L2TlbPrefetchDB)
+    L2TlbPrefetchDB.vpn := prefetch.io.out.bits.vpn
+    L2TlbPrefetchTable.log(L2TlbPrefetchDB, prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
   }
   arb2.io.out.ready := cache.io.req.ready
 
@@ -383,6 +389,52 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
   generatePerfEvent()
+
+  val L1TlbTable = ChiselDB.createTable("L1Tlb", new L1TlbDB)
+  val ITlbReqDB, DTlbReqDB, ITlbRespDB, DTlbRespDB = Wire(new L1TlbDB)
+  ITlbReqDB.vpn := io.tlb(0).req(0).bits.vpn
+  DTlbReqDB.vpn := io.tlb(1).req(0).bits.vpn
+  ITlbRespDB.vpn := io.tlb(0).resp.bits.entry.tag
+  DTlbRespDB.vpn := io.tlb(1).resp.bits.entry.tag
+  L1TlbTable.log(ITlbReqDB, io.tlb(0).req(0).fire, "ITlbReq", clock, reset)
+  L1TlbTable.log(DTlbReqDB, io.tlb(1).req(0).fire, "DTlbReq", clock, reset)
+  L1TlbTable.log(ITlbRespDB, io.tlb(0).resp.fire, "ITlbResp", clock, reset)
+  L1TlbTable.log(DTlbRespDB, io.tlb(1).resp.fire, "DTlbResp", clock, reset)
+
+  val PageCacheTable = ChiselDB.createTable("PageCache", new PageCacheDB)
+  val PageCacheDB = Wire(new PageCacheDB)
+  PageCacheDB.vpn := cache.io.resp.bits.toTlb.tag
+  PageCacheDB.source := cache.io.resp.bits.req_info.source
+  PageCacheDB.bypassed := cache.io.resp.bits.bypassed
+  PageCacheDB.is_first := cache.io.resp.bits.isFirst
+  PageCacheDB.prefetched := cache.io.resp.bits.toTlb.prefetch
+  PageCacheDB.prefetch := cache.io.resp.bits.prefetch
+  PageCacheDB.l2Hit := cache.io.resp.bits.toFsm.l2Hit
+  PageCacheDB.l1Hit := cache.io.resp.bits.toFsm.l1Hit
+  PageCacheDB.hit := cache.io.resp.bits.hit
+  PageCacheTable.log(PageCacheDB, cache.io.resp.fire, "PageCache", clock, reset)
+
+  val PTWTable = ChiselDB.createTable("PTW", new PTWDB)
+  val PTWReqDB, PTWRespDB, LLPTWReqDB, LLPTWRespDB = Wire(new PTWDB)
+  PTWReqDB.vpn := ptw.io.req.bits.req_info.vpn
+  PTWReqDB.source := ptw.io.req.bits.req_info.source
+  PTWRespDB.vpn := ptw.io.refill.req_info.vpn
+  PTWRespDB.source := ptw.io.refill.req_info.source
+  LLPTWReqDB.vpn := llptw.io.in.bits.req_info.vpn
+  LLPTWReqDB.source := llptw.io.in.bits.req_info.source
+  LLPTWRespDB.vpn := llptw.io.mem.refill.vpn
+  LLPTWRespDB.source := llptw.io.mem.refill.source
+  PTWTable.log(PTWReqDB, ptw.io.req.fire, "PTWReq", clock, reset)
+  PTWTable.log(PTWRespDB, ptw.io.mem.resp.fire, "PTWResp", clock, reset)
+  PTWTable.log(LLPTWReqDB, llptw.io.in.fire, "LLPTWReq", clock, reset)
+  PTWTable.log(LLPTWRespDB, llptw.io.mem.resp.fire, "LLPTWResp", clock, reset)
+
+  val L2TlbMissQueueTable = ChiselDB.createTable("L2TlbMissQueue", new L2TlbMissQueueDB)
+  val L2TlbMissQueueInDB, L2TlbMissQueueOutDB = Wire(new L2TlbMissQueueDB)
+  L2TlbMissQueueInDB.vpn := missQueue.io.in.bits.vpn
+  L2TlbMissQueueOutDB.vpn := missQueue.io.out.bits.vpn
+  L2TlbMissQueueTable.log(L2TlbMissQueueInDB, missQueue.io.in.fire, "L2TlbMissQueueIn", clock, reset)
+  L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, missQueue.io.out.fire, "L2TlbMissQueueOut", clock, reset)
 }
 
 /** BlockHelper, block missqueue, not to send too many req to cache
