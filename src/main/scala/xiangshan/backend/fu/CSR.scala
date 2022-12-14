@@ -73,11 +73,15 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vl = Input(UInt(XLEN.W))
   val vtype = Output(Valid(UInt(XLEN.W)))
   val vlenb = Input(UInt(XLEN.W))
+  
   val vill = Input(UInt(1.W))
   val vma = Input(UInt(1.W))
   val vta = Input(UInt(1.W))
   val vsew = Input(UInt(3.W))
   val vlmul = Input(UInt(3.W))
+
+  val set_vl = Output(Valid(UInt(XLEN.W)))
+
   val vstart_clr = Output(Bool())
   val vstart_inc = Output(Bool())
   val dirty_vs = Output(Bool())
@@ -217,7 +221,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val xs = Output(UInt(2.W))
     val fs = Output(UInt(2.W))
     val mpp = Output(UInt(2.W))
-    val hpp = Output(UInt(2.W))
+    val vs = Output(UInt(2.W))
     val spp = Output(UInt(1.W))
     val pie = new Priv
     val ie = new Priv
@@ -415,7 +419,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // | xs   | 00 |
   // | fs   | 01 |
   // | mpp  | 00 |
-  // | hpp  | 00 |
+  // | vs  | 00 |
   // | spp  | 0 |
   // | pie  | 0000 | pie.h is used as UBE
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
@@ -604,7 +608,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
-  val vlenb = Reg(UInt(XLEN.W))
+  val vlenb = RegInit(32.U(XLEN.W))
+
+  // set mstatus->sd and mstatus->vs when true
+  val csrw_dirty_vs_state = WireInit(false.B)
 
   // vcsr is mapped to vxrm and vxsat
   class VcsrStruct extends Bundle {
@@ -614,8 +621,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     assert(this.getWidth == XLEN)
   }
 
+  class VtypeStruct extends Bundle {
+    val vill = UInt(1.W)
+    val reserved = UInt((XLEN-9).W)
+    val vma = UInt(1.W)
+    val vta = UInt(1.W)
+    val vsew = UInt(3.W)
+    val vlmul = UInt(3.W)
+  }
+
   def vxrm_wfn(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    csrw_dirty_vs_state := true.B
     vcsrOld.vxrm := wdata(1,0)
     vcsrOld.asUInt
   }
@@ -623,6 +640,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   def vxsat_wfn(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    csrw_dirty_vs_state := true.B
     vcsrOld.vxsat := wdata(0)
     vcsrOld.asUInt
   }
@@ -630,9 +648,21 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   def vcsr_wfn(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    csrw_dirty_vs_state := true.B
     vcsrOld.vxrm := wdata.asTypeOf(vcsrOld).vxrm
     vcsrOld.vxsat := wdata.asTypeOf(vcsrOld).vxsat
     vcsrOld.asUInt
+  }
+
+  def vtype_wfn(wdata: UInt): UInt = {
+    val vtypeOld = WireInit(vtype.asTypeOf(new VtypeStruct))
+    csrw_dirty_vs_state := true.B
+    vtypeOld.vill := wdata.asTypeOf(vtypeOld).vill
+    vtypeOld.vma := wdata.asTypeOf(vtypeOld).vma
+    vtypeOld.vta := wdata.asTypeOf(vtypeOld).vta
+    vtypeOld.vsew := wdata.asTypeOf(vtypeOld).vsew
+    vtypeOld.vlmul := wdata.asTypeOf(vtypeOld).vlmul
+    vtypeOld.asUInt
   }
 
   val vcsrMapping = Map(
@@ -641,20 +671,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
     MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
     MaskedRegMap(Vl, vl),
-    MaskedRegMap(Vtype, vtype),
+    MaskedRegMap(Vtype, vtype, wfn = vtype_wfn),
     MaskedRegMap(Vlenb, vlenb)
   )
-
-  csrio.vpu.vstart := vstart
-  csrio.vpu.vxrm := vcsr(2,1)
-  csrio.vpu.vxsat := vcsr(0)
-  csrio.vpu.vl := vl
-  csrio.vpu.vlenb := vlenb
-  csrio.vpu.vill := vtype(XLEN-1)
-  csrio.vpu.vma := vtype(7)
-  csrio.vpu.vta := vtype(6)
-  csrio.vpu.vsew := vtype(5,3)
-  csrio.vpu.vlmul := vtype(2,0)
 
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
@@ -885,6 +904,40 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
+  when (RegNext(csrio.vpu.vcsr.valid)) {
+    vcsr := vcsr_wfn(RegNext(csrio.vpu.vcsr.bits))
+  }
+  when (RegNext(csrio.vpu.vtype.valid)) {
+    vtype := vtype_wfn(RegNext(csrio.vpu.vtype.bits))
+  }
+  when (RegNext(csrio.vpu.set_vl.valid)) {
+    vl := RegNext(csrio.vpu.vl)
+  }
+  // set vs and sd in mstatus
+  when (csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.vs := "b11".U
+    mstatusNew.sd := true.B
+    mstatus := mstatusNew.asUInt
+  }
+
+  when (RegNext(csrio.vpu.vstart_clr)) {
+    vstart := 0.U
+  }
+  .elsewhen (RegNext(csrio.vpu.vstart_inc)) {
+    vstart := vstart + 1.U
+  }
+  
+  csrio.vpu.vstart := vstart
+  csrio.vpu.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
+  csrio.vpu.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
+  csrio.vpu.vl := vl
+  csrio.vpu.vlenb := vlenb
+  csrio.vpu.vill := vtype.asTypeOf(new VtypeStruct).vill
+  csrio.vpu.vma := vtype.asTypeOf(new VtypeStruct).vma
+  csrio.vpu.vta := vtype.asTypeOf(new VtypeStruct).vta
+  csrio.vpu.vsew := vtype.asTypeOf(new VtypeStruct).vsew
+  csrio.vpu.vlmul := vtype.asTypeOf(new VtypeStruct).vlmul
 
   // Trigger Ctrl
   csrio.customCtrl.trigger_enable := tdata1Phy.map{t =>
