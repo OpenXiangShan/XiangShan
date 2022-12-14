@@ -846,6 +846,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.ldest := req.ctrl.ldest
     wdata.rfWen := req.ctrl.rfWen
     wdata.fpWen := req.ctrl.fpWen
+    wdata.vecWen := req.ctrl.vecWen
     wdata.wflags := req.ctrl.fpu.wflags
     wdata.commitType := req.ctrl.commitType
     wdata.pdest := req.pdest

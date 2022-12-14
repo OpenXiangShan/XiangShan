@@ -240,6 +240,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val redirect = ValidIO(new Redirect)
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W))) // TODO: use me
   })
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
@@ -390,6 +391,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
+  rat.io.vecReadPorts <> DontCare // TODO: connect me
 
   // memory dependency predict
   // when decode, send fold pc to mdp
@@ -419,8 +421,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rat.io.robCommits := rob.io.commits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
+  rat.io.vecRenamePorts := rename.io.vecRenamePorts
   rat.io.debug_int_rat <> io.debug_int_rat
   rat.io.debug_fp_rat <> io.debug_fp_rat
+  rat.io.debug_vec_rat <> io.debug_vec_rat
 
   // pipeline between decode and rename
   for (i <- 0 until RenameWidth) {
@@ -441,6 +445,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     rename.io.in(i).bits := renamePipe.bits
     rename.io.intReadPorts(i) := rat.io.intReadPorts(i).map(_.data)
     rename.io.fpReadPorts(i) := rat.io.fpReadPorts(i).map(_.data)
+    rename.io.vecReadPorts(i) := rat.io.vecReadPorts(i).map(_.data)
     rename.io.waittable(i) := RegEnable(waittable.io.rdata(i), decode.io.out(i).fire)
 
     if (i < RenameWidth - 1) {

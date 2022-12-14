@@ -158,6 +158,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fuOpType = FuOpType()
   val rfWen = Bool()
   val fpWen = Bool()
+  val vecWen = Bool()
   val isXSTrap = Bool()
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
@@ -358,6 +359,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
   val fpWen = Bool()
+  val vecWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
