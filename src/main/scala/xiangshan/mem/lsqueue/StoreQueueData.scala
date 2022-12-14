@@ -89,7 +89,10 @@ class SQData8Entry(implicit p: Parameters) extends XSBundle {
   val data = UInt((XLEN/8).W)
 }
 
-class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule 
+  with HasDCacheParameters 
+  with HasCircularQueuePtrHelper 
+{
   val io = IO(new Bundle() {
     // sync read port
     val raddr = Vec(numRead, Input(UInt(log2Up(numEntries).W)))
@@ -120,16 +123,62 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 
   val data = Reg(Vec(numEntries, new SQData8Entry))
 
+  require(isPow2(StoreQueueNWriteBanks))
+  require(StoreQueueNWriteBanks > 1)
+  def get_bank(in: UInt): UInt = in(log2Up(StoreQueueNWriteBanks) -1, 0)
+  def get_bank_index(in: UInt): UInt = in >> log2Up(StoreQueueNWriteBanks)
+  def get_vec_index(index: Int, bank: Int): Int = {
+    (index << log2Up(StoreQueueNWriteBanks)) + bank
+  }
+
   // writeback to sq
+  // store queue data write takes 2 cycles
+  // (0 until numWrite).map(i => {
+  //   when(RegNext(io.data.wen(i))){
+  //     data(RegNext(io.data.waddr(i))).data := RegNext(io.data.wdata(i))
+  //   }
+  // })
   (0 until numWrite).map(i => {
-    when(io.data.wen(i)){
-      data(io.data.waddr(i)).data := io.data.wdata(i)
-    }
+    (0 until StoreQueueNWriteBanks).map(bank => {
+      val s0_wen = io.data.wen(i) && get_bank(io.data.waddr(i)) === bank.U
+      val s1_wen = RegNext(s0_wen)
+      val s1_wdata = RegEnable(io.data.wdata(i), s0_wen)
+      val s1_waddr = RegEnable(get_bank_index(io.data.waddr(i)), s0_wen)
+      val numRegsPerBank = StoreQueueSize / StoreQueueNWriteBanks
+      (0 until numRegsPerBank).map(index => {
+        when(s1_wen && s1_waddr === index.U){
+          data(get_vec_index(index, bank)).data := s1_wdata
+        }
+      })
+      s0_wen.suggestName("data_s0_wen_" + i +"_bank_" + bank)
+      s1_wen.suggestName("data_s1_wen_" + i +"_bank_" + bank)
+      s1_wdata.suggestName("data_s1_wdata_" + i +"_bank_" + bank)
+      s1_waddr.suggestName("data_s1_waddr_" + i +"_bank_" + bank)
+    })
   })
+
+  // (0 until numWrite).map(i => {
+  //   when(RegNext(io.mask.wen(i))){
+  //     data(RegNext(io.mask.waddr(i))).valid := RegNext(io.mask.wdata(i))
+  //   }
+  // })
   (0 until numWrite).map(i => {
-    when(io.mask.wen(i)){
-      data(io.mask.waddr(i)).valid := io.mask.wdata(i)
-    }
+    (0 until StoreQueueNWriteBanks).map(bank => {
+      val s0_wen = io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+      val s1_wen = RegNext(s0_wen)
+      val s1_wdata = RegEnable(io.mask.wdata(i), s0_wen)
+      val s1_waddr = RegEnable(get_bank_index(io.mask.waddr(i)), s0_wen)
+      val numRegsPerBank = StoreQueueSize / StoreQueueNWriteBanks
+      (0 until numRegsPerBank).map(index => {
+        when(s1_wen && s1_waddr === index.U){
+          data(get_vec_index(index, bank)).valid := s1_wdata
+        }
+      })
+      s0_wen.suggestName("mask_s0_wen_" + i +"_bank_" + bank)
+      s1_wen.suggestName("mask_s1_wen_" + i +"_bank_" + bank)
+      s1_wdata.suggestName("mask_s1_wdata_" + i +"_bank_" + bank)
+      s1_waddr.suggestName("mask_s1_waddr_" + i +"_bank_" + bank)
+    })
   })
 
   // destorequeue read data

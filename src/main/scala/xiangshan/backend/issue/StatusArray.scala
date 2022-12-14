@@ -93,14 +93,24 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     })))
     val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
     val memWaitUpdateReq = if (params.checkWaitBit) Flipped(new MemWaitUpdateReq) else null
+
+    val rsFeedback = Output(Vec(5, Bool()))
   })
 
   val statusArray = Reg(Vec(params.numEntries, new StatusEntry(params)))
+  val replayArray = Reg(Vec(params.numEntries, UInt(3.W))) // for perf-eval only
   val statusArrayNext = WireInit(statusArray)
+  val replayArrayNext = WireInit(replayArray)
   statusArray := statusArrayNext
+  replayArray := replayArrayNext
   when (reset.asBool) {
     statusArray.map(_.valid := false.B)
+    replayArray.foreach(_ := RSFeedbackType.feedbackInvalid)
   }
+  (statusArrayNext zip replayArrayNext).foreach { case (status, replay) => when(status.valid === 0.B) { replay := RSFeedbackType.feedbackInvalid } }
+  io.rsFeedback := VecInit((0 until 5).map(index => statusArray.zip(replayArray).map {
+    case (status, replay) => status.valid && replay === index.U
+  }.reduce(_ || _)))
 
   // instruction is ready for issue
   val readyVec = VecInit(statusArray.map(_.canIssue))
@@ -143,13 +153,14 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   val deqResp = statusArray.indices.map(deqRespSel)
 
   val is_issued = Wire(Vec(params.numEntries, Bool()))
-  for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
+  for ((((status, statusNext), replayNext), i) <- statusArray.zip(statusArrayNext).zip(replayArrayNext).zipWithIndex) {
     // valid: when the entry holds a valid instruction, mark it true.
     // Set when (1) not (flushed or deq); AND (2) update.
     val realValid = updateValid(i) || status.valid
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
     flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
+    when(updateValid(i)) { replayNext := RSFeedbackType.feedbackInvalid }
     statusNext.valid := realValid && !(isFlushed || deqRespSucc)
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
     XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
@@ -162,6 +173,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // Reset when (1) deq is not granted (it needs to be scheduled again); (2) only one credit left.
     val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
     val deqNotGranted = deqRespValid && !deqRespSucc
+    when(deqNotGranted && statusNext.valid) { replayNext := deqRespType }
     statusNext.scheduled := false.B
     if (params.needScheduledBit) {
       // An entry keeps in the scheduled state until its credit comes to zero or deqFailed.

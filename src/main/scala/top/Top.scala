@@ -68,7 +68,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param
+      case HCCacheParamsKey => l3param.copy(enableTopDown = debugOpts.EnableTopDown)
     })))
   )
 
@@ -89,7 +89,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
   } else {
-    core_with_l2.map(_ => BundleBridgeSource(() => Bool()))
+    core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
   }
 
   core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({

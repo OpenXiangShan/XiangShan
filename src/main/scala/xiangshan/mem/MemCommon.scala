@@ -60,6 +60,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
   val tlbMiss = Bool()
   val ptwBack = Bool()
   val mmio = Bool()
+  val atomic = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 
   val forwardMask = Vec(8, Bool())
@@ -70,12 +71,15 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
 
   // For debug usage
   val isFirstIssue = Bool()
+
+  // For load replay
+  val isLoadReplay = Bool()
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // queue entry data, except flag bits, will be updated if writeQueue is true,
   // valid bit in LqWriteBundle will be ignored
-  val writeQueueData = Bool()
+  val lq_data_wen_dup = Vec(6, Bool()) // dirty reg dup
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
@@ -88,13 +92,15 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     tlbMiss := input.tlbMiss
     ptwBack := input.ptwBack
     mmio := input.mmio
+    atomic := input.atomic
     rsIdx := input.rsIdx
     forwardMask := input.forwardMask
     forwardData := input.forwardData
     isSoftPrefetch := input.isSoftPrefetch
     isFirstIssue := input.isFirstIssue
+    isLoadReplay := input.isLoadReplay
 
-    writeQueueData := false.B
+    lq_data_wen_dup := DontCare
   }
 }
 
@@ -158,6 +164,57 @@ class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
 class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new LoadViolationQueryReq)
   val resp = Flipped(Valid(new LoadViolationQueryResp))
+}
+
+class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
+  //  robIdx: Requestor's (a store instruction) rob index for match logic. 
+  val robIdx = new RobPtr
+
+  //  paddr: requestor's (a store instruction) physical address for match logic. 
+  val paddr = UInt(PAddrBits.W)
+
+  //  mask: requestor's (a store instruction) data width mask for match logic.
+  val mask = UInt(8.W)  
+}
+
+// Store byte valid mask write bundle
+//
+// Store byte valid mask write to SQ takes 2 cycles
+class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
+  val sqIdx = new SqPtr
+  val mask = UInt(8.W)
+}
+
+class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
+  val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
+  val bank_oh = UInt(DCacheBanks.W)
+  val forwardMask = Vec(8, Bool())
+  val forwardData = Vec(8, UInt(8.W))
+  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val addrOffset = UInt(3.W) // for data selection
+
+  // val dcacheData = UInt(64.W)
+  def dcacheData(): UInt = {
+    Mux1H(bank_oh, bankedDcacheData)
+  }
+
+  def mergedData(): UInt = {
+    val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+      Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
+    ))
+    rdataVec.asUInt
+  }
+}
+
+// Load writeback data from load queue (refill)
+class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
+  val lqData = UInt(64.W) // load queue has merged data
+  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val addrOffset = UInt(3.W) // for data selection
+
+  def mergedData(): UInt = {
+    lqData
+  }
 }
 
 // Bundle for load / store wait waking up

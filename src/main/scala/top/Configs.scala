@@ -57,11 +57,14 @@ class MinimalConfig(n: Int = 1) extends Config(
       _.copy(
         DecodeWidth = 2,
         RenameWidth = 2,
+        CommitWidth = 2,
         FetchWidth = 4,
         IssQueSize = 8,
         NRPhyRegs = 64,
         LoadQueueSize = 16,
+        LoadQueueNWriteBanks = 4,
         StoreQueueSize = 12,
+        StoreQueueNWriteBanks = 4,
         RobSize = 32,
         FtqSize = 8,
         IBufSize = 16,
@@ -160,13 +163,25 @@ class MinimalConfig(n: Int = 1) extends Config(
         L2CacheParamsOpt = None // remove L2 Cache
       )
     )
-    case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024,
-        simulation = true
-      )),
-      L3NBanks = 1
-    )
+    case SoCParamsKey =>
+      val tiles = site(XSTileKey)
+      up(SoCParamsKey).copy(
+        L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+          sets = 1024,
+          inclusive = false,
+          clientCaches = tiles.map{ p =>
+            CacheParameters(
+              "dcache",
+              sets = 2 * p.dcacheParametersOpt.get.nSets,
+              ways = p.dcacheParametersOpt.get.nWays + 2,
+              blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets),
+              aliasBitsOpt = None
+            )
+          },
+          simulation = !site(DebugOptionsKey).FPGAPlatform
+        )),
+        L3NBanks = 1
+      )
   })
 )
 
@@ -223,6 +238,7 @@ class WithNKBL2
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
+          blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
         reqField = Seq(PreferCacheField()),

@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
+import chisel3.ExcitingUtils
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -69,9 +70,54 @@ class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
 }
 
+class LqPaddrWriteBundle(implicit p: Parameters) extends XSBundle {
+  val paddr = Output(UInt(PAddrBits.W))
+  val lqIdx = Output(new LqPtr)
+}
+
+class LqVaddrWriteBundle(implicit p: Parameters) extends XSBundle {
+  val vaddr = Output(UInt(VAddrBits.W))
+  val lqIdx = Output(new LqPtr)
+}
+
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {
   val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
   val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
+}
+
+class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
+  val enq = new LqEnqIO
+  val brqRedirect = Flipped(ValidIO(new Redirect))
+  val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) // select load from lq to load pipeline 
+  val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
+  val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
+  val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
+  val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+  val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
+  val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
+  val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
+  val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
+  val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+  val ldRawDataOut = Vec(2, Output(new LoadDataFromLQBundle))
+  val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
+  val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
+  val rob = Flipped(new RobLsqIO)
+  val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
+  val refill = Flipped(ValidIO(new Refill)) // TODO: to be renamed
+  val release = Flipped(ValidIO(new Release))
+  val uncache = new UncacheWordIO
+  val exceptionAddr = new ExceptionAddrIO
+  val lqFull = Output(Bool())
+  val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
+  val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+
+  // for load replay (recieve feedback from load pipe line)
+  val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
+  val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
+
+  val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
+
+  val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 }
 
 // Load Queue
@@ -81,27 +127,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
 {
-  val io = IO(new Bundle() {
-    val enq = new LqEnqIO
-    val brqRedirect = Flipped(ValidIO(new Redirect))
-    val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
-    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
-    val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
-    val s3_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
-    val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
-    val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
-    val rob = Flipped(new RobLsqIO)
-    val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-    val refill = Flipped(ValidIO(new Refill))
-    val release = Flipped(ValidIO(new Release))
-    val uncache = new UncacheWordIO
-    val exceptionAddr = new ExceptionAddrIO
-    val lqFull = Output(Bool())
-    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
-  })
+  val io = IO(new LoadQueueIOBundle())
+
+  // dontTouch(io)
 
   println("LoadQueue: size:" + LoadQueueSize)
 
@@ -109,7 +137,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = LoadPipelineWidth + 1, numWrite = LoadPipelineWidth))
+  // vaddrModule's read port 0 for exception addr, port {1, 2} for debug module, port {3, 4} for load replay
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = LoadPipelineWidth + 1 + 2, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
   val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
   vaddrTriggerResultModule.io := DontCare
@@ -122,6 +151,52 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val refilling = WireInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
+
+  /**
+    * used for load replay control
+    */
+
+  val tlb_hited = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+  val ld_ld_check_ok = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+  val st_ld_check_ok = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+  val cache_bank_no_conflict = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+  val cache_no_replay = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+  val forward_data_valid = RegInit(VecInit(List.fill(LoadQueueSize)(true.B)))
+
+
+  /**
+    * used for re-select control
+    */
+
+  val credit = RegInit(VecInit(List.fill(LoadQueueSize)(0.U(ReSelectLen.W))))
+  
+  // ptrs to control which cycle to choose
+  val block_ptr_tlb = RegInit(VecInit(List.fill(LoadQueueSize)(0.U(2.W))))
+  val block_ptr_others = RegInit(VecInit(List.fill(LoadQueueSize)(0.U(2.W))))
+
+  // specific cycles to block
+  val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
+  block_cycles_tlb := io.tlbReplayDelayCycleCtrl
+  val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+
+  val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
+
+  // data forward block
+  val block_sq_idx = RegInit(VecInit(List.fill(LoadQueueSize)(0.U((log2Ceil(StoreQueueSize).W)))))
+  val block_by_data_forward_fail = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
+
+  val creditUpdate = WireInit(VecInit(List.fill(LoadQueueSize)(0.U(ReSelectLen.W))))
+
+  credit := creditUpdate
+
+  (0 until LoadQueueSize).map(i => {
+    creditUpdate(i) := Mux(credit(i) > 0.U(ReSelectLen.W), credit(i) - 1.U(ReSelectLen.W), credit(i))
+    sel_blocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
+  })
+
+  (0 until LoadQueueSize).map(i => {
+    block_by_data_forward_fail(i) := Mux(block_by_data_forward_fail(i) === true.B && io.storeDataValidVec(block_sq_idx(i)) === true.B , false.B, block_by_data_forward_fail(i))
+  })
 
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
@@ -159,7 +234,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqIdx = enqPtrExt(offset)
     val index = io.enq.req(i).bits.lqIdx.value
     when (canEnqueue(i) && !enqCancel(i)) {
-      uop(index).robIdx := io.enq.req(i).bits.robIdx
+      uop(index) := io.enq.req(i).bits
+      // NOTE: the index will be used when replay
+      uop(index).lqIdx := lqIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
@@ -167,6 +244,26 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       miss(index) := false.B
       pending(index) := false.B
       error(index) := false.B
+
+      /**
+        * used for load replay control
+        */
+      tlb_hited(index) := true.B
+      ld_ld_check_ok(index) := true.B
+      st_ld_check_ok(index) := true.B
+      cache_bank_no_conflict(index) := true.B
+      cache_no_replay(index) := true.B
+      forward_data_valid(index) := true.B
+
+      /**
+        * used for delaying load(block-ptr to control how many cycles to block)
+        */
+      credit(index) := 0.U(ReSelectLen.W)
+      block_ptr_tlb(index) := 0.U(2.W)
+      block_ptr_others(index) := 0.U(2.W)
+
+      block_by_data_forward_fail(index) := false.B
+
       XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
       XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
     }
@@ -174,6 +271,91 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
 
+  val lastCycleRedirect = RegNext(io.brqRedirect)
+  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
+
+  // replay logic
+  // replay is splited into 2 stages
+
+  // stage1: select 2 entries and read their vaddr
+  val s0_block_load_mask = WireInit(VecInit((0 until LoadQueueSize).map(x=>false.B)))
+  val s1_block_load_mask = RegNext(s0_block_load_mask)
+  val s2_block_load_mask = RegNext(s1_block_load_mask)
+
+  val loadReplaySel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W))) // index selected last cycle
+  val loadReplaySelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
+
+  val loadReplaySelVec = VecInit((0 until LoadQueueSize).map(i => {
+    val blocked = s1_block_load_mask(i) || s2_block_load_mask(i) || sel_blocked(i) || block_by_data_forward_fail(i)
+    allocated(i) && (!tlb_hited(i) || !ld_ld_check_ok(i) || !st_ld_check_ok(i) || !cache_bank_no_conflict(i) || !cache_no_replay(i) || !forward_data_valid(i)) && !blocked
+  })).asUInt() // use uint instead vec to reduce verilog lines
+
+  val remReplayDeqMask = Seq.tabulate(LoadPipelineWidth)(getRemBits(deqMask)(_))
+
+  // generate lastCycleSelect mask
+  val remReplayFireMask = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(UIntToOH(loadReplaySel(rem)))(rem))
+
+  val loadReplayRemSelVecFire = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadReplaySelVec)(rem) & ~remReplayFireMask(rem))
+  val loadReplayRemSelVecNotFire = Seq.tabulate(LoadPipelineWidth)(getRemBits(loadReplaySelVec)(_))
+
+  val replayRemFire = Seq.tabulate(LoadPipelineWidth)(rem => WireInit(false.B))
+
+  val loadReplayRemSel = Seq.tabulate(LoadPipelineWidth)(rem => Mux(
+    replayRemFire(rem),
+    getFirstOne(toVec(loadReplayRemSelVecFire(rem)), remReplayDeqMask(rem)),
+    getFirstOne(toVec(loadReplayRemSelVecNotFire(rem)), remReplayDeqMask(rem))
+  ))
+
+  val loadReplaySelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
+  val loadReplaySelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
+
+  (0 until LoadPipelineWidth).foreach(index => {
+    loadReplaySelGen(index) := (
+      if (LoadPipelineWidth > 1) Cat(loadReplayRemSel(index), index.U(log2Ceil(LoadPipelineWidth).W))
+      else loadReplayRemSel(index)
+    )
+    loadReplaySelVGen(index) := Mux(replayRemFire(index), loadReplayRemSelVecFire(index).asUInt.orR, loadReplayRemSelVecNotFire(index).asUInt.orR)
+  })
+
+  (0 until LoadPipelineWidth).map(i => {
+    vaddrModule.io.raddr(LoadPipelineWidth + 1 + i) := loadReplaySelGen(i)
+  })
+
+  (0 until LoadPipelineWidth).map(i => {
+    loadReplaySel(i) := RegNext(loadReplaySelGen(i))
+    loadReplaySelV(i) := RegNext(loadReplaySelVGen(i), init = false.B)
+  })
+  
+  // stage2: replay to load pipeline (if no load in S0)
+  (0 until LoadPipelineWidth).map(i => {
+    when(replayRemFire(i)) {
+      s0_block_load_mask(loadReplaySel(i)) := true.B
+    }
+  })
+  
+  // init
+  (0 until LoadPipelineWidth).map(i => {
+    replayRemFire(i) := false.B
+  })
+
+  for(i <- 0 until LoadPipelineWidth) {
+    val replayIdx = loadReplaySel(i)
+    val notRedirectLastCycle = !uop(replayIdx).robIdx.needFlush(RegNext(io.brqRedirect))
+
+    io.loadOut(i).valid := loadReplaySelV(i) && notRedirectLastCycle
+
+    io.loadOut(i).bits := DontCare
+    io.loadOut(i).bits.uop := uop(replayIdx)
+    io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + 1 + i)
+    io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + 1 + i), uop(replayIdx).ctrl.fuOpType(1,0))
+    io.loadOut(i).bits.isFirstIssue := false.B
+    io.loadOut(i).bits.isLoadReplay := true.B
+
+    when(io.loadOut(i).fire) {
+      replayRemFire(i) := true.B
+    }
+
+  }
   /**
     * Writeback load from load units
     *
@@ -188,6 +370,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
+    dataModule.io.paddr.wen(i) := false.B
+    vaddrModule.io.wen(i) := false.B
     vaddrTriggerResultModule.io.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
 
@@ -195,24 +379,22 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // flag bits in lq needs to be updated accurately
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
-          io.loadIn(i).bits.data,
           io.loadIn(i).bits.mask,
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio
         )
       }.otherwise {
-        XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+        XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
         io.loadIn(i).bits.uop.lqIdx.asUInt,
         io.loadIn(i).bits.uop.cf.pc,
         io.loadIn(i).bits.vaddr,
         io.loadIn(i).bits.paddr,
-        io.loadIn(i).bits.data,
         io.loadIn(i).bits.mask,
         io.loadIn(i).bits.forwardData.asUInt,
         io.loadIn(i).bits.forwardMask.asUInt,
@@ -221,7 +403,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       if(EnableFastForward){
         datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.s2_load_data_forwarded(i)) &&
           !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
-          !io.s3_dcache_require_replay(i) // do not writeback if that inst will be resend from rs
+          !io.s2_dcache_require_replay(i) // do not writeback if that inst will be resend from rs
       } else {
         datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.s2_load_data_forwarded(i)) &&
           !io.loadIn(i).bits.mmio // mmio data is not valid until we finished uncache access
@@ -233,19 +415,41 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       if(EnableFastForward){
-        miss(loadWbIndex) := dcacheMissed && !io.s2_load_data_forwarded(i) && !io.s3_dcache_require_replay(i)
+        miss(loadWbIndex) := dcacheMissed && !io.s2_load_data_forwarded(i) && !io.s2_dcache_require_replay(i)
       } else {
         miss(loadWbIndex) := dcacheMissed && !io.s2_load_data_forwarded(i)
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
-      released(loadWbIndex) := release2cycle.valid && 
+      released(loadWbIndex) := release2cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release2cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1cycle.valid &&
         io.loadIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset) === release1cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
     }
 
     // data bit in lq can be updated when load_s2 valid
-    when(io.loadIn(i).bits.writeQueueData){
+    // when(io.loadIn(i).bits.lq_data_wen){
+    //   val loadWbData = Wire(new LQDataEntry)
+    //   loadWbData.paddr := io.loadIn(i).bits.paddr
+    //   loadWbData.mask := io.loadIn(i).bits.mask
+    //   loadWbData.data := io.loadIn(i).bits.forwardData.asUInt // fwd data
+    //   loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
+    //   dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
+    //   dataModule.io.wb.wen(i) := true.B
+
+    //   // dirty code for load instr
+    //   uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
+    //   uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
+    //   uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
+    //   uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
+
+    //   vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
+    //   vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
+
+    //   vaddrTriggerResultModule.io.wen(i) := true.B
+    // }
+
+    // dirty code to reduce load_s2.valid fanout
+    when(io.loadIn(i).bits.lq_data_wen_dup(0)){
       val loadWbData = Wire(new LQDataEntry)
       loadWbData.paddr := io.loadIn(i).bits.paddr
       loadWbData.mask := io.loadIn(i).bits.mask
@@ -253,23 +457,94 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
       dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
       dataModule.io.wb.wen(i) := true.B
-
-      // dirty code for load instr
+    }
+    // dirty code for load instr
+    when(io.loadIn(i).bits.lq_data_wen_dup(1)){
       uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest
+    }
+    when(io.loadIn(i).bits.lq_data_wen_dup(2)){
       uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
+    }
+    when(io.loadIn(i).bits.lq_data_wen_dup(3)){
       uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
+    }
+    when(io.loadIn(i).bits.lq_data_wen_dup(4)){
       uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
-
+    }
+    when(io.loadIn(i).bits.lq_data_wen_dup(5)){
       vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
       vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
-
       vaddrTriggerResultModule.io.wen(i) := true.B
     }
 
-    // vaddrModule write is delayed, as vaddrModule will not be read right after write
-    vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
-    vaddrModule.io.wdata(i) := RegNext(io.loadIn(i).bits.vaddr)
-    vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire())
+    when(io.loadPaddrIn(i).valid) {
+      dataModule.io.paddr.wen(i) := true.B
+      dataModule.io.paddr.waddr(i) := io.loadPaddrIn(i).bits.lqIdx.value
+      dataModule.io.paddr.wdata(i) := io.loadPaddrIn(i).bits.paddr
+    }
+    
+    // update vaddr in load S1
+    when(io.loadVaddrIn(i).valid) {
+      vaddrModule.io.wen(i) := true.B
+      vaddrModule.io.waddr(i) := io.loadVaddrIn(i).bits.lqIdx.value
+      vaddrModule.io.wdata(i) := io.loadVaddrIn(i).bits.vaddr
+    }
+
+    /**
+      * used for feedback and replay
+      */
+    when(io.replayFast(i).valid){
+      val idx = io.replayFast(i).ld_idx
+      val needreplay = !io.replayFast(i).ld_ld_check_ok || !io.replayFast(i).st_ld_check_ok || !io.replayFast(i).cache_bank_no_conflict
+      
+      ld_ld_check_ok(idx) := io.replayFast(i).ld_ld_check_ok
+      st_ld_check_ok(idx) := io.replayFast(i).st_ld_check_ok
+      cache_bank_no_conflict(idx) := io.replayFast(i).cache_bank_no_conflict
+
+      when(needreplay) {
+        creditUpdate(idx) := block_cycles_others(block_ptr_others(idx))
+        block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
+        // try to replay this load in next cycle
+        s1_block_load_mask(idx) := false.B
+        s2_block_load_mask(idx) := false.B
+
+        // replay this load in next cycle
+        loadReplaySelGen(idx(log2Ceil(LoadPipelineWidth) - 1, 0)) := idx
+        loadReplaySelVGen(idx(log2Ceil(LoadPipelineWidth) - 1, 0)) := true.B
+      }
+    }
+
+    when(io.replaySlow(i).valid){
+      val idx = io.replaySlow(i).ld_idx
+      val needreplay = !io.replaySlow(i).tlb_hited || !io.replaySlow(i).st_ld_check_ok || !io.replaySlow(i).cache_no_replay || !io.replaySlow(i).forward_data_valid
+
+      tlb_hited(idx) := io.replaySlow(i).tlb_hited
+      st_ld_check_ok(idx) := io.replaySlow(i).st_ld_check_ok
+      cache_no_replay(idx) := io.replaySlow(i).cache_no_replay
+      forward_data_valid(idx) := io.replaySlow(i).forward_data_valid
+
+      val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
+
+      when(needreplay) {
+        creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
+                              Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)), 0.U))
+        when(!io.replaySlow(i).tlb_hited) {
+          block_ptr_tlb(idx) := Mux(block_ptr_tlb(idx) === 3.U(2.W), block_ptr_tlb(idx), block_ptr_tlb(idx) + 1.U(2.W))
+        }.elsewhen(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok) {
+          block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
+        }
+      }      
+
+      block_by_data_forward_fail(idx) := false.B
+
+      when(!io.replaySlow(i).forward_data_valid) {
+        when(!io.storeDataValidVec(invalid_sq_idx)) {
+          block_by_data_forward_fail(idx) := true.B
+          block_sq_idx(idx) := invalid_sq_idx
+        }
+      }
+    }
+
   }
 
   when(io.refill.valid) {
@@ -282,17 +557,17 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   dataModule.io.refill.paddr := io.refill.bits.addr
   dataModule.io.refill.data := io.refill.bits.data
 
-  val s3_dcache_require_replay = WireInit(VecInit((0 until LoadPipelineWidth).map(i =>{
-    RegNext(io.loadIn(i).fire()) && RegNext(io.s3_dcache_require_replay(i))
+  val s2_dcache_require_replay = WireInit(VecInit((0 until LoadPipelineWidth).map(i =>{
+    RegNext(io.loadIn(i).fire()) && RegNext(io.s2_dcache_require_replay(i))
   })))
-  dontTouch(s3_dcache_require_replay)
+  dontTouch(s2_dcache_require_replay)
 
   (0 until LoadQueueSize).map(i => {
     dataModule.io.refill.refillMask(i) := allocated(i) && miss(i)
     when(dataModule.io.refill.valid && dataModule.io.refill.refillMask(i) && dataModule.io.refill.matchMask(i)) {
       datavalid(i) := true.B
       miss(i) := false.B
-      when(!s3_dcache_require_replay.asUInt.orR){
+      when(!s2_dcache_require_replay.asUInt.orR){
         refilling(i) := true.B
       }
       when(io.refill.bits.error) {
@@ -306,10 +581,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lastCycleLoadWbIndex = RegNext(loadWbIndex)
     // update miss state in load s3
     if(!EnableFastForward){
-      // s3_dcache_require_replay will be used to update lq flag 1 cycle after for better timing
+      // s2_dcache_require_replay will be used to update lq flag 1 cycle after for better timing
       //
-      // io.dcacheRequireReplay comes from dcache miss req reject, which is quite slow to generate
-      when(s3_dcache_require_replay(i) && !refill_addr_hit(RegNext(io.loadIn(i).bits.paddr), io.refill.bits.addr)) {
+      // io.s2_dcache_require_replay comes from dcache miss req reject, which is quite slow to generate
+      when(s2_dcache_require_replay(i)) {
         // do not writeback if that inst will be resend from rs
         // rob writeback will not be triggered by a refill before inst replay
         miss(lastCycleLoadWbIndex) := false.B // disable refill listening
@@ -320,6 +595,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // update load error state in load s3
     when(RegNext(io.loadIn(i).fire()) && io.s3_delayed_load_error(i)){
       uop(lastCycleLoadWbIndex).cf.exceptionVec(loadAccessFault) := true.B
+    }
+    // update inst replay from fetch flag in s3
+    when(RegNext(io.loadIn(i).fire()) && io.s3_replay_from_fetch(i)){
+      uop(lastCycleLoadWbIndex).ctrl.replayInst := true.B
     }
   }
 
@@ -343,7 +622,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
     allocated(i) && !writebacked(i) && datavalid(i) // query refilling will cause bad timing
   })).asUInt() // use uint instead vec to reduce verilog lines
+
   val remDeqMask = Seq.tabulate(LoadPipelineWidth)(getRemBits(deqMask)(_))
+
   // generate lastCycleSelect mask
   val remFireMask = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(UIntToOH(loadWbSel(rem)))(rem))
   // generate real select vec
@@ -405,7 +686,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     // Int load writeback will finish (if not blocked) in one cycle
     io.ldout(i).bits.uop := seluop
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
-    io.ldout(i).bits.data := rdataPartialLoad
+    io.ldout(i).bits.data := rdataPartialLoad // not used
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
@@ -414,6 +695,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.ldout(i).bits.debug.vaddr := vaddrModule.io.rdata(i+1)
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
+    
+    // merged data, uop and offset for data sel in load_s3
+    io.ldRawDataOut(i).lqData := dataModule.io.wb.rdata(i).data
+    io.ldRawDataOut(i).uop := io.ldout(i).bits.uop
+    io.ldRawDataOut(i).addrOffset := dataModule.io.wb.rdata(i).paddr
 
     when(io.ldout(i).fire()) {
       XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
@@ -477,6 +763,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     })
   }
 
+
   /**
     * Store-Load Memory violation detection
     *
@@ -485,29 +772,28 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     *
     * Cycle 0: Store Writeback
     *   Generate match vector for store address with rangeMask(stPtr, enqPtr).
-    *   Besides, load instructions in LoadUnit_S1 and S2 are also checked.
     * Cycle 1: Redirect Generation
-    *   There're three possible types of violations, up to 6 possible redirect requests.
-    *   Choose the oldest load (part 1). (4 + 2) -> (1 + 2)
+    *   There're up to 2 possible redirect requests.
+    *   Choose the oldest load (part 1). 
     * Cycle 2: Redirect Fire
-    *   Choose the oldest load (part 2). (3 -> 1)
+    *   Choose the oldest load (part 2).
     *   Prepare redirect request according to the detected violation.
     *   Fire redirect request (if valid)
     */
 
-  // stage 0:        lq l1 wb     l1 wb lq
-  //                 |  |  |      |  |  |  (paddr match)
-  // stage 1:        lq l1 wb     l1 wb lq
-  //                 |  |  |      |  |  |
-  //                 |  |------------|  |
-  //                 |        |         |
-  // stage 2:        lq      l1wb       lq
-  //                 |        |         |
+  // stage 0:        lq                 lq
+  //                 |                  |  (paddr match)
+  // stage 1:        lq                 lq
+  //                 |                  |
+  //                 |                  |
+  //                 |                  |
+  // stage 2:        lq                 lq
+  //                 |                  |
   //                 --------------------
   //                          |
   //                      rollback req
   io.load_s1 := DontCare
-  def detectRollback(i: Int) = {
+def detectRollback(i: Int) = {
     val startIndex = io.storeIn(i).bits.uop.lqIdx.value
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
     val xorMask = lqIdxMask ^ enqMask
@@ -524,54 +810,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
-    val lqViolation = lqViolationVec.asUInt().orR()
+    val lqViolation = lqViolationVec.asUInt().orR() && RegNext(!io.storeIn(i).bits.miss)
     val lqViolationIndex = getFirstOne(lqViolationVec, RegNext(lqIdxMask))
     val lqViolationUop = uop(lqViolationIndex)
     // lqViolationUop.lqIdx.flag := deqMask(lqViolationIndex) ^ deqPtrExt.flag
     // lqViolationUop.lqIdx.value := lqViolationIndex
     XSDebug(lqViolation, p"${Binary(Cat(lqViolationVec))}, $startIndex, $lqViolationIndex\n")
 
-    // when l/s writeback to rob together, check if rollback is needed
-    val wbViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
-      io.loadIn(j).valid &&
-      isAfter(io.loadIn(j).bits.uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
-      io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
-      (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
-    })))
-    val wbViolation = wbViolationVec.asUInt().orR() && RegNext(io.storeIn(i).valid && !io.storeIn(i).bits.miss)
-    val wbViolationUop = getOldest(wbViolationVec, RegNext(VecInit(io.loadIn.map(_.bits))))._2(0).uop
-    XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
-
-    // check if rollback is needed for load in l1
-    val l1ViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
-      io.load_s1(j).valid && // L1 valid
-      isAfter(io.load_s1(j).uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
-      io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s1(j).paddr(PAddrBits - 1, 3) &&
-      (io.storeIn(i).bits.mask & io.load_s1(j).mask).orR
-    })))
-    val l1Violation = l1ViolationVec.asUInt().orR() && RegNext(io.storeIn(i).valid && !io.storeIn(i).bits.miss)
-    val load_s1 = Wire(Vec(LoadPipelineWidth, new XSBundleWithMicroOp))
-    (0 until LoadPipelineWidth).foreach(i => load_s1(i).uop := io.load_s1(i).uop)
-    val l1ViolationUop = getOldest(l1ViolationVec, RegNext(load_s1))._2(0).uop
-    XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
-
-    XSDebug(
-      l1Violation,
-      "need rollback (l1 load) pc %x robidx %d target %x\n",
-      io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.robIdx.asUInt, l1ViolationUop.robIdx.asUInt
-    )
     XSDebug(
       lqViolation,
       "need rollback (ld wb before store) pc %x robidx %d target %x\n",
       io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
     )
-    XSDebug(
-      wbViolation,
-      "need rollback (ld/st wb together) pc %x robidx %d target %x\n",
-      io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.robIdx.asUInt, wbViolationUop.robIdx.asUInt
-    )
 
-    ((lqViolation, lqViolationUop), (wbViolation, wbViolationUop), (l1Violation, l1ViolationUop))
+    (lqViolation, lqViolationUop)
   }
 
   def rollbackSel(a: Valid[MicroOpRbExt], b: Valid[MicroOpRbExt]): ValidIO[MicroOpRbExt] = {
@@ -585,15 +837,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       b // sel b
     )
   }
-  val lastCycleRedirect = RegNext(io.brqRedirect)
-  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
   // S2: select rollback (part1) and generate rollback request
   // rollback check
-  // Wb/L1 rollback seq check is done in s2
-  val rollbackWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
-  val rollbackL1 = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
-  val rollbackL1Wb = Wire(Vec(StorePipelineWidth*2, Valid(new MicroOpRbExt)))
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
   val rollbackLq = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
   // store ftq index for store set update
@@ -601,24 +847,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val stFtqOffsetS2 = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (i <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(i)
-    rollbackLq(i).valid := detectedRollback._1._1 && RegNext(io.storeIn(i).valid)
-    rollbackLq(i).bits.uop := detectedRollback._1._2
+    rollbackLq(i).valid := detectedRollback._1 && RegNext(io.storeIn(i).valid)
+    rollbackLq(i).bits.uop := detectedRollback._2
     rollbackLq(i).bits.flag := i.U
-    rollbackWb(i).valid := detectedRollback._2._1 && RegNext(io.storeIn(i).valid)
-    rollbackWb(i).bits.uop := detectedRollback._2._2
-    rollbackWb(i).bits.flag := i.U
-    rollbackL1(i).valid := detectedRollback._3._1 && RegNext(io.storeIn(i).valid)
-    rollbackL1(i).bits.uop := detectedRollback._3._2
-    rollbackL1(i).bits.flag := i.U
-    rollbackL1Wb(2*i) := rollbackL1(i)
-    rollbackL1Wb(2*i+1) := rollbackWb(i)
     stFtqIdxS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqPtr)
     stFtqOffsetS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqOffset)
   }
 
-  val rollbackL1WbSelected = ParallelOperation(rollbackL1Wb, rollbackSel)
-  val rollbackL1WbVReg = RegNext(rollbackL1WbSelected.valid)
-  val rollbackL1WbReg = RegEnable(rollbackL1WbSelected.bits, rollbackL1WbSelected.valid)
   val rollbackLqVReg = rollbackLq.map(x => RegNext(x.valid))
   val rollbackLqReg = rollbackLq.map(x => RegEnable(x.bits, x.valid))
 
@@ -626,13 +861,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // Note that we use robIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's robIdx equals to this cycle's robIdx, it still triggers the redirect.
 
-  val rollbackValidVec = rollbackL1WbVReg +: rollbackLqVReg
-  val rollbackUopExtVec = rollbackL1WbReg +: rollbackLqReg
-
   // select uop in parallel
-  val mask = getAfterMask(rollbackValidVec, rollbackUopExtVec.map(i => i.uop))
   val lqs = getOldest(rollbackLqVReg, rollbackLqReg)
-  val rollbackUopExt = getOldest(lqs._1 :+ rollbackL1WbVReg, lqs._2 :+ rollbackL1WbReg)._2(0)
+  val rollbackUopExt = lqs._2(0) 
   val stFtqIdxS3 = RegNext(stFtqIdxS2)
   val stFtqOffsetS3 = RegNext(stFtqOffsetS2)
   val rollbackUop = rollbackUopExt.uop
@@ -640,13 +871,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val rollbackStFtqOffset = stFtqOffsetS3(rollbackUopExt.flag)
 
   // check if rollback request is still valid in parallel
-  val rollbackValidVecChecked = Wire(Vec(LoadPipelineWidth + 1, Bool()))
-  for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopExtVec.map(i => i.uop)).zipWithIndex) {
-    rollbackValidVecChecked(idx) := v &&
-      (!lastCycleRedirect.valid || isBefore(uop.robIdx, lastCycleRedirect.bits.robIdx)) &&
-      (!lastlastCycleRedirect.valid || isBefore(uop.robIdx, lastlastCycleRedirect.bits.robIdx))
-  }
-
   io.rollback.bits.robIdx := rollbackUop.robIdx
   io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
   io.rollback.bits.stFtqIdx := rollbackStFtqIdx
@@ -659,7 +883,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
 
-  io.rollback.valid := rollbackValidVecChecked.asUInt.orR
+  io.rollback.valid := rollbackLqVReg.reduce(_|_) &&
+                        (!lastCycleRedirect.valid || isBefore(rollbackUop.robIdx, lastCycleRedirect.bits.robIdx)) && 
+                        (!lastlastCycleRedirect.valid || isBefore(rollbackUop.robIdx, lastlastCycleRedirect.bits.robIdx))
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x robidx %d\n", io.rollback.bits.cfi, io.rollback.bits.robIdx.asUInt)
@@ -786,9 +1012,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
   io.uncache.req.bits.data := dataModule.io.uncache.rdata.data
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
-
-  io.uncache.req.bits.id   := DontCare
+  io.uncache.req.bits.id   := RegNext(deqPtrExtNext.value)
   io.uncache.req.bits.instrtype := DontCare
+  io.uncache.req.bits.atomic := true.B
 
   io.uncache.resp.ready := true.B
 
@@ -874,6 +1100,18 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire()))))
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
+
+  if (env.EnableTopDown) {
+    val stall_loads_bound = WireDefault(0.B)
+    ExcitingUtils.addSink(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
+    val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
+    val l1d_loads_bound = stall_loads_bound && !have_miss_entry
+    ExcitingUtils.addSource(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
+    XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
+    val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
+    ExcitingUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss", ExcitingUtils.Perf)
+    ExcitingUtils.addSink(WireInit(0.U), "stall_l1d_load_miss", ExcitingUtils.Perf)
+  }
 
   val perfValidCount = RegNext(validCount)
 

@@ -204,7 +204,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
-    AXI4IdIndexer(idBits = 2) :=
+    AXI4IdIndexer(idBits = 4) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
@@ -285,7 +285,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   val pma = LazyModule(new TLPMA)
-  pma.node := 
+  pma.node :=
     TLBuffer.chainNode(4) :=
     peripheralXbar
 
@@ -305,7 +305,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
       val ext_intr_sync = RegInit(0.U(3.W))
       ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
-      plic_in := ext_intr_sync(1) && !ext_intr_sync(2)
+      plic_in := ext_intr_sync(2)
     }
 
     pma.module.io <> cacheable_check

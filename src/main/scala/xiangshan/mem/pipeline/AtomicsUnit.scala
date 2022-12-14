@@ -127,9 +127,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
-    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
-    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
-    io.dtlb.req.bits.debug.robIdx := in.uop.robIdx
+    io.dtlb.resp.ready      := true.B
+    io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
@@ -145,7 +144,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         "b10".U   -> (in.src(0)(1,0) === 0.U), //w
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
-      exceptionVec(storeAddrMisaligned) := !addrAligned
+      exceptionVec(loadAddrMisaligned)  := !addrAligned && isLr
+      exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
@@ -179,7 +179,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st
+    val exception_pa = pmp.st || pmp.ld
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -188,6 +188,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       // if sbuffer has been flushed, go to query dcache, otherwise wait for sbuffer.
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
+    // update storeAccessFault bit
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
   }
 
   when (state === s_wait_flush_sbuffer_resp) {

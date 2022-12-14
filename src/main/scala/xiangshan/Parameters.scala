@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -60,7 +60,7 @@ case class XSCoreParameters
   EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
-  EnableUBTB: Boolean = true,
+  EnableFauFTB: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -97,20 +97,12 @@ case class XSCoreParameters
   numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
-      // val loop = Module(new LoopPredictor)
-      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
-      //                             else          Module(new Tage) }
-      //             else          { Module(new FakeTage) })
       val ftb = Module(new FTB()(p))
-      val ubtb = Module(new MicroBTB()(p))
+      val ubtb =Module(new FauFTB()(p))
       // val bim = Module(new BIM()(p))
       val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
-      // val tage = Module(new Tage()(p))
-      // val fake = Module(new FakePredictor()(p))
-
-      // val preds = Seq(loop, tage, btb, ubtb, bim)
       val preds = Seq(ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
@@ -120,12 +112,12 @@ case class XSCoreParameters
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
       ubtb.io.in.bits.resp_in(0) := resp_in
-      tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
-      ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
-      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
+      tage.io.in.bits.resp_in(0) := ubtb.io.out
+      ftb.io.in.bits.resp_in(0)  := tage.io.out
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out
+      ras.io.in.bits.resp_in(0) := ittage.io.out
 
-      (preds, ras.io.out.resp)
+      (preds, ras.io.out)
     }),
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
@@ -136,7 +128,10 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   LoadQueueSize: Int = 80,
+  LoadQueueNWriteBanks: Int = 8,
   StoreQueueSize: Int = 64,
+  StoreQueueNWriteBanks: Int = 8,
+  VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -159,16 +154,22 @@ case class XSCoreParameters
   ),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
+  VecMemSrcInWidth: Int = 2,
+  VecMemInstWbWidth: Int = 1,
+  VecMemDispatchWidth: Int = 1,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
+  UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
   EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
+  ReSelectLen: Int = 6, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -266,7 +267,8 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
-  UseDRAMSim: Boolean = false
+  UseDRAMSim: Boolean = false,
+  EnableTopDown: Boolean = false
 )
 
 trait HasXSParameter {
@@ -291,6 +293,7 @@ trait HasXSParameter {
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val AsidLength = coreParams.AsidLength
+  val ReSelectLen = coreParams.ReSelectLen
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
@@ -309,6 +312,7 @@ trait HasXSParameter {
   val EnableGHistDiff = coreParams.EnableGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
+  val EnableFauFTB = coreParams.EnableFauFTB
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
@@ -368,7 +372,10 @@ trait HasXSParameter {
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
+  val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
@@ -378,15 +385,20 @@ trait HasXSParameter {
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
+  val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
+  val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
+  val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
+  val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
+  val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

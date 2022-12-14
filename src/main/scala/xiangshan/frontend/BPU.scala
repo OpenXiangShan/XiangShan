@@ -26,7 +26,7 @@ import utils._
 import scala.math.min
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaLength = 512 // TODO: Reduce meta length
+  val MaxMetaLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   // val numBr = 2
@@ -155,15 +155,7 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   // val s0_all_ready = Bool()
 }
 
-class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val last_stage_meta = UInt(MaxMetaLength.W) // This is use by composer
-  val resp = new BranchPredictionResp
-
-  // These store in meta, extract in composer
-  // val rasSp = UInt(log2Ceil(RasSize).W)
-  // val rasTop = new RASEntry
-  // val specCnt = Vec(PredictWidth, UInt(10.W))
-}
+class BasePredictorOutput (implicit p: Parameters) extends BranchPredictionResp {}
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val reset_vector = Input(UInt(PAddrBits.W))
@@ -194,9 +186,10 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
+  val is_fast_pred = false
   val io = IO(new BasePredictorIO())
 
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 
   io.out.last_stage_meta := 0.U
 
@@ -216,9 +209,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
     s1_pc := reset_vector
   }
 
-  io.out.resp.s1.pc := s1_pc
-  io.out.resp.s2.pc := s2_pc
-  io.out.resp.s3.pc := s3_pc
+  io.out.s1.pc := s1_pc
+  io.out.s2.pc := s2_pc
+  io.out.s3.pc := s3_pc
   
   val perfEvents: Seq[(String, UInt)] = Seq()
 
@@ -229,7 +222,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
   io.in.ready                 := true.B
   io.out.last_stage_meta      := 0.U
-  io.out.resp := io.in.bits.resp_in(0)
+  io.out := io.in.bits.resp_in(0)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -315,9 +308,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
-  val resp = predictors.io.out.resp
-  
-  
+  val resp = predictors.io.out
+
+
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
   val s1_flush, s2_flush, s3_flush = Wire(Bool())
@@ -347,7 +340,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   s1_components_ready := predictors.io.s1_ready
   s1_ready := s1_fire || !s1_valid
-  s0_fire := !reset.asBool && s1_components_ready && s1_ready
+  s0_fire := RegNext(!reset.asBool) && s1_components_ready && s1_ready
   predictors.io.s0_fire := s0_fire
 
   s2_components_ready := predictors.io.s2_ready
@@ -388,12 +381,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s1_valid && s2_components_ready && s2_ready ||
     s2_fire && s2_redirect ||
     s3_fire && s3_redirect
-  io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp)
-  io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.last_stage_meta // TODO: change to lastStageMeta
-  io.bpu_to_ftq.resp.bits.s3.folded_hist := s3_folded_gh
-  io.bpu_to_ftq.resp.bits.s3.histPtr := s3_ghist_ptr
-  io.bpu_to_ftq.resp.bits.s3.lastBrNumOH := s3_last_br_num_oh
-  io.bpu_to_ftq.resp.bits.s3.afhob := s3_ahead_fh_oldest_bits
+  io.bpu_to_ftq.resp.bits  := predictors.io.out
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.folded_hist := s3_folded_gh
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.lastBrNumOH := s3_last_br_num_oh
+  io.bpu_to_ftq.resp.bits.last_stage_spec_info.afhob       := s3_ahead_fh_oldest_bits
 
   npcGen.register(true.B, s0_pc_reg, Some("stallPC"), 0)
   foldedGhGen.register(true.B, s0_folded_gh_reg, Some("stallFGH"), 0)
@@ -436,8 +428,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  XSError(!resp.s1.is_minimal, "s1 should be minimal!\n")
-
   npcGen.register(s1_valid, resp.s1.getTarget, Some("s1_target"), 4)
   foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
   ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 4)
@@ -447,12 +437,19 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     b.register(w.reduce(_||_), s1_ghv_wdatas(i), Some(s"s1_new_bit_$i"), 4)
   }
 
-  def preds_needs_redirect_vec(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
+  class PreviousPredInfo extends Bundle {
+    val target = UInt(VAddrBits.W)
+    val lastBrPosOH = UInt((numBr+1).W)
+    val taken = Bool()
+    val cfiIndex = UInt(log2Ceil(PredictWidth).W)
+  }
+
+  def preds_needs_redirect_vec(x: PreviousPredInfo, y: BranchPredictionBundle) = {
     VecInit(
-      x.getTarget =/= y.getTarget,
-      x.lastBrPosOH.asUInt =/= y.lastBrPosOH.asUInt,
+      x.target =/= y.getTarget,
+      x.lastBrPosOH =/= y.lastBrPosOH.asUInt,
       x.taken =/= y.taken,
-      (x.taken && y.taken) && x.cfiIndex.bits =/= y.cfiIndex.bits,
+      (x.taken && y.taken) && x.cfiIndex =/= y.cfiIndex.bits,
       // x.shouldShiftVec.asUInt =/= y.shouldShiftVec.asUInt,
       // x.brTaken =/= y.brTaken
     )
@@ -492,13 +489,17 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s1_pred = RegEnable(resp.s1, 0.U.asTypeOf(resp.s1), s1_fire)
+  val s1_pred_info = Wire(new PreviousPredInfo)
+  s1_pred_info.target := resp.s1.getTarget
+  s1_pred_info.lastBrPosOH := resp.s1.lastBrPosOH.asUInt
+  s1_pred_info.taken := resp.s1.taken
+  s1_pred_info.cfiIndex := resp.s1.cfiIndex.bits
 
-  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred, resp.s2)
+  val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(s1_pred_info), s1_fire)
+
+  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred_info, resp.s2)
 
   s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
-
-  XSError(resp.s2.is_minimal, "s2 should not be minimal!\n")
 
   npcGen.register(s2_redirect, resp.s2.getTarget, Some("s2_target"), 5)
   foldedGhGen.register(s2_redirect, s2_predicted_fh, Some("s2_FGH"), 5)
@@ -597,7 +598,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val redirect = do_redirect.bits
 
   predictors.io.update := RegNext(io.ftq_to_bpu.update)
-  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.histPtr))
+  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr))
   predictors.io.redirect := do_redirect
 
   // Redirect logic

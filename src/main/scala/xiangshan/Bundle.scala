@@ -62,6 +62,8 @@ object RSFeedbackType {
   val bankConflict = 3.U(3.W)
   val ldVioCheckRedo = 4.U(3.W)
 
+  val feedbackInvalid = 7.U(3.W)
+
   def apply() = UInt(3.W)
 }
 
@@ -101,7 +103,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.rasSp := entry.rasSp
-    this.rasEntry := entry.rasEntry
+    this.rasEntry := entry.rasTop
     this
   }
 }
@@ -127,9 +129,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  // This inst will flush all the pipe when it is the oldest inst in ROB,
-  // then replay from this inst itself
-  val replayInst = Bool()
 }
 
 
@@ -365,20 +364,21 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isMove = Bool()
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Output(Bool())
-  val commitValid = Vec(CommitWidth, Output(Bool()))
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
 
-  val isWalk = Output(Bool())
+  val isWalk = Bool()
   // valid bits optimized for walk
-  val walkValid = Vec(CommitWidth, Output(Bool()))
+  val walkValid = Vec(CommitWidth, Bool())
 
-  val info = Vec(CommitWidth, Output(new RobCommitInfo))
+  val info = Vec(CommitWidth, new RobCommitInfo)
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
@@ -493,8 +493,10 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val ldld_vio_check_enable = Output(Bool())
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
+  val uncache_write_outstanding_enable = Output(Bool())
   // Rename
-  val move_elim_enable = Output(Bool())
+  val fusion_enable = Output(Bool())
+  val wfi_enable = Output(Bool())
   // Decode
   val svinval_enable = Output(Bool())
 

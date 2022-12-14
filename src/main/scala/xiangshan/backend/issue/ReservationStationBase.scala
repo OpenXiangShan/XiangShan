@@ -27,7 +27,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
-import com.fasterxml.jackson.databind.JsonSerializable.Base
+import chisel3.ExcitingUtils
 
 case class RSMod
 (
@@ -51,14 +51,17 @@ case class RSParams
   var numFastWakeup: Int = 0,
   var numWakeup: Int = 0,
   var hasFeedback: Boolean = false,
+  var lsqFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
   //
   var needScheduledBit: Boolean = false,
   // special cases
+  var isAlu: Boolean = false,
   var isJump: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
+  var isSta: Boolean = false,
   var isStd: Boolean = false,
   var isMemAddr: Boolean = false,
   var isFMA: Boolean = false,
@@ -91,6 +94,8 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
     params.numSrc = max(params.numSrc, max(cfg.intSrcCnt, cfg.fpSrcCnt))
     params.exuCfg = Some(cfg)
     cfg match {
+      case AluExeUnitCfg => params.isAlu = true
+      case StaExeUnitCfg => params.isSta = true
       case JumpCSRExeUnitCfg => params.isJump = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
@@ -99,8 +104,11 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
       case _ =>
     }
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
-      params.hasFeedback = true
+      params.lsqFeedback = true
       params.checkWaitBit = true
+    }
+    if(cfg == StaExeUnitCfg) {
+      params.hasFeedback = true
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
@@ -196,12 +204,21 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
   io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
   io.deq <> rs.flatMap(_.io.deq)
+  io.full <> rs.map(_.io.full).reduce(_ && _)
   rs.foreach(_.io.fastUopsIn <> io.fastUopsIn)
   rs.foreach(_.io.fastDatas <> io.fastDatas)
   rs.foreach(_.io.slowPorts <> io.slowPorts)
   if (io.fastWakeup.isDefined) {
     io.fastWakeup.get <> rs.flatMap(_.io.fastWakeup.get)
   }
+
+  if (params.isJump)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"jumpRS_${index}") }
+  if (params.isAlu)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"aluRS_${index}") }
+  if (params.isSta)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"staRS_${index}") }
+  if (params.isStd)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"stdRS_${index}") }
+  if (params.isMul)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"mulRS_${index}") }
+  if (params.isLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"loadRS_${index}") }
+
 
   val perfEvents = rs.flatMap(_.getPerfEvents)
   generatePerfEvent()
@@ -218,6 +235,8 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
   val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
   val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
+  // perf counter
+  val full = Output(Bool())
   // extra
   val fastWakeup = if (params.fixedLatency >= 0) Some(Vec(params.numDeq, ValidIO(new MicroOp))) else None
 }
@@ -746,9 +765,29 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
     }
   }
 
+  if (env.EnableTopDown && params.isLoad) {
+    val l1d_loads_bound = WireDefault(0.B)
+    ExcitingUtils.addSink(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
+    val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
+    val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
+    val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
+    val bankConflict = !mshrFull && !tlbMiss && !dataInvalid && statusArray.io.rsFeedback(RSFeedbackType.bankConflict.litValue.toInt)
+    val ldVioCheckRedo = !mshrFull && !tlbMiss && !dataInvalid && !bankConflict && statusArray.io.rsFeedback(RSFeedbackType.ldVioCheckRedo.litValue.toInt)
+    XSPerfAccumulate("l1d_loads_mshr_bound", l1d_loads_bound && mshrFull)
+    XSPerfAccumulate("l1d_loads_tlb_bound", l1d_loads_bound && tlbMiss)
+    XSPerfAccumulate("l1d_loads_store_data_bound", l1d_loads_bound && dataInvalid)
+    XSPerfAccumulate("l1d_loads_bank_conflict_bound", l1d_loads_bound && bankConflict)
+    XSPerfAccumulate("l1d_loads_vio_check_redo_bound", l1d_loads_bound && ldVioCheckRedo)
+  }
+
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfAccumulate("allocate_num", PopCount(s0_doEnqueue))
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
+
+  def size: Int = params.numEntries
+
+  io.full := statusArray.io.isValid.andR
+  XSPerfAccumulate("full", statusArray.io.isValid.andR)
 
   val perfEvents = Seq(("full", statusArray.io.isValid.andR))
   generatePerfEvent()

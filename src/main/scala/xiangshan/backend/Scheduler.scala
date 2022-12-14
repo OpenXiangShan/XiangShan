@@ -30,6 +30,7 @@ import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams, RSMod}
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import chisel3.ExcitingUtils
 
 class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
@@ -200,8 +201,9 @@ class Scheduler(
 
   val numIssuePorts: Int = configs.map(_.numDeq).sum
   val numReplayPorts: Int = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
-  val memRsEntries: Seq[Int] = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
   val memRsNum: Seq[Int] = reservationStations.filter(_.params.hasFeedback == true).map(_.numRS)
+  val numLsqReplayPorts = reservationStations.filter(_.params.lsqFeedback == true).map(_.params.numDeq).sum
+  val memRsEntries = reservationStations.filter(_.params.lsqFeedback == true).map(_.params.numEntries)
   val getMemRsEntries: Int = {
     require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
     require(memRsNum.isEmpty || memRsNum.max == memRsNum.min, "different num not supported")
@@ -280,7 +282,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val jalr_target = Input(UInt(VAddrBits.W))
     val stIssuePtr = Input(new SqPtr())
     // special ports for load / store rs
-    val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
+    val enqLsq = if (outer.numLsqReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
     // from lsq
@@ -290,6 +292,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    // perf
+    val sqFull = Input(Bool())
+    val lqFull = Input(Bool())
 
   }
 
@@ -443,7 +448,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     if (rs.isJump) {
       val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
       rs.extra.jump.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
-      rs.extra.jump.jalr_target := RegEnable(io.extra.jalr_target, jumpFire)
+      rs.extra.jump.jalr_target := io.extra.jalr_target
     }
     if (rs.checkWaitBit) {
       rs.extra.checkwait.stIssuePtr <> io.extra.stIssuePtr
@@ -556,6 +561,20 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
+
+  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
+    val stall_ls_dq = WireDefault(0.B)
+    ExcitingUtils.addSink(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
+    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val st_rs_full = !rs_all.filter(rs => rs.params.isSta || rs.params.isStd).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val stall_stores_bound = stall_ls_dq && (st_rs_full || io.extra.sqFull)
+    val stall_loads_bound = stall_ls_dq && (ld_rs_full || io.extra.lqFull)
+    val stall_ls_bandwidth_bound = stall_ls_dq && !(st_rs_full || io.extra.sqFull) && !(ld_rs_full || io.extra.lqFull)
+    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
+    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
+    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
+  }
 
   val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
   val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))

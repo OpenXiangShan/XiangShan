@@ -33,11 +33,9 @@ import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters {
-  def io: Record
-}
+  with HasFPUParameters
 
 //remove this trait after impl module logic
 trait NeedImpl {
@@ -384,6 +382,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
+    exu.scheExtra.lqFull := memBlock.io.lqFull
+    exu.scheExtra.sqFull := memBlock.io.sqFull
     exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
       sink.bits := src.bits
       sink.valid := src.valid
