@@ -90,6 +90,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val iprefetchBuf = Flipped(new IPFBufferRead)
   val PIQ          = Flipped(Vec(nPrefetchEntries,new PIQToMainPipe))
   val IPFBufMove   = Flipped(new IPFBufferMove)
+  val IPFPipe      = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe))
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -120,6 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   val fromPIQ             = io.PIQ.map(_.info)
   val IPFBufferMove       = io.IPFBufMove
+  val toIPFPipe           = io.IPFPipe
 
   io.itlb.foreach(_.req_kill := false.B)
 
@@ -540,6 +542,27 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     when(hit_0_miss_1 || miss_0_miss_1) {
       printf("{%d} ICache miss, port: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), 1.U, s2_req_vaddr(1), addrAlign(s2_req_vaddr(1), blockBytes, VAddrBits))
     }
+  }
+  /** miss handle information to iprefetch pipe */
+  //TODO: better cancle logic
+  val miss_handle_reg = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  when(s1_fire && !s1_final_port_hit(0)){
+    miss_handle_reg(0) := true.B
+  }
+  when(s1_fire && !s1_final_port_hit(1) && s1_double_line) {
+    miss_handle_reg(1) := true.B
+  }
+  when(fromMSHR(0).fire()) {
+    miss_handle_reg(0) := false.B
+  }
+  when(fromMSHR(1).fire()) {
+    miss_handle_reg(1) := false.B
+  }
+  (0 until PortNumber).foreach{
+    i =>
+      toIPFPipe(i).valid := miss_handle_reg(i)
+      toIPFPipe(i).bits.vSetIdx := s2_req_vsetIdx(i)
+      toIPFPipe(i).bits.ptage := s2_req_ptags(i)
   }
 
 

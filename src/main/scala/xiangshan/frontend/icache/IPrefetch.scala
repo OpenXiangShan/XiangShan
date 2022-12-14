@@ -51,6 +51,10 @@ class PIQToMainPipe(implicit  p: Parameters) extends IPrefetchBundle{
   val info = DecoupledIO(new PIQData)
 }
 
+class MainPipeToPrefetchPipe(implicit p: Parameters) extends IPrefetchBundle {
+  val ptage = UInt(tagBits.W)
+  val vSetIdx = UInt(idxBits.W)
+}
 class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
   val enqReq  = DecoupledIO(new PIQReq)
 }
@@ -64,6 +68,8 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val toMissUnit      = new IPrefetchToMissUnit
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
   val IPFBufferRead   = Flipped(new IPFBufferFilterRead)
+  /** icache main pipe to prefetch pipe*/
+  val fromMainPipe    = Flipped(Vec(PortNumber,ValidIO(new MainPipeToPrefetchPipe)))
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
@@ -319,6 +325,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val prefetch_dir = RegInit(VecInit(Seq.fill(nPrefetchEntries)(0.U.asTypeOf(new PrefetchDir))))
 
   val fromFtq = io.fromFtq
+  val fromMainPipe = io.fromMainPipe
   val (toITLB,  fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
   io.iTLBInter.req_kill := false.B
   val (toIMeta, fromIMeta) = (io.toIMeta, io.fromIMeta.metaData(0))
@@ -433,16 +440,19 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p3_paddr = RegEnable(p2_paddr,  p2_fire)
   val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
   val p3_vaddr   =  RegEnable(p2_vaddr,    p2_fire)
+  val p3_vidx = get_idx(p3_vaddr)
 
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
-
-  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit
+  //Cache miss handling by main pipe
+  val p3_hit_mp_miss = VecInit((0 until PortNumber).map(i => fromMainPipe(i).valid && (fromMainPipe(i).bits.ptage === get_phy_tag(p3_paddr) &&
+                                                            (fromMainPipe(i).bits.vSetIdx === p3_vidx)))).reduce(_||_)
+  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss
   p3_discard := p3_valid && p3_req_cancel
 
   toMissUnit.enqReq.valid := p3_valid && !p3_req_cancel
   toMissUnit.enqReq.bits.paddr := p3_paddr
-  toMissUnit.enqReq.bits.vSetIdx := get_idx(p3_vaddr)
+  toMissUnit.enqReq.bits.vSetIdx := p3_vidx
 
   when(reachMaxSize){
     maxPrefetchCoutner := 0.U
