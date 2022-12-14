@@ -417,6 +417,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.fpu.isIllegal := false.B
   csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
   csrioIn.fpu.frm <> exuBlocks(1).io.fuExtra.frm.get
+  csrioIn.vpu <> DontCare
   csrioIn.exception <> ctrlBlock.io.robio.exception
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
