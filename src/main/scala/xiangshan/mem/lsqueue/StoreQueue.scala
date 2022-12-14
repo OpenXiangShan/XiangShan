@@ -70,6 +70,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
+    val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
@@ -81,6 +82,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val storeDataValidVec = Vec(StoreQueueSize, Output(Bool()))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -124,6 +126,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val committed = Reg(Vec(StoreQueueSize, Bool())) // inst has been committed by rob
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
+  val atomic = Reg(Vec(StoreQueueSize, Bool()))
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -144,6 +147,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
 
   val commitCount = RegNext(io.rob.scommit)
+
+  (0 until StoreQueueSize).map{i => {
+    io.storeDataValidVec(i) := datavalid(i)
+  }}
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)
@@ -198,12 +205,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqIdx = enqPtrExt(offset)
     val index = io.enq.req(i).bits.sqIdx.value
     when (canEnqueue(i) && !enqCancel(i)) {
-      uop(index).robIdx := io.enq.req(i).bits.robIdx
+      uop(index) := io.enq.req(i).bits
+      // NOTE: the index will be used when replay
+      uop(index).sqIdx := sqIdx
       allocated(index) := true.B
       datavalid(index) := false.B
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
     }
@@ -291,6 +301,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when (storeInFireReg) {
       pending(stWbIndexReg) := io.storeInRe(i).mmio
       mmio(stWbIndexReg) := io.storeInRe(i).mmio
+      atomic(stWbIndexReg) := io.storeInRe(i).atomic
     }
 
     when(vaddrModule.io.wen(i)){
@@ -439,8 +450,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_req) {
-      when(io.uncache.req.fire()) {
-        uncacheState := s_resp
+      when (io.uncache.req.fire) {
+        when (io.uncacheOutstanding) {
+          uncacheState := s_wb
+        } .otherwise {
+          uncacheState := s_resp
+        }
       }
     }
     is(s_resp) {
@@ -479,6 +494,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.id   := DontCare
   io.uncache.req.bits.instrtype   := DontCare
+  io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
 
   when(io.uncache.req.fire()){
     // mmio store should not be committed until uncache req is sent

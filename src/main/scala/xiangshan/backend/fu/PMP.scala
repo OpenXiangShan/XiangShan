@@ -365,6 +365,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
   val st = Output(Bool())
   val instr = Output(Bool())
   val mmio = Output(Bool())
+  val atomic = Output(Bool())
 
   def |(resp: PMPRespBundle): PMPRespBundle = {
     val res = Wire(new PMPRespBundle())
@@ -372,6 +373,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
     res.st := this.st || resp.st
     res.instr := this.instr || resp.instr
     res.mmio := this.mmio || resp.mmio
+    res.atomic := this.atomic || resp.atomic    
     res
   }
 }
@@ -383,6 +385,7 @@ trait PMPCheckMethod extends PMPConst {
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := false.B
+    resp.atomic := false.B
     resp
   }
 

@@ -58,6 +58,10 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val loadPaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqPaddrWriteBundle)))
+    val loadVaddrIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqVaddrWriteBundle)))
+    val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
+    val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
+    val loadOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
@@ -70,6 +74,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
@@ -93,6 +98,13 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val storeQueue = Module(new StoreQueue)
 
   storeQueue.io.hartId := io.hartId
+  storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
+  
+  loadQueue.io.storeDataValidVec := storeQueue.io.storeDataValidVec
+
+  dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
+  val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(11.U(ReSelectLen.W), 50.U(ReSelectLen.W), 30.U(ReSelectLen.W), 10.U(ReSelectLen.W))))
+  loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
 
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready
@@ -119,6 +131,10 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadPaddrIn <> io.loadPaddrIn
+  loadQueue.io.loadOut <> io.loadOut
+  loadQueue.io.loadVaddrIn <> io.loadVaddrIn
+  loadQueue.io.replayFast <> io.replayFast
+  loadQueue.io.replaySlow <> io.replaySlow
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.s2_load_data_forwarded <> io.s2_load_data_forwarded
@@ -171,8 +187,9 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   switch(pendingstate){
     is(s_idle){
-      when(io.uncache.req.fire()){
-        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, s_store)
+      when(io.uncache.req.fire() && !io.uncacheOutstanding){
+        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, 
+                          Mux(io.uncacheOutstanding, s_idle, s_store))
       }
     }
     is(s_load){
@@ -196,15 +213,22 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise{
     io.uncache.req <> storeQueue.io.uncache.req
   }
-  when(pendingstate === s_load){
-    io.uncache.resp <> loadQueue.io.uncache.resp
-  }.otherwise{
-    io.uncache.resp <> storeQueue.io.uncache.resp
+  when (io.uncacheOutstanding) {
+    io.uncache.resp <> loadQueue.io.uncache.resp  
+  } .otherwise {
+    when(pendingstate === s_load){
+      io.uncache.resp <> loadQueue.io.uncache.resp
+    }.otherwise{
+      io.uncache.resp <> storeQueue.io.uncache.resp
+    }
   }
+  
 
   assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
-  assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
+  when (!io.uncacheOutstanding) {
+    assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
+  }
 
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull

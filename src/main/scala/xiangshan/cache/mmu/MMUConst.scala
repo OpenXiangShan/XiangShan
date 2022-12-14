@@ -93,7 +93,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 5000
+  val timeOutThreshold = 10000
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -127,7 +127,7 @@ trait HasTlbConst extends HasXSParameter {
 
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
     val width = v.getWidth
-    val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U)))
+    val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U(log2Up(width).W))))
     val full = Cat(v).andR
     Mux(full, lruIdx, emptyIdx)
   }
