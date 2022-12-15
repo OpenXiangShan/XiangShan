@@ -239,7 +239,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
 
-  io.lsu.s2_hit := s2_hit_dup_lsu
+  io.lsu.s2_hit := s2_hit_dup_lsu && !s2_wpu_pred_fail
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
@@ -268,9 +268,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
 
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
-  assert(!RegNext(s2_valid && (s2_tag_match && !s2_hit)))
-  assert(!RegNext(s2_valid && (s2_hit_dup_lsu =/= s2_hit)))
+  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
+  // assert(!RegNext(s2_valid && (s2_tag_match && !s2_hit)))
+  // assert(!RegNext(s2_valid && (s2_hit_dup_lsu =/= s2_hit)))
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -305,7 +305,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
-  val real_miss = !s2_hit_dup_lsu
+  val real_miss = !s2_hit_dup_lsu // FIXME: real miss need be the s2_real_way_en?
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
