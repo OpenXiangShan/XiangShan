@@ -122,6 +122,10 @@ object difftest extends XSModule with SbtModule {
   override def millSourcePath = os.pwd / "difftest"
 }
 
+object yunsuan extends XSModule with SbtModule {
+  override def millSourcePath = os.pwd / "yunsuan"
+}
+
 object fudian extends XSModule with SbtModule
 
 // extends this trait to use XiangShan in other projects
@@ -131,6 +135,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
   def rocketModule: PublishModule
   def difftestModule: PublishModule
   def huancunModule: PublishModule
+  def yunsuanModule: PublishModule
   def fudianModule: PublishModule
 
   override def millSourcePath = os.pwd
@@ -143,6 +148,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
     rocketModule,
     difftestModule,
     huancunModule,
+    yunsuanModule,
     fudianModule
   )
 
@@ -162,5 +168,6 @@ object XiangShan extends CommonXiangShan {
   override def rocketModule = rocketchip
   override def difftestModule = difftest
   override def huancunModule = huancun
+  override def yunsuanModule = yunsuan
   override def fudianModule = fudian
 }
