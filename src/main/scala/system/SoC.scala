@@ -111,6 +111,7 @@ trait HaveSlaveAXI4Port {
   l3_xbar :=
     TLFIFOFixer() :=
     TLWidthWidget(32) :=
+    TLBuffer() :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(32)) :=
     AXI4Fragmenter() :=
