@@ -40,7 +40,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
-    val vecReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
+    val vecReadPorts = Vec(RenameWidth, Vec(5, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
@@ -63,10 +63,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   intFreeList.io.debug_rat <> io.debug_int_rat
   fpFreeList.io.commit     <> io.robCommits
   fpFreeList.io.debug_rat  <> io.debug_fp_rat
-
-  object RegType extends Enumeration { val Reg_I, Reg_F, Reg_V = Value }
-  import RegType._
-  type   RegType = RegType.Value
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   // fp and vec share `fpFreeList`
@@ -114,9 +110,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     */
   val uops = Wire(Vec(RenameWidth, new MicroOp))
   uops.foreach( uop => {
-    uop.srcState(0) := DontCare
-    uop.srcState(1) := DontCare
-    uop.srcState(2) := DontCare
+    uop.srcState := DontCare
     uop.robIdx := DontCare
     uop.debugInfo := DontCare
     uop.lqIdx := DontCare
@@ -186,6 +180,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }
     uops(i).psrc(2) := Mux1H(uops(i).ctrl.srcType(2)(2, 1), Seq(io.fpReadPorts(i)(2), io.vecReadPorts(i)(2)))
+    uops(i).psrc(3) := io.vecReadPorts(i)(3)
     uops(i).old_pdest := Mux1H(Seq(
       uops(i).ctrl.rfWen  -> io.intReadPorts(i).last,
       uops(i).ctrl.fpWen  -> io.fpReadPorts (i).last,
@@ -255,7 +250,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     */
   // a simple functional model for now
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
-  val bypassCond = Wire(Vec(4, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  val bypassCond = Wire(Vec(5, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   for (i <- 1 until RenameWidth) {
     val vecCond = io.in(i).bits.ctrl.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
     val fpCond = io.in(i).bits.ctrl.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
@@ -278,7 +273,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(2) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(2)(i-1).asBools).foldLeft(uops(i).psrc(2)) {
       (z, next) => Mux(next._2, next._1, z)
     }
-    io.out(i).bits.old_pdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).old_pdest) {
+    io.out(i).bits.psrc(3) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
+      (z, next) => Mux(next._2, next._1, z)
+    }
+    io.out(i).bits.old_pdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(4)(i-1).asBools).foldLeft(uops(i).old_pdest) {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
@@ -356,6 +354,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
       p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
       p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
+      p"lsrc(3):${in.bits.ctrl.lsrc(3)} -> psrc(3):${out.bits.psrc(3)} " +
       p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
       p"old_pdest:${out.bits.old_pdest}\n"
     )
