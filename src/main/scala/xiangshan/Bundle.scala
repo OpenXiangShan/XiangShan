@@ -151,9 +151,9 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  val srcType = Vec(3, SrcType())
-  val lsrc = Vec(3, UInt(5.W))
-  val ldest = UInt(5.W)
+  val srcType = Vec(4, SrcType())
+  val lsrc = Vec(4, UInt(6.W))
+  val ldest = UInt(6.W)
   val fuType = FuType()
   val fuOpType = FuOpType()
   val rfWen = Bool()
@@ -173,7 +173,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 
-  private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
+  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen,
     isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
@@ -220,8 +220,8 @@ class LSIdx(implicit p: Parameters) extends XSBundle {
 
 // CfCtrl -> MicroOp at Rename Stage
 class MicroOp(implicit p: Parameters) extends CfCtrl {
-  val srcState = Vec(3, SrcState())
-  val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
+  val srcState = Vec(4, SrcState())
+  val psrc = Vec(4, UInt(PhyRegIdxWidth.W))
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
@@ -356,7 +356,7 @@ class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
 }
 
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(5.W)
+  val ldest = UInt(6.W)
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()

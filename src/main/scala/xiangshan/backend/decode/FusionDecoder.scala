@@ -467,7 +467,7 @@ class FusionDecodeInfo extends Bundle {
 class FusionDecodeReplace extends Bundle {
   val fuType = Valid(FuType())
   val fuOpType = Valid(FuOpType())
-  val lsrc2 = Valid(UInt(5.W))
+  val lsrc2 = Valid(UInt(6.W))
   val src2Type = Valid(SrcType())
 
   def update(cs: CtrlSignals): Unit = {
