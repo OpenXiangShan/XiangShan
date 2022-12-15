@@ -22,6 +22,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.issue._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.vector._
 import xiangshan.backend.exu._
 import xiangshan.backend.{Std, ScheLaneConfig}
 
@@ -598,6 +599,7 @@ package object xiangshan {
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
+  def vipuGen(p: Parameters) = new VIPU()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -795,11 +797,22 @@ package object xiangshan {
     latency = UncertainLatency()
   )
 
+  val vipuCfg = FuConfig(
+    name = "vipu",
+    fuGen = vipuGen,
+    fuSel = (uop: MicroOp) => FuType.vipu === uop.ctrl.fuType,
+    fuType = FuType.vipu,
+    numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false,
+    numVecSrc = 2, writeVecRf = true,
+    fastUopOut = true, // TODO: check
+    fastImplemented = true, //TODO: check
+  )
+
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",

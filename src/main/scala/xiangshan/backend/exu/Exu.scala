@@ -131,10 +131,12 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
 
   val fuIn = config.fuConfigs.map(fuCfg =>
     if (fuCfg.numIntSrc > 0) {
+      // read rf from int-rf
       assert(fuCfg.numFpSrc == 0 || config == StdExeUnitCfg)
       io.fromInt
     } else {
-      assert(fuCfg.numFpSrc > 0)
+      // read rf from fp/vec-rf
+      assert(fuCfg.numFpSrc > 0 || fuCfg.numVecSrc > 0)
       io.fromFp
     }
   )
