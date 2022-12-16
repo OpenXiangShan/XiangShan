@@ -4,10 +4,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.uintToBitPat
+import freechips.rocketchip.rocket.Instructions._
 import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import freechips.rocketchip.rocket.Instructions._
+import yunsuan.{VipuType, VfpuType}
 
 abstract class VecType {
   def X = BitPat("b?")

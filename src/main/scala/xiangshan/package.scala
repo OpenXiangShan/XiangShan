@@ -132,13 +132,14 @@ package object xiangshan {
     def X = BitPat("b???????")
   }
 
-  object VipuType {
-    def dummy = 0.U(7.W)
-  }
+  // move VipuType and VfpuType into YunSuan/package.scala
+  // object VipuType {
+  //   def dummy = 0.U(7.W)
+  // }
 
-  object VfpuType {
-    def dummy = 0.U(7.W)
-  }
+  // object VfpuType {
+  //   def dummy = 0.U(7.W)
+  // }
 
   object VlduType {
     def dummy = 0.U(7.W)

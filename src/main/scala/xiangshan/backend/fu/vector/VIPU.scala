@@ -20,10 +20,14 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import utils.XSError
 import xiangshan.backend.fu.FunctionUnit
 import yunsuan.vector.VectorIntAdder
+import yunsuan.{VipuType, VectorElementFormat}
 
 class VIPU(implicit p: Parameters) extends FunctionUnit(/*len = 128/VLEN*/) {
+  XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
+
   val uop = io.in.bits.uop
 
   val AdderWidth = 64
@@ -32,8 +36,8 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(/*len = 128/VLEN*/) {
   for(i <- 0 until NumAdder) {
     adder(i).io.in_0 := io.in.bits.src(0)(AdderWidth*(i+1)-1, AdderWidth*i)
     adder(i).io.in_1 := io.in.bits.src(1)(AdderWidth*(i+1)-1, AdderWidth*i)
-    adder(i).io.int_format := DontCare // TODO
-    adder(i).io.op_code := DontCare // TODO
+    adder(i).io.int_format := VectorElementFormat.d // TODO
+    adder(i).io.op_code := uop.ctrl.fuOpType
     adder(i).io.carry_or_borrow_in := DontCare
   }
   val adder_result = VecInit(adder.map(_.io.out)).asUInt
