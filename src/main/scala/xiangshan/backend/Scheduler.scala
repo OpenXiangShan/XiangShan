@@ -131,7 +131,9 @@ case class ScheLaneConfig (
   numDeq: Int,
   intFastWakeupTarget: Seq[ExuConfig] = Seq(),
   fpFastWakeupTarget: Seq[ExuConfig] = Seq()
-)
+){
+  def name: String = exuConfig.name
+}
 
 
 case class DpPortMapConfig(rsIdx: Int, dpIdx: Int)
@@ -194,6 +196,7 @@ class Scheduler(
     rs.addIssuePort(cfg.exuConfig, cfg.numDeq)
     rs.addWakeup(wakeupPorts(i))
     rs.addEarlyWakeup(numAllFastPorts(i))
+    rs.suggestName(s"rs${cfg.name}_Wrapper")
     rs
   }
   // connect to dispatch
