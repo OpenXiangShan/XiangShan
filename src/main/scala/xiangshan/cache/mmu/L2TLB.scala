@@ -476,29 +476,83 @@ class PTEHelper() extends ExtModule {
   val pf     = IO(Output(UInt(8.W)))
 }
 
+class PTWDelayN[T <: Data](gen: T, n: Int, flush: Bool) extends Module {
+  val io = IO(new Bundle() {
+    val in = Input(gen)
+    val out = Output(gen)
+    val ptwflush = Input(flush.cloneType)
+  })
+  val out = RegInit(VecInit(Seq.fill(n)(0.U.asTypeOf(gen))))
+  val t = RegInit(VecInit(Seq.fill(n)(0.U.asTypeOf(gen))))
+  out(0) := io.in
+  if (n == 1) {
+    io.out := out(0)
+  } else {
+    when (io.ptwflush) {
+      for (i <- 0 until n) {
+        t(i) := 0.U.asTypeOf(gen)
+        out(i) := 0.U.asTypeOf(gen)
+      }
+      io.out := 0.U.asTypeOf(gen)
+    } .otherwise {
+      for (i <- 1 until n) {
+        t(i-1) := out(i-1)
+        out(i) := t(i-1)
+      }
+      io.out := out(n-1)
+    }
+  }
+}
+
+object PTWDelayN {
+  def apply[T <: Data](in: T, n: Int, flush: Bool): T = {
+    val delay = Module(new PTWDelayN(in.cloneType, n, flush))
+    delay.io.in := in
+    delay.io.ptwflush := flush
+    delay.io.out
+  }
+}
+
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)
-
+  val flush = VecInit(Seq.fill(PtwWidth)(false.B))
+  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed, itlbParams.fenceDelay)
+  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed, ldtlbParams.fenceDelay)
   for (i <- 0 until PtwWidth) {
-    io.tlb(i).req(0).ready := true.B
-
     val helper = Module(new PTEHelper())
     helper.clock := clock
-    helper.enable := io.tlb(i).req(0).valid
     helper.satp := io.csr.tlb.satp.ppn
-    helper.vpn := io.tlb(i).req(0).bits.vpn
+
+    if (coreParams.softPTWDelay == 1) {
+      helper.enable := io.tlb(i).req(0).fire
+      helper.vpn := io.tlb(i).req(0).bits.vpn
+    } else {
+      helper.enable := PTWDelayN(io.tlb(i).req(0).fire, coreParams.softPTWDelay - 1, flush(i))
+      helper.vpn := PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay - 1, flush(i))
+    }
+
     val pte = helper.pte.asTypeOf(new PteBundle)
     val level = helper.level
     val pf = helper.pf
+    val empty = RegInit(true.B)
+    when (io.tlb(i).req(0).fire) {
+      empty := false.B
+    } .elsewhen (io.tlb(i).resp.fire || flush(i)) {
+      empty := true.B
+    }
 
-    io.tlb(i).resp.valid := RegNext(io.tlb(i).req(0).valid)
+    io.tlb(i).req(0).ready := empty || io.tlb(i).resp.fire
+    io.tlb(i).resp.valid := PTWDelayN(io.tlb(i).req(0).fire, coreParams.softPTWDelay, flush(i))
     assert(!io.tlb(i).resp.valid || io.tlb(i).resp.ready)
-    io.tlb(i).resp.bits.entry.tag := RegNext(io.tlb(i).req(0).bits.vpn)
+    io.tlb(i).resp.bits.entry.tag := PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay, flush(i))
     io.tlb(i).resp.bits.entry.ppn := pte.ppn
     io.tlb(i).resp.bits.entry.perm.map(_ := pte.getPerm())
     io.tlb(i).resp.bits.entry.level.map(_ := level)
     io.tlb(i).resp.bits.pf := pf
     io.tlb(i).resp.bits.af := DontCare // TODO: implement it
+    io.tlb(i).resp.bits.entry.v := !pf
+    io.tlb(i).resp.bits.entry.prefetch := DontCare
+    io.tlb(i).resp.bits.entry.asid := io.csr.tlb.satp.asid
   }
 }
 
