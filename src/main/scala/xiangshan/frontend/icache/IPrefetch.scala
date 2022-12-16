@@ -296,6 +296,11 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
         b.confidence := 0.U
     }
   }
+  if(DebugFlags.fdip){
+    when(io.fencei){
+      printf(" %d :fencei\n",GTimer())
+    }
+  }
 
 }
 
@@ -328,7 +333,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val fromMainPipe = io.fromMainPipe
   val (toITLB,  fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
   io.iTLBInter.req_kill := false.B
-  val (toIMeta, fromIMeta) = (io.toIMeta, io.fromIMeta.metaData(0))
+  val (toIMeta, fromIMeta, fromIMetaValid) = (io.toIMeta, io.fromIMeta.metaData(0), io.fromIMeta.entryValid(0))
   val (toIPFBuffer, fromIPFBuffer) = (io.IPFBufferRead.req, io.IPFBufferRead.resp)
   val (toPMP,  fromPMP)   = (io.pmp.req, io.pmp.resp)
   val toMissUnit = io.toMissUnit
@@ -390,9 +395,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p1_meta_ptags       = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.tag)),valid = RegNext(p0_fire))
   val p1_meta_cohs        = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.coh)),valid = RegNext(p0_fire))
+  val p1_meta_valids      = ResultHoldBypass(data = fromIMetaValid,valid = RegNext(p0_fire))
 
   val p1_tag_eq_vec       =  VecInit(p1_meta_ptags.map(_  ===  p1_ptag ))
-  val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_cohs(w).isValid()})
+  val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_valids(w)})
   val p1_tag_match        =  ParallelOR(p1_tag_match_vec)
   toIPFBuffer.vSetIdx := get_idx(p1_vaddr)
   toIPFBuffer.paddr := tlb_resp_paddr
@@ -595,7 +601,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     }
 
     is(s_write_back){
-      state := Mux(io.piq_write_ipbuffer.fire(), s_finish, s_write_back)
+      state := Mux(io.piq_write_ipbuffer.fire() || needFlush, s_finish, s_write_back)
     }
 
     is(s_finish){

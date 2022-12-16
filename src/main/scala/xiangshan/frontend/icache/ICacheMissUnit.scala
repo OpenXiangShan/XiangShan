@@ -81,6 +81,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     //write back to Prefetch Buffer
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
+    val fencei = Input(Bool())
+
   })
 
   /** default value for control signals */
@@ -270,6 +272,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val entry = Module(new ICacheMissEntry(edge, i))
 
     entry.io.id := i.U
+    entry.io.fencei := io.fencei
 
     // entry req
     entry.io.req.valid := io.req(i).valid
