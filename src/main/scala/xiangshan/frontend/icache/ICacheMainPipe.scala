@@ -546,10 +546,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** miss handle information to iprefetch pipe */
   //TODO: better cancle logic
   val miss_handle_reg = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  when(s1_fire && !s1_final_port_hit(0)){
+  val s1_port_miss = Seq(s1_fire && !s1_final_port_hit(0), s1_fire && !s1_final_port_hit(1) && s1_double_line)
+  when(s1_port_miss(0)) {
     miss_handle_reg(0) := true.B
   }
-  when(s1_fire && !s1_final_port_hit(1) && s1_double_line) {
+  when(s1_port_miss(1)) {
     miss_handle_reg(1) := true.B
   }
   when(fromMSHR(0).fire()) {
@@ -560,7 +561,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
   (0 until PortNumber).foreach{
     i =>
-      toIPFPipe(i).valid := miss_handle_reg(i)
+      toIPFPipe(i).valid := miss_handle_reg(i) || s1_port_miss(i)
       toIPFPipe(i).bits.vSetIdx := s2_req_vsetIdx(i)
       toIPFPipe(i).bits.ptage := s2_req_ptags(i)
   }

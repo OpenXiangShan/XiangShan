@@ -104,6 +104,15 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
+  val needFlushReg = RegInit(false.B)
+  when(state === s_idle) {
+    needFlushReg := false.B
+  }
+  when((state =/= s_idle) && io.fencei) {
+    needFlushReg := true.B
+  }
+  val needFlush = needFlushReg || io.fencei
+
   if(DebugFlags.fdip){
     when(io.mem_acquire.fire()) {
       printf("{%d} Miss unit: send an acquire, source id: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), id.U, req.vaddr, addrAlign(req.vaddr, blockBytes, VAddrBits))
@@ -165,13 +174,13 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
 
     is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire(), s_wait_resp, s_write_back)
+      state := Mux((io.meta_write.fire() && io.data_write.fire()) || needFlush, s_wait_resp, s_write_back)
     }
 
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt
       io.resp.bits.corrupt := req_corrupt
-      when(io.resp.fire()) {
+      when(io.resp.fire() || needFlush) {
         state := s_idle
       }
     }
@@ -215,10 +224,10 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val miss_new_coh = ClientMetadata(ClientStates.Branch)
 
-  io.meta_write.valid := (state === s_write_back)
+  io.meta_write.valid := (state === s_write_back) && !needFlush
   io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
 
-  io.data_write.valid := (state === s_write_back)
+  io.data_write.valid := (state === s_write_back) && !needFlush
   io.data_write.bits.generate(data = respDataReg.asUInt,
                               idx  = req_idx,
                               waymask = req_waymask,
@@ -229,7 +238,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     "entryPenalty" + Integer.toString(id, 10),
     BoolStopWatch(
       start = io.req.fire(),
-      stop = io.resp.valid,
+      stop = io.resp.valid || needFlush,
       startHighPriority = true)
   )
   XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire())
