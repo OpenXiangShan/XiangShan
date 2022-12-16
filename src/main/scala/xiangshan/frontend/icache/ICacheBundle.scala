@@ -114,7 +114,7 @@ class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
     val vaddr  = Vec(PortNumber, UInt(VAddrBits.W))
     val rvalid = Vec(PortNumber, Bool())
     //stage 1: paddr by s1
-    val paddr = Vec(PortNumber, UInt(VAddrBits.W))
+    val paddr = Vec(PortNumber, UInt(PAddrBits.W))
   }))
   /** output */
   val resp = ValidIO(new Bundle{
