@@ -502,26 +502,41 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.storeset_no_fast_wakeup := slvpredctl(3)
   csrio.customCtrl.lvpred_timeout := slvpredctl(8, 4)
 
-  // smblockctl: memory block configurations
-  // bits 0-3: store buffer flush threshold (default: 8 entries)
+  //  smblockctl: memory block configurations
+  //  +------------------------------+---+----+----+-----+--------+
+  //  |XLEN-1                       8| 7 | 6  | 5  |  4  |3      0|
+  //  +------------------------------+---+----+----+-----+--------+
+  //  |           Reserved           | O | CE | SP | LVC |   Th   |
+  //  +------------------------------+---+----+----+-----+--------+
+  //  Description:
+  //  Bit 3-0   : Store buffer flush threshold (Th).
+  //  Bit 4     : Enable load violation check after reset (LVC).
+  //  Bit 5     : Enable soft-prefetch after reset (SP).
+  //  Bit 6     : Enable cache error after reset (CE).
+  //  Bit 7     : Enable uncache write outstanding (O).
+  //  Others    : Reserved.
+
   val smblockctl_init_val =
     ("hf".U & StoreBufferThreshold.U) |
     (EnableLdVioCheckAfterReset.B.asUInt << 4) |
     (EnableSoftPrefetchAfterReset.B.asUInt << 5) |
-    (EnableCacheErrorAfterReset.B.asUInt << 6)
+    (EnableCacheErrorAfterReset.B.asUInt << 6) |
+    (EnableUncacheWriteOutstanding.B.asUInt << 7)
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
   csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
   csrio.customCtrl.cache_error_enable := smblockctl(6)
+  csrio.customCtrl.uncache_write_outstanding_enable := smblockctl(7)
 
   println("CSR smblockctl init value:")
   println("  Store buffer replace threshold: " + StoreBufferThreshold)
   println("  Enable ld-ld vio check after reset: " + EnableLdVioCheckAfterReset)
   println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
-
+  println("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
+  
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.svinval_enable := srnctl(1)

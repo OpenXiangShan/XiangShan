@@ -60,6 +60,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
   val tlbMiss = Bool()
   val ptwBack = Bool()
   val mmio = Bool()
+  val atomic = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 
   val forwardMask = Vec(8, Bool())
@@ -91,6 +92,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     tlbMiss := input.tlbMiss
     ptwBack := input.ptwBack
     mmio := input.mmio
+    atomic := input.atomic
     rsIdx := input.rsIdx
     forwardMask := input.forwardMask
     forwardData := input.forwardData
@@ -162,6 +164,17 @@ class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
 class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new LoadViolationQueryReq)
   val resp = Flipped(Valid(new LoadViolationQueryResp))
+}
+
+class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
+  //  robIdx: Requestor's (a store instruction) rob index for match logic. 
+  val robIdx = new RobPtr
+
+  //  paddr: requestor's (a store instruction) physical address for match logic. 
+  val paddr = UInt(PAddrBits.W)
+
+  //  mask: requestor's (a store instruction) data width mask for match logic.
+  val mask = UInt(8.W)  
 }
 
 // Store byte valid mask write bundle
