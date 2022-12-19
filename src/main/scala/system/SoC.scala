@@ -113,6 +113,7 @@ trait HaveSlaveAXI4Port {
     TLWidthWidget(32) :=
     TLBuffer() :=
     AXI4ToTL() :=
+    AXI4Buffer() :=
     AXI4UserYanker(Some(32)) :=
     AXI4Fragmenter() :=
     AXI4Buffer() :=
