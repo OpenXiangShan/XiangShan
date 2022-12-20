@@ -111,7 +111,9 @@ trait HaveSlaveAXI4Port {
   l3_xbar :=
     TLFIFOFixer() :=
     TLWidthWidget(32) :=
+    TLBuffer() :=
     AXI4ToTL() :=
+    AXI4Buffer() :=
     AXI4UserYanker(Some(16)) :=
     AXI4Fragmenter() :=
     AXI4Buffer() :=
@@ -280,7 +282,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    
+
     debugModule.module.io <> debug_module_io
 
     // sync external interrupts
