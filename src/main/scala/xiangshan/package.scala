@@ -528,6 +528,10 @@ package object xiangshan {
     def INVALID_INSTR = "b0110".U
     def IMM_B6 = "b1000".U
 
+    def IMM_OPIVIS = "b1001".U
+    def IMM_OPIVIU = "b1010".U
+
+
     def X      = BitPat("b????")
 
     def apply() = UInt(4.W)
