@@ -31,7 +31,7 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
 
 case class ICacheParameters(
-    nSets: Int = 256,
+    nSets: Int =  64,
     nWays: Int = 8,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
