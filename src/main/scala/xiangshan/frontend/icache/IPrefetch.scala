@@ -66,6 +66,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val toIMeta         = Decoupled(new ICacheReadBundle)
   val fromIMeta       = Input(new ICacheMetaRespBundle)
   val toMissUnit      = new IPrefetchToMissUnit
+  val freePIQEntry    = Input(UInt(log2Ceil(nPrefetchEntries).W))
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
   val IPFBufferRead   = Flipped(new IPFBufferFilterRead)
   /** icache main pipe to prefetch pipe*/
@@ -73,6 +74,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
+  val fencei         = Input(Bool())
 }
 
 /** Prefetch Buffer **/
@@ -460,15 +462,19 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toMissUnit.enqReq.bits.paddr := p3_paddr
   toMissUnit.enqReq.bits.vSetIdx := p3_vidx
 
-  when(reachMaxSize){
+  when(io.fencei){
     maxPrefetchCoutner := 0.U
 
     prefetch_dir.foreach(_.valid := false.B)
   }.elsewhen(toMissUnit.enqReq.fire()){
-    maxPrefetchCoutner := maxPrefetchCoutner + 1.U
+    when(reachMaxSize){
+      prefetch_dir(io.freePIQEntry).paddr := p3_paddr
+    }.otherwise {
+      maxPrefetchCoutner := maxPrefetchCoutner + 1.U
 
-    prefetch_dir(maxPrefetchCoutner).valid := true.B
-    prefetch_dir(maxPrefetchCoutner).paddr := p3_paddr
+      prefetch_dir(maxPrefetchCoutner).valid := true.B
+      prefetch_dir(maxPrefetchCoutner).paddr := p3_paddr
+    }
   }
 
   p3_ready := toMissUnit.enqReq.ready || !enableBit

@@ -262,6 +262,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
+    val freePIQEntry          = Output(UInt(log2Ceil(nPrefetchEntries).W))
 
     val fencei = Input(Bool())
     val piq_write_ipbuffer = ValidIO(new IPFBufferWrite)
@@ -339,6 +340,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   }
   alloc := PriorityEncoder(prefEntries.map(_.io.req.ready))
   io.prefetch_req.ready := ParallelOR(prefEntries.map(_.io.req.ready))
+  io.freePIQEntry := PriorityEncoder(prefEntries.map(_.io.req.ready))
   (0 until nPrefetchEntries).foreach(i => toMainPipe(i) <> prefEntries(i).io.prefetch_entry_data)
   val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, tl_a_chanel:_*)

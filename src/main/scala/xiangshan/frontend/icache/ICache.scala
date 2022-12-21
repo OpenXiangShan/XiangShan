@@ -594,6 +594,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
   missUnit.io.hartId := io.hartId
   prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
+  prefetchPipe.io.fencei := io.fencei
+  prefetchPipe.io.freePIQEntry := missUnit.io.freePIQEntry
 
   bus.b.ready := false.B
   bus.c.valid := false.B
