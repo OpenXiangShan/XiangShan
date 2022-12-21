@@ -746,3 +746,32 @@ object ValidHoldBypass{
     valid || infire
   }
 }
+
+class L1TlbDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+}
+
+class PageCacheDB(implicit p: Parameters) extends TlbBundle with HasPtwConst {
+  val vpn = UInt(vpnLen.W)
+  val source = UInt(bSourceWidth.W)
+  val bypassed = Bool()
+  val is_first = Bool()
+  val prefetched = Bool()
+  val prefetch = Bool()
+  val l2Hit = Bool()
+  val l1Hit = Bool()
+  val hit = Bool()
+}
+
+class PTWDB(implicit p: Parameters) extends TlbBundle with HasPtwConst {
+  val vpn = UInt(vpnLen.W)
+  val source = UInt(bSourceWidth.W)
+}
+
+class L2TlbPrefetchDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+}
+
+class L2TlbMissQueueDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+}
