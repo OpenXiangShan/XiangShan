@@ -128,7 +128,7 @@ package object xiangshan {
   }
 
   object FuOpType {
-    def apply() = UInt(7.W)
+    def apply() = UInt(8.W)
     def X = BitPat("b???????")
   }
 
@@ -343,6 +343,9 @@ package object xiangshan {
     def xorzexth   = "b110_0101".U
     def orcblsb    = "b110_0110".U
     def orcbzexth  = "b110_0111".U
+    def vsetvli    = "b1000_0000".U
+    def vsetvl     = "b1000_0001".U
+    def vsetivli   = "b1000_0010".U
 
     def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
     def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
@@ -530,7 +533,8 @@ package object xiangshan {
 
     def IMM_OPIVIS = "b1001".U
     def IMM_OPIVIU = "b1010".U
-
+    def IMM_VSETVLI   = "b1100".U
+    def IMM_VSETIVLI  = "b1101".U
 
     def X      = BitPat("b????")
 
