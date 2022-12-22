@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams, RSMod}
-import xiangshan.backend.regfile.{Regfile, RfReadPort}
+import xiangshan.backend.regfile.{IntRegFile, VfRegFile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 import chisel3.ExcitingUtils
@@ -272,11 +272,11 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // special ports for RS that needs to read from other schedulers
     // In: read response from other schedulers
     // Out: read request to other schedulers
-    val intRfReadIn = if (!outer.hasIntRf && outer.numIntRfReadPorts > 0) Some(Vec(outer.numIntRfReadPorts, Flipped(new RfReadPort(XLEN)))) else None
-    val intRfReadOut = if (outer.outIntRfReadPorts > 0) Some(Vec(outer.outIntRfReadPorts, new RfReadPort(XLEN))) else None
-    val fpRfReadIn = if (!outer.hasFpRf && outer.numFpRfReadPorts > 0) Some(Vec(outer.numFpRfReadPorts, Flipped(new RfReadPort(XLEN)))) else None
+    val intRfReadIn = if (!outer.hasIntRf && outer.numIntRfReadPorts > 0) Some(Vec(outer.numIntRfReadPorts, Flipped(new RfReadPort(XLEN, IntPregIdxWidth)))) else None
+    val intRfReadOut = if (outer.outIntRfReadPorts > 0) Some(Vec(outer.outIntRfReadPorts, new RfReadPort(XLEN, IntPregIdxWidth))) else None
+    val fpRfReadIn = if (!outer.hasFpRf && outer.numFpRfReadPorts > 0) Some(Vec(outer.numFpRfReadPorts, Flipped(new RfReadPort(VLEN, VfPregIdxWidth)))) else None
     val fpStateReadIn = if (!outer.hasFpRf && outer.numFpRfReadPorts > 0) Some(Vec(outer.numFpRfReadPorts, Flipped(new BusyTableReadIO))) else None
-    val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
+    val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(VLEN, VfPregIdxWidth))) else None
     val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
@@ -396,12 +396,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat
     if (isInt) {
       val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
-      Regfile(NRPhyRegs, readIntRf, wen, waddr, wdata, true, debugRead = Some(debugRead))
+      IntRegFile(IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
     }
     else {
       // For floating-point function units, every instruction writes either int or fp regfile.
-      val wen = wbPorts.map(_.valid)
-      Regfile(NRPhyRegs, readFpRf, wen, waddr, wdata, false, debugRead = Some(debugRead))
+      // Multi-wen for each regfile
+      val wen = Seq.fill(VLEN/XLEN)(wbPorts.map(_.valid))
+      val widenWdata = wdata.map(ZeroExt(_, VLEN))
+      VfRegFile(VfPhyRegs, VLEN/XLEN, readFpRf, wen, waddr, widenWdata, debugReadAddr = Some(debugRead))
     }
   }
 
