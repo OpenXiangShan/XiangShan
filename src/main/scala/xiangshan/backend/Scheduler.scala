@@ -19,7 +19,7 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
+import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestArchVecRegState}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
@@ -295,6 +295,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_vec_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     // perf
     val sqFull = Input(Bool())
     val lqFull = Input(Bool())
@@ -393,7 +394,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val wbPorts = if (isInt) io.writeback.take(intRfWritePorts) else io.writeback.drop(intRfWritePorts)
     val waddr = wbPorts.map(_.bits.uop.pdest)
     val wdata = wbPorts.map(_.bits.data)
-    val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat
+    val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat ++ io.extra.debug_vec_rat
     if (isInt) {
       val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
       IntRegFile(IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
@@ -559,7 +560,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.fpr := RegNext(RegNext(VecInit(fpRfReadData.takeRight(32))))
+    difftest.io.fpr := RegNext(RegNext(VecInit(fpRfReadData.map(_(XLEN-1, 0)).takeRight(64).take(32))))
+  }
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
+    val difftest = Module(new DifftestArchVecRegState)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.vpr := RegNext(RegNext(VecInit(fpRfReadData.map((x : UInt) => (List(x(63, 0), x(127, 64)))).flatten.takeRight(64))))
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
