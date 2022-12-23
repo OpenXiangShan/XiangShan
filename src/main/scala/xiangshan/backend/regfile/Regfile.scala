@@ -35,6 +35,7 @@ class RfWritePort(len: Int, width: Int)(implicit p: Parameters) extends XSBundle
 
 class Regfile
 (
+  name: String,
   numReadPorts: Int,
   numWritePorts: Int,
   hasZero: Boolean,
@@ -47,7 +48,7 @@ class Regfile
     val debug_rports = Vec(32, new RfReadPort(len, width))
   })
 
-  println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWritePorts)
+  println(name + ": size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWritePorts)
 
   val mem = Reg(Vec(NRPhyRegs, UInt(len.W)))
   for (r <- io.readPorts) {
@@ -68,6 +69,7 @@ class Regfile
 
 object Regfile {
   def apply(
+    name         : String,
     numEntries   : Int,
     raddr        : Seq[UInt],
     wen          : Seq[Bool],
@@ -86,7 +88,7 @@ object Regfile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val regfile = Module(new Regfile(numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
+    val regfile = Module(new Regfile(name, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
     val rdata = regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>
       rport.addr := addr
       rport.data
@@ -126,6 +128,7 @@ object Regfile {
 
 object IntRegFile {
   def apply(
+    name         : String,
     numEntries   : Int,
     raddr        : Seq[UInt],
     wen          : Seq[Bool],
@@ -135,13 +138,14 @@ object IntRegFile {
     debugReadAddr: Option[Seq[UInt]] = None,
   )(implicit p: Parameters): Seq[UInt] = {
     Regfile(
-      numEntries, raddr, wen, waddr, wdata,
+      name, numEntries, raddr, wen, waddr, wdata,
       hasZero = true, withReset, debugReadAddr)
   }
 }
 
 object VfRegFile {
   def apply(
+    name         : String,
     numEntries   : Int,
     splitNum     : Int,
     raddr        : Seq[UInt],
@@ -154,7 +158,7 @@ object VfRegFile {
     require(splitNum >= 1, "splitNum should be no less than 1")
     require(splitNum == wen.length, "splitNum should be equal to length of wen vec")
     if (splitNum == 1) {
-      Regfile(numEntries, raddr, wen.head, waddr, wdata,
+      Regfile(name, numEntries, raddr, wen.head, waddr, wdata,
         hasZero = false, withReset, debugReadAddr)
     }
 
@@ -165,7 +169,7 @@ object VfRegFile {
     var rdataVec = Wire(Vec(splitNum, Vec(numReadPorts, UInt(dataWidth.W))))
     for (i <- 0 until splitNum) {
       wdataVec(i) := wdata.map(_((i + 1) * dataWidth - 1, i * dataWidth))
-      rdataVec(i) := Regfile(numEntries, raddr, wen(i), waddr, wdataVec(i),
+      rdataVec(i) := Regfile(name+s"Part${i}", numEntries, raddr, wen(i), waddr, wdataVec(i),
         hasZero = false, withReset, debugReadAddr)
     }
     val rdata = Wire(Vec(numReadPorts, UInt(wdata.head.getWidth.W)))

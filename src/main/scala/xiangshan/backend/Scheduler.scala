@@ -396,14 +396,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat
     if (isInt) {
       val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
-      IntRegFile(IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
+      IntRegFile("IntRegFile", IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
     }
     else {
       // For floating-point function units, every instruction writes either int or fp regfile.
       // Multi-wen for each regfile
       val wen = Seq.fill(VLEN/XLEN)(wbPorts.map(_.valid))
       val widenWdata = wdata.map(ZeroExt(_, VLEN))
-      VfRegFile(VfPhyRegs, VLEN/XLEN, readFpRf, wen, waddr, widenWdata, debugReadAddr = Some(debugRead))
+      VfRegFile("VecFpRegFile", VfPhyRegs, VLEN/XLEN, readFpRf, wen, waddr, widenWdata, debugReadAddr = Some(debugRead))
     }
   }
 
