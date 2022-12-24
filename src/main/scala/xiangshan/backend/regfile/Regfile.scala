@@ -45,7 +45,7 @@ class Regfile
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
-    val debug_rports = Vec(32, new RfReadPort(len, width))
+    val debug_rports = Vec(64, new RfReadPort(len, width))
   })
 
   println(name + ": size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWritePorts)

@@ -69,9 +69,9 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(UInt(XLEN.W))
   val vxsat = Input(UInt(1.W))
   val vxrm = Input(UInt(2.W))
-  val vcsr = Output(Valid(UInt(XLEN.W)))
+  val vcsr = Input(UInt(XLEN.W))
   val vl = Input(UInt(XLEN.W))
-  val vtype = Output(Valid(UInt(XLEN.W)))
+  val vtype = Input(UInt(XLEN.W))
   val vlenb = Input(UInt(XLEN.W))
   
   val vill = Input(UInt(1.W))
@@ -80,10 +80,10 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vsew = Input(UInt(3.W))
   val vlmul = Input(UInt(3.W))
 
+  val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vl = Output(Valid(UInt(XLEN.W)))
+  val set_vtype = Output(Valid(UInt(XLEN.W)))
 
-  val vstart_clr = Output(Bool())
-  val vstart_inc = Output(Bool())
   val dirty_vs = Output(Bool())
 }
 
@@ -624,7 +624,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
-  val vlenb = RegInit(32.U(XLEN.W))
+  val vlenb = RegInit(0.U(XLEN.W))
 
   // set mstatus->sd and mstatus->vs when true
   val csrw_dirty_vs_state = WireInit(false.B)
@@ -670,25 +670,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     vcsrOld.asUInt
   }
 
-  def vtype_wfn(wdata: UInt): UInt = {
-    val vtypeOld = WireInit(vtype.asTypeOf(new VtypeStruct))
-    csrw_dirty_vs_state := true.B
-    vtypeOld.vill := wdata.asTypeOf(vtypeOld).vill
-    vtypeOld.vma := wdata.asTypeOf(vtypeOld).vma
-    vtypeOld.vta := wdata.asTypeOf(vtypeOld).vta
-    vtypeOld.vsew := wdata.asTypeOf(vtypeOld).vsew
-    vtypeOld.vlmul := wdata.asTypeOf(vtypeOld).vlmul
-    vtypeOld.asUInt
-  }
-
   val vcsrMapping = Map(
     MaskedRegMap(Vstart, vstart),
     MaskedRegMap(Vxrm, vcsr, wfn = vxrm_wfn, rfn = vxrm_rfn),
     MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
     MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
     MaskedRegMap(Vl, vl),
-    MaskedRegMap(Vtype, vtype, wfn = vtype_wfn),
-    MaskedRegMap(Vlenb, vlenb)
+    MaskedRegMap(Vtype, vtype),
+    MaskedRegMap(Vlenb, vlenb),
   )
 
   // Hart Priviledge Mode
@@ -920,33 +909,28 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
-  when (RegNext(csrio.vpu.vcsr.valid)) {
-    vcsr := vcsr_wfn(RegNext(csrio.vpu.vcsr.bits))
+  when (RegNext(csrio.vpu.set_vstart.valid)) {
+    vstart := RegNext(csrio.vpu.set_vstart.bits)
   }
-  when (RegNext(csrio.vpu.vtype.valid)) {
-    vtype := vtype_wfn(RegNext(csrio.vpu.vtype.bits))
+  when (RegNext(csrio.vpu.set_vtype.valid)) {
+    vtype := RegNext(csrio.vpu.set_vtype.bits)
   }
   when (RegNext(csrio.vpu.set_vl.valid)) {
     vl := RegNext(csrio.vpu.set_vl.bits)
   }
   // set vs and sd in mstatus
-  when (csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.vs := "b11".U
-    mstatusNew.sd := true.B
-    mstatus := mstatusNew.asUInt
-  }
-
-  when (RegNext(csrio.vpu.vstart_clr)) {
-    vstart := 0.U
-  }
-  .elsewhen (RegNext(csrio.vpu.vstart_inc)) {
-    vstart := vstart + 1.U
-  }
+  // when (csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
+  //   val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+  //   mstatusNew.vs := "b11".U
+  //   mstatusNew.sd := true.B
+  //   mstatus := mstatusNew.asUInt
+  // }
   
   csrio.vpu.vstart := vstart
   csrio.vpu.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
   csrio.vpu.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
+  csrio.vpu.vcsr := vcsr
+  csrio.vpu.vtype := vtype
   csrio.vpu.vl := vl
   csrio.vpu.vlenb := vlenb
   csrio.vpu.vill := vtype.asTypeOf(new VtypeStruct).vill
@@ -1359,6 +1343,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.dpc := dpc
     difftest.io.dscratch0 := dscratch
     difftest.io.dscratch1 := dscratch1
+  }
+
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    val difftest = Module(new DifftestVectorState)
+    difftest.io.clock := clock
+    difftest.io.coreid := csrio.hartId
+    difftest.io.vstart := vstart
+    difftest.io.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
+    difftest.io.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
+    difftest.io.vcsr := vcsr
+    difftest.io.vl := vl
+    difftest.io.vtype := vtype
+    difftest.io.vlenb := vlenb
   }
 }
 
