@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
-import utils.{ParallelPriorityMux, ZeroExt, ValidHold}
+import utility.{ParallelPriorityMux, ZeroExt, ValidHold}
 import xiangshan.cache.mmu.TlbCmd
 
 /* Memory Mapped PMA */

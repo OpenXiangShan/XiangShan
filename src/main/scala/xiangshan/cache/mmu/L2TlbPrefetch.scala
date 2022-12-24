@@ -20,6 +20,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.{SfenceBundle, XSModule}
 import utils._
+import utility._
 
 class L2TlbPrefetchIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val in = Flipped(ValidIO(new Bundle {

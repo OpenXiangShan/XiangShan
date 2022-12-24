@@ -22,6 +22,7 @@ import chisel3.util._
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig

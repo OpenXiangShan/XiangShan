@@ -21,6 +21,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
+import utility._
 
 class KeyboardIO extends Bundle {
   val ps2Clk = Input(Bool())

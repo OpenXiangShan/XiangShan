@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import xiangshan._
 import utils._
+import utility._
 
 class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 {
