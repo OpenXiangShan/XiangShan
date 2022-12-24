@@ -74,8 +74,8 @@ package object xiangshan {
     def ldu          = "b1100".U
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
-    def vipu         = "b10000".U
-    def vfpu         = "b11000".U
+    def vipu         = "b11000".U
+    def vfpu         = "b11001".U
     def vldu         = "b11100".U
     def vstu         = "b11101".U
     def X            = BitPat("b????")
