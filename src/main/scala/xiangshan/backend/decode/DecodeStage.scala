@@ -64,8 +64,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.fpRat(i)(3).addr := decoders(i).io.deq.cf_ctrl.ctrl.ldest
     io.fpRat(i).foreach(_.hold := !io.out(i).ready)
 
-    // TODO: vector decode
-    io.vecRat <> DontCare
+    // Vec instructions
+    // TODO: vec uop dividers need change this
+    io.vecRat(i)(0).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(0)
+    io.vecRat(i)(1).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(1)
+    io.vecRat(i)(2).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(2)
+    io.vecRat(i)(3).addr := decoders(i).io.deq.cf_ctrl.ctrl.ldest
+    io.vecRat(i)(4).addr := 0.U
+    io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
