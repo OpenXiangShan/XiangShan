@@ -362,11 +362,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
     val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
     val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
-    
+
     when(redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
     when(flushRedirect.valid)              { RobFlushPending := true.B }
     when(redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
-    
+
     when (RegNext(io.frontend.toFtq.redirect.valid)) {
       when(pendingRedirect) {                             stage2_redirect_cycles := true.B }
       when(MissPredPending) { MissPredPending := false.B; branch_resteers_cycles := true.B }

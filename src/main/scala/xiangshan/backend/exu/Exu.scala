@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utils.{XSPerfAccumulate, ZeroExt}
 import xiangshan._
 import xiangshan.backend.fu._
 
@@ -62,10 +62,13 @@ case class ExuConfig
 
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
   val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
+  val vecSrcCnt = max(fuConfigs.map(_.numVecSrc))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
+  val readVecRf = vecSrcCnt > 0
   val writeIntRf = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
+  val writeVecRf = fuConfigs.map(_.writeVecRf).reduce(_ || _)
   val writeFflags = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
@@ -75,6 +78,8 @@ case class ExuConfig
   val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
+
+  val isVPU = readVecRf && writeVecRf
 
   val latency: HasFuLatency = {
     val lats = fuConfigs.map(_.latency)
@@ -112,11 +117,13 @@ case class ExuConfig
 abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   @public val config = cfg
 
+  val dataWidth = if (config.isVPU) VLEN else XLEN
+
   @public val io = IO(new Bundle() {
-    val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
-    val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
+    val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput(false))) else null
+    val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput(true))) else null
     val redirect = Flipped(ValidIO(new Redirect))
-    val out = DecoupledIO(new ExuOutput)
+    val out = DecoupledIO(new ExuOutput(config.isVPU))
   })
 
   @public val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
@@ -171,7 +178,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
         out.bits.uop := in.head.bits.uop
         out.valid := in.head.valid
       } else {
-        val arb = Module(new Arbiter(new ExuOutput, in.size))
+        val arb = Module(new Arbiter(new ExuOutput(config.isVPU), in.size))
         in.zip(arb.io.in).foreach{ case (l, r) =>
           l.ready := r.ready
           r.valid := l.valid

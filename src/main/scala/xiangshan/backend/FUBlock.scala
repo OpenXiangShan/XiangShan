@@ -48,13 +48,14 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
 class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {
   val numIn = configs.map(_._2).sum
   val numFma = configs.filter(_._1 == FmacExeUnitCfg).map(_._2).sum
+  val isVpu = configs.map(_._1.isVPU).reduce(_ || _)
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     // in
-    val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput(isVpu))))
     // out
-    val writeback = Vec(numIn, DecoupledIO(new ExuOutput))
+    val writeback = Vec(numIn, DecoupledIO(new ExuOutput(isVpu)))
     // misc
     val extra = new FUBlockExtraIO(configs)
   })

@@ -322,12 +322,16 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
-class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val src = Vec(3, UInt(XLEN.W))
+class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val dataWidth = if (isVpu) VLEN else XLEN
+
+  val src = Vec(3, UInt(dataWidth.W))
 }
 
-class ExuOutput(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val data = UInt(XLEN.W)
+class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val dataWidth = if (isVpu) VLEN else XLEN
+
+  val data = UInt(dataWidth.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

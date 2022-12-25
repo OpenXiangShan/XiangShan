@@ -72,7 +72,9 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     // issue and wakeup ports
     val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput))) else None
     val fastUopOut = scheduler.io.fastUopOut.cloneType
-    val rfWriteback = scheduler.io.writeback.cloneType
+    // val rfWriteback = scheduler.io.writeback.cloneType
+    val rfWritebackInt = scheduler.io.writebackInt.cloneType
+    val rfWritebackFp = scheduler.io.writebackFp.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
     val fuWriteback = fuBlock.io.writeback.cloneType
     // extra
@@ -87,7 +89,8 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.allocPregs <> io.allocPregs
   scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
-  scheduler.io.writeback <> io.rfWriteback
+  scheduler.io.writebackInt <> io.rfWritebackInt
+  scheduler.io.writebackFp <> io.rfWritebackFp
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
 
@@ -129,8 +132,11 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   val exclusiveFuWb = flattenFuConfigs.zip(fuBlock.io.writeback).filter(_._1.hasExclusiveWbPort)
   val exclusiveRfWbIdx = fuConfigs.map(_._1).filter(_.hasExclusiveWbPort).flatMap(cfg => outer.getWbIndex(cfg))
   require(exclusiveFuWb.length == exclusiveRfWbIdx.length, s"${exclusiveFuWb.length} != ${exclusiveRfWbIdx.length}")
+  val scheWBVec = scheduler.io.writebackInt ++ scheduler.io.writebackFp
+  val outWBVec = io.rfWritebackInt ++ io.rfWritebackFp
+
   for ((i, (cfg, wb)) <- exclusiveRfWbIdx.zip(exclusiveFuWb)) {
-    val scheWb = scheduler.io.writeback(i)
+    val scheWb = scheWBVec(i)
     scheWb.valid := wb.valid
     scheWb.bits := wb.bits
     if (cfg.hasFastUopOut) {
@@ -140,7 +146,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     }
 
     println(s"scheduler.writeback($i) is connected from exu ${cfg.name}")
-    val outerWb = io.rfWriteback(i)
+    val outerWb = outWBVec(i)
     val hasWb = outerWb.valid || scheWb.valid
     XSError(hasWb && outerWb.bits.uop.robIdx =/= scheWb.bits.uop.robIdx,
       "different instruction between io.rfWriteback and fu.writeback\n")
@@ -187,7 +193,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     val wbIdx = outer.getWbIndex(cfg)
     require(wakeupIdx.length == wbIdx.length)
     for ((i, j) <- wakeupIdx.zip(wbIdx)) {
-      val scheWb = scheduler.io.writeback(j)
+      val scheWb = scheWBVec(j)
       val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(redirect)
       scheWb.valid := RegNext(scheduler.io.fastUopOut(i).valid && !isFlushed)
       scheWb.bits.uop := RegNext(scheduler.io.fastUopOut(i).bits)

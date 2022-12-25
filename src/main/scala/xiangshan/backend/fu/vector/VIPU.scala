@@ -24,14 +24,15 @@ import utils.XSError
 import xiangshan.backend.fu.FunctionUnit
 import yunsuan.vector.VectorIntAdder
 import yunsuan.{VipuType, VectorElementFormat}
+import xiangshan.XSCoreParamsKey
 
-class VIPU(implicit p: Parameters) extends FunctionUnit(/*len = 128/VLEN*/) {
+class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN) {
   XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
 
   val uop = io.in.bits.uop
 
-  val AdderWidth = 64
-  val NumAdder = 1 // TODO: replace with VLEN/AdderWidth when rf ready
+  val AdderWidth = XLEN
+  val NumAdder = VLEN / XLEN
   val adder = Seq.fill(NumAdder)(Module(new VectorIntAdder()))
   for(i <- 0 until NumAdder) {
     adder(i).io.in_0 := io.in.bits.src(0)(AdderWidth*(i+1)-1, AdderWidth*i)

@@ -81,6 +81,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
 
 class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
+  val isVpu = isFp
 
   // NOTE:
   // 0 for direct connect (exclusive);
@@ -145,15 +146,15 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   }
   println(sb)
 
-  lazy val module = new WbArbiterImp(this)
+  lazy val module = new WbArbiterImp(this, isVpu)
 }
 
-class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class WbArbiterImp(outer: WbArbiter, isVpu: Boolean)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput)))
-    val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
+    val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput(isVpu))))
+    val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput(isVpu)))
   })
 
   val redirect = RegNextWithEnable(io.redirect)
@@ -265,8 +266,8 @@ class WbArbiterWrapper(
     val io = IO(new Bundle() {
       val hartId = Input(UInt(8.W))
       val redirect = Flipped(ValidIO(new Redirect))
-      val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
-      val out = Vec(numOutPorts, ValidIO(new ExuOutput))
+      val in  = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput(true))))
+      val out = Vec(numOutPorts, ValidIO(new ExuOutput(true)))
     })
 
     override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {

@@ -375,7 +375,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
     exu.allocPregs <> ctrlBlock.io.allocPregs
-    exu.rfWriteback <> rfWriteback
+    exu.rfWritebackInt <> rfWriteback.take(NRIntWritePorts)
+    exu.rfWritebackFp <> rfWriteback.drop(NRIntWritePorts)
     exu.fastUopIn <> allFastUop1
     exu.scheExtra.jumpPc <> ctrlBlock.io.jumpPc
     exu.scheExtra.jalr_target <> ctrlBlock.io.jalr_target

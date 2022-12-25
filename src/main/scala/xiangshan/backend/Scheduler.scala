@@ -299,7 +299,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // perf
     val sqFull = Input(Bool())
     val lqFull = Input(Bool())
-
   }
 
   val numFma = outer.configs.filter(_.exuConfig == FmacExeUnitCfg).map(_.numDeq).sum
@@ -315,7 +314,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
     val fastUopOut = Vec(outer.numIssuePorts, ValidIO(new MicroOp))
     // wakeup-related ports
-    val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val writebackInt = Vec(intRfWritePorts, Flipped(ValidIO(new ExuOutput(false))))
+    val writebackFp = Vec(fpRfWritePorts, Flipped(ValidIO(new ExuOutput(true))))
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
     // misc ports
     val extra = new SchedulerExtraIO
@@ -348,7 +348,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       pregAlloc.valid := allocReq.isInt
       pregAlloc.bits := allocReq.preg
     }
-    busyTable.io.wbPregs.zip(io.writeback.take(intRfWritePorts)).foreach{ case (pregWb, exuWb) =>
+    busyTable.io.wbPregs.zip(io.writebackInt).foreach{ case (pregWb, exuWb) =>
       pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
       pregWb.bits := exuWb.bits.uop.pdest
     }
@@ -367,7 +367,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         pregAlloc.valid := allocReq.isFp
         pregAlloc.bits := allocReq.preg
       }
-      busyTable.io.wbPregs.zip(io.writeback.drop(intRfWritePorts)).foreach { case (pregWb, exuWb) =>
+      busyTable.io.wbPregs.zip(io.writebackFp).foreach { case (pregWb, exuWb) =>
         pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
         pregWb.bits := exuWb.bits.uop.pdest
       }
@@ -391,7 +391,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   def readFpRf: Seq[UInt] = extractReadRf(outer.numDpPortFpRead) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
 
   def genRegfile(isInt: Boolean): Seq[UInt] = {
-    val wbPorts = if (isInt) io.writeback.take(intRfWritePorts) else io.writeback.drop(intRfWritePorts)
+    val wbPorts = if (isInt) io.writebackInt else io.writebackFp
     val waddr = wbPorts.map(_.bits.uop.pdest)
     val wdata = wbPorts.map(_.bits.data)
     val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat ++ io.extra.debug_vec_rat
@@ -473,8 +473,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       feedbackIdx += width
     }
 
-    val intWriteback = io.writeback.take(intRfWritePorts)
-    val fpWriteback  = io.writeback.drop(intRfWritePorts)
+    val intWriteback = io.writebackInt
+    val fpWriteback  = io.writebackFp
+    val writebackTotal = intWriteback ++ fpWriteback
     (cfg.intSrcCnt > 0, cfg.fpSrcCnt > 0) match {
       case (true,  false) => rs.io.slowPorts := intWriteback
       case (false, true) => rs.io.slowPorts := fpWriteback
@@ -486,12 +487,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val innerIntUop = outer.innerIntFastSources(i).map(_._2).map(rs_all(_).module.io.fastWakeup.get).fold(Seq())(_ ++ _)
     val innerFpUop = outer.innerFpFastSources(i).map(_._2).map(rs_all(_).module.io.fastWakeup.get).fold(Seq())(_ ++ _)
     val innerUop = innerIntUop ++ innerFpUop
-    val innerData = outer.innerFastPorts(i).map(io.writeback(_).bits.data)
+    val innerData = outer.innerFastPorts(i).map(writebackTotal(_).bits.data)
     node.connectFastWakeup(innerUop, innerData)
     require(innerUop.length == innerData.length)
 
     val outerUop = outer.outFastPorts(i).map(io.fastUopIn(_))
-    val outerData = outer.outFastPorts(i).map(io.writeback(_).bits.data)
+    val outerData = outer.outFastPorts(i).map(writebackTotal(_).bits.data)
     node.connectFastWakeup(outerUop, outerData)
     require(outerUop.length == outerData.length)
   }

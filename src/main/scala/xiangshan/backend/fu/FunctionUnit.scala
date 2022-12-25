@@ -60,7 +60,8 @@ case class FuConfig
   replayInst: Boolean = false,
   trigger: Boolean = false
 ) {
-  def srcCnt: Int = math.max(numIntSrc, numFpSrc)
+  def srcCnt: Int = math.max(math.max(numIntSrc, numFpSrc), numVecSrc)
+  def isVectorFU: Boolean = (numVecSrc > 0) && writeVecRf
 }
 
 
