@@ -557,16 +557,20 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData.takeRight(32))))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
+    val fpReg = fpRfReadData.takeRight(64).take(32)
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.fpr := RegNext(RegNext(VecInit(fpRfReadData.map(_(XLEN-1, 0)).takeRight(64).take(32))))
+    difftest.io.fpr.zip(fpReg).map(r => r._1 := RegNext(RegNext(r._2(XLEN-1, 0))))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
+    val vecReg = fpRfReadData.takeRight(32)
     val difftest = Module(new DifftestArchVecRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.vpr := RegNext(RegNext(VecInit(fpRfReadData.map((x : UInt) => (List(x(63, 0), x(127, 64)))).flatten.takeRight(64))))
+    for (i <- 0 until 32)
+      for (j <- 0 until (VLEN/XLEN))
+        difftest.io.vpr((VLEN/XLEN)*i +j) := RegNext(RegNext(vecReg(i)(XLEN*(j+1)-1, XLEN*j)))
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
