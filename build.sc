@@ -114,7 +114,8 @@ object huancun extends XSModule with SbtModule {
   override def millSourcePath = os.pwd / "huancun"
 
   override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip
+    rocketchip,
+    utility
   )
 }
 
