@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
 import freechips.rocketchip.util.uintToBitPat
 import utils._
+import utility._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import freechips.rocketchip.rocket.Instructions._

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 
 // 21264-like wait table, uses 2-bit counter
 class WaitTable(implicit p: Parameters) extends XSModule {

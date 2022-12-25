@@ -22,6 +22,7 @@ import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.HasExuWbHelper

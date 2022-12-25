@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
+import utility._
 
 case object StreamParamsKey extends Field[StreamPrefetchParameters]
 

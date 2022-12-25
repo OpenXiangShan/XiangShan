@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utils._
+import utility._
 import xiangshan.L1CacheErrorInfo
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {

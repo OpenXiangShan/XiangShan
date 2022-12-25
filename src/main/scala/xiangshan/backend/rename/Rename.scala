@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._

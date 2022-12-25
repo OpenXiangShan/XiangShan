@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import xiangshan.DebugOptionsKey
 import utils.XSLogLevel.XSLogLevel
+import utility.GTimer
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value

@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.mem.LsqEnqIO

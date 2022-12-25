@@ -23,6 +23,7 @@ import fudian.utils.Multiplier
 import fudian.{FCMA, FCMA_ADD, FCMA_ADD_s1, FCMA_ADD_s2, FMUL, FMULToFADD, FMUL_s1, FMUL_s2, FMUL_s3, RawFloat}
 import xiangshan._
 import utils._
+import utility._
 
 
 class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends Bundle {

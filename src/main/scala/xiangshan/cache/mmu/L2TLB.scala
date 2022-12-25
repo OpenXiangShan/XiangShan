@@ -24,11 +24,12 @@ import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
-import huancun.utils.ChiselDB
+import utility.ChiselDB
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 

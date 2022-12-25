@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import utils._
+import utility._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}

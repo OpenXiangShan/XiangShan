@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
