@@ -160,23 +160,23 @@ object VfRegFile {
     if (splitNum == 1) {
       Regfile(name, numEntries, raddr, wen.head, waddr, wdata,
         hasZero = false, withReset, debugReadAddr)
+    } else {
+      val dataWidth = 64
+      val numReadPorts = raddr.length + debugReadAddr.getOrElse(Seq()).length
+      require(splitNum > 1 && wdata.head.getWidth == dataWidth * splitNum)
+      val wdataVec = Wire(Vec(splitNum, Vec(wdata.length, UInt(dataWidth.W))))
+      var rdataVec = Wire(Vec(splitNum, Vec(numReadPorts, UInt(dataWidth.W))))
+      for (i <- 0 until splitNum) {
+        wdataVec(i) := wdata.map(_((i + 1) * dataWidth - 1, i * dataWidth))
+        rdataVec(i) := Regfile(name+s"Part${i}", numEntries, raddr, wen(i), waddr, wdataVec(i),
+          hasZero = false, withReset, debugReadAddr)
+      }
+      val rdata = Wire(Vec(numReadPorts, UInt(wdata.head.getWidth.W)))
+      for (i <- 0 until rdata.length) {
+        rdata(i) := Cat(rdataVec.map(_(i)).reverse)
+      }
+      rdata
     }
-
-    val dataWidth = 64
-    val numReadPorts = raddr.length + debugReadAddr.getOrElse(Seq()).length
-    require(splitNum > 1 && wdata.head.getWidth == dataWidth * splitNum)
-    val wdataVec = Wire(Vec(splitNum, Vec(wdata.length, UInt(dataWidth.W))))
-    var rdataVec = Wire(Vec(splitNum, Vec(numReadPorts, UInt(dataWidth.W))))
-    for (i <- 0 until splitNum) {
-      wdataVec(i) := wdata.map(_((i + 1) * dataWidth - 1, i * dataWidth))
-      rdataVec(i) := Regfile(name+s"Part${i}", numEntries, raddr, wen(i), waddr, wdataVec(i),
-        hasZero = false, withReset, debugReadAddr)
-    }
-    val rdata = Wire(Vec(numReadPorts, UInt(wdata.head.getWidth.W)))
-    for (i <- 0 until rdata.length) {
-      rdata(i) := Cat(rdataVec.map(_(i)))
-    }
-    rdata
   }
 
 //  // for dummy usage
