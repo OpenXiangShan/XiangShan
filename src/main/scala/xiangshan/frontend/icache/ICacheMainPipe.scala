@@ -319,7 +319,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_wait := s1_wait_vec(0) || (s1_double_line && s1_wait_vec(1))
 
   (0 until PortNumber).foreach(i =>
-      when(s2_ready){
+      when(s1_fire){
         PIQ_hold_res(i) := false.B
       }.elsewhen(PIQ_write_back(i)){
         PIQ_hold_res(i) := true.B
