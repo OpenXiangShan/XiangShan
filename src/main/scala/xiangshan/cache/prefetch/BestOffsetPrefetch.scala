@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
+import utility._
 
 case object BOPParamsKey extends Field[BOPParameters]
 

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.ExceptionNO._
 
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](

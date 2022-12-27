@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 

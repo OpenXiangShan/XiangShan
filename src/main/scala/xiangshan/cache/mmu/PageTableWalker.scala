@@ -23,6 +23,7 @@ import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
@@ -72,14 +73,11 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 @chiselName
 class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PTWIO)
-
   val sfence = io.sfence
   val mem = io.mem
   val satp = io.csr.satp
   val flush = io.sfence.valid || io.csr.satp.changed
 
-  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(5)
-  val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
   val ppn = Reg(UInt(ppnLen.W))
@@ -87,99 +85,46 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  io.req.ready := state === s_idle
 
-  val finish = WireInit(false.B)
-  val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+  // s/w register
+  val s_pmp_check = RegInit(true.B)
+  val s_mem_req = RegInit(true.B)
+  val s_llptw_req = RegInit(true.B)
+  val w_mem_resp = RegInit(true.B)
+  // for updating "level"
+  val mem_addr_update = RegInit(false.B)
+  
+  val idle = RegInit(true.B)
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update)
+
   val pageFault = memPte.isPf(level)
-  switch (state) {
-    is (s_idle) {
-      when (io.req.fire()) {
-        val req = io.req.bits
-        state := s_addr_check
-        level := Mux(req.l1Hit, 1.U, 0.U)
-        af_level := Mux(req.l1Hit, 1.U, 0.U)
-        ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
-        vpn := io.req.bits.req_info.vpn
-        l1Hit := req.l1Hit
-        accessFault := false.B
-      }
-    }
+  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
-    is (s_addr_check) {
-      state := s_mem_req
-    }
-
-    is (s_mem_req) {
-      when (mem.req.fire()) {
-        state := s_mem_resp
-      }
-      when (accessFault) {
-        state := s_check_pte
-      }
-    }
-
-    is (s_mem_resp) {
-      when(mem.resp.fire()) {
-        state := s_check_pte
-        af_level := af_level + 1.U
-      }
-    }
-
-    is (s_check_pte) {
-      when (io.resp.valid) { // find pte already or accessFault (mentioned below)
-        when (io.resp.fire()) {
-          state := s_idle
-        }
-        finish := true.B
-      }.elsewhen(io.llptw.valid) { // the next level is pte, go to miss queue
-        when (io.llptw.fire()) {
-          state := s_idle
-        }
-        finish := true.B
-      } otherwise { // go to next level, access the memory, need pmp check first
-        when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
-          // do nothing, RegNext the pmp check result and do it later (mentioned above)
-        }.otherwise { // go to next level.
-          assert(level === 0.U)
-          level := levelNext
-          state := s_mem_req
-        }
-      }
-    }
-  }
-
-  when (sfence.valid) {
-    state := s_idle
-    accessFault := false.B
-  }
-
-  // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
-  val is_pte = memPte.isLeaf() || memPte.isPf(level)
-  val find_pte = is_pte
-  val to_find_pte = level === 1.U && !is_pte
+  val find_pte = memPte.isLeaf() || pageFault
+  val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
-  io.resp.valid := state === s_check_pte && (find_pte || accessFault)
-  io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn, satp.asid)
+  
+  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
+  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
+  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
-  io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault
+  io.req.ready := idle
+  
+  io.resp.valid := idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
+  io.resp.bits.source := source
+  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
+
+  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.ppn := memPte.ppn
 
-  assert(level =/= 2.U || level =/= 3.U)
-
-  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
-  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
   io.pmp.req.valid := DontCare // samecycle, do not use valid
   io.pmp.req.bits.addr := mem_addr
   io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
 
-  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
+  mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
   mem.req.bits.addr := mem_addr
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
@@ -187,26 +132,92 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.refill.level := level
   io.refill.req_info.source := source
 
-  XSDebug(p"[ptw] state:${state} level:${level} notFound:${pageFault}\n")
+  when (io.req.fire()){
+    val req = io.req.bits
+    level := Mux(req.l1Hit, 1.U, 0.U)
+    af_level := Mux(req.l1Hit, 1.U, 0.U)
+    ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
+    vpn := io.req.bits.req_info.vpn
+    l1Hit := req.l1Hit
+    accessFault := false.B
+    s_pmp_check := false.B
+    idle := false.B
+  }
+  
+  when(sent_to_pmp && mem_addr_update === false.B){
+    s_mem_req := false.B
+    s_pmp_check := true.B
+  }
+
+  when(accessFault && idle === false.B){
+    s_pmp_check := true.B
+    s_mem_req := true.B
+    w_mem_resp := true.B
+    s_llptw_req := true.B
+    mem_addr_update := true.B
+  }
+
+  when (mem.req.fire()){
+    s_mem_req := true.B
+    w_mem_resp := false.B
+  } 
+    
+  when(mem.resp.fire() &&  w_mem_resp === false.B){
+    w_mem_resp := true.B
+    af_level := af_level + 1.U
+    s_llptw_req := false.B
+    mem_addr_update := true.B
+  }
+  
+  when(mem_addr_update){
+    when(level === 0.U && !(find_pte||accessFault)){
+      level := levelNext
+      s_mem_req := false.B 
+      s_llptw_req := true.B
+      mem_addr_update := false.B
+    }.elsewhen(io.llptw.fire()){
+      idle := true.B
+      s_llptw_req := true.B
+      mem_addr_update := false.B
+    }.elsewhen(io.resp.fire()){
+      idle := true.B
+      s_llptw_req := true.B
+      mem_addr_update := false.B
+      accessFault := false.B
+    }
+  }
+  
+  
+  when (sfence.valid) {
+    idle := true.B
+    s_pmp_check := true.B
+    s_mem_req := true.B
+    s_llptw_req := true.B
+    w_mem_resp := true.B
+    accessFault := false.B
+  }
+
+  
+  XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
   }
-  XSPerfAccumulate("fsm_busy", state =/= s_idle)
-  XSPerfAccumulate("fsm_idle", state === s_idle)
+  XSPerfAccumulate("fsm_busy", !idle)
+  XSPerfAccumulate("fsm_idle", idle)
   XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
-  TimeOutAssert(state =/= s_idle, timeOutThreshold, "page table walker time out")
+  TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
 
   val perfEvents = Seq(
     ("fsm_count         ", io.req.fire()                                     ),
-    ("fsm_busy          ", state =/= s_idle                                  ),
-    ("fsm_idle          ", state === s_idle                                  ),
+    ("fsm_busy          ", !idle                                             ),
+    ("fsm_idle          ", idle                                              ),
     ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
     ("mem_count         ", mem.req.fire()                                    ),
     ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),

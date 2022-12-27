@@ -32,6 +32,7 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
 import utils._
+import utility._
 
 import scala.math.max
 import Chisel.experimental.chiselName
@@ -493,6 +494,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val ldld_vio_check_enable = Output(Bool())
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
+  val uncache_write_outstanding_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())

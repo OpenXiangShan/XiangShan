@@ -14,14 +14,15 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package utils
+package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
+import utils._
+import utility._
+import xiangshan._
 
-object GTimer {
-  def apply() = {
-    val c = RegInit(0.U(64.W))
-    c := c + 1.U
-    c
-  }
+class DummyVectorLsq(implicit p: Parameters) extends BaseVectorLsq {
+  io := DontCare
 }

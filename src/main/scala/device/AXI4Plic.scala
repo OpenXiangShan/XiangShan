@@ -20,8 +20,8 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
-import utils.MaskExpand
-import utils.{HasTLDump, XSDebug, RegMap}
+import utils.{XSDebug, HasTLDump}
+import utility.{RegMap, MaskExpand}
 
 /*  base + 0x000000: Reserved (interrupt source 0 does not exist)
     base + 0x000004: Interrupt source 1 priority

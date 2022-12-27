@@ -23,9 +23,9 @@ import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.ElaborationArtefacts
-import huancun.utils.ChiselDB
+import utility.ChiselDB
 import top.TopMain.writeOutputFile
-import utils.GTimer
+import utility.GTimer
 import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {

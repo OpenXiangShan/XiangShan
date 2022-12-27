@@ -22,12 +22,13 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import huancun.utils.FastArbiter
+import utility.FastArbiter
 import mem.{AddPipelineReg}
 
 import scala.math.max
@@ -137,6 +138,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
+
+  // uncache
+  val uncacheIdxBits = log2Up(StoreQueueSize) max log2Up(LoadQueueSize)
 
   // parameters about duplicating regs to solve fanout
   // In Main Pipe:
@@ -383,10 +387,42 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new BankedDCacheWordResp))
 }
 
+
+class UncacheWordReq(implicit p: Parameters) extends DCacheBundle 
+{
+  val cmd  = UInt(M_SZ.W)
+  val addr = UInt(PAddrBits.W)
+  val data = UInt(DataBits.W)
+  val mask = UInt((DataBits/8).W)
+  val id   = UInt(uncacheIdxBits.W)
+  val instrtype = UInt(sourceTypeWidth.W)
+  val atomic = Bool()
+
+  def dump() = {
+    XSDebug("UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
+      cmd, addr, data, mask, id) 
+  }
+}
+
+class UncacheWorResp(implicit p: Parameters) extends DCacheBundle 
+{
+  val data      = UInt(DataBits.W)
+  val id        = UInt(uncacheIdxBits.W)
+  val miss      = Bool()
+  val replay    = Bool()
+  val tag_error = Bool()
+  val error     = Bool()
+
+  def dump() = {
+    XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
+      data, id, miss, replay, tag_error, error) 
+  }
+}
+
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new DCacheWordRespWithError))
+  val req  = DecoupledIO(new UncacheWordReq)
+  val resp = Flipped(DecoupledIO(new UncacheWorResp))
 }
 
 class AtomicsResp(implicit p: Parameters) extends DCacheBundle {

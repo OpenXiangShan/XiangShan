@@ -21,13 +21,14 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
-import huancun.utils.FastArbiter
+import utility.FastArbiter
 import mem.{AddPipelineReg}
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {

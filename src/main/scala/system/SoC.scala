@@ -24,7 +24,7 @@ import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams,
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utils.{BinaryArbiter, TLEdgeBuffer}
+import utility.{BinaryArbiter, TLEdgeBuffer}
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
@@ -204,7 +204,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
-    AXI4IdIndexer(idBits = 2) :=
+    AXI4IdIndexer(idBits = 4) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=

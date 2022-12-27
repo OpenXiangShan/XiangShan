@@ -22,6 +22,7 @@ import chisel3.util._
 import chisel3.experimental.chiselName
 import xiangshan._
 import utils._
+import utility._
 
 @chiselName
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {

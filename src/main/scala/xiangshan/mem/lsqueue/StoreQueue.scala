@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
@@ -70,6 +71,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
+    val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
@@ -125,6 +127,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val committed = Reg(Vec(StoreQueueSize, Bool())) // inst has been committed by rob
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
+  val atomic = Reg(Vec(StoreQueueSize, Bool()))
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -299,6 +302,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when (storeInFireReg) {
       pending(stWbIndexReg) := io.storeInRe(i).mmio
       mmio(stWbIndexReg) := io.storeInRe(i).mmio
+      atomic(stWbIndexReg) := io.storeInRe(i).atomic
     }
 
     when(vaddrModule.io.wen(i)){
@@ -447,8 +451,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_req) {
-      when(io.uncache.req.fire()) {
-        uncacheState := s_resp
+      when (io.uncache.req.fire) {
+        when (io.uncacheOutstanding) {
+          uncacheState := s_wb
+        } .otherwise {
+          uncacheState := s_resp
+        }
       }
     }
     is(s_resp) {
@@ -487,6 +495,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.id   := DontCare
   io.uncache.req.bits.instrtype   := DontCare
+  io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
 
   when(io.uncache.req.fire()){
     // mmio store should not be committed until uncache req is sent

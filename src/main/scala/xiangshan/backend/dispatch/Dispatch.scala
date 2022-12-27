@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest._
 import utils._
+import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.RobEnqIO

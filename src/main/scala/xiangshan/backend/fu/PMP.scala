@@ -22,10 +22,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
-import utils.MaskedRegMap.WritableMask
+import utility.MaskedRegMap.WritableMask
 import xiangshan._
 import xiangshan.backend.fu.util.HasCSRConst
 import utils._
+import utility._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
 
 trait PMPConst extends HasPMParameters {
@@ -365,6 +366,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
   val st = Output(Bool())
   val instr = Output(Bool())
   val mmio = Output(Bool())
+  val atomic = Output(Bool())
 
   def |(resp: PMPRespBundle): PMPRespBundle = {
     val res = Wire(new PMPRespBundle())
@@ -372,6 +374,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
     res.st := this.st || resp.st
     res.instr := this.instr || resp.instr
     res.mmio := this.mmio || resp.mmio
+    res.atomic := this.atomic || resp.atomic    
     res
   }
 }
@@ -383,6 +386,7 @@ trait PMPCheckMethod extends PMPConst {
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := false.B
+    resp.atomic := false.B
     resp
   }
 

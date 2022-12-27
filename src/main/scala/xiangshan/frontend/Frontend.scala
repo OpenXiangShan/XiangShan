@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
 import xiangshan.cache.mmu._
