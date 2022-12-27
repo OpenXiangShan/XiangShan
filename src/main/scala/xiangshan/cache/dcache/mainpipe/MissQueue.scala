@@ -157,6 +157,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     })
 
     val req_handled_by_this_entry = Output(Bool())
+
+    val forwardInfo = Output(new MissEntryForwardIO)
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -407,7 +409,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
   // when granted data is all ready, wakeup lq's miss load
-  io.refill_to_ldq.valid := RegNext(w_grantfirst && !w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
+  io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire()) && should_refill_data_reg
   io.refill_to_ldq.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count))
   io.refill_to_ldq.bits.error := RegNext(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied)
@@ -519,6 +521,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
   io.debug_early_replace.bits.tag := req.replace_tag
 
+  io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
+
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
   XSPerfAccumulate("load_miss_penalty_to_use",
@@ -553,7 +557,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   perf_monitor.io.coreid := io.hartId
   perf_monitor.io.mshrid := io.id
   perf_monitor.io.miss := primary_fire
-  perf_monitor.io.refill := req_valid && release_entry
+  perf_monitor.io.first_refill := req_valid && !w_grantfirst && io.mem_grant.fire()
+  perf_monitor.io.release := req_valid && release_entry
   perf_monitor.io.cyclenow := cycle_perf
 }
 
@@ -592,6 +597,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     }))
+
+    // forward missqueue
+    val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -614,6 +622,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val req_handled_vec = entries.map(_.io.req_handled_by_this_entry)
   assert(PopCount(req_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.id := OHToUInt(req_handled_vec)
+
+  val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
+  (0 until LoadPipelineWidth).map(i => {
+    val id = io.forward(i).mshrid
+    val req_valid = io.forward(i).valid
+    val paddr = io.forward(i).paddr
+
+    val (forward_mshr, forwardData) = forwardInfo_vec(id).forward(req_valid, paddr)
+    io.forward(i).forward_result_valid := forwardInfo_vec(id).check(req_valid, paddr)
+    io.forward(i).forward_mshr := forward_mshr
+    io.forward(i).forwardData := forwardData
+  })
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))

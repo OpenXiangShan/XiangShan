@@ -445,12 +445,128 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
 }
 
+// forward tilelink channel D's data to ldu
+class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
+  val valid = Bool()
+  val data = UInt(l1BusDataWidth.W)
+  val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+  val last = Bool()
+
+  def apply(req_valid : Bool, req_data : UInt, req_mshrid : UInt, req_last : Bool) = {
+    valid := req_valid
+    data := req_data
+    mshrid := req_mshrid
+    last := req_last
+  }
+
+  def dontCare() = {
+    valid := false.B
+    data := DontCare
+    mshrid := DontCare
+    last := DontCare
+  }
+
+  def forward(req_valid : Bool, req_mshr_id : UInt, req_paddr : UInt) = {
+    val all_match = req_valid && valid &&
+                req_mshr_id === mshrid &&
+                req_paddr(log2Up(refillBytes)) === last
+
+    val forward_D = RegInit(false.B)
+    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+
+    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
+    val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
+    (0 until l1BusDataWidth / 64).map(i => {
+      block_data(i) := data(64 * i + 63, 64 * i)
+    })
+    val selected_data = block_data(block_idx)
+
+    forward_D := all_match
+    for (i <- 0 until 8) {
+      forwardData(i) := selected_data(8 * i + 7, 8 * i)
+    }
+
+    (forward_D, forwardData)
+  }
+}
+
+class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
+  val inflight = Bool()
+  val paddr = UInt(PAddrBits.W)
+  val raw_data = Vec(blockBytes/beatBytes, UInt(beatBits.W))
+  val firstbeat_valid = Bool()
+  val lastbeat_valid = Bool()
+
+  def apply(mshr_valid : Bool, mshr_paddr : UInt, mshr_rawdata : Vec[UInt], mshr_first_valid : Bool, mshr_last_valid : Bool) = {
+    inflight := mshr_valid
+    paddr := mshr_paddr
+    raw_data := mshr_rawdata
+    firstbeat_valid := mshr_first_valid
+    lastbeat_valid := mshr_last_valid
+  }
+
+  // check if we can forward from mshr or D channel
+  def check(req_valid : Bool, req_paddr : UInt) = {
+    RegNext(req_valid && inflight && req_paddr(PAddrBits - 1, blockOffBits) === paddr(PAddrBits - 1, blockOffBits))
+  }
+
+  def forward(req_valid : Bool, req_paddr : UInt) = {
+    val all_match = (req_paddr(log2Up(refillBytes)) === 0.U && firstbeat_valid) || 
+                    (req_paddr(log2Up(refillBytes)) === 1.U && lastbeat_valid)
+
+    val forward_mshr = RegInit(false.B)
+    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+
+    val beat_data = raw_data(req_paddr(log2Up(refillBytes)))
+    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
+    val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
+    (0 until l1BusDataWidth / 64).map(i => {
+      block_data(i) := beat_data(64 * i + 63, 64 * i)
+    })
+    val selected_data = block_data(block_idx)
+
+    forward_mshr := all_match
+    for (i <- 0 until 8) {
+      forwardData(i) := selected_data(8 * i + 7, 8 * i)
+    }
+
+    (forward_mshr, forwardData)
+  }
+}
+
+// forward mshr's data to ldu
+class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
+  // req
+  val valid = Input(Bool())
+  val mshrid = Input(UInt(log2Up(cfg.nMissEntries).W))
+  val paddr = Input(UInt(PAddrBits.W))
+  // resp
+  val forward_mshr = Output(Bool())
+  val forwardData = Output(Vec(8, UInt(8.W)))
+  val forward_result_valid = Output(Bool())
+
+  def connect(sink: LduToMissqueueForwardIO) = {
+    sink.valid := valid
+    sink.mshrid := mshrid
+    sink.paddr := paddr
+    forward_mshr := sink.forward_mshr
+    forwardData := sink.forwardData
+    forward_result_valid := sink.forward_result_valid
+  }
+
+  def forward() = {
+    (forward_result_valid, forward_mshr, forwardData)
+  }
+}
+
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
+  val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
+  val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -483,7 +599,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
 
   val io = IO(new DCacheIO)
-
+  
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
@@ -604,6 +720,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.banked_data_resp := bankedDataArray.io.resp
   })
 
+  (0 until LoadPipelineWidth).map(i => {
+    val (_, _, done, _) = edge.count(bus.d)
+    when(bus.d.bits.opcode === TLMessages.GrantData) {
+      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+    }.otherwise {
+      io.lsu.forward_D(i).dontCare()
+    }
+  })
+
   //----------------------------------------
   // load pipe
   // the s1 kill signal
@@ -650,6 +775,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     missQueue.io.req.bits.cancel := true.B
     missReqArb.io.out.ready := false.B
   }
+
+  // forward missqueue
+  (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
 
   // refill to load queue
   io.lsu.lsq <> missQueue.io.refill_to_ldq

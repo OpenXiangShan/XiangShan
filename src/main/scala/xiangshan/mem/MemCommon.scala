@@ -48,7 +48,7 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
+class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
@@ -73,6 +73,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
 
   // For load replay
   val isLoadReplay = Bool()
+
+  // For dcache miss load
+  val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+
+  val forward_tlDchannel = Bool()
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -97,6 +102,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isSoftPrefetch := input.isSoftPrefetch
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
+    mshrid := input.mshrid
+    forward_tlDchannel := input.forward_tlDchannel
 
     lq_data_wen_dup := DontCare
   }
@@ -180,9 +187,22 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
 
+  // forward tilelink D channel
+  val forward_D = Input(Bool())
+  val forwardData_D = Input(Vec(8, UInt(8.W)))
+
+  // forward mshr data
+  val forward_mshr = Input(Bool())
+  val forwardData_mshr = Input(Vec(8, UInt(8.W)))
+
+  val forward_result_valid = Input(Bool())
+
   // val dcacheData = UInt(64.W)
   def dcacheData(): UInt = {
-    Mux1H(bank_oh, bankedDcacheData)
+    val dcache_data = Mux1H(bank_oh, bankedDcacheData)
+    val use_D = forward_D && forward_result_valid
+    val use_mshr = forward_mshr && forward_result_valid
+    Mux(use_D, forwardData_D.asUInt, Mux(use_mshr, forwardData_mshr.asUInt, dcache_data))
   }
 
   def mergedData(): UInt = {

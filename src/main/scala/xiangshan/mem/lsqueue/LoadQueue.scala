@@ -135,7 +135,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
-  val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
+  val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
   // vaddrModule's read port 0 for exception addr, port 1 for uncache vaddr read, port {2, 3} for load replay
   val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1 + 1 + LoadPipelineWidth, numWrite = LoadPipelineWidth))
@@ -179,7 +179,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // specific cycles to block
   val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   block_cycles_tlb := io.tlbReplayDelayCycleCtrl
-  val block_cycles_cache = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
 
   val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
@@ -192,13 +192,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val miss_mshr_id = RegInit(VecInit(List.fill(LoadQueueSize)(0.U((log2Up(cfg.nMissEntries).W)))))
   val block_by_cache_miss = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
 
+  val true_cache_miss_replay = WireInit(VecInit(List.fill(LoadQueueSize)(false.B)))
+  (0 until LoadQueueSize).map{i => {
+    true_cache_miss_replay(i) := tlb_hited(i) && ld_ld_check_ok(i) && cache_bank_no_conflict(i) && 
+                                 cache_no_replay(i) && forward_data_valid(i) && !cache_hited(i)
+  }}
+
   val creditUpdate = WireInit(VecInit(List.fill(LoadQueueSize)(0.U(ReSelectLen.W))))
 
   credit := creditUpdate
 
   (0 until LoadQueueSize).map(i => {
     creditUpdate(i) := Mux(credit(i) > 0.U(ReSelectLen.W), credit(i) - 1.U(ReSelectLen.W), credit(i))
-    sel_blocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
+    sel_blocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W)
   })
 
   (0 until LoadQueueSize).map(i => {
@@ -207,6 +213,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   (0 until LoadQueueSize).map(i => {
     block_by_cache_miss(i) := Mux(block_by_cache_miss(i) === true.B && io.refill.valid && io.refill.bits.id === miss_mshr_id(i), false.B, block_by_cache_miss(i))
+    when(creditUpdate(i) === 0.U && block_by_cache_miss(i) === true.B) {
+      block_by_cache_miss(i) := false.B
+    }
+    when(block_by_cache_miss(i) === true.B && io.refill.valid && io.refill.bits.id === miss_mshr_id(i)) {
+      creditUpdate(i) := 0.U
+    }
   })
 
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
@@ -363,6 +375,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
+    io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
+    io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
 
     when(io.loadOut(i).fire) {
       replayRemFire(i) := true.B
@@ -463,12 +477,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     // dirty code to reduce load_s2.valid fanout
     when(io.loadIn(i).bits.lq_data_wen_dup(0)){
-      val loadWbData = Wire(new LQDataEntry)
-      loadWbData.paddr := io.loadIn(i).bits.paddr
-      loadWbData.mask := io.loadIn(i).bits.mask
-      loadWbData.data := io.loadIn(i).bits.forwardData.asUInt // fwd data
-      loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
-      dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
+      dataModule.io.wbWrite(i, loadWbIndex, io.loadIn(i).bits.mask)
       dataModule.io.wb.wen(i) := true.B
     }
     // dirty code for load instr
@@ -539,8 +548,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
       when(needreplay) {
         // update credit and ptr
+        val data_in_last_beat = io.replaySlow(i).data_in_last_beat
         creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
-        Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)),
+        Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat,
         Mux(!io.replaySlow(i).cache_no_replay, block_cycles_others(block_ptr_others(idx)), 0.U)))
 
         when(!io.replaySlow(i).tlb_hited) {
@@ -566,7 +576,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
       block_by_cache_miss(idx) := io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && // this load tlb hit and no cache replay
                                   !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data && // cache miss
-                                  !io.refill.valid //no refill in this cycle
+                                  !(io.refill.valid && io.refill.bits.id === io.replaySlow(i).miss_mshr_id) && //no refill in this cycle
+                                  creditUpdate(idx) =/= 0.U // credit is not zero
     }
 
   }
@@ -576,11 +587,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   // NOTE: we don't refill data from dcache now! 
-
-  // Refill 64 bit in a cycle
-  // Refill data comes back from io.dcache.resp
-  dataModule.io.refill := DontCare
-  dataModule.io.refill.valid := false.B
 
   val s2_dcache_require_replay = WireInit(VecInit((0 until LoadPipelineWidth).map(i =>{
     RegNext(io.loadIn(i).fire()) && RegNext(io.s2_dcache_require_replay(i))
@@ -986,7 +992,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
-  io.uncache.req.bits.data := dataModule.io.uncache.rdata.data
+  io.uncache.req.bits.data := DontCare
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
 
   io.uncache.req.bits.id   := DontCare
@@ -1007,7 +1013,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   // (3) response from uncache channel: mark as datavalid
-  dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
     datavalid(deqPtr) := true.B
     uncacheData := io.uncache.resp.bits.data(XLEN-1, 0)
