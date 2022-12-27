@@ -550,17 +550,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
-
-  val cycle_perf = RegInit(0.U(64.W))
-  cycle_perf := cycle_perf + 1.U
-  val perf_monitor = Module(new DifftestDcachePerfMonitor)
-  perf_monitor.io.clock := clock
-  perf_monitor.io.coreid := io.hartId
-  perf_monitor.io.mshrid := io.id
-  perf_monitor.io.miss := primary_fire
-  perf_monitor.io.first_refill := req_valid && !w_grantfirst && io.mem_grant.fire()
-  perf_monitor.io.release := req_valid && release_entry
-  perf_monitor.io.cyclenow := cycle_perf
 }
 
 class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
