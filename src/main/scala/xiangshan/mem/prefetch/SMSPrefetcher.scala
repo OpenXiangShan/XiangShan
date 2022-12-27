@@ -1065,13 +1065,13 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.pf_addr.valid := false.B //pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
   io.l1_req.bits.is_store := true.B
   io.l1_req.bits.confidence := 1.U
-  io.l1_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
