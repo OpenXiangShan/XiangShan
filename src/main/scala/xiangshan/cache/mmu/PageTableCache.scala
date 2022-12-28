@@ -23,6 +23,7 @@ import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -640,7 +641,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.asid, ignoreAsid = true))).asUInt | spg)
+        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.asid, ignoreAsid = true))).asUInt)
       } .otherwise {
         // specific leaf of addr && specific asid
         spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.asid))).asUInt | spg)

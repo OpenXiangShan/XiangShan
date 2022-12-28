@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -745,4 +746,33 @@ object ValidHoldBypass{
     when (flush) { valid := false.B } // NOTE: the flush will flush in & out, is that ok?
     valid || infire
   }
+}
+
+class L1TlbDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+}
+
+class PageCacheDB(implicit p: Parameters) extends TlbBundle with HasPtwConst {
+  val vpn = UInt(vpnLen.W)
+  val source = UInt(bSourceWidth.W)
+  val bypassed = Bool()
+  val is_first = Bool()
+  val prefetched = Bool()
+  val prefetch = Bool()
+  val l2Hit = Bool()
+  val l1Hit = Bool()
+  val hit = Bool()
+}
+
+class PTWDB(implicit p: Parameters) extends TlbBundle with HasPtwConst {
+  val vpn = UInt(vpnLen.W)
+  val source = UInt(bSourceWidth.W)
+}
+
+class L2TlbPrefetchDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+}
+
+class L2TlbMissQueueDB(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
 }

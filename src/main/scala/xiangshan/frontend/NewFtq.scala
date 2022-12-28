@@ -20,11 +20,12 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.ImmUnion
-import huancun.utils.ChiselDB
+import utility.ChiselDB
 
 class FtqDebugBundle extends Bundle {
   val pc = UInt(39.W)

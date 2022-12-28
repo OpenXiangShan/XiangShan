@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{LookupTree, LookupTreeDefault, ParallelMux, SignExt, ZeroExt}
+import utility.{LookupTree, LookupTreeDefault, ParallelMux, SignExt, ZeroExt}
 import xiangshan._
 
 class AddModule(implicit p: Parameters) extends XSModule {

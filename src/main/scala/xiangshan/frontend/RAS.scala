@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
+import utility._
 import xiangshan._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {

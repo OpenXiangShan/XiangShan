@@ -23,7 +23,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.SignExt
+import utility.SignExt
 import xiangshan.backend.fu.util.CSA3_2
 
 /** A Radix-4 SRT Integer Divider

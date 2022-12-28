@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.backend.fu.util.{C22, C32, C53}
 
 class MulDivCtrl extends Bundle{

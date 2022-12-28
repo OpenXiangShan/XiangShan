@@ -27,6 +27,7 @@ import xiangshan._
 import huancun.{AliasKey, DirtyKey}
 import xiangshan.cache._
 import utils._
+import utility._
 import difftest._
 
 

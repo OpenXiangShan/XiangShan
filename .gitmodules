@@ -13,3 +13,6 @@
 [submodule "fudian"]
 	path = fudian
 	url = https://github.com/OpenXiangShan/fudian.git
+[submodule "utility"]
+	path = utility
+	url = https://github.com/OpenXiangShan/utility

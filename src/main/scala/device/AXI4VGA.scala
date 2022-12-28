@@ -23,6 +23,7 @@ import chisel3.experimental.ExtModule
 import freechips.rocketchip.amba.axi4.{AXI4AdapterNode, AXI4IdentityNode, AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
 import utils._
+import utility._
 
 trait HasVGAConst {
   val ScreenW = 800
