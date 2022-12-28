@@ -326,6 +326,8 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val replayCarry = new ReplayCarry
   // data has been corrupted
   val tag_error = Bool() // tag error
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
+
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
@@ -342,7 +344,6 @@ class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
 {
   val bank_data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
   val bank_oh = UInt(DCacheBanks.W)
-  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -421,6 +422,7 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val tag_error = Bool()
   val error     = Bool()
   val replayCarry = new ReplayCarry
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
   def dump() = {
     XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
