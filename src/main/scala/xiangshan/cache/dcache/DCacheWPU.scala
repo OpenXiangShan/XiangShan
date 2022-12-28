@@ -17,6 +17,15 @@ class ReplayCarry(implicit p: Parameters) extends XSBundle with HasDCacheParamet
   val valid = Bool()
 }
 
+object ReplayCarry{
+  def apply(rwe: UInt, v: Bool)(implicit p: Parameters): ReplayCarry = {
+    val rcry = Wire(new ReplayCarry)
+    rcry.real_way_en := rwe
+    rcry.valid := v
+    rcry
+  }
+}
+
 class WPUReq(implicit p: Parameters) extends WPUBuddle {
   val vaddr = UInt(PAddrBits.W)
   val replayCarry = new ReplayCarry

@@ -49,7 +49,7 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
+class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
@@ -75,6 +75,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp {
 
   // For load replay
   val isLoadReplay = Bool()
+
+  // For dcache miss load
+  val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+
+  val forward_tlDchannel = Bool()
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -100,6 +105,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isSoftPrefetch := input.isSoftPrefetch
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
+    mshrid := input.mshrid
+    forward_tlDchannel := input.forward_tlDchannel
 
     lq_data_wen_dup := DontCare
   }
@@ -187,23 +194,40 @@ class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
+  // old dcache: optimize data sram read fanout
+  // val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
+  // val bank_oh = UInt(DCacheBanks.W)  
+  
+  // new dcache
+  val respDcacheData = UInt(XLEN.W)
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
+  
+  // forward tilelink D channel
+  val forward_D = Input(Bool())
+  val forwardData_D = Input(Vec(8, UInt(8.W)))
 
-  val dcacheData = UInt(XLEN.W)
+  // forward mshr data
+  val forward_mshr = Input(Bool())
+  val forwardData_mshr = Input(Vec(8, UInt(8.W)))
 
-  /* WHQ-dcache: optimize data sram read fanout
-  val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
-  val bank_oh = UInt(DCacheBanks.W)
+  val forward_result_valid = Input(Bool())
+  
   def dcacheData(): UInt = {
-    Mux1H(bank_oh, bankedDcacheData)
+    // old dcache
+    // val dcache_data = Mux1H(bank_oh, bankedDcacheData)
+    // new dcache
+    val dcache_data = respDcacheData
+    val use_D = forward_D && forward_result_valid
+    val use_mshr = forward_mshr && forward_result_valid
+    Mux(use_D, forwardData_D.asUInt, Mux(use_mshr, forwardData_mshr.asUInt, dcache_data))
   }
-  */
+
   def mergedData(): UInt = {
     val rdataVec = VecInit((0 until XLEN / 8).map(j =>
-      Mux(forwardMask(j), forwardData(j), dcacheData(8*(j+1)-1, 8*j))
+      Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
     ))
     rdataVec.asUInt
   }
