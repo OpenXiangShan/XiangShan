@@ -48,6 +48,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
+    val miss_resp   = Input(new MissResp)
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -276,6 +277,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // load pipe need replay when there is a bank conflict
   resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
+  resp.bits.mshr_id := io.miss_resp.id
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
 
