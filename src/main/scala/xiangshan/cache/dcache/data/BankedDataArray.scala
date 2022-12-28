@@ -22,9 +22,7 @@ import utils._
 import utility._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
-import huancun.utils.ChiselDB
 
 import scala.math.max
 
