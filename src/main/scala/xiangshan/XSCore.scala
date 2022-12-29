@@ -26,6 +26,7 @@ import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
 import system.HasSoCParameter
 import utils._
+import utility._
 import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.cache.mmu._
@@ -137,10 +138,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new L2TLBWrapper())
-  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
+  val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
-  ptw_to_l2_buffer.node := ptw.node
+  if (!coreParams.softPTW) {
+    ptw_to_l2_buffer.node := ptw.node
+  }
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts: Seq[Seq[ExuConfig]] = wbArbiter.intWbPorts
@@ -294,7 +297,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   frontend.io.hartId  := io.hartId
@@ -400,7 +403,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  memBlock.io.perfEventsPTW  := ptw.getPerf
+  if (!coreParams.softPTW) {
+    memBlock.io.perfEventsPTW := ptw.getPerf
+  } else {
+    memBlock.io.perfEventsPTW := DontCare
+  }
   ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId

@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
+import utility._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.backend.fu.util.HasCSRConst
 

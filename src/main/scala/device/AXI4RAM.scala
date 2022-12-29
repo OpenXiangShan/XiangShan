@@ -22,7 +22,7 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import freechips.rocketchip.amba.axi4.AXI4SlaveNode
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule}
-import utils.MaskExpand
+import utility.MaskExpand
 
 class RAMHelper(memByte: BigInt) extends ExtModule {
   val DataBits = 64

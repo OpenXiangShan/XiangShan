@@ -20,6 +20,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.{SfenceBundle, XSModule}
 import utils._
+import utility._
 
 class L2TlbPrefetchIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val in = Flipped(ValidIO(new Bundle {
@@ -36,7 +37,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val OldRecordSize = 4
   val old_reqs = Reg(Vec(OldRecordSize, UInt(vpnLen.W)))
-  val old_v = VecInit(Seq.fill(OldRecordSize)(RegInit(false.B)))
+  val old_v = RegInit(VecInit(Seq.fill(OldRecordSize)(false.B)))
   val old_index = RegInit(0.U(log2Ceil(OldRecordSize).W))
 
   def already_have(vpn: UInt): Bool = {
@@ -63,6 +64,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
     old_v.map(_ := false.B)
   }
 
-  XSPerfAccumulate("l2tlb_prefetch_input_count", input_valid)
+  XSPerfAccumulate("l2tlb_prefetch_input_count", io.in.valid)
+  XSPerfAccumulate("l2tlb_prefetch_valid_count", input_valid)
   XSPerfAccumulate("l2tlb_prefetch_output_count", io.out.fire())
 }

@@ -21,6 +21,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
+import utility._
 
 // we support 256 interrupt bits by default
 class IntrGenIO extends Bundle {

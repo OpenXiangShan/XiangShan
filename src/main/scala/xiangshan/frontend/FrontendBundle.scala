@@ -22,6 +22,7 @@ import chisel3.experimental.chiselName
 import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
+import utility._
 import scala.math._
 
 @chiselName

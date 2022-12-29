@@ -22,7 +22,7 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{SignExt, ZeroExt}
+import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.HasPipelineReg
 import xiangshan.i2fCfg
 

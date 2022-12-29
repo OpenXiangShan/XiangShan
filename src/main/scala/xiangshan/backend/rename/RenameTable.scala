@@ -19,7 +19,8 @@ package xiangshan.backend.rename
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{ParallelPriorityMux, XSError}
+import utility.ParallelPriorityMux
+import utils.XSError
 import xiangshan._
 
 abstract class RegType

@@ -20,7 +20,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
-import utils.{XSPerfAccumulate, ZeroExt}
+import utils.XSPerfAccumulate
+import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.fu._
 

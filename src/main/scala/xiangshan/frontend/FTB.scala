@@ -22,6 +22,7 @@ import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import chisel3.experimental.chiselName
 
 import scala.math.min

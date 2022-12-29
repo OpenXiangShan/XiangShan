@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.exu.ExuConfig
 
