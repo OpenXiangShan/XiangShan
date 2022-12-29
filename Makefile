@@ -106,8 +106,8 @@ verilog: $(TOP_V)
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
-	@date -R | tee -a $(TIMELOG)
+	@echo "\n[mill] Generating Verilog files..." > $(@D)/time.log
+	@date -R | tee -a $(@D)/time.log
 	time -o $(@D)/time.log mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D) \
 		--config $(CONFIG) --full-stacktrace --num-cores $(NUM_CORES) \
 		$(SIM_ARGS)
