@@ -66,8 +66,8 @@ ifeq ($(MFC),1)
 RELEASE_ARGS += -X none -E chirrtl --output-file $(TOP).chirrtl.fir
 DEBUG_ARGS += -X none -E chirrtl --output-file $(SIM_TOP).chirrtl.fir
 else
-RELEASE_ARGS += -E verilog --output-file $(TOP).v
-DEBUG_ARGS += -E verilog --output-file $(SIM_TOP).v
+RELEASE_ARGS += --emission-options disableRegisterRandomization -E verilog --output-file $(TOP).v
+DEBUG_ARGS += --emission-options disableRegisterRandomization -E verilog --output-file $(SIM_TOP).v
 endif
 
 ifeq ($(RELEASE),1)
