@@ -26,6 +26,7 @@ import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
+import xiangshan.cache.dcache.ReplayCarry
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -75,6 +76,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For load replay
   val isLoadReplay = Bool()
+  val replayCarry = new ReplayCarry
 
   // For dcache miss load
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
@@ -107,6 +109,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel
+    replayCarry := input.replayCarry
 
     lq_data_wen_dup := DontCare
   }

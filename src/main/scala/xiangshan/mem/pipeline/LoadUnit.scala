@@ -66,7 +66,6 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val trigger = Flipped(new LqTriggerIO)
 
   // for load replay
-  val replayCarry = Input(new ReplayCarry)
   val replayFast = new LoadToLsqFastIO
   val replaySlow = new LoadToLsqSlowIO
 }
@@ -99,7 +98,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val s0_kill = Input(Bool())
     // wire from lq to load pipeline
     val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
-    val replayCarry = Input(new ReplayCarry)
 
     val s0_sqIdx = Output(new SqPtr)
   })
@@ -143,7 +141,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.lsqOut.bits.isFirstIssue
     s0_rsIdx := io.lsqOut.bits.rsIdx
     s0_sqIdx := io.lsqOut.bits.uop.sqIdx
-    s0_replayCarry := io.replayCarry
+    s0_replayCarry := io.lsqOut.bits.replayCarry
   }.elsewhen(io.in.valid) {
     val imm12 = io.in.bits.uop.ctrl.imm(11, 0)
     s0_vaddr := io.in.bits.src(0) + SignExt(imm12, VAddrBits)
@@ -738,7 +736,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val load_s2 = Module(new LoadUnit_S2)
 
   load_s0.io.lsqOut <> io.lsqOut
-  load_s0.io.replayCarry := io.lsq.replayCarry
 
   // load s0
   load_s0.io.in <> io.ldin

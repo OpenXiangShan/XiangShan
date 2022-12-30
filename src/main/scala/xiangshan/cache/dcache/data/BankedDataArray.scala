@@ -201,14 +201,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     data_sram.io.r.req.bits.apply(setIdx = io.r.addr)
     io.r.data := data_sram.io.r.resp.data(0)
 
-    // val r_way_en_reg = RegNext(io.r.way_en)
-    // val half = nWays / 2
-    // val data_read = data_bank.map(_.io.r.resp.data(0))
-    // val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
-    // val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
-    // val sel_low = r_way_en_reg.tail(half).orR()
-    // val row_data = Mux(sel_low, data_left, data_right) // FIXME lyq: to make sure there is a data selection? but it makes logic completed
-
     def dump_r() = {
       when(RegNext(io.r.en)) {
         XSDebug("bank read set %x bank %x way %x data %x\n",

@@ -306,12 +306,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
-  val real_miss = !s2_hit_dup_lsu // FIXME: real miss need be the s2_real_way_en?
+  val real_miss = !s2_hit_dup_lsu
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
-  // FIXME: is here right?
-  resp.bits.replayCarry.valid := resp.bits.miss // s2_wpu_pred_fail
+  resp.bits.replayCarry.valid := resp.bits.miss
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id

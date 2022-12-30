@@ -114,7 +114,6 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
   // for load replay (recieve feedback from load pipe line)
-  val replayCarry = Vec(LoadPipelineWidth, Output(new ReplayCarry))
   val replayFast = Vec(LoadPipelineWidth, Flipped(new LoadToLsqFastIO))
   val replaySlow = Vec(LoadPipelineWidth, Flipped(new LoadToLsqSlowIO))
 
@@ -380,7 +379,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
-    io.replayCarry(i) := replayCarryReg(replayIdx)  // FIXME lyq: change to loadout
+    io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
     io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
 

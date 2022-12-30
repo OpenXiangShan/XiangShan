@@ -50,7 +50,6 @@ class WPUIO(implicit p:Parameters) extends WPUBuddle{
   val s2_real_way_en = Output(UInt(nWays.W))
 }
 
-// TODO: mode design
 class DCacheWPU (implicit p:Parameters) extends WPUModule{
   val io = IO(new WPUIO)
   
