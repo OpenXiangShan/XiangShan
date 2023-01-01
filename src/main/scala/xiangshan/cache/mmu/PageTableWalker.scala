@@ -195,6 +195,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_llptw_req := true.B
     w_mem_resp := true.B
     accessFault := false.B
+    mem_addr_update := false.B
   }
 
   
