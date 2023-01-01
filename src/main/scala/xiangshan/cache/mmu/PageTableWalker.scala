@@ -93,7 +93,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val w_mem_resp = RegInit(true.B)
   // for updating "level"
   val mem_addr_update = RegInit(false.B)
-  
+
   val idle = RegInit(true.B)
   val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update)
 
@@ -103,14 +103,14 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val find_pte = memPte.isLeaf() || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
-  
+
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
   io.req.ready := idle
-  
-  io.resp.valid := idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault)) 
+
+  io.resp.valid := idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault))
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
 
@@ -143,7 +143,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_pmp_check := false.B
     idle := false.B
   }
-  
+
   when(sent_to_pmp && mem_addr_update === false.B){
     s_mem_req := false.B
     s_pmp_check := true.B
@@ -160,19 +160,19 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (mem.req.fire()){
     s_mem_req := true.B
     w_mem_resp := false.B
-  } 
-    
+  }
+
   when(mem.resp.fire() &&  w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level + 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
   }
-  
+
   when(mem_addr_update){
     when(level === 0.U && !(find_pte||accessFault)){
       level := levelNext
-      s_mem_req := false.B 
+      s_mem_req := false.B
       s_llptw_req := true.B
       mem_addr_update := false.B
     }.elsewhen(io.llptw.fire()){
@@ -186,8 +186,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       accessFault := false.B
     }
   }
-  
-  
+
+
   when (sfence.valid) {
     idle := true.B
     s_pmp_check := true.B
@@ -198,7 +198,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_addr_update := false.B
   }
 
-  
+
   XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
 
   // perf
