@@ -117,8 +117,8 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
   }
 
   // assertion of consistancy between arch rename table and refCounter
-  val archRefCounterFromRAT = RegNext(VecInit((0 until size).map(i => PopCount(io.debug_int_rat.map(_ === i.U)))),
-                                      VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
+  val archRefCounterFromRAT = RegInit(VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
+  archRefCounterFromRAT := (0 until size).map(i => PopCount(io.debug_int_rat.map(_ === i.U)))
   (1 until size).foreach(i =>
     XSError(archRefCounter(i) =/= archRefCounterFromRAT(i),
             p"archRefCounter_$i: ${archRefCounter(i)} =/= archRefCounterFromRAT_$i: ${archRefCounterFromRAT(i)}\n")
@@ -133,4 +133,3 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     XSPerfAccumulate(s"free_reg_$i", VecInit(isFreed).asUInt.orR)
   }
 }
-

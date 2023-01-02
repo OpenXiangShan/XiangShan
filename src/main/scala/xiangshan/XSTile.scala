@@ -14,7 +14,7 @@ import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
-  val ecc_error = Valid(UInt(soc.PAddrBits.W)) 
+  val ecc_error = Valid(UInt(soc.PAddrBits.W))
 }
 
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
@@ -174,6 +174,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
-    ResetGen(resetChain, reset.asBool || core_soft_rst.asBool, !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }
 }

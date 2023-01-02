@@ -108,7 +108,7 @@ class ErrorArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extend
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
     val write = Vec(writePorts, Flipped(DecoupledIO(new ErrorWriteReq)))
-    // customized cache op port 
+    // customized cache op port
     // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 
