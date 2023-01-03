@@ -367,7 +367,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
 
-  // select.io.balance
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -439,7 +438,6 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   for (((statusUpdate, uop), i) <- statusArray.io.update.zip(s1_dispatchUops_dup.head).zipWithIndex) {
     statusUpdate.enable := uop.valid
     statusUpdate.addr := s1_allocatePtrOH_dup.head(i)
-    statusUpdate.data.valid := true.B
     statusUpdate.data.scheduled := false.B // s1_delayedSrc(i).asUInt.orR
     statusUpdate.data.blocked := false.B // for checkWaitBit
     statusUpdate.data.credit := 0.U //Mux(s1_delayedSrc(i).asUInt.orR, 1.U, 0.U) // credit = 1

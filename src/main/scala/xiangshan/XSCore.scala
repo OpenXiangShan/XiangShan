@@ -491,6 +491,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     )
   )
 
-  ResetGen(resetTree, reset.asBool, !debugOpts.FPGAPlatform)
+  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
 
 }

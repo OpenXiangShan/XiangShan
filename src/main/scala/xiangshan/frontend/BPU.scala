@@ -183,7 +183,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule 
+abstract class BasePredictor(implicit p: Parameters) extends XSModule
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
@@ -213,7 +213,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.out.s1.pc := s1_pc
   io.out.s2.pc := s2_pc
   io.out.s3.pc := s3_pc
-  
+
   val perfEvents: Seq[(String, UInt)] = Seq()
 
 
@@ -299,13 +299,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   println(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
-  
+
   val s0_ghist_ptr = Wire(new CGHPtr)
   val s0_ghist_ptr_reg = RegNext(s0_ghist_ptr, 0.U.asTypeOf(new CGHPtr))
   val s1_ghist_ptr = RegEnable(s0_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s0_fire)
   val s2_ghist_ptr = RegEnable(s1_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s1_fire)
   val s3_ghist_ptr = RegEnable(s2_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s2_fire)
-  
+
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
@@ -341,7 +341,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   s1_components_ready := predictors.io.s1_ready
   s1_ready := s1_fire || !s1_valid
-  s0_fire := RegNext(!reset.asBool) && s1_components_ready && s1_ready
+  s0_fire := s1_components_ready && s1_ready
   predictors.io.s0_fire := s0_fire
 
   s2_components_ready := predictors.io.s2_ready
@@ -665,9 +665,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 1)
 
   s0_pc         := npcGen()
-  when (!(RegNext(RegNext(reset.asBool) && !reset.asBool) )) {
-    s0_pc_reg     := s0_pc
-  }
   s0_folded_gh  := foldedGhGen()
   s0_ghist_ptr  := ghistPtrGen()
   s0_ahead_fh_oldest_bits := aheadFhObGen()

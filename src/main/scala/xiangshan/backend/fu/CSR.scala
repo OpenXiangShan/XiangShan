@@ -385,15 +385,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mipFixMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt
-  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt
+  def getMisaMxl(mxl: BigInt): BigInt = mxl << (XLEN - 2)
+  def getMisaExt(ext: Char): Long = 1 << (ext.toInt - 'a'.toInt)
   var extList = List('a', 's', 'i', 'u')
   if (HasMExtension) { extList = extList :+ 'm' }
   if (HasCExtension) { extList = extList :+ 'c' }
   if (HasFPU) { extList = extList ++ List('f', 'd') }
   if (HasVPU) { extList = extList :+ 'v' }
-  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
-  val misa = RegInit(UInt(XLEN.W), misaInitVal)
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0L)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
+  val misa = RegInit(UInt(XLEN.W), misaInitVal.U)
 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
@@ -401,7 +401,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 25.U) // architecture id for XiangShan is 25; see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
-  val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
+  val mhartid = Reg(UInt(XLEN.W)) // the hardware thread running the code
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    mhartid := csrio.hartId
+  }
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
   val mstatus = RegInit("ha00002000".U(XLEN.W))
 
@@ -543,12 +546,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //  Others    : Reserved.
 
   val smblockctl_init_val =
-    ("hf".U & StoreBufferThreshold.U) |
-    (EnableLdVioCheckAfterReset.B.asUInt << 4) |
-    (EnableSoftPrefetchAfterReset.B.asUInt << 5) |
-    (EnableCacheErrorAfterReset.B.asUInt << 6) |
-    (EnableUncacheWriteOutstanding.B.asUInt << 7)
-  val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val)
+    (0xf & StoreBufferThreshold) |
+    (EnableLdVioCheckAfterReset.toInt << 4) |
+    (EnableSoftPrefetchAfterReset.toInt << 5) |
+    (EnableCacheErrorAfterReset.toInt << 6)
+    (EnableUncacheWriteOutstanding.toInt << 7)
+  val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check_enable := smblockctl(4)
@@ -562,7 +565,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
   println("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
-  
+
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.svinval_enable := srnctl(1)
@@ -1288,7 +1291,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Implicit add reset values for mepc[0] and sepc[0]
   // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
-  when (reset.asBool) {
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
     sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
   }

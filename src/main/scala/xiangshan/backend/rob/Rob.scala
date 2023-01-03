@@ -206,7 +206,8 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
     }
   }
 
-  val current = Reg(Valid(new RobExceptionInfo))
+  val currentValid = RegInit(false.B)
+  val current = Reg(new RobExceptionInfo)
 
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
@@ -237,36 +238,35 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   // (1) system reset
   // (2) current is valid: flush, remain, merge, update
   // (3) current is not valid: s1 or enq
-  val current_flush = current.bits.robIdx.needFlush(io.redirect) || io.flush
+  val current_flush = current.robIdx.needFlush(io.redirect) || io.flush
   val s1_flush = s1_out_bits.robIdx.needFlush(io.redirect) || io.flush
-  when (reset.asBool) {
-    current.valid := false.B
-  }.elsewhen (current.valid) {
+  when (currentValid) {
     when (current_flush) {
-      current.valid := Mux(s1_flush, false.B, s1_out_valid)
+      currentValid := Mux(s1_flush, false.B, s1_out_valid)
     }
     when (s1_out_valid && !s1_flush) {
-      when (isAfter(current.bits.robIdx, s1_out_bits.robIdx)) {
-        current.bits := s1_out_bits
-      }.elsewhen (current.bits.robIdx === s1_out_bits.robIdx) {
-        current.bits.exceptionVec := (s1_out_bits.exceptionVec.asUInt | current.bits.exceptionVec.asUInt).asTypeOf(ExceptionVec())
-        current.bits.flushPipe := s1_out_bits.flushPipe || current.bits.flushPipe
-        current.bits.replayInst := s1_out_bits.replayInst || current.bits.replayInst
-        current.bits.singleStep := s1_out_bits.singleStep || current.bits.singleStep
-        current.bits.trigger := (s1_out_bits.trigger.asUInt | current.bits.trigger.asUInt).asTypeOf(new TriggerCf)
+      when (isAfter(current.robIdx, s1_out_bits.robIdx)) {
+        current := s1_out_bits
+      }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
+        current.exceptionVec := (s1_out_bits.exceptionVec.asUInt | current.exceptionVec.asUInt).asTypeOf(ExceptionVec())
+        current.flushPipe := s1_out_bits.flushPipe || current.flushPipe
+        current.replayInst := s1_out_bits.replayInst || current.replayInst
+        current.singleStep := s1_out_bits.singleStep || current.singleStep
+        current.trigger := (s1_out_bits.trigger.asUInt | current.trigger.asUInt).asTypeOf(new TriggerCf)
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
-    current.valid := true.B
-    current.bits := s1_out_bits
+    currentValid := true.B
+    current := s1_out_bits
   }.elsewhen (enq_valid && !(io.redirect.valid || io.flush)) {
-    current.valid := true.B
-    current.bits := enq_bits
+    currentValid := true.B
+    current := enq_bits
   }
 
-  io.out.valid := s1_out_valid || enq_valid && enq_bits.can_writeback
-  io.out.bits := Mux(s1_out_valid, s1_out_bits, enq_bits)
-  io.state := current
+  io.out.valid   := s1_out_valid || enq_valid && enq_bits.can_writeback
+  io.out.bits    := Mux(s1_out_valid, s1_out_bits, enq_bits)
+  io.state.valid := currentValid
+  io.state.bits  := current
 
 }
 
@@ -485,7 +485,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // debug for lqidx and sqidx
       debug_microOp(wbIdx).lqIdx := wb.bits.uop.lqIdx
       debug_microOp(wbIdx).sqIdx := wb.bits.uop.sqIdx
-      
+
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.cf.pc)} wen ${debug_Uop.ctrl.rfWen} " +
@@ -765,12 +765,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
       valid(commitReadAddr(i)) := false.B
-    }
-  }
-  // reset: when exception, reset all valid to false
-  when (reset.asBool) {
-    for (i <- 0 until RobSize) {
-      valid(i) := false.B
     }
   }
 
