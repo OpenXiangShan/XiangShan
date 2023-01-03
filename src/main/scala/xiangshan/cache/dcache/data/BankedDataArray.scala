@@ -230,14 +230,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
 
   val data_banks = List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new DataSRAM(i,j))))
-  val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplate(
+  // ecc_banks also needs to be changed to two-dimensional to align with data_banks
+  val ecc_banks = List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new SRAMTemplate(
     Bits(eccBits.W),
     set = DCacheSets,
-    way = DCacheWays,
+    way = 1,
     shouldReset = false,
     holdRead = false,
     singlePort = true
-  )))
+    ))))
 
   data_banks.map(_.map(_.dump()))
 
@@ -306,25 +307,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(read_result)
   dontTouch(read_error_delayed_result)
   for (bank_index <- 0 until DCacheBanks) {
-    // read ECC
-    val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-      bank_addrs(i) === bank_index.U && io.read(i).valid
-    })))
-    val readline_match = Wire(Bool())
-    if (ReduceReadlineConflict) {
-      readline_match := io.readline.valid && io.readline.bits.rmask(bank_index)
-    } else {
-      readline_match := io.readline.valid
-    }
-    val bank_set_addr = Mux(readline_match,
-      addr_to_dcache_set(io.readline.bits.addr),
-      PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
-    )
-    val read_enable = bank_addr_matchs.asUInt.orR || readline_match
-    val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.r.req.valid := read_enable
-    ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
-    // read data
     for (way_index <- 0 until DCacheWays) {
       //     Set Addr & Read Way Mask
       //
@@ -348,10 +330,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       } else {
         readline_en := io.readline.valid && io.readline.bits.way_en(way_index)
       }
-      /* val ecc_way_en = Mux(readline_en,
-        io.readline.bits.way_en,
-        PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> way_en(i)))
-      ) */
       val sram_set_addr = Mux(readline_en,
         addr_to_dcache_set(io.readline.bits.addr),
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> set_addrs(i)))
@@ -361,13 +339,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       val data_bank = data_banks(bank_index)(way_index)
       data_bank.io.r.en := read_en
       data_bank.io.r.addr := sram_set_addr
+      val ecc_bank = ecc_banks(bank_index)(way_index)
+      ecc_bank.io.r.req.valid := read_en
+      ecc_bank.io.r.req.bits.apply(setIdx = sram_set_addr)
+
       read_result(bank_index)(way_index).raw_data := data_bank.io.r.data
-      read_result(bank_index)(way_index).ecc := ecc_bank.io.r.resp.data(way_index) // Mux1H(RegNext(ecc_way_en), ecc_bank.io.r.resp.data)
+      read_result(bank_index)(way_index).ecc := ecc_bank.io.r.resp.data(0)
 
       // use ECC to check error
       val ecc_data = read_result(bank_index)(way_index).asECCData()
-      val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
-      read_result(bank_index)(way_index).error_delayed := false.B // dcacheParameters.dataCode.decode(ecc_data_delayed).error // FIXME: adding this will error
+      val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_en))
+      read_result(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
       read_error_delayed_result(bank_index)(way_index) := read_result(bank_index)(way_index).error_delayed
     }
   }
@@ -407,22 +389,22 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       data_bank.io.w.en := io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index) && io.write_dup(bank_index).bits.way_en(way_index)
       data_bank.io.w.addr := sram_waddr_dup(bank_index)
       data_bank.io.w.data := io.write.bits.data(bank_index)
-    }
-    // ecc write
-    val ecc_bank = ecc_banks(bank_index)
-    ecc_bank.io.w.req.valid := RegNext(io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index))
-    ecc_bank.io.w.req.bits.apply(
-      setIdx = RegNext(sram_waddr_dup(bank_index)),
-      data = RegNext(getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index))))),
-      waymask = RegNext(io.write_dup(bank_index).bits.way_en)
-    )
-    when(ecc_bank.io.w.req.valid) {
-      XSDebug("write in ecc sram: bank %x set %x data %x waymask %x\n",
-        bank_index.U,
-        sram_waddr,
-        getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
-        io.write.bits.way_en
-      );
+      // ecc write
+      val ecc_bank = ecc_banks(bank_index)(way_index)
+      ecc_bank.io.w.req.valid := RegNext(io.write_dup(bank_index).valid && io.write.bits.wmask(bank_index) && io.write_dup(bank_index).bits.way_en(way_index))
+      ecc_bank.io.w.req.bits.apply(
+        setIdx = RegNext(sram_waddr_dup(bank_index)),
+        data = RegNext(getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index))))),
+        waymask = 1.U
+      )
+      when(ecc_bank.io.w.req.valid) {
+        XSDebug("write in ecc sram: bank %x set %x data %x waymask %x\n",
+          bank_index.U,
+          sram_waddr,
+          getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
+          io.write.bits.way_en
+        );
+      }
     }
   }
 
@@ -444,9 +426,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when (io.cacheOp_req_dup(0).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(0))) {
     for (bank_index <- 0 until (DCacheBanks / 3)) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.r.req.valid := true.B
-      ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.r.req.valid := true.B
+        ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      }
     }
     cacheOpShouldResp := true.B
   }
@@ -463,13 +447,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when(io.cacheOp_req_dup(2).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(2))){
     for (bank_index <- 0 until (DCacheBanks / 3)) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.w.req.valid := true.B
-      ecc_bank.io.w.req.bits.apply(
-        setIdx = io.cacheOp.req.bits.index,
-        data = io.cacheOp.req.bits.write_data_ecc,
-        waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      )
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.w.req.valid := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
+        ecc_bank.io.w.req.bits.apply(
+          setIdx = io.cacheOp.req.bits.index,
+          data = io.cacheOp.req.bits.write_data_ecc,
+          waymask = 1.U
+        )
+      }
     }
     cacheOpShouldResp := true.B
   }
@@ -487,9 +473,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when (io.cacheOp_req_dup(4).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(4))) {
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.r.req.valid := true.B
-      ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.r.req.valid := true.B
+        ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      }
     }
     cacheOpShouldResp := true.B
   }
@@ -506,13 +494,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when(io.cacheOp_req_dup(6).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(6))){
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.w.req.valid := true.B
-      ecc_bank.io.w.req.bits.apply(
-        setIdx = io.cacheOp.req.bits.index,
-        data = io.cacheOp.req.bits.write_data_ecc,
-        waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      )
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.w.req.valid := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
+        ecc_bank.io.w.req.bits.apply(
+          setIdx = io.cacheOp.req.bits.index,
+          data = io.cacheOp.req.bits.write_data_ecc,
+          waymask = 1.U
+        )
+      }
     }
     cacheOpShouldResp := true.B
   }
@@ -529,11 +519,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when (io.cacheOp_req_dup(8).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(8))) {
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.r.req.valid := true.B
-      ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.r.req.valid := true.B
+        ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
+      }
     }
-      cacheOpShouldResp := true.B
+    cacheOpShouldResp := true.B
   }
   when(io.cacheOp_req_dup(9).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(9))){
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
@@ -548,13 +540,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   when(io.cacheOp_req_dup(10).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(10))){
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
-      val ecc_bank = ecc_banks(bank_index)
-      ecc_bank.io.w.req.valid := true.B
-      ecc_bank.io.w.req.bits.apply(
-        setIdx = io.cacheOp.req.bits.index,
-        data = io.cacheOp.req.bits.write_data_ecc,
-        waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      )
+      for(way_index <- 0 until DCacheWays){
+        val ecc_bank = ecc_banks(bank_index)(way_index)
+        ecc_bank.io.w.req.valid := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
+        ecc_bank.io.w.req.bits.apply(
+          setIdx = io.cacheOp.req.bits.index,
+          data = io.cacheOp.req.bits.write_data_ecc,
+          waymask = 1.U
+        )
+      }
     }
     cacheOpShouldResp := true.B
   }
@@ -562,7 +556,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(bank_index)(RegNext(io.cacheOp.req.bits.wayNum(4, 0))).raw_data
-	  eccReadResult(bank_index) := ecc_banks(bank_index).io.r.resp.data(RegNext(io.cacheOp.req.bits.wayNum(4, 0)))
+	  eccReadResult(bank_index) := read_result(bank_index)(RegNext(io.cacheOp.req.bits.wayNum(4, 0))).ecc
   }
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
     eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
