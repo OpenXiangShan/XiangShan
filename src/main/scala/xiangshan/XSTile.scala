@@ -232,7 +232,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   val mbistBroadCastToL2 = if(outer.coreParams.L2CacheParamsOpt.isDefined) {
     if(outer.coreParams.L2CacheParamsOpt.get.hasMbist){
       val res = Some(Wire(new huancun.utils.BroadCastBundle))
-      outer.core.module.dft.get := res.get
+      outer.l2cache.get.module.dft.get := res.get
       res
     } else {
       None
