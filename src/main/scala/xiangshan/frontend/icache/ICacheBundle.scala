@@ -129,5 +129,8 @@ class IPFBufferWrite(implicit p: Parameters) extends  IPrefetchBundle{
   val data =  UInt(blockBits.W)
 }
 
-
+class IPFBufferMove(implicit p: Parameters) extends  IPrefetchBundle{
+  val vsetIdx = Output(UInt(idxBits.W))
+  val waymask = Input(UInt(nWays.W))
+}
 

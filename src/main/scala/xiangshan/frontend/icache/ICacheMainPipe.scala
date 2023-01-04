@@ -89,6 +89,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val dataArray    = new ICacheDataReqBundle
   val iprefetchBuf = Flipped(new IPFBufferRead)
   val PIQ          = Flipped(Vec(nPrefetchEntries,new PIQToMainPipe))
+  val IPFBufMove   = Flipped(new IPFBufferMove)
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -118,6 +119,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toITLB, fromITLB)  = (io.itlb.map(_.req), io.itlb.map(_.resp))
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   val fromPIQ             = io.PIQ.map(_.info)
+  val IPFBufferMove       = io.IPFBufMove
 
   io.itlb.foreach(_.req_kill := false.B)
 
@@ -283,6 +285,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(s0_fire))
 
   val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
+  IPFBufferMove.waymask := UIntToOH(replacers(0).way(IPFBufferMove.vsetIdx))
 
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
 

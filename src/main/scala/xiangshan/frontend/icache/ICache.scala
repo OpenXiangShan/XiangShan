@@ -521,6 +521,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
   meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
   data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
+  mainPipe.io.IPFBufMove <> ipfBuffer.io.replace
 
   ipfBuffer.io.fencei := io.fencei
   missUnit.io.fencei := io.fencei

@@ -76,11 +76,10 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val io = IO(new Bundle{
     val read  = new IPFBufferRead
     val write = Flipped(ValidIO(new IPFBufferWrite))
+    /** to ICache replacer */
+    val replace = new IPFBufferMove
+    /** to ICache meta and data */
     val move  = new Bundle() {
-//      /** input */
-//      val mp_ip_cache_hit = Input(Bool())
-//      val mp_ip_buffer_idx = Input(Bool())
-      /** output */
       val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
       val data_write = DecoupledIO(new ICacheDataWriteBundle)
     }
@@ -203,6 +202,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val move_queue_empty = curr_move_ptr === curr_hit_ptr
   val move_valid = !move_queue_empty && meta_buffer(move_queue(curr_move_ptr)).move
   val move_jump  = !move_queue_empty && !meta_buffer(move_queue(curr_move_ptr)).move
+
   //latch for better timing
   io.move.meta_write.valid := RegNext(move_valid)
   io.move.data_write.valid := RegNext(move_valid)
@@ -211,17 +211,19 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val move_idx = RegNext(move_queue(curr_move_ptr))
   val moveEntryMeta = RegNext(meta_buffer(move_idx))
   val moveEntryData = RegNext(data_buffer(move_idx))
+  io.replace.vsetIdx := meta_buffer(move_idx).index
+  val waymask = RegNext(io.replace.waymask)
 
   when(io.move.meta_write.fire()) {
     io.move.meta_write.bits.generate(tag = moveEntryMeta.tag,
       coh = ClientMetadata(ClientStates.Branch),
       idx = moveEntryMeta.index,
-      waymask = 0.U,
+      waymask = waymask,
       bankIdx = moveEntryMeta.index(0))
 
     io.move.data_write.bits.generate(data = moveEntryData.cachline,
       idx = moveEntryMeta.index,
-      waymask = 0.U,
+      waymask = waymask,
       bankIdx = moveEntryMeta.index(0),
       paddr = moveEntryMeta.paddr)
 
