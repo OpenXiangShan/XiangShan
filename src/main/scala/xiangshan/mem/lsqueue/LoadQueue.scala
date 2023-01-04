@@ -28,6 +28,7 @@ import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import chisel3.ExcitingUtils
+import xiangshan.cache.dcache.ReplayCarry
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -135,6 +136,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   println("LoadQueue: size:" + LoadQueueSize)
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
+  val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueSize)(ReplayCarry(0.U, false.B))))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
@@ -377,6 +379,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
+    io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
     io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
 
@@ -546,6 +549,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       st_ld_check_ok(idx) := io.replaySlow(i).st_ld_check_ok
       cache_no_replay(idx) := io.replaySlow(i).cache_no_replay
       forward_data_valid(idx) := io.replaySlow(i).forward_data_valid
+      replayCarryReg(idx) := io.replaySlow(i).replayCarry
       cache_hited(idx) := io.replaySlow(i).cache_hited
 
       val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
@@ -941,6 +945,7 @@ def detectRollback(i: Int) = {
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
   io.uncache.req.bits.id   := RegNext(deqPtrExtNext.value)
   io.uncache.req.bits.instrtype := DontCare
+  io.uncache.req.bits.replayCarry := DontCare
   io.uncache.req.bits.atomic := true.B
 
   io.uncache.resp.ready := true.B
