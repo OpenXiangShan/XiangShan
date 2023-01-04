@@ -75,7 +75,11 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
   s1_pred_way_en := pred_way_en
   io.resp.bits.predict_way := OHToUInt(s1_pred_way_en)
   io.resp.bits.predict_way_en := s1_pred_way_en
-  io.resp.valid := true.B
+  if(EnableDCacheWPU){
+    io.resp.valid := true.B
+  }else{
+    io.resp.valid := false.B
+  }
   assert(RegNext(PopCount(io.resp.bits.predict_way_en) <= 1.U), "tag should not match with more than 1 way")
 
   // check and update in s1
@@ -119,7 +123,11 @@ class IdealWPU(implicit p:Parameters) extends WPUModule{
     }
   )
 
-  io.resp.valid := true.B
+  if(EnableDCacheWPU){
+    io.resp.valid := true.B
+  }else{
+    io.resp.valid := false.B
+  }
   io.resp.bits.predict_way := pred_way
   io.resp.bits.predict_way_en := VecInit((0 until nWays).map(x => x.U === pred_way)).asUInt
   
