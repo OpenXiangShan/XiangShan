@@ -88,6 +88,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
   def nIPFBufferSize   = cacheParams.nPrefBufferEntries
+  def maxIPFMoveConf   = blockBytes/(instBytes*FetchWidth)
 
   def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
     val valid  = RegInit(false.B)
@@ -474,7 +475,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries),
+      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries + cacheParams.nPrefetchEntries),
       supportsProbe = TransferSizes(blockBytes),
       supportsHint = TransferSizes(blockBytes)
     )),

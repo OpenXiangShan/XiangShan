@@ -957,7 +957,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   if(cacheParams.hasPrefetch){
     val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
-    prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
+    
+    when(io.toPrefetch.req.fire()){
+      prefetchPtr := prefetchPtr + 1.U
+    }
+
+    val distance_between_prefetch_ifu = prefetchPtr.value - ifuPtr.value
+    //TODO: Parameterize it
+    val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
+    val prefetch_too_late = prefetchPtr.value <= ifuPtr.value
+    when(prefetch_too_late && prefetchPtr =/= bpuPtr){
+      prefetchPtr := ifuPtr + 1.U
+    }
 
     when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
       prefetchPtr := bpu_s2_resp.ftq_idx
@@ -976,10 +987,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       prefetch_is_to_send := true.B
       prefetch_addr := last_cycle_update_target
     }
-    val distance_between_prefetch_ifu = prefetchPtr.value - ifuPtr.value
-    //TODO: Parameterize it
-    val prefetch_faraway_from_ifu = distance_between_prefetch_ifu > 32.U
-    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send && !prefetch_faraway_from_ifu
+    
+    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send && !prefetch_faraway_from_ifu && !prefetch_too_late
     io.toPrefetch.req.bits.target := prefetch_addr
     if(DebugFlags.fdip){
       when(io.toPrefetch.req.fire()) {
