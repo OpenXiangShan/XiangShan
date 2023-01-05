@@ -64,10 +64,7 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
   val exeUnits = configs.zip(exuDefs).map(x => Seq.fill(x._1._2)(Instance(x._2))).reduce(_ ++ _)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
-  // TODO: deal with Std units
   val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
-  val stdExeUnits = exeUnits.filter(_.config.readIntRf).filter(_.config.readFpRf)
-  stdExeUnits.foreach(_.io.fromFp := DontCare)
   io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
