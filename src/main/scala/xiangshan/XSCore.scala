@@ -254,10 +254,10 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val hasIntRf = Seq(true, false)
   val hasFpRf = Seq(false, true)
   val exuBlocks = scheduleCfgs.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
-    case (((sche, disp), other), i) =>
+    case (((sche, disp), other), i) => {
       LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
+    }
   }
-
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = exuBlocks.head.scheduler.getMemRsEntries

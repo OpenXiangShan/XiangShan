@@ -112,6 +112,14 @@ case class ExuConfig
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR
   }
+
+  override def toString: String = {
+    val fuList = fuConfigs.map(_.toString).map("    " + _).foldLeft("")(_ + "\n" + _).trim()
+    s"${name}: blockName ${blockName} " + "" +
+    s"wbPriority(int|fp) ${wbIntPriority}|${wbFpPriority} " +
+    s"extExu ${extendsExu} FU List:\n" +
+    s"    ${fuList}"
+  }
 }
 
 @instantiable

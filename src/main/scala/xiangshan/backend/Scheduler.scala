@@ -134,10 +134,20 @@ case class ScheLaneConfig (
   fpFastWakeupTarget: Seq[ExuConfig] = Seq()
 ){
   def name: String = exuConfig.name
+  override def toString: String = {
+    s"${name}*${numDeq} " +
+    (if(intFastWakeupTarget.nonEmpty) "intFastWakeupTarget" + intFastWakeupTarget.map(_.name).foldLeft("")(_+" "+_) else "" ) +
+    (if(fpFastWakeupTarget.nonEmpty) "fpFastWakeupTarget" + fpFastWakeupTarget.map(_.name).foldLeft("")(_+_) else "" ) +
+    s"ExuConfig ${exuConfig}"
+  }
 }
 
 
-case class DpPortMapConfig(rsIdx: Int, dpIdx: Int)
+case class DpPortMapConfig(rsIdx: Int, dpIdx: Int) {
+  override def toString: String = {
+    s"rsIdx ${rsIdx} dpIdx ${dpIdx}"
+  }
+}
 
 class Scheduler(
   // val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],

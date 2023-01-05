@@ -52,6 +52,21 @@ class ExuBlock(
     Seq(params)
   }
   override lazy val writebackSourceImp: HasWritebackSourceImp = module
+
+  println("ExuBlock:")
+  if(intRfWbPorts.nonEmpty)
+    println("  intRfWbPorts: " + intRfWbPorts.map(a => a.map(_.name)))
+  if(fpRfWbPorts.nonEmpty)
+    println("  fpRfWbPorts: " + fpRfWbPorts.map(a => a.map(_.name)))
+  if(outFastPorts.nonEmpty)
+    println("  outFastPorts: " + outFastPorts)
+  println("  dpPorts:")
+  for (a <- dpPorts)
+    for (b <- a)
+      println(s"    ${b}")
+  println(s"  outIntRfReadPorts ${outIntRfReadPorts} outFpRfReadPorts ${outFpRfReadPorts} hasIntRf ${hasIntRf} hasFpRf ${hasFpRf}")
+  println(configs.map(_.toString).map("  " + _ + "\n").foldLeft("")(_ + _))
+
 }
 
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)

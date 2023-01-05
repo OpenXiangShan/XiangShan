@@ -62,6 +62,20 @@ case class FuConfig
 ) {
   def srcCnt: Int = math.max(math.max(numIntSrc, numFpSrc), numVecSrc)
   def isVectorFU: Boolean = (numVecSrc > 0) && writeVecRf
+
+  override def toString: String = {
+    s"${name}: SrcNum(${numIntSrc}|${numFpSrc}|${numVecSrc}) " +
+    s"Write(" +
+    (if(writeIntRf) "int|" else "") +
+    (if(writeFpRf) "fp|" else "") +
+    (if(writeVecRf) "vec|" else "") +
+    (if(writeFflags) "fflags" else "") +
+    (if(!writeIntRf && !writeFpRf && !writeVecRf && !writeFflags) "none" else "") + ") " +
+    (if(hasRedirect) "hasRedirect " else "") +
+    (if(latency.latencyVal.getOrElse(99) != 99) "latency " + latency.latencyVal.get+" " else "") +
+    (if(fastUopOut) "hasFastUopOut " else "") +
+    s"inputBuffer (${hasInputBuffer._1},${hasInputBuffer._2},${hasInputBuffer._3}) "
+  }
 }
 
 
