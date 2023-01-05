@@ -37,7 +37,7 @@ package object xiangshan {
     // alias
     def reg = this.xp
     def DC  = imm // Don't Care
-    def X   = BitPat("b???")
+    def X   = BitPat("b000")
 
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
@@ -58,27 +58,27 @@ package object xiangshan {
 
   // Todo: Use OH instead
   object FuType {
-    def jmp          = "b0000".U
-    def i2f          = "b0001".U
-    def csr          = "b0010".U
-    def alu          = "b0110".U
-    def mul          = "b0100".U
-    def div          = "b0101".U
-    def fence        = "b0011".U
-    def bku          = "b0111".U
+    def jmp          = "b00000".U
+    def i2f          = "b00001".U
+    def csr          = "b00010".U
+    def alu          = "b00110".U
+    def mul          = "b00100".U
+    def div          = "b00101".U
+    def fence        = "b00011".U
+    def bku          = "b00111".U
 
-    def fmac         = "b1000".U
-    def fmisc        = "b1011".U
-    def fDivSqrt     = "b1010".U
+    def fmac         = "b01000".U
+    def fmisc        = "b01011".U
+    def fDivSqrt     = "b01010".U
 
-    def ldu          = "b1100".U
-    def stu          = "b1101".U
-    def mou          = "b1111".U // for amo, lr, sc, fence
-    def vipu         = "b11000".U
-    def vfpu         = "b11001".U
+    def ldu          = "b01100".U
+    def stu          = "b01101".U
+    def mou          = "b01111".U // for amo, lr, sc, fence
+    def vipu         = "b10000".U
+    def vfpu         = "b11000".U
     def vldu         = "b11100".U
     def vstu         = "b11101".U
-    def X            = BitPat("b????")
+    def X            = BitPat("b00000")
 
     def num = 18
 
@@ -127,9 +127,10 @@ package object xiangshan {
     )
   }
 
+  def FuOpTypeWidth = 8
   object FuOpType {
-    def apply() = UInt(8.W)
-    def X = BitPat("b???????")
+    def apply() = UInt(FuOpTypeWidth.W)
+    def X = BitPat("b00000000")
   }
 
   // move VipuType and VfpuType into YunSuan/package.scala
@@ -142,11 +143,11 @@ package object xiangshan {
   // }
 
   object VlduType {
-    def dummy = 0.U(7.W)
+    def dummy = 0.U
   }
 
   object VstuType {
-    def dummy = 0.U(7.W)
+    def dummy = 0.U
   }
 
   object CommitType {
@@ -355,7 +356,7 @@ package object xiangshan {
     def getBranchType(func: UInt) = func(3, 2)
     def isBranchInvert(func: UInt) = func(1)
 
-    def apply() = UInt(7.W)
+    def apply() = UInt(FuOpTypeWidth.W)
   }
 
   object MDUOpType {
@@ -536,7 +537,7 @@ package object xiangshan {
     def IMM_VSETVLI   = "b1100".U
     def IMM_VSETIVLI  = "b1101".U
 
-    def X      = BitPat("b????")
+    def X      = BitPat("b0000")
 
     def apply() = UInt(4.W)
   }
