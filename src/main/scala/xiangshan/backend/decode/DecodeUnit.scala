@@ -644,7 +644,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     XSTrapDecode.table ++
     BDecode.table ++
     CBODecode.table ++
-    SvinvalDecode.table
+    SvinvalDecode.table ++
+    VecDecoder.table
+
+  require(decode_table.map(_._2.length == 13).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
