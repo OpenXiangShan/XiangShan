@@ -174,11 +174,14 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 
-  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen,
+  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
     isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
+    val decoder: Seq[UInt] = ListLookup(
+      inst, XDecode.decodeDefault.map(bitPatToUInt),
+      table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
+    )
     allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
     this

@@ -11,10 +11,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import yunsuan.{VfpuType, VipuType}
 
-abstract class VecType {
-  def X = BitPat("b?")
-  def N = BitPat("b0")
-  def Y = BitPat("b1")
+abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
   def asOldDecodeOutput(): List[BitPat] = {
     val src1::src2::src3::fu::fuOp::xWen::fWen::vWen::mWen::vxsatWen::xsTrap::noSpec::blockBack::flushPipe::selImm::Nil = generate()
@@ -26,130 +23,89 @@ abstract class VecType {
   }
 }
 
-case class OPIVV(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends VecType {
+case class OPIVV(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    //                                                                              xsTrap
-    //                                                                              |  noSpec
-    //                                            xWen                              |  |  blockBack
-    //    src1,       src2,       src3, fu, fuOp, |, fWen, vWen, mWen, vxsatWen,    |  |  |  flushPipe, selImm
-    List (SrcType.vp, SrcType.vp, src3, fu, fuOp, N, N, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVX(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends VecType {
+case class OPIVX(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    //                                                                              xsTrap
-    //                                                                              |  noSpec
-    //                                            xWen                              |  |  blockBack
-    //    src1,       src2,       src3, fu, fuOp, |, fWen, vWen, mWen, vxsatWen,    |  |  |  flushPipe, selImm
-    List (SrcType.xp, SrcType.vp, src3, fu, fuOp, N, N, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat) extends VecType {
+case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    //                                                                               xsTrap
-    //                                                                               |  noSpec
-    //                                             xWen                              |  |  blockBack
-    //    src1,        src2,       src3, fu, fuOp, |, fWen, vWen, mWen, vxsatWen,    |  |  |  flushPipe, selImm
-    List (SrcType.imm, SrcType.vp, src3, fu, fuOp, N, N, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, selImm)
+    XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm,
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends VecType {
+case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    val vxsatWen = false
-    //                                                                                   xsTrap
-    //                                                                                   |  noSpec
-    //                                            xWen    fWen                           |  |  blockBack
-    //    src1,       src2,       src3, fu, fuOp, |       |  vWen    mWen    vxsatWen,   |  |  |  flushPipe, selImm
-    List (SrcType.vp, SrcType.vp, src3, fu, fuOp, xWen.B, N, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, xWen, F, vWen, mWen, F, F, F, F).generate()
   }
 }
 
-case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends VecType {
+case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    val vxsatWen = false
-    //                                                                                   xsTrap
-    //                                                                                   |  noSpec
-    //                                            xWen    fWen                           |  |  blockBack
-    //    src1,       src2,       src3, fu, fuOp, |       |  vWen    mWen    vxsatWen,   |  |  |  flushPipe, selImm
-    List (SrcType.xp, SrcType.vp, src3, fu, fuOp, xWen.B, N, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+      xWen = xWen, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVV(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat,  fWen: Boolean, vWen: Boolean, mWen: Boolean) extends VecType {
+case class OPFVV(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    val vxsatWen = false
-    //                                                                             xsTrap
-    //                                                                             |  noSpec
-    //                                      xWen    fWen                           |  |  blockBack
-    //    src1, src2,       src3, fu, fuOp, |       |  vWen    mWen    vxsatWen,   |  |  |  flushPipe, selImm
-    List (src1, SrcType.vp, src3, fu, fuOp, N, fWen.B, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVF(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends VecType {
+case class OPFVF(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    val vxsatWen = false
-    //                                                                             xsTrap
-    //                                                                             |  noSpec
-    //                                      xWen    fWen                           |  |  blockBack
-    //    src1, src2,       src3, fu, fuOp, |       |  vWen    mWen    vxsatWen,   |  |  |  flushPipe, selImm
-    List (src1, SrcType.vp, src3, fu, fuOp, N, fWen.B, vWen.B, mWen.B, vxsatWen.B, N, N, N, N, SelImm.X)
+    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat) extends VecType {
+case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp
-    //                                             xWen
-    //                                             |  fWen               xsTrap
-    //                                             |  |  vWen            |  noSpec
-    //                                             |  |  |  mWen         |  |  blockBack
-    //    src1, src2,      src3, fu,         fuOp, |  |  |  |  vxsatWen, |  |  |  flushPipe, selImm
-    List (src1, src2, SrcType.X, FuType.alu, fuOp, Y, N, N, N, N,        N, N, N, Y, selImm)
+    XSDecode(src1, src2, SrcType.X, FuType.alu, fuOp, selImm,
+      xWen = T, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = flushPipe).generate()
   }
 }
 
 case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false, ff: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends VecType {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vldu
     val src1 = SrcType.xp
     val src3 = SrcType.X
-    //                                xWen
-    //                                |  fWen               xsTrap
-    //                                |  |  vWen            |  noSpec
-    //                                |  |  |  mWen         |  |  blockBack
-    //    src1, src2, src3, fu, fuOp, |  |  |  |  vxsatWen, |  |  |  flushPipe, selImm
-    List (src1, src2, src3, fu, fuOp, N, N, Y, N, N,        N, N, N, Y, SelImm.X)
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = F, vWen = T, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
 case class VST(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends VecType {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vstu
     val src1 = SrcType.xp
     val src3 = SrcType.vp
-    //                                xWen
-    //                                |  fWen               xsTrap
-    //                                |  |  vWen            |  noSpec
-    //                                |  |  |  mWen         |  |  blockBack
-    //    src1, src2, src3, fu, fuOp, |  |  |  |  vxsatWen, |  |  |  flushPipe, selImm
-    List (src1, src2, src3, fu, fuOp, N, N, Y, N, N,        N, N, N, Y, SelImm.X)
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X,
+      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
 object VecDecoder extends DecodeConstants {
-  private def F = false
-  private def T = true
-
-  val opivv: Array[(BitPat, VecType)] = Array(
+  val opivv: Array[(BitPat, XSDecodeBase)] = Array(
     VADD_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VSUB_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
 
@@ -205,7 +161,7 @@ object VecDecoder extends DecodeConstants {
     VWREDSUM_VS     -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
   )
 
-  val opivx: Array[(BitPat, VecType)] = Array(
+  val opivx: Array[(BitPat, XSDecodeBase)] = Array(
     VADD_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VSUB_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VRSUB_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
@@ -258,11 +214,11 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VSSRA_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
 
-    VNCLIPU_WV    -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T),
-    VNCLIP_WV     -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T),
+    VNCLIPU_WX    -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T),
+    VNCLIP_WX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T),
   )
 
-  val opivi: Array[(BitPat, VecType)] = Array(
+  val opivi: Array[(BitPat, XSDecodeBase)] = Array(
     VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
     VRSUB_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
 
@@ -299,8 +255,8 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
     VSSRA_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
 
-    VNCLIPU_WV    -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T, SelImm.IMM_OPIVIU),
-    VNCLIP_WV     -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T, SelImm.IMM_OPIVIU),
+    VNCLIPU_WI    -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T, SelImm.IMM_OPIVIU),
+    VNCLIP_WI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, T, SelImm.IMM_OPIVIU),
 
     VMV1R_V       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
     VMV2R_V       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
@@ -308,7 +264,7 @@ object VecDecoder extends DecodeConstants {
     VMV8R_V       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
   )
 
-  val opmvv: Array[(BitPat, VecType)] = Array(
+  val opmvv: Array[(BitPat, XSDecodeBase)] = Array(
     VAADD_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VAADDU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VASUB_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
@@ -320,7 +276,9 @@ object VecDecoder extends DecodeConstants {
     VFIRST_M     -> OPMVV(F, FuType.vipu, VipuType.dummy, T, F, F),
     VID_V        -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VIOTA_M      -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VMACC_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
+
+    // VMACC_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
+    
     VMADD_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VMAND_MM     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMANDN_MM    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
@@ -337,6 +295,7 @@ object VecDecoder extends DecodeConstants {
     VMULH_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMULHSU_VV   -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMULHU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
+
     VMV_X_S      -> OPMVV(F, FuType.vipu, VipuType.dummy, T, F, F),
     VNMSAC_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VNMSUB_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
@@ -369,10 +328,10 @@ object VecDecoder extends DecodeConstants {
     VWSUB_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_WV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUBU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F)
+    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
   )
 
-  val opmvx: Array[(BitPat, VecType)] = Array(
+  val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
     VAADD_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VAADDU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VASUB_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
@@ -386,30 +345,36 @@ object VecDecoder extends DecodeConstants {
     VMULHSU_VX     -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMULHU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMV_S_X        -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+
     VNMSAC_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VNMSUB_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VREM_VX        -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VREMU_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+
     VSLIDE1DOWN_VX -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VSLIDE1UP_VX   -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWADD_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWADD_WX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWADDU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWADDU_WX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+
+    // OutOfMemoryError
     VWMACC_VX      -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMACCSU_VX    -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMACCU_VX     -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
+
     VWMACCUS_VX    -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMUL_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWMULSU_VX     -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+    // Ok
     VWMULU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_WX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F)
+    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
   )
 
-  val opfvv: Array[(BitPat, VecType)] = Array(
+  val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
     VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -487,6 +452,7 @@ object VecDecoder extends DecodeConstants {
     VFWCVT_F_X_V       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFWCVT_F_F_V       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
+    // !
     // 13.19. Narrowing Floating-Point/Integer Type-Convert Instructions
     VFNCVT_XU_F_W      -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNCVT_X_F_W       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -511,7 +477,7 @@ object VecDecoder extends DecodeConstants {
     VFMV_F_S           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// f[rd] = vs2[0] (rs1=0)
   )
 
-  val opfvf: Array[(BitPat, VecType)] = Array(
+  val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
     VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -582,13 +548,13 @@ object VecDecoder extends DecodeConstants {
     VFSLIDE1DOWN_VF    -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// vd[i] = vs2[i+1], vd[vl-1]=f[rs1]
   )
 
-  val vset: Array[(BitPat, VecType)] = Array(
+  val vset: Array[(BitPat, XSDecodeBase)] = Array(
     VSETVLI   -> VSET(F, T, ALUOpType.vsetvli,  F, SelImm.IMM_VSETVLI),
     VSETIVLI  -> VSET(T, T, ALUOpType.vsetivli, F, SelImm.IMM_VSETIVLI),
     VSETVL    -> VSET(F, F, ALUOpType.vsetvl,   T, SelImm.X), // flush pipe
   )
 
-  val vls: Array[(BitPat, VecType)] = Array(
+  val vls: Array[(BitPat, XSDecodeBase)] = Array(
     // 7.4. Vector Unit-Stride Instructions
     VLE8_V        -> VLD(SrcType.X,   VlduType.dummy),
     VLE16_V       -> VLD(SrcType.X,   VlduType.dummy),
@@ -661,18 +627,6 @@ object VecDecoder extends DecodeConstants {
     VS8R_V        -> VST(SrcType.X,   VlduType.dummy, whole = T),
   )
 
-  val opivvTable  : Array[(BitPat, List[BitPat])] = opivv.map(x => (x._1, x._2.generate()))
-  val opivxTable  : Array[(BitPat, List[BitPat])] = opivx.map(x => (x._1, x._2.generate()))
-  val opiviTable  : Array[(BitPat, List[BitPat])] = opivi.map(x => (x._1, x._2.generate()))
-  val opmvvTable  : Array[(BitPat, List[BitPat])] = opmvv.map(x => (x._1, x._2.generate()))
-  val opmvxTable  : Array[(BitPat, List[BitPat])] = opmvx.map(x => (x._1, x._2.generate()))
-  val opfvvTable  : Array[(BitPat, List[BitPat])] = opfvv.map(x => (x._1, x._2.generate()))
-  val opfvfTable  : Array[(BitPat, List[BitPat])] = opfvv.map(x => (x._1, x._2.generate()))
-  val vsetTable   : Array[(BitPat, List[BitPat])] = vset.map(x => (x._1, x._2.generate()))
-  val vlsTable    : Array[(BitPat, List[BitPat])] = vls.map(x => (x._1, x._2.generate()))
-
-  val table: Array[(BitPat, List[BitPat])] = opivvTable ++ opivxTable ++ opiviTable ++
-              opmvvTable ++ opmvxTable ++
-              opfvvTable ++ opfvfTable ++
-              vsetTable ++ vlsTable
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++ vls ++
+    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf
 }

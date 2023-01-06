@@ -106,7 +106,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--config $(CONFIG)                                            \
 		$(SIM_MEM_ARGS)                                               \
 		--num-cores $(NUM_CORES)                                      \
-		$(SIM_ARGS) $(FC_ARGS)
+		$(SIM_ARGS) $(FC_ARGS) --full-stacktrace
 	$(SED_CMD) $@
 ifeq ($(MFC),1)
 	$(AWK_CMD) $@
