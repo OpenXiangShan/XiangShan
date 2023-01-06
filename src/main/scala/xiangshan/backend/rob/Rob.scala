@@ -324,6 +324,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_microOp = Mem(RobSize, new MicroOp)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
+  //for perf counter
+  val microOpPerfInfo = Mem(RobSize, new Bundle{
+    val isMove = Bool()
+    val loadWaitBit = Bool()
+  })
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -413,6 +418,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.selectTime := timer
       debug_microOp(enqIndex).debugInfo.issueTime := timer
       debug_microOp(enqIndex).debugInfo.writebackTime := timer
+      microOpPerfInfo(enqIndex) := Cat(enqUop.ctrl.isMove, enqUop.cf.loadWaitBit).asTypeOf(microOpPerfInfo.t)
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -1139,12 +1145,16 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.instrCnt := instrCnt
   }
 
+  val microOpPerfInfoAtDeqPtr = deqPtrVec.map(_.value).map(microOpPerfInfo(_))
+  val commitIsMoveImpl = microOpPerfInfoAtDeqPtr.map(_.isMove)
+  val commitLoadWaitBitImpl = microOpPerfInfoAtDeqPtr.map(_.loadWaitBit)
+
   val validEntriesBanks = (0 until (RobSize + 63) / 64).map(i => RegNext(PopCount(valid.drop(i * 64).take(64))))
   val validEntries = RegNext(ParallelOperation(validEntriesBanks, (a: UInt, b: UInt) => a +& b))
-  val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m })
+  val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMoveImpl).map{ case (v, m) => v && m })
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
-  val commitLoadWaitVec = VecInit(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w })
+  val commitLoadWaitVec = VecInit(commitLoadValid.zip(commitLoadWaitBitImpl).map{ case (v, w) => v && w })
   val commitStoreVec = VecInit(io.commits.commitValid.zip(commitIsStore).map{ case (v, t) => v && t })
   val perfEvents = Seq(
     ("rob_interrupt_num      ", io.flushOut.valid && intrEnable                                       ),
