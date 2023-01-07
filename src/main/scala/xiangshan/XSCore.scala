@@ -195,23 +195,23 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     exuConfig           = FmiscExeUnitCfg,
     numDeq              = exuParameters.FmiscCnt)
 
-  val scheduleCfgs = Seq(
-    Seq(
-      aluScheLaneCfg,
-      mulScheLaneCfg,
-      jumpScheLaneCfg,
-      loadScheLaneCfg,
-      staScheLaneCfg,
-      stdScheLaneCfg
-    ),
-    Seq(
-      fmaScheLaneCfg,
-      fmiscScheLaneCfg
-    )
+  val intScheLaneCfgs = Seq(
+    aluScheLaneCfg,
+    mulScheLaneCfg,
+    jumpScheLaneCfg,
+    loadScheLaneCfg,
+    staScheLaneCfg,
+    stdScheLaneCfg
   )
+  val vecScheLaneCfgs = Seq(
+    fmaScheLaneCfg,
+    fmiscScheLaneCfg
+  )
+  val allScheLaneCfgs = Seq(intScheLaneCfgs, vecScheLaneCfgs)
+
   // should do outer fast wakeup ports here
-  val otherFastPorts: Seq[Seq[Seq[Int]]] = scheduleCfgs.zipWithIndex.map { case (sche, i) =>
-    val otherCfg = scheduleCfgs.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
+  def getOtherFastPorts(sche: Seq[ScheLaneConfig]): Seq[Seq[Int]]= {
+    val otherCfg = allScheLaneCfgs.filter(_ != sche).reduce(_ ++ _)
     val outerPorts = sche.map(cfg => {
       // exe units from this scheduler need fastUops from exeunits
       val outerWakeupInSche = sche.filter(_.exuConfig.wakeupFromExu)
@@ -224,9 +224,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       val fpSource = findInWbPorts(fpWbPorts, intraFpScheOuter ++ otherFpSource)
       getFastWakeupIndex(cfg.exuConfig, intSource, fpSource, intWbPorts.length).sorted
     })
-    println(s"inter-scheduler wakeup sources for $i: $outerPorts")
+    println(s"inter-scheduler wakeup sources: $outerPorts")
     outerPorts
   }
+  val intOtherFastPorts = getOtherFastPorts(intScheLaneCfgs)
+  val vecOtherFastPorts = getOtherFastPorts(vecScheLaneCfgs)
+  val otherFastPorts = Seq(intOtherFastPorts, vecOtherFastPorts)
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
@@ -247,29 +250,39 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     else Seq(DpPortMapConfig(0, i))
   })
 
-  val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts)
+  val intDispatchPorts = intDpPorts ++ lsDpPorts
+  val vecDispatchPorts = fpDpPorts
 
   val outIntRfReadPorts = Seq(0, 0)
   val outFpRfReadPorts = Seq(0, StorePipelineWidth)         // StorePipelineWidth = num of StdRS * numDeq of StdRS (or sum of multi numDeq)
   val hasIntRf = Seq(true, false)
   val hasFpRf = Seq(false, true)
-  val exuBlocks = scheduleCfgs.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
-    case (((sche, disp), other), i) =>
-      LazyModule(new ExuBlock(
-        configs           = sche,
-        dpPorts           = disp,
-        intRfWbPorts      = intWbPorts,
-        fpRfWbPorts       = fpWbPorts,
-        outFastPorts      = other,
-        outIntRfReadPorts = outIntRfReadPorts(i),
-        outFpRfReadPorts  = outFpRfReadPorts(i),
-        hasIntRf          = hasIntRf(i),
-        hasFpRf           = hasFpRf(i)
-        ))
-  }
+  val intExuBlock = LazyModule(new ExuBlock(
+    configs           = intScheLaneCfgs,
+    dpPorts           = intDispatchPorts,
+    intRfWbPorts      = intWbPorts,
+    fpRfWbPorts       = fpWbPorts,
+    outFastPorts      = intOtherFastPorts,
+    outIntRfReadPorts = 0,
+    outFpRfReadPorts  = 0,
+    hasIntRf          = true,
+    hasFpRf           = false
+  ))
+  val vecExuBlock = LazyModule(new ExuBlock(
+    configs           = vecScheLaneCfgs,
+    dpPorts           = vecDispatchPorts,
+    intRfWbPorts      = intWbPorts,
+    fpRfWbPorts       = fpWbPorts,
+    outFastPorts      = vecOtherFastPorts,
+    outIntRfReadPorts = 0,
+    outFpRfReadPorts  = StorePipelineWidth,
+    hasIntRf          = false,
+    hasFpRf           = true
+  ))
+  val exuBlocks = Seq(intExuBlock, vecExuBlock)
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = exuBlocks.head.scheduler.getMemRsEntries
+      IssQueSize = intExuBlock.scheduler.getMemRsEntries
     )
   })))
 
@@ -307,7 +320,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
   val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
-  val exuBlocks = outer.exuBlocks.map(_.module)
+  val intExuBlock = outer.intExuBlock.module
+  val vecExuBlock = outer.vecExuBlock.module
+  val exuBlocks = Seq(intExuBlock, vecExuBlock)
 
   frontend.io.hartId  := io.hartId
   ctrlBlock.io.hartId := io.hartId
@@ -333,8 +348,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
-  require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
-  val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
+  // require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
+  val csrFenceMod = intExuBlock// exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
   val csrioIn = csrFenceMod.io.fuExtra.csrio.get
   val fenceio = csrFenceMod.io.fuExtra.fenceio.get
 
@@ -349,7 +364,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
-  exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
+  intExuBlock.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   exuBlocks.foreach(b => {
     b.io.scheExtra.lcommit := ctrlBlock.io.robio.lsq.lcommit
     b.io.scheExtra.scommit := memBlock.io.sqDeq
@@ -374,16 +389,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
 
-  exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
-  exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get
+  intExuBlock.io.scheExtra.fpRfReadIn.get <> vecExuBlock.io.scheExtra.fpRfReadOut.get
+  intExuBlock.io.scheExtra.fpStateReadIn.get <> vecExuBlock.io.scheExtra.fpStateReadOut.get
 
-  memBlock.io.issue <> exuBlocks(0).io.issue.get
+  memBlock.io.issue <> intExuBlock.io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
-  exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
-  exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
+  intExuBlock.io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
+  intExuBlock.io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
 
-  val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
+  val stdIssue = intExuBlock.io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
     exu.allocPregs <> ctrlBlock.io.allocPregs
@@ -410,8 +425,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
-  ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
-  ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
+  ctrlBlock.perfinfo.perfEventsEu0 := intExuBlock.getPerf.dropRight(outer.intExuBlock.scheduler.numRs)
+  ctrlBlock.perfinfo.perfEventsEu1 := vecExuBlock.getPerf.dropRight(outer.vecExuBlock.scheduler.numRs)
   if (!coreParams.softPTW) {
     memBlock.io.perfEventsPTW := ptw.getPerf
   } else {
@@ -434,7 +449,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B
   csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
-  csrioIn.fpu.frm <> exuBlocks(1).io.fuExtra.frm.get
+  csrioIn.fpu.frm <> vecExuBlock.io.fuExtra.frm.get
   csrioIn.vpu <> DontCare
   csrioIn.exception <> ctrlBlock.io.robio.exception
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
@@ -458,7 +473,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
-  memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
+  memBlock.io.rsfeedback <> intExuBlock.io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
