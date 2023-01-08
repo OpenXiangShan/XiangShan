@@ -30,6 +30,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import utility.ChiselDB
+import difftest._
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -290,6 +291,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
   cache.io.refill.bits.sel_pte_dup.map(_ := RegNext(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source))))
+
+  if (env.EnableDifftest) {
+    val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
+    when (mem.a.valid) {
+      difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
+    }
+
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
+    difftest.io.cacheid := 2.U
+    difftest.io.valid := cache.io.refill.valid
+    difftest.io.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
+    difftest.io.data := refill_data.asTypeOf(difftest.io.data)
+  }
 
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
