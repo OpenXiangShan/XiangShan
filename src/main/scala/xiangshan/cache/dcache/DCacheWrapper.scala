@@ -30,6 +30,7 @@ import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
 import utility.FastArbiter
 import mem.{AddPipelineReg}
+import xiangshan.cache.dcache.ReplayCarry
 
 import scala.math.max
 
@@ -282,6 +283,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
+  val replayCarry = new ReplayCarry
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -311,15 +313,21 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
-  val data   = UInt(DataBits.W)
+  // read in s2
+  val data = UInt(DataBits.W)
+  // select in s3
+  val data_delayed = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
 
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache miss, and failed to enter the missqueue, replay from RS is needed
   val replay = Bool()
+  val replayCarry = new ReplayCarry
   // data has been corrupted
   val tag_error = Bool() // tag error
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
+
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
@@ -336,7 +344,6 @@ class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
 {
   val bank_data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
   val bank_oh = UInt(DCacheBanks.W)
-  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
@@ -384,7 +391,7 @@ class Release(implicit p: Parameters) extends DCacheBundle
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new BankedDCacheWordResp))
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
 
@@ -397,6 +404,7 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
+  val replayCarry = new ReplayCarry
 
   def dump() = {
     XSDebug("UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
@@ -407,11 +415,14 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 class UncacheWorResp(implicit p: Parameters) extends DCacheBundle 
 {
   val data      = UInt(DataBits.W)
+  val data_delayed = UInt(DataBits.W)
   val id        = UInt(uncacheIdxBits.W)
   val miss      = Bool()
   val replay    = Bool()
   val tag_error = Bool()
   val error     = Bool()
+  val replayCarry = new ReplayCarry
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
   def dump() = {
     XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
@@ -742,18 +753,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.readline <> mainPipe.io.data_read
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
-  mainPipe.io.data_resp := bankedDataArray.io.resp
+  mainPipe.io.data_resp := bankedDataArray.io.readline_resp
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
+    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp_delayed(i)
+
     ldu(i).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(i)
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
-  })
-
-  (0 until LoadPipelineWidth).map(i => {
-    ldu(i).io.banked_data_resp := bankedDataArray.io.resp
   })
 
   (0 until LoadPipelineWidth).map(i => {

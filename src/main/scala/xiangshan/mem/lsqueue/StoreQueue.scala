@@ -495,6 +495,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.id   := DontCare
   io.uncache.req.bits.instrtype   := DontCare
+  io.uncache.req.bits.replayCarry := DontCare
   io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
 
   when(io.uncache.req.fire()){
@@ -589,6 +590,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
+    io.sbuffer(i).bits.replayCarry := DontCare
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load

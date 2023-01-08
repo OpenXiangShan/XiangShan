@@ -170,6 +170,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
+  EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
@@ -408,6 +409,7 @@ trait HasXSParameter {
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
+  val EnableDCacheWPU = coreParams.EnableDCacheWPU
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val asidLen = coreParams.MMUAsidLen

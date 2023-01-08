@@ -358,6 +358,7 @@ simv.daidir
 ucli.key
 stack.info*
 *.vpd
+*.vcd
 *.bin
 
 !ready-to-run/*
