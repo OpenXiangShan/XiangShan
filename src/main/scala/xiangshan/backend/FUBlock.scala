@@ -45,6 +45,9 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
   val fenceio = if (hasFence) Some(new FenceIO) else None
   val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
 
+  override def toString: String = {
+    s"FUBlockExtraIO: " + configs.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _) + s" hasCSR:${hasCSR} hasFence:${hasFence} hasFrm:${hasFrm} numRedOut:${numRedirectOut}"
+  }
 }
 
 abstract class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -109,6 +112,7 @@ extends LazyModuleImp(outer) with HasXSParameter {
   }
   XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
 
+  println(io.extra)
 }
 
 class IntFUBlock(configVec: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends FUBlock(configVec) {
