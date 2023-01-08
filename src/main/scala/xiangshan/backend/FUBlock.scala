@@ -25,6 +25,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -46,7 +47,13 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
 
 }
 
-class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {
+abstract class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends LazyModule with HasXSParameter {
+
+  lazy val module = new FUBlockImp(configs, this)
+}
+
+class FUBlockImp(configs: Seq[(ExuConfig, Int)], outer: FUBlock)(implicit p: Parameters)
+extends LazyModuleImp(outer) with HasXSParameter {
   val numIn = configs.map(_._2).sum
   val numFma = configs.filter(_._1 == FmacExeUnitCfg).map(_._2).sum
   val isVpu = configs.map(_._1.isVPU).reduce(_ || _)
@@ -102,4 +109,19 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   }
   XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
 
+}
+
+class IntFUBlock(configVec: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends FUBlock(configVec) {
+  override lazy val module = new IntFUBlockImp(configVec, this)
+}
+
+class IntFUBlockImp(configVec: Seq[(ExuConfig, Int)], out: IntFUBlock)(implicit p: Parameters) extends FUBlockImp(configVec, out) {
+}
+
+
+class VecFUBlock(configVec: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends FUBlock(configVec) {
+  override lazy val module = new VecFUBlockImp(configVec, this)
+}
+
+class VecFUBlockImp(configVec: Seq[(ExuConfig, Int)], out: VecFUBlock)(implicit p: Parameters) extends FUBlockImp(configVec, out) {
 }

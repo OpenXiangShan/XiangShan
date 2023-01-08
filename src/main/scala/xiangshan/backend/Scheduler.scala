@@ -149,8 +149,7 @@ case class DpPortMapConfig(rsIdx: Int, dpIdx: Int) {
   }
 }
 
-class Scheduler(
-  // val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],
+abstract class Scheduler(
   val configs: Seq[ScheLaneConfig],
   val dpPorts: Seq[Seq[DpPortMapConfig]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
@@ -164,18 +163,7 @@ class Scheduler(
   val numDpPorts = dpPorts.length
   // Each dispatch port has several rs, which responses to its own exu config
   val dpExuConfigs = dpPorts.map(port => port.map(_.rsIdx).map(configs(_).exuConfig))
-  def getDispatch2: Seq[Dispatch2Rs] = {
-    if (dpExuConfigs.length > exuParameters.AluCnt) {
-      val intDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.take(exuParameters.AluCnt)))
-      val lsDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs.drop(exuParameters.AluCnt)))
-      Seq(intDispatch, lsDispatch)
-    }
-    else {
-      val fpDispatch = LazyModule(new Dispatch2Rs(dpExuConfigs))
-      Seq(fpDispatch)
-    }
-  }
-  val dispatch2 = getDispatch2
+  val dispatch2: Seq[Dispatch2Rs]
 
   // regfile parameters: overall read and write ports
   val numIntRfWritePorts = intRfWbPorts.length
@@ -230,10 +218,10 @@ class Scheduler(
 
   val numFpRfReadPorts: Int = reservationStations.map(p => (p.params.numDeq) * p.numFpRfPorts).sum + outFpRfReadPorts
 
-  lazy val module = new SchedulerImp(this)
-
   def canAccept(fuType: UInt): Bool = VecInit(configs.map(_.exuConfig.canAccept(fuType))).asUInt.orR
   def numRs: Int = reservationStations.map(_.numRS).sum
+
+  lazy val module = new SchedulerImp(this)
 }
 
 class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter with HasPerfEvents {
@@ -589,4 +577,50 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()
   val perfEvents = schedulerPerf ++ intBtPerf ++ fpBtPerf ++ rs_all.flatMap(_.module.getPerfEvents)
   generatePerfEvent()
+}
+
+class IntScheduler(
+  val configVec: Seq[ScheLaneConfig],
+  val dpPortVec: Seq[Seq[DpPortMapConfig]],
+  val intRfWbPortVec: Seq[Seq[ExuConfig]],
+  val fpRfWbPortVec: Seq[Seq[ExuConfig]],
+  val outFastPortVec: Seq[Seq[Int]],
+  val outIntRfReadPortVec: Int,
+  val outFpRfReadPortVec: Int
+)(implicit p: Parameters) extends Scheduler(
+  configVec, dpPortVec,
+  intRfWbPortVec, fpRfWbPortVec,
+  outFastPortVec, outIntRfReadPortVec, outFpRfReadPortVec,
+  true, false
+) {
+  val dispatch2 = Seq(
+    LazyModule(new Dispatch2Rs(dpExuConfigs.take(exuParameters.AluCnt))),
+    LazyModule(new Dispatch2Rs(dpExuConfigs.drop(exuParameters.AluCnt)))
+  )
+  override lazy val module = new IntSchedulerImp(this)
+}
+
+class IntSchedulerImp(out: Scheduler)(implicit p: Parameters) extends SchedulerImp(out) {
+}
+
+class VecScheduler(
+  val configVec: Seq[ScheLaneConfig],
+  val dpPortVec: Seq[Seq[DpPortMapConfig]],
+  val intRfWbPortVec: Seq[Seq[ExuConfig]],
+  val fpRfWbPortVec: Seq[Seq[ExuConfig]],
+  val outFastPortVec: Seq[Seq[Int]],
+  val outIntRfReadPortVec: Int,
+  val outFpRfReadPortVec: Int
+)(implicit p: Parameters) extends Scheduler(
+  configVec, dpPortVec,
+  intRfWbPortVec, fpRfWbPortVec,
+  outFastPortVec, outIntRfReadPortVec, outFpRfReadPortVec,
+  false, true
+) {
+  val dispatch2 = Seq(LazyModule(new Dispatch2Rs(dpExuConfigs)))
+
+  override lazy val module = new VecSchedulerImp(this)
+}
+
+class VecSchedulerImp(out: Scheduler)(implicit p: Parameters) extends SchedulerImp(out) {
 }

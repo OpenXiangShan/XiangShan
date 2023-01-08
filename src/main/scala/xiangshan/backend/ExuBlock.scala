@@ -25,7 +25,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu._
 
-class ExuBlock(
+abstract class ExuBlock(
   val configs: Seq[ScheLaneConfig],
   val dpPorts: Seq[Seq[DpPortMapConfig]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
@@ -36,17 +36,9 @@ class ExuBlock(
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource with HasExuWbHelper {
-  val scheduler = LazyModule(new Scheduler(
-    configs           = configs,
-    dpPorts           = dpPorts,
-    intRfWbPorts      = intRfWbPorts,
-    fpRfWbPorts       = fpRfWbPorts,
-    outFastPorts      = outFastPorts,
-    outIntRfReadPorts = outIntRfReadPorts,
-    outFpRfReadPorts  = outFpRfReadPorts,
-    hasIntRf          = hasIntRf,
-    hasFpRf           = hasFpRf
-    ))
+  val scheduler: Scheduler
+  val fuBlock: FUBlock
+
 
   val allRfWbPorts: Seq[Seq[ExuConfig]] = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)
@@ -54,14 +46,11 @@ class ExuBlock(
   val fuConfigs: Seq[(ExuConfig, Int)] = configs.map(c => (c.exuConfig, c.numDeq)).filter(_._1.extendsExu)
   val numOutFu: Int = configs.filterNot(_.exuConfig.extendsExu).map(_.numDeq).sum
 
-  lazy val module = new ExuBlockImp(this)
-
   override val writebackSourceParams: Seq[WritebackSourceParams] = {
     val params = new WritebackSourceParams
     params.exuConfigs = fuConfigs.flatMap(cfg => Seq.fill(cfg._2)(Seq(cfg._1)))
     Seq(params)
   }
-  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 
   println("ExuBlock:")
   if(intRfWbPorts.nonEmpty)
@@ -76,15 +65,14 @@ class ExuBlock(
       println(s"    ${b}")
   println(s"  outIntRfReadPorts ${outIntRfReadPorts} outFpRfReadPorts ${outFpRfReadPorts} hasIntRf ${hasIntRf} hasFpRf ${hasFpRf}")
   println(configs.map(_.toString).map("  " + _ + "\n").foldLeft("")(_ + _))
-
 }
 
-class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
+abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
   with HasWritebackSourceImp with HasPerfEvents {
   val scheduler = outer.scheduler.module
+  val fuBlock = outer.fuBlock.module
 
   val fuConfigs = outer.fuConfigs
-  val fuBlock = Module(new FUBlock(fuConfigs))
 
   val numOutFu = outer.numOutFu
 
@@ -96,9 +84,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     val allocPregs = scheduler.io.allocPregs.cloneType
     val in = scheduler.io.in.cloneType
     // issue and wakeup ports
-    val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput))) else None
     val fastUopOut = scheduler.io.fastUopOut.cloneType
-    // val rfWriteback = scheduler.io.writeback.cloneType
     val rfWritebackInt = scheduler.io.writebackInt.cloneType
     val rfWritebackFp = scheduler.io.writebackFp.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
@@ -122,9 +108,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   val perfEvents = scheduler.getPerfEvents
   generatePerfEvent()
-
-  // the scheduler issues instructions to function units
-  scheduler.io.issue <> fuBlock.io.issue ++ io.issue.getOrElse(Seq())
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect
@@ -232,5 +215,75 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   for ((cfg, wb) <- flattenFuConfigs.zip(io.fuWriteback)) {
     wb.bits.uop.clearExceptions(cfg.exceptionOut, cfg.flushPipe, cfg.replayInst)
   }
+}
 
+class IntExuBlock(
+  val configVec: Seq[ScheLaneConfig],
+  val dpPortVec: Seq[Seq[DpPortMapConfig]],
+  val intRfWbPortVec: Seq[Seq[ExuConfig]],
+  val fpRfWbPortVec: Seq[Seq[ExuConfig]],
+  val outFastPortVec: Seq[Seq[Int]]
+)(implicit p: Parameters) extends ExuBlock(
+  configVec, dpPortVec,
+  intRfWbPortVec, fpRfWbPortVec, outFastPortVec,
+  0, 0, true, false
+) {
+  val scheduler = LazyModule(new IntScheduler(
+    configVec           = configs,
+    dpPortVec           = dpPorts,
+    intRfWbPortVec      = intRfWbPorts,
+    fpRfWbPortVec       = fpRfWbPorts,
+    outFastPortVec      = outFastPorts,
+    outIntRfReadPortVec = outIntRfReadPorts,
+    outFpRfReadPortVec  = outFpRfReadPorts
+  ))
+  val fuBlock = LazyModule(new IntFUBlock(fuConfigs))
+
+  override lazy val module = new IntExuBlockImp(this)
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
+}
+
+class IntExuBlockImp(out: ExuBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+  val extraio = IO(new Bundle {
+    val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput(false)))) else None
+  })
+
+  // the scheduler issues instructions to function units
+  scheduler.io.issue <> fuBlock.io.issue ++ extraio.issue.getOrElse(Seq())
+}
+
+
+class VecExuBlock(
+  val configVec: Seq[ScheLaneConfig],
+  val dpPortVec: Seq[Seq[DpPortMapConfig]],
+  val intRfWbPortVec: Seq[Seq[ExuConfig]],
+  val fpRfWbPortVec: Seq[Seq[ExuConfig]],
+  val outFastPortVec: Seq[Seq[Int]],
+)(implicit p: Parameters) extends ExuBlock(
+  configVec, dpPortVec,
+  intRfWbPortVec, fpRfWbPortVec, outFastPortVec,
+  0, p(XSCoreParamsKey).StorePipelineWidth, false, true
+) {
+  val scheduler = LazyModule(new VecScheduler(
+    configVec           = configs,
+    dpPortVec           = dpPorts,
+    intRfWbPortVec      = intRfWbPorts,
+    fpRfWbPortVec       = fpRfWbPorts,
+    outFastPortVec      = outFastPorts,
+    outIntRfReadPortVec = outIntRfReadPorts,
+    outFpRfReadPortVec  = outFpRfReadPorts
+  ))
+  val fuBlock = LazyModule(new VecFUBlock(fuConfigs))
+  override lazy val module = new VecExuBlockImp(this)
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
+}
+
+class VecExuBlockImp(out: ExuBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+  require(numOutFu == 0, "Memory Uops are handled by LS-rs now")
+  // val extraio = IO(new Bundle {
+  //   val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput(true)))) else None
+  // })
+
+  // // the scheduler issues instructions to function units
+  scheduler.io.issue <> fuBlock.io.issue // ++ io.issueio.getOrElse(Seq())
 }

@@ -249,35 +249,22 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     if (i < 2 * exuParameters.FmiscCnt) Seq(DpPortMapConfig(0, i), DpPortMapConfig(1, i))
     else Seq(DpPortMapConfig(0, i))
   })
-
   val intDispatchPorts = intDpPorts ++ lsDpPorts
   val vecDispatchPorts = fpDpPorts
 
-  val outIntRfReadPorts = Seq(0, 0)
-  val outFpRfReadPorts = Seq(0, StorePipelineWidth)         // StorePipelineWidth = num of StdRS * numDeq of StdRS (or sum of multi numDeq)
-  val hasIntRf = Seq(true, false)
-  val hasFpRf = Seq(false, true)
-  val intExuBlock = LazyModule(new ExuBlock(
-    configs           = intScheLaneCfgs,
-    dpPorts           = intDispatchPorts,
-    intRfWbPorts      = intWbPorts,
-    fpRfWbPorts       = fpWbPorts,
-    outFastPorts      = intOtherFastPorts,
-    outIntRfReadPorts = 0,
-    outFpRfReadPorts  = 0,
-    hasIntRf          = true,
-    hasFpRf           = false
+  val intExuBlock = LazyModule(new IntExuBlock(
+    configVec           = intScheLaneCfgs,
+    dpPortVec           = intDispatchPorts,
+    intRfWbPortVec      = intWbPorts,
+    fpRfWbPortVec       = fpWbPorts,
+    outFastPortVec      = intOtherFastPorts
   ))
-  val vecExuBlock = LazyModule(new ExuBlock(
-    configs           = vecScheLaneCfgs,
-    dpPorts           = vecDispatchPorts,
-    intRfWbPorts      = intWbPorts,
-    fpRfWbPorts       = fpWbPorts,
-    outFastPorts      = vecOtherFastPorts,
-    outIntRfReadPorts = 0,
-    outFpRfReadPorts  = StorePipelineWidth,
-    hasIntRf          = false,
-    hasFpRf           = true
+  val vecExuBlock = LazyModule(new VecExuBlock(
+    configVec           = vecScheLaneCfgs,
+    dpPortVec           = vecDispatchPorts,
+    intRfWbPortVec      = intWbPorts,
+    fpRfWbPortVec       = fpWbPorts,
+    outFastPortVec      = vecOtherFastPorts
   ))
   val exuBlocks = Seq(intExuBlock, vecExuBlock)
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
@@ -392,13 +379,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   intExuBlock.io.scheExtra.fpRfReadIn.get <> vecExuBlock.io.scheExtra.fpRfReadOut.get
   intExuBlock.io.scheExtra.fpStateReadIn.get <> vecExuBlock.io.scheExtra.fpStateReadOut.get
 
-  memBlock.io.issue <> intExuBlock.io.issue.get
+  memBlock.io.issue <> intExuBlock.extraio.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   intExuBlock.io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
   intExuBlock.io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
 
-  val stdIssue = intExuBlock.io.issue.get.takeRight(exuParameters.StuCnt)
+  val stdIssue = intExuBlock.extraio.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
     exu.allocPregs <> ctrlBlock.io.allocPregs
