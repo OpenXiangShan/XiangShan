@@ -42,10 +42,11 @@ package object xiangshan {
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
     def isReg(srcType: UInt) = srcType(0)
+    def isXp(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
     def isVp(srcType: UInt) = srcType(2)
     def isPcOrImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
-
+    def isNotReg(srcType: UInt): Bool = !srcType.orR
     def apply() = UInt(3.W)
   }
 
@@ -54,6 +55,9 @@ package object xiangshan {
     def rdy     = "b1".U
     // def specRdy = "b10".U // speculative ready, for future use
     def apply() = UInt(1.W)
+
+    def isReady(state: UInt): Bool = state === this.rdy
+    def isBusy(state: UInt): Bool = state === this.busy
   }
 
   // Todo: Use OH instead
