@@ -435,7 +435,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.fpRfReadOut.isDefined) {
-    val extraFpReadData = fpRfReadData_asyn.dropRight(32).takeRight(outer.outFpRfReadPorts)
+    val extraFpReadData = fpRfReadData_asyn.dropRight(64).takeRight(outer.outFpRfReadPorts)
     io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
     require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
   }
