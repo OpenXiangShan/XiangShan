@@ -76,6 +76,10 @@ abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends Lazy
 
   val numOutFu = outer.numOutFu
 
+  def SeqConnect[T <: Data](lhs: Seq[T], rhs: Seq[T]) {
+    for ((l, r) <- lhs.zip(rhs)) { l <> r }
+  }
+
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     // global control
@@ -88,10 +92,14 @@ abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends Lazy
     val rfWritebackInt = scheduler.io.writebackInt.cloneType
     val rfWritebackFp = scheduler.io.writebackFp.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
-    val fuWriteback = fuBlock.io.writeback.cloneType
+    val fuWritebackInt = fuBlock.io.writebackInt.cloneType
+    val fuWritebackVec = fuBlock.io.writebackVec.cloneType
     // extra
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
+
+    def rfWriteback = rfWritebackInt ++ rfWritebackFp
+    def fuWriteback = fuWritebackInt ++ fuWritebackVec
   })
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.fuWriteback))
 
@@ -111,7 +119,8 @@ abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends Lazy
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect
-  fuBlock.io.writeback <> io.fuWriteback
+
+  SeqConnect(fuBlock.io.writeback, io.fuWriteback)
   fuBlock.io.extra <> io.fuExtra
 
   // To reduce fanout, we add registers here for redirect.

@@ -133,6 +133,9 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput(true))) else null
     val redirect = Flipped(ValidIO(new Redirect))
     val out = DecoupledIO(new ExuOutput(config.isVPU))
+
+    // NOTE: a ExeUnit can only accept Int or Fp, not both
+    def fuIn = if (config.readIntRf) fromInt else fromFp
   })
 
   @public val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
@@ -145,17 +148,24 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
     mod
   })
 
-  val fuIn = config.fuConfigs.map(fuCfg =>
-    if (fuCfg.numIntSrc > 0) {
-      // read rf from int-rf
-      assert(fuCfg.numFpSrc == 0 || config == StdExeUnitCfg)
-      io.fromInt
-    } else {
-      // read rf from fp/vec-rf
-      assert(fuCfg.numFpSrc > 0 || fuCfg.numVecSrc > 0)
-      io.fromFp
-    }
-  )
+  val fuIn = config.fuConfigs.map(a => io.fuIn)
+  // val fuIn = config.fuConfigs.map(fuCfg =>
+  //   if (fuCfg.numIntSrc > 0) {
+  //     // read rf from int-rf
+  //     assert(fuCfg.numFpSrc == 0 || config == StdExeUnitCfg)
+  //     io.fromInt
+  //   } else {
+  //     // read rf from fp/vec-rf
+  //     assert(fuCfg.numFpSrc > 0 || fuCfg.numVecSrc > 0)
+  //     io.fromFp
+  //   }
+  // )
+  for (fu <- config.fuConfigs) {
+    println(s"FU ${fu.name} srcNum int ${fu.numIntSrc} fp ${fu.numFpSrc} vec ${fu.numVecSrc}")
+  }
+  // println("EXU require: " + config.fuConfigs.filter(a => a.numIntSrc > 0 && (a.numFpSrc > 0 || a.numVecSrc > 0)).map(_.name).reduce(_ + " " + _))
+  // require(config.fuConfigs.filter(a => (a.numIntSrc > 0) && ((a.numFpSrc > 0) || (a.numVecSrc > 0))).isEmpty)
+  // require(config.fuConfigs.filter(_.numIntSrc >0).isEmpty || config.fuConfigs.filter(a => a.numFpSrc > 0 || a.numVecSrc > 0).isEmpty)
   val fuSel = fuIn.zip(config.fuConfigs).map { case (in, cfg) => cfg.fuSel(in.bits.uop) }
 
   val fuInReady = config.fuConfigs.zip(fuIn).zip(functionUnits.zip(fuSel)).map { case ((fuCfg, in), (fu, sel)) =>

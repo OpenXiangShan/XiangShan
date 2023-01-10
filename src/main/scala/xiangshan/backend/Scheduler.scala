@@ -299,7 +299,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val lqFull = Input(Bool())
   }
 
-  val numFma = outer.configs.filter(_.exuConfig == FmacExeUnitCfg).map(_.numDeq).sum
+  // val numFma = outer.configs.filter(_.exuConfig == FmacExeUnitCfg).map(_.numDeq).sum
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))

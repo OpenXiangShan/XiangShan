@@ -57,26 +57,56 @@ abstract class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) e
 
 class FUBlockImp(configs: Seq[(ExuConfig, Int)], outer: FUBlock)(implicit p: Parameters)
 extends LazyModuleImp(outer) with HasXSParameter {
+  require(configs.map(_._1).filter(a => a.readFpRf && a.readIntRf && a.readVecRf).isEmpty)
+
+  val configIntIn = configs.filter{a => a._1.readIntRf}
+  val configVecIn = configs.filter{a => a._1.readVecRf || a._1.readFpRf}
+  val configIntOut = configs.filter{a => a._1.readIntRf && a._1.writeIntRf}
+  val configVecOut = configs.filter{a => (a._1.readVecRf || a._1.readFpRf) && (a._1.writeVecRf || a._1.writeFpRf)}
+
+  val numIntIn = configIntIn.map(_._2).sum
+  val numVecIn = configVecIn.map(_._2).sum
+  // If only write but not read, the op is data move cross domain or i2f/f2i
+  val numIntOut = configIntOut.map(_._2).sum
+  val numVecOut = configVecOut.map(_._2).sum
+
+
   val numIn = configs.map(_._2).sum
-  val numFma = configs.filter(_._1 == FmacExeUnitCfg).map(_._2).sum
-  val isVpu = configs.map(_._1.isVPU).reduce(_ || _)
+  require(numIn == (numIntIn + numVecIn))
+  // val numFma = configs.filter(_._1 == FmacExeUnitCfg).map(_._2).sum
+  // val isVpu = configs.map(_._1.isVPU).reduce(_ || _)
+
+  def SeqConnect[T <: Data](lhs: Seq[T], rhs: Seq[T]) {
+    for ((l, r) <- lhs.zip(rhs)) { l <> r }
+  }
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     // in
-    val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput(isVpu))))
+    val issueInt = Vec(numIntIn, Flipped(DecoupledIO(new ExuInput(false))))
+    val issueVec = Vec(numVecIn, Flipped(DecoupledIO(new ExuInput(true))))
     // out
-    val writeback = Vec(numIn, DecoupledIO(new ExuOutput(isVpu)))
+    val writebackInt = Vec(numIntOut, DecoupledIO(new ExuOutput(false)))
+    val writebackVec = Vec(numVecOut, DecoupledIO(new ExuOutput(true)))
     // misc
     val extra = new FUBlockExtraIO(configs)
+
+    def issue = issueInt ++ issueVec
+    def writeback = writebackInt ++ writebackVec
   })
 
   val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
   val exeUnits = configs.zip(exuDefs).map(x => Seq.fill(x._1._2)(Instance(x._2))).reduce(_ ++ _)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
   val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
-  io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
-  io.writeback <> exeUnits.map(_.io.out)
+  SeqConnect(io.issue, intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp))
+  SeqConnect(io.writeback, exeUnits.map(_.io.out))
+  // io.issueInt <> intExeUnits.map(_.io.fromInt)
+  // io.issueVec <> fpExeUnits.map(_.io.fromFp)
+  // io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
+  io.writebackInt <> intExeUnits.map(_.io.out)
+  io.writebackVec <> fpExeUnits.map(_.io.out)
+  // for ((w, e) <- io.writeback.zip(exeUnits.map(_.io.out))) { w <> e }
 
   // to please redirectGen
   io.extra.exuRedirect.zip(exeUnits.reverse.filter(_.config.hasRedirect).map(_.io.out)).foreach {
@@ -107,11 +137,16 @@ extends LazyModuleImp(outer) with HasXSParameter {
     }
   }
 
-  for ((iss, i) <- io.issue.zipWithIndex) {
+  for ((iss, i) <- (io.issueInt ++ io.issueVec).zipWithIndex) {
     XSPerfAccumulate(s"issue_count_$i", iss.fire())
   }
-  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
+  XSPerfHistogram("writeback_count", PopCount((io.writebackInt ++ io.writebackVec).map(_.fire())), true.B, 0, numIn, 1)
 
+  println("FUBlock IO.issue & IO.Writeback")
+  if (numIntIn > 0) println(s"  numIntIn: ${numIntIn} " + configIntIn.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _))
+  if (numIntOut > 0) println(s"  numIntOut: ${numIntOut} " + configIntOut.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _))
+  if (numVecIn > 0) println(s"  numVecIn: ${numVecIn} " + configVecIn.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _))
+  if (numVecOut > 0) println(s"  numVecOut: ${numVecOut} " + configVecOut.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _))
   println(io.extra)
 }
 
