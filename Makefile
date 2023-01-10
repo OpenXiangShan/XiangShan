@@ -116,6 +116,10 @@ ifeq ($(MFC),1)
 	--annotation-file=$(BUILD_DIR)/$(SIM_TOP).anno.json --format=fir \
 	--lowering-options=noAlwaysComb,disallowExpressionInliningInPorts,explicitBitcast \
 	--verilog --dedup -o $(SIM_TOP_V) $(BUILD_DIR)/$(SIM_TOP).chirrtl.fir
+
+	sed '/\/\/ ----- 8< ----- .*----- 8< -----/,$d' $(SIM_TOP_V) > res.v
+	rm $(SIM_TOP_V)
+	mv res.v $(SIM_TOP_V)
 endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
