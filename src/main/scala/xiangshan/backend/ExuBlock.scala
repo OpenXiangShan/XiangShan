@@ -92,11 +92,10 @@ abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends Lazy
     val rfWritebackInt = scheduler.io.writebackInt.cloneType
     val rfWritebackFp = scheduler.io.writebackFp.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
-    val fuWritebackInt = fuBlock.io.writebackInt.cloneType
-    val fuWritebackVec = fuBlock.io.writebackVec.cloneType
+    val fuWritebackInt = Vec(outer.fuBlock.numIntOut, DecoupledIO(new ExuOutput(false)))
+    val fuWritebackVec = Vec(outer.fuBlock.numVecOut, DecoupledIO(new ExuOutput(true)))
     // extra
     val scheExtra = scheduler.io.extra.cloneType
-    val fuExtra = fuBlock.io.extra.cloneType
 
     def rfWriteback = rfWritebackInt ++ rfWritebackFp
     def fuWriteback = fuWritebackInt ++ fuWritebackVec
@@ -121,7 +120,6 @@ abstract class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends Lazy
   fuBlock.io.redirect <> io.redirect
 
   SeqConnect(fuBlock.io.writeback, io.fuWriteback)
-  fuBlock.io.extra <> io.fuExtra
 
   // To reduce fanout, we add registers here for redirect.
   val redirect = RegNextWithEnable(io.redirect)
@@ -248,19 +246,23 @@ class IntExuBlock(
   ))
   val fuBlock = LazyModule(new IntFUBlock(fuConfigs))
 
-  override lazy val module = new IntExuBlockImp(this)
+  override lazy val module = new IntExuBlockImp(this, fuBlock)
   override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
-class IntExuBlockImp(out: ExuBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+class IntExuBlockImp(out: ExuBlock, fu: IntFUBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+  // NOTE: re-claim FUBlock with another name to access extraio
+  val fuModule = fu.module
+
   val extraio = IO(new Bundle {
     val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput(false)))) else None
+    val fuExtra = fuModule.extraio.cloneType
   })
 
   // the scheduler issues instructions to function units
   scheduler.io.issue <> fuBlock.io.issue ++ extraio.issue.getOrElse(Seq())
+  extraio.fuExtra <> fuModule.extraio
 }
-
 
 class VecExuBlock(
   val configVec: Seq[ScheLaneConfig],
@@ -283,16 +285,22 @@ class VecExuBlock(
     outFpRfReadPortVec  = outFpRfReadPorts
   ))
   val fuBlock = LazyModule(new VecFUBlock(fuConfigs))
-  override lazy val module = new VecExuBlockImp(this)
+
+  override lazy val module = new VecExuBlockImp(this, fuBlock)
   override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
-class VecExuBlockImp(out: ExuBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+class VecExuBlockImp(out: ExuBlock, fu: VecFUBlock)(implicit p: Parameters) extends ExuBlockImp(out) {
+  // NOTE: re-claime FUBlock to access extraio
+  val fuModule = fu.module
+
   require(numOutFu == 0, "Memory Uops are handled by LS-rs now")
-  // val extraio = IO(new Bundle {
+  val extraio = IO(new Bundle {
   //   val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput(true)))) else None
-  // })
+    val fuExtra = fuModule.extraio.cloneType
+  })
 
   // // the scheduler issues instructions to function units
-  scheduler.io.issue <> fuBlock.io.issue // ++ io.issueio.getOrElse(Seq())
+  scheduler.io.issue <> fuModule.io.issue // ++ io.issueio.getOrElse(Seq())
+  extraio.fuExtra <> fuModule.extraio
 }

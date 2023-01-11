@@ -337,8 +337,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = intExuBlock// exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
-  val csrioIn = csrFenceMod.io.fuExtra.csrio.get
-  val fenceio = csrFenceMod.io.fuExtra.fenceio.get
+  val csrioIn = csrFenceMod.extraio.fuExtra.csrio
+  val fenceio = csrFenceMod.extraio.fuExtra.fenceio
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> fenceio.sfence
@@ -347,8 +347,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei := fenceio.fencei
 
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
-  val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
-  ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
+  ctrlBlock.io.exuRedirect <> intExuBlock.extraio.fuExtra.exuRedirect
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   intExuBlock.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
@@ -436,7 +435,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B
   csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
-  csrioIn.fpu.frm <> vecExuBlock.io.fuExtra.frm.get
+  csrioIn.fpu.frm <> vecExuBlock.extraio.fuExtra.frm
   csrioIn.vpu <> DontCare
   csrioIn.exception <> ctrlBlock.io.robio.exception
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
