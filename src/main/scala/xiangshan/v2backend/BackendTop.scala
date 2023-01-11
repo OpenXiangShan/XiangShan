@@ -1,17 +1,16 @@
-package newBackend
+package xiangshan.v2backend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xiangshan.backend.HasExuWbHelper
+import xiangshan.backend.exu.FenceIO
 import xiangshan.backend.fu.CSRFileIO
-import xiangshan.{CustomCSRCtrlIO, FrontendToCtrlIO, HasWritebackSource, HasXSParameter, MemRSFeedbackIO, Redirect, TlbCsrBundle, XSBundle, XSCoreParamsKey}
-import xiangshan.backend.exu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.v2backend.Bundles._
-import xiangshan.mem.{LsqEnqIO, SqPtr}
 import xiangshan.frontend.FtqRead
+import xiangshan.mem.{LsqEnqIO, SqPtr}
+import xiangshan.{FrontendToCtrlIO, CustomCSRCtrlIO, TlbCsrBundle, MemRSFeedbackIO, HasXSParameter, XSBundle, XSCoreParamsKey, Redirect}
+import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, DynInst}
 
 class BackendTop(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
@@ -51,9 +50,7 @@ class BackendMemIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBund
   val csrToMemBlockCtrl = Output(new CustomCSRCtrlIO)
 }
 
-
-
-private class BackendIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBundle {
+class BackendIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBundle {
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
   }
