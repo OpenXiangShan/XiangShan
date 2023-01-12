@@ -278,6 +278,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
+    // for vset
+    val vconfigReadPort = if(outer.hasIntRf) Some(new RfReadPort(XLEN, IntPregIdxWidth)) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -388,7 +390,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs_all.flatMap(_.module.readFpRf_asyn).map(_.addr)
     }
   }
-  def readIntRf: Seq[UInt] = extractReadRf(true) ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
+  def readIntRf: Seq[UInt] = extractReadRf(true) ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr) :+ io.extra.vconfigReadPort.get.addr
   def readFpRf: Seq[UInt] = extractReadRf(false) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
 
   def genRegfile(isInt: Boolean): Seq[UInt] = {
@@ -429,7 +431,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if (io.extra.intRfReadOut.isDefined) {
-    val extraIntReadData = intRfReadData_asyn.dropRight(32).takeRight(outer.outIntRfReadPorts)
+    val extraIntReadData = intRfReadData_asyn.dropRight(33).takeRight(outer.outIntRfReadPorts)
     io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
     require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
   }
@@ -523,6 +525,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
 
 
+  }
+  if(io.extra.vconfigReadPort.isDefined) {
+    io.extra.vconfigReadPort.get.data := intRfReadData_asyn.dropRight(32).last
   }
 
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {

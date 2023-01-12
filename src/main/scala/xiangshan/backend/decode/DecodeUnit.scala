@@ -579,6 +579,20 @@ case class Imm_OPIVIU() extends Imm(5){
     instr(19, 15)
   }
 }
+case class Imm_VSETVLI() extends Imm(11){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(30, 20)
+  }
+}
+case class Imm_VSETIVLI() extends Imm(15){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    Cat(instr(19, 15), instr(29, 20))
+  }
+}
 object ImmUnion {
   val I = Imm_I()
   val S = Imm_S()
@@ -589,7 +603,10 @@ object ImmUnion {
   val B6 = Imm_B6()
   val OPIVIS = Imm_OPIVIS()
   val OPIVIU = Imm_OPIVIU()
-  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU)
+  val VSETVLI = Imm_VSETVLI()
+  val VSETIVLI = Imm_VSETIVLI()
+
+  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -600,7 +617,9 @@ object ImmUnion {
     SelImm.IMM_Z,
     SelImm.IMM_B6,
     SelImm.IMM_OPIVIS,
-    SelImm.IMM_OPIVIU
+    SelImm.IMM_OPIVIU,
+    SelImm.IMM_VSETVLI,
+    SelImm.IMM_VSETIVLI
   ).zip(imms)
   println(s"ImmUnion max len: $maxLen")
 }
@@ -622,7 +641,12 @@ case class Imm_LUI_LOAD() {
  */
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
-  val deq = new Bundle { val cf_ctrl = Output(new CfCtrl) }
+  val vconfig = Input(UInt(XLEN.W))
+  val deq = new Bundle {
+    val cf_ctrl = Output(new CfCtrl)
+    val isVset = Output(Bool())
+  }
+  val deq_isVset = new Bundle{ }
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
@@ -667,6 +691,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.vecWen := DontCare
   cs.srcType(3) := DontCare
   cs.lsrc(3) := DontCare
+  cs.uopIdx := "b11111".U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
@@ -707,9 +732,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
+  cs.vconfig := 0.U(16.W)
+  when(FuType.isVpu(cs.fuType)){
+    cs.vconfig := io.vconfig
+  }
   cf_ctrl.ctrl := cs
 
   io.deq.cf_ctrl := cf_ctrl
+
+  io.deq.isVset := FuType.isIntExu(cs.fuType) && ALUOpType.isVset(cs.fuOpType)
 
   //-------------------------------------------------------------
   // Debug Info

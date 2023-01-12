@@ -59,6 +59,8 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
   }
+  
+  val vcsrFlag   = Output(Bool())
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
@@ -163,6 +165,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
   val exceptionVec = ExceptionVec()
   val flushPipe = Bool()
+  val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
@@ -300,6 +303,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
+    val isVsetFlushPipe = Output(Bool())
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback = MixedVec(numWbPorts.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
@@ -468,6 +472,49 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   when (!io.wfi_enable) {
     hasWFI := false.B
   }
+  // sel vsetvl's flush position
+  val vs_idle :: vs_waitVinstr :: vs_waitFlush :: Nil = Enum(3)
+  val vsetvlState = RegInit(vs_idle)
+
+  val firstVInstrFtqPtr    = RegInit(0.U.asTypeOf(new FtqPtr))
+  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(log2Up(PredictWidth).W)))
+  val firstVInstrRobIdx    = RegInit(0.U.asTypeOf(new RobPtr))
+
+  val enq0            = io.enq.req(0)
+  val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.andR && canEnqueue(0)
+  val enq0IsVsetFlush = enq0IsVset && enq0.bits.ctrl.flushPipe
+  val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVpu(req.bits.ctrl.fuType) && fire}
+  // for vs_idle
+  val firstVInstrIdle = PriorityMux(enqIsVInstrVec.zip(io.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(io.enq.req(0).cloneType)))
+  // for vs_waitVinstr
+  val enqIsVInstrOrVset = (enqIsVInstrVec(0) || enq0IsVset) +: enqIsVInstrVec.drop(1)
+  val firstVInstrWait = PriorityMux(enqIsVInstrOrVset, io.enq.req)
+  when(vsetvlState === vs_idle){
+    firstVInstrFtqPtr    := firstVInstrIdle.bits.cf.ftqPtr
+    firstVInstrFtqOffset := firstVInstrIdle.bits.cf.ftqOffset
+    firstVInstrRobIdx    := firstVInstrIdle.bits.robIdx
+  }.elsewhen(vsetvlState === vs_waitVinstr){
+    firstVInstrFtqPtr    := firstVInstrWait.bits.cf.ftqPtr
+    firstVInstrFtqOffset := firstVInstrWait.bits.cf.ftqOffset
+    firstVInstrRobIdx    := firstVInstrWait.bits.robIdx
+  }
+
+  val hasVInstrAfterI = Cat(enqIsVInstrVec(0)).orR
+  when(vsetvlState === vs_idle){
+    when(enq0IsVsetFlush){
+      vsetvlState := Mux(hasVInstrAfterI, vs_waitFlush, vs_waitVinstr)
+    }
+  }.elsewhen(vsetvlState === vs_waitVinstr){
+    when(io.redirect.valid){
+      vsetvlState := vs_idle
+    }.elsewhen(Cat(enqIsVInstrOrVset).orR){
+      vsetvlState := vs_waitFlush
+    }
+  }.elsewhen(vsetvlState === vs_waitFlush){
+    when(io.redirect.valid){
+      vsetvlState := vs_idle
+    }
+  }
 
   /**
     * Writeback (from execution units)
@@ -519,16 +566,19 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
 
+  val isVsetFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe && exceptionDataRead.bits.isVset
+  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
+  io.isVsetFlushPipe := RegNext(isVsetFlushPipe)
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
   io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
-  io.flushOut.bits.robIdx := deqPtr
-  io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
-  io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
-  io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || exceptionEnable, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
+  io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
+  io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqDispatchData.ftqIdx)
+  io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqDispatchData.ftqOffset)
+  io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || exceptionEnable || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && exceptionEnable)
@@ -636,6 +686,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   io.csr.fflags := RegNext(fflags)
   io.csr.dirty_fs := RegNext(dirty_fs)
 
+  // sync v csr to csr
+//  io.csr.vcsrFlag := RegNext(isVsetFlushPipe)
+
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE))
@@ -691,7 +744,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   walkPtrVec := walkPtrVec_next
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val commitCnt = PopCount(io.commits.commitValid)
+  val isLastUopVec = io.commits.info.map(_.uopIdx.andR)
+  val commitCnt = PopCount(io.commits.commitValid.zip(isLastUopVec).map{case(isCommitValid, isLastUop) => isCommitValid && isLastUop})
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
 
@@ -850,6 +904,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.ftqOffset := req.cf.ftqOffset
     wdata.isMove := req.eliminatedMove
     wdata.pc := req.cf.pc
+    wdata.uopIdx := req.ctrl.uopIdx
+    wdata.vconfig := req.ctrl.vconfig
   }
   dispatchData.io.raddr := commitReadAddr_next
 
@@ -860,6 +916,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
+    exceptionGen.io.enq(i).bits.isVset := FuType.isIntExu(io.enq.req(i).bits.ctrl.fuType) && ALUOpType.isVset(io.enq.req(i).bits.ctrl.fuOpType)
     exceptionGen.io.enq(i).bits.replayInst := false.B
     XSError(canEnqueue(i) && io.enq.req(i).bits.ctrl.replayInst, "enq should not set replayInst")
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
@@ -876,6 +933,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exc_wb.bits.robIdx          := wb.bits.uop.robIdx
     exc_wb.bits.exceptionVec    := ExceptionNO.selectByExu(wb.bits.uop.cf.exceptionVec, configs)
     exc_wb.bits.flushPipe       := configs.exists(_.flushPipe).B && wb.bits.uop.ctrl.flushPipe
+    exc_wb.bits.isVset          := false.B
     exc_wb.bits.replayInst      := configs.exists(_.replayInst).B && wb.bits.uop.ctrl.replayInst
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
@@ -1038,6 +1096,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
 
+      difftest.io.isVsetFirst := RegNext(RegNext(RegNext(io.commits.commitValid(i) && !io.commits.info(i).uopIdx.orR)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
