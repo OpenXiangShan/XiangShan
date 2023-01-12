@@ -148,7 +148,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1 = Reg(Vec(l2tlbParams.l1Size, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v = RegInit(0.U(l2tlbParams.l1Size.W))
   val l1g = Reg(UInt(l2tlbParams.l1Size.W))
-  val l1asids = Reg(Vec(l2tlbParams.l1Size, UInt(AsidLength.W)))
+  val l1asids = l1.map(_.asid)
 
   // l2: level 1 non-leaf pte
   val l2 = Module(new SRAMTemplate(
@@ -202,7 +202,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val sp = Reg(Vec(l2tlbParams.spSize, new PtwEntry(tagLen = SPTagLen, hasPerm = true, hasLevel = true)))
   val spv = RegInit(0.U(l2tlbParams.spSize.W))
   val spg = Reg(UInt(l2tlbParams.spSize.W))
-  val spasids = Reg(Vec(l2tlbParams.spSize, UInt(AsidLength.W)))
+  val spasids = sp.map(_.asid)
 
   // Access Perf
   val l1AccessPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
