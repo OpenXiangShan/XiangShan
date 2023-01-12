@@ -549,7 +549,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     (0xf & StoreBufferThreshold) |
     (EnableLdVioCheckAfterReset.toInt << 4) |
     (EnableSoftPrefetchAfterReset.toInt << 5) |
-    (EnableCacheErrorAfterReset.toInt << 6)
+    (EnableCacheErrorAfterReset.toInt << 6) |
     (EnableUncacheWriteOutstanding.toInt << 7)
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
