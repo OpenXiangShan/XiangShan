@@ -549,9 +549,9 @@ object VecDecoder extends DecodeConstants {
   )
 
   val vset: Array[(BitPat, XSDecodeBase)] = Array(
-    VSETVLI   -> VSET(F, T, ALUOpType.vsetvli,  F, SelImm.IMM_VSETVLI),
-    VSETIVLI  -> VSET(T, T, ALUOpType.vsetivli, F, SelImm.IMM_VSETIVLI),
-    VSETVL    -> VSET(F, F, ALUOpType.vsetvl,   T, SelImm.X), // flush pipe
+    VSETVLI   -> VSET(F, T, ALUOpType.vsetvli1,  F, SelImm.IMM_VSETVLI),
+    VSETIVLI  -> VSET(T, T, ALUOpType.vsetivli1, F, SelImm.IMM_VSETIVLI),
+    VSETVL    -> VSET(F, F, ALUOpType.vsetvl1,   T, SelImm.X), // flush pipe
   )
 
   val vls: Array[(BitPat, XSDecodeBase)] = Array(

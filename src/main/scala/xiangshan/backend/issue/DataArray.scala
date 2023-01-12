@@ -112,10 +112,9 @@ class JumpImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
 
 class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
   when (SrcType.isImm(io.uop.ctrl.srcType(1))) {
-    val imm32 = Mux(io.uop.ctrl.selImm === SelImm.IMM_U,
-      ImmUnion.U.toImm32(io.uop.ctrl.imm),
-      ImmUnion.I.toImm32(io.uop.ctrl.imm)
-    )
+    val imm32 = Mux(io.uop.ctrl.selImm === SelImm.IMM_VSETIVLI, ImmUnion.VSETIVLI.toImm32(io.uop.ctrl.imm),
+                  Mux(io.uop.ctrl.selImm === SelImm.IMM_VSETVLI, ImmUnion.VSETVLI.toImm32(io.uop.ctrl.imm),
+                    Mux(io.uop.ctrl.selImm === SelImm.IMM_U, ImmUnion.U.toImm32(io.uop.ctrl.imm), ImmUnion.I.toImm32(io.uop.ctrl.imm))))
     io.data_out(1) := SignExt(imm32, XLEN)
   }
 }
