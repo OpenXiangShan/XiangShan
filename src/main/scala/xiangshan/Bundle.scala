@@ -168,6 +168,8 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
+  val uopIdx = UInt(5.W)
+  val vconfig = UInt(16.W)
   val isMove = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
@@ -378,6 +380,9 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+
+  val uopIdx = UInt(5.W)
+  val vconfig = UInt(16.W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {

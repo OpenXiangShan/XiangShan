@@ -49,6 +49,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     // debug arch ports
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_vconfig_rat = Input(UInt(PhyRegIdxWidth.W))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
@@ -60,8 +61,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   intRefCounter.io.commit        <> io.robCommits
   intRefCounter.io.redirect      := io.redirect.valid
   intRefCounter.io.debug_int_rat <> io.debug_int_rat
+  intRefCounter.io.debug_vconfig_rat := io.debug_vconfig_rat
   intFreeList.io.commit    <> io.robCommits
   intFreeList.io.debug_rat <> io.debug_int_rat
+  intFreeList.io_extra.debug_vconfig_rat := io.debug_vconfig_rat
   fpFreeList.io.commit     <> io.robCommits
   fpFreeList.io.debug_rat  <> io.debug_fp_rat
 

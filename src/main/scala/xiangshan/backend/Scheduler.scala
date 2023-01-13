@@ -337,6 +337,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
+    // for vset
+    val vconfigReadPort = if(outer.hasIntRf) Some(new RfReadPort(XLEN, IntPregIdxWidth)) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -405,8 +407,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     * Currently, read regfile when at select stage of rs, get data at the same cycle.
     * Store-Data-RS reads fp Regfile (Cross Domain).
     */
-  val readIntRf: Seq[UInt] = extractIntReadRf() ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
-  val readFpRf: Seq[UInt] = extractFpReadRf() ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
+  def readIntRf: Seq[UInt] = extractIntReadRf() ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr) :+ io.extra.vconfigReadPort.get.addr
+  def readFpRf: Seq[UInt] = extractFpReadRf() ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
 
   val intRfReadData_asyn = if (intRfConfig._1) genRegfile()
     else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
@@ -554,9 +556,19 @@ class IntSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends Schedule
 
   if (io.extra.intRfReadOut.isDefined) {
     println("Scheduler: has IntRfReadOut")
-    val extraIntReadData = intRfReadData_asyn.dropRight(32).takeRight(outer.outIntRfReadPorts)
+    val extraIntReadData = intRfReadData_asyn.dropRight(33).takeRight(outer.outIntRfReadPorts)
     io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
     require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
+  }
+
+  if (io.extra.loadFastMatch.isDefined) {
+    val allLoadRS = outer.reservationStations.filter(_.params.isLoad).map(_.module.extra.load)
+    io.extra.loadFastMatch.get := allLoadRS.map(_.map(_.fastMatch)).fold(Seq())(_ ++ _)
+    io.extra.loadFastImm.get := allLoadRS.map(_.map(_.fastImm)).fold(Seq())(_ ++ _)
+  }
+
+  if(io.extra.vconfigReadPort.isDefined) {
+    io.extra.vconfigReadPort.get.data := intRfReadData_asyn.dropRight(32).last
   }
 
   var feedbackIdx = 0
@@ -655,7 +667,7 @@ class VecSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends Schedule
 
   if (io.extra.fpRfReadOut.isDefined) {
     println("Scheduler: has fpRfReadOut")
-    val extraFpReadData = fpRfReadData_asyn.dropRight(32).takeRight(outer.outFpRfReadPorts)
+    val extraFpReadData = fpRfReadData_asyn.dropRight(64).takeRight(outer.outFpRfReadPorts)
     io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
     require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
   }

@@ -95,7 +95,7 @@ package object xiangshan {
     def isSvinvalBegin(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && !flush
     def isSvinval(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.sfence && !flush
     def isSvinvalEnd(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && flush
-
+    def isVpu(fuType: UInt) = fuType(4)
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
     def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1) || fuType(2) && fuType(1) && fuType(0)
@@ -344,9 +344,12 @@ package object xiangshan {
     def xorzexth   = "b110_0101".U
     def orcblsb    = "b110_0110".U
     def orcbzexth  = "b110_0111".U
-    def vsetvli    = "b1000_0000".U
-    def vsetvl     = "b1000_0001".U
-    def vsetivli   = "b1000_0010".U
+    def vsetvli1    = "b1000_0000".U
+    def vsetvli2    = "b1000_0100".U
+    def vsetvl1     = "b1000_0001".U
+    def vsetvl2     = "b1000_0101".U
+    def vsetivli1   = "b1000_0010".U
+    def vsetivli2   = "b1000_0110".U
 
     def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
     def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
@@ -355,6 +358,10 @@ package object xiangshan {
     def isBranch(func: UInt) = func(6, 4) === "b111".U
     def getBranchType(func: UInt) = func(3, 2)
     def isBranchInvert(func: UInt) = func(1)
+    def isVset(func: UInt) = func(7, 3) === "b1000_0".U
+    def isVsetvl(func: UInt) = isVset(func) && func(0)
+    def isVsetvli(func: UInt) = isVset(func) && !func(1, 0).orR
+    def vsetExchange(func: UInt) = Cat(func(7, 3), "b1".U, func(1, 0))
 
     def apply() = UInt(FuOpTypeWidth.W)
   }
