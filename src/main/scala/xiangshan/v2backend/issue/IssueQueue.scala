@@ -6,7 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, ExuInput, ExuOutput}
-import xiangshan.{MemRSFeedbackIO, Redirect, XSBundle}
+import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
 
 case class IssueQueueParams(
   var numEntries      : Int = 0,
@@ -91,7 +91,41 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends X
   // Todo: wake up bundle
 }
 
-
-class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams) extends LazyModuleImp(outer) {
+class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams) extends LazyModuleImp(outer) with HasXSParameter{
   val io = IO(new IssueQueueIO)
+
+  val statusArray = Module(new StatusArray)
+  val immArray = Module(new DataArray(UInt(XLEN.W), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries))
+  val payloadArray = Module(new DataArray(new DynInst, iqParams.numDeq, iqParams.numEnq, iqParams.numEntries))
+  val enqPolicy = Module(new EnqPolicy)
+  val deqPolicy = Module(new DeqPolicy)
+
+  val enqValidVec = io.enq.map(_.valid)
+  val (enqSelValidVec, enqSelOHVec) = enqPolicy.io.enqSelOHVec.map(oh => (oh.valid, oh.bits)).unzip
+  val enqImmValidVec = io.enq.map(enq => enq.valid && enq.bits.imm.valid)
+  val enqImmVec = io.enq.map(_.bits.imm.bits)
+
+  val (deqSelValidVec, deqSelOHVec) = deqPolicy.io.deqSelOHVec.map(oh => (oh.valid, oh.bits)).unzip
+
+  val immArrayRdataVec = immArray.io.read.map(_.data)
+  immArray.io match { case immArrayIO =>
+    immArrayIO.write.zipWithIndex.foreach { case (w, i) =>
+      w.en := enqSelValidVec(i) && enqImmValidVec(i)
+      w.addr := enqSelOHVec(i)
+      w.data := enqImmVec(i)
+    }
+    immArrayIO.read.zipWithIndex.foreach { case (r, i) =>
+      r.addr := Mux(deqSelValidVec(i), deqSelOHVec(i), 0.U)
+    }
+  }
+
+  statusArray.io match { case statusArrayIO: StatusArrayIO =>
+    statusArrayIO.wakeup := io.writeBack
+    statusArrayIO.enq.zipWithIndex.foreach { case (enq, i) =>
+      enq.valid := enqSelValidVec(i)
+      // more todo
+    }
+  }
+
+
 }
