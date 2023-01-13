@@ -53,6 +53,8 @@ object Bundles {
 
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
+    val imm             = ValidIO(UInt(XLEN.W)) // Todo: check if it need minimized
+
     val rfWen           = Bool()
     val fpWen           = Bool()
     val vecWen          = Bool()
