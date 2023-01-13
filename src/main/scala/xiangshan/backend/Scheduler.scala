@@ -226,7 +226,61 @@ abstract class Scheduler(
   lazy val module = new SchedulerImp(this)
 }
 
-class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter with HasPerfEvents {
+trait SchedulerImpMethod { this: SchedulerImp =>
+
+  def getIntBusyTable() = {
+    val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
+    busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
+      pregAlloc.valid := allocReq.isInt
+      pregAlloc.bits := allocReq.preg
+    }
+    busyTable.io.wbPregs.zip(io.writebackInt).foreach{ case (pregWb, exuWb) =>
+      pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
+      pregWb.bits := exuWb.bits.uop.pdest
+    }
+    busyTable.io.read <> readIntState
+    Some(busyTable)
+  }
+
+  def getFpBusyTable() = {
+    // Some fp states are read from outside
+    val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
+    // The left read requests are serviced by internal busytable
+    val numBusyTableRead = readFpState.length - numInFpStateRead
+    println(s"Scheduler: fpBusyTable: InFp ${numInFpStateRead} BusyTableRead ${numBusyTableRead}")
+    val busyTable = if (numBusyTableRead > 0) {
+      println(s"Scheduler: Gen FP BusyTable Read ${numBusyTableRead} Write ${fpRfWritePorts}")
+      val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
+      busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
+        pregAlloc.valid := allocReq.isFp
+        pregAlloc.bits := allocReq.preg
+      }
+      busyTable.io.wbPregs.zip(io.writebackFp).foreach { case (pregWb, exuWb) =>
+        pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
+        pregWb.bits := exuWb.bits.uop.pdest
+      }
+      busyTable.io.read <> readFpState.take(numBusyTableRead)
+      busyTable.io.read <> readFpState
+      Some(busyTable)
+    } else None
+    if (io.extra.fpStateReadIn.isDefined && numInFpStateRead > 0) {
+      println(s"Scheduler: FP Out read ${numInFpStateRead}")
+      io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
+    }
+    busyTable
+  }
+
+  def extractIntReadRf(): Seq[UInt] = {
+    rs_all.flatMap(_.module.readIntRf_asyn).map(_.addr)
+  }
+  def extractFpReadRf(): Seq[UInt] = {
+    rs_all.flatMap(_.module.readFpRf_asyn).map(_.addr)
+  }
+
+  def genRegfile(): Seq[UInt] = Seq() // Implemented at sub-class
+}
+
+class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter with HasPerfEvents with SchedulerImpMethod {
   val memRsEntries = outer.getMemRsEntries
   val updatedP = p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
@@ -240,6 +294,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   val rs_all = outer.reservationStations
   rs_all.foreach(_.module.extra <> DontCare)
+  val numLoadPorts = rs_all.filter(_.params.isLoad).map(_.module.extra.load).map(_.length).sum
+
 
   // print rs info
   println("Scheduler: ")
@@ -247,7 +303,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of replay ports: ${outer.numReplayPorts}")
   println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
   println(s"  number of std ports: ${outer.numSTDPorts}")
-  val numLoadPorts = outer.reservationStations.filter(_.params.isLoad).map(_.module.extra.load).map(_.length).sum
   println(s"  number of load ports: ${numLoadPorts}")
   println(s"  hasIntRf ${outer.hasIntRf} IntRfRead ${outer.numIntRfReadPorts} IntRfWrite ${outer.numIntRfWritePorts} outIntRfRead ${outer.outIntRfReadPorts}")
   println(s"  hasFpRf ${outer.hasFpRf} FpRfRead ${outer.numFpRfReadPorts} FpRfWrite ${outer.numFpRfWritePorts} outFpRfRead ${outer.outFpRfReadPorts}")
@@ -326,136 +381,69 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   // To reduce fanout, we add registers here for redirect.
   val redirect = RegNextWithEnable(io.redirect)
 
+  /** Dispatch2Rs:
+    */
   val dispatch2 = outer.dispatch2.map(_.module)
   dispatch2.foreach(_.io.redirect := redirect)
-  io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
-
-  // dirty code for ls dp
-  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
-    val lsqCtrl = Module(new LsqEnqCtrl)
-    lsqCtrl.io.redirect <> redirect
-    lsqCtrl.io.enq <> dp.io.enqLsq.get
-    lsqCtrl.io.lcommit := io.extra.lcommit
-    lsqCtrl.io.scommit := io.extra.scommit
-    lsqCtrl.io.lqCancelCnt := io.extra.lqCancelCnt
-    lsqCtrl.io.sqCancelCnt := io.extra.sqCancelCnt
-    io.extra.enqLsq.get <> lsqCtrl.io.enqLsq
-  })
 
   io.in <> dispatch2.flatMap(_.io.in)
+  io.extra.rsReady := outer.dispatch2.flatMap(_.module.io.out.map(_.ready))
+
+  /** BusyTable:
+    * Read regfile state when deq from dispatch2 and enq to rs
+    * Store-Data-RS reads fp Regfile state(Cross Domain). But for timing optimization,
+    * Store-Data-RS reads from local busytable copy.
+    */
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
-  val intBusyTable = if (readIntState.nonEmpty) {
-    val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
-    busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
-      pregAlloc.valid := allocReq.isInt
-      pregAlloc.bits := allocReq.preg
-    }
-    busyTable.io.wbPregs.zip(io.writebackInt).foreach{ case (pregWb, exuWb) =>
-      pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
-      pregWb.bits := exuWb.bits.uop.pdest
-    }
-    busyTable.io.read <> readIntState
-    Some(busyTable)
-  } else None
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
-  println(s"Scheduler: readFpState ${readFpState.length} fpStateOut ${io.extra.fpStateReadOut.getOrElse(Seq()).length} dispatch ${dispatch2.flatMap(_.io.readFpState.getOrElse(Seq())).length}")
-  val fpBusyTable = if (readFpState.nonEmpty) {
-    // Some fp states are read from outside
-    val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
-    // The left read requests are serviced by internal busytable
-    val numBusyTableRead = readFpState.length - numInFpStateRead
-    println(s"Scheduler: fpBusyTable: InFp ${numInFpStateRead} BusyTableRead ${numBusyTableRead}")
-    val busyTable = if (numBusyTableRead > 0) {
-      println(s"Scheduler: Gen FP BusyTable Read ${numBusyTableRead} Write ${fpRfWritePorts}")
-      val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
-      busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
-        pregAlloc.valid := allocReq.isFp
-        pregAlloc.bits := allocReq.preg
-      }
-      busyTable.io.wbPregs.zip(io.writebackFp).foreach { case (pregWb, exuWb) =>
-        pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
-        pregWb.bits := exuWb.bits.uop.pdest
-      }
-      busyTable.io.read <> readFpState.take(numBusyTableRead)
-      busyTable.io.read <> readFpState
-      Some(busyTable)
-    } else None
-    if (io.extra.fpStateReadIn.isDefined && numInFpStateRead > 0) {
-      println(s"Scheduler: FP Out read ${numInFpStateRead}")
-      io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
-    }
-    busyTable
-  } else None
+
+  val intBusyTable = if (readIntState.nonEmpty) getIntBusyTable() else None
+  val fpBusyTable = if (readFpState.nonEmpty) getFpBusyTable() else None
   val allocate = dispatch2.flatMap(_.io.out)
 
-  def extractReadRf(isInt: Boolean): Seq[UInt] = {
-    if (isInt) {
-      rs_all.flatMap(_.module.readIntRf_asyn).map(_.addr)
-    }
+  /** Regfile:
+    * Currently, read regfile when at select stage of rs, get data at the same cycle.
+    * Store-Data-RS reads fp Regfile (Cross Domain).
+    */
+  val readIntRf: Seq[UInt] = extractIntReadRf() ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
+  val readFpRf: Seq[UInt] = extractFpReadRf() ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
+
+  val intRfReadData_asyn = if (intRfConfig._1) genRegfile()
+    else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
+  val fpRfReadData_asyn = if (fpRfConfig._1) genRegfile()
+    else VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data))
+
+  rs_all.flatMap(_.module.readIntRf_asyn.map(_.data))
+    .zip(intRfReadData_asyn)
+    .foreach{ case (a, b) => a := b}
+  rs_all.flatMap(_.module.readFpRf_asyn).map(_.data)
+    .zip(fpRfReadData_asyn)
+    .foreach{ case (a, b) => a := b}
+
+  /** Connect Dispatch2Rs with RS
+    */
+  for ((dp, i) <- outer.dpPorts.zipWithIndex) {
+    // dp connects only one rs: don't use arbiter
+    if (dp.length == 1)
+      rs_all(dp.head.rsIdx).module.io.fromDispatch(dp.head.dpIdx) <> allocate(i)
+    // dp connects more than one rs: use arbiter to route uop to the correct rs
     else {
-      rs_all.flatMap(_.module.readFpRf_asyn).map(_.addr)
-    }
-  }
-  def readIntRf: Seq[UInt] = extractReadRf(true) ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr)
-  def readFpRf: Seq[UInt] = extractReadRf(false) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
-
-  def genRegfile(isInt: Boolean): Seq[UInt] = {
-    val wbPorts = if (isInt) io.writebackInt else io.writebackFp
-    val waddr = wbPorts.map(_.bits.uop.pdest)
-    val wdata = wbPorts.map(_.bits.data)
-    val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat ++ io.extra.debug_vec_rat
-    if (isInt) {
-      val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
-      IntRegFile("IntRegFile", IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
-    }
-    else {
-      // For floating-point function units, every instruction writes either int or fp regfile.
-      // Multi-wen for each regfile
-      val wen = Seq.fill(VLEN/XLEN)(wbPorts.map(_.valid))
-      val widenWdata = wdata.map(ZeroExt(_, VLEN))
-      VfRegFile("VecFpRegFile", VfPhyRegs, VLEN/XLEN, readFpRf, wen, waddr, widenWdata, debugReadAddr = Some(debugRead))
+      val func = dp.map(rs => (op: MicroOp) => rs_all(rs.rsIdx).canAccept(op.ctrl.fuType))
+      val arbiterOut = DispatchArbiter(allocate(i), func)
+      val rsIn = VecInit(dp.map(rs => rs_all(rs.rsIdx).module.io.fromDispatch(rs.dpIdx)))
+      rsIn <> arbiterOut
     }
   }
 
-  val intRfReadData_asyn = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
-  val fpRfReadData_asyn = if (fpRfConfig._1) genRegfile(false) else VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data))
-
-  if(intRfReadData_asyn.length>0)
-    rs_all.flatMap(_.module.readIntRf_asyn.map(_.data)).zip(intRfReadData_asyn).foreach{ case (a, b) => a := b}
-  if(fpRfReadData_asyn.length>0)
-    rs_all.flatMap(_.module.readFpRf_asyn).map(_.data).zip(fpRfReadData_asyn).foreach{ case (a, b) => a := b}
-
-  if (io.extra.intRfReadIn.isDefined) {
-    io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
-    require(io.extra.intRfReadIn.get.length == readIntRf.length)
-  }
-
-  if (io.extra.fpRfReadIn.isDefined) {
-    // Due to distance issues, we RegNext the address for cross-block regfile read
-    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
-    require(io.extra.fpRfReadIn.get.length == readFpRf.length)
-  }
-
-  if (io.extra.intRfReadOut.isDefined) {
-    val extraIntReadData = intRfReadData_asyn.dropRight(32).takeRight(outer.outIntRfReadPorts)
-    io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
-    require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
-  }
-
-  if (io.extra.fpRfReadOut.isDefined) {
-    val extraFpReadData = fpRfReadData_asyn.dropRight(32).takeRight(outer.outFpRfReadPorts)
-    io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
-    require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
-  }
-
+  /** Connect RS with:
+    * 1. each other's wakeup(MicroOp)
+    * 2. FU's writeback(ExuOutput)
+    * 3. FU's ExuInput
+    */
   var issueIdx = 0
-  var feedbackIdx = 0
-  var stDataIdx = 0
-  var fastUopOutIdx = 0
   io.fastUopOut := DontCare
   for (((node, cfg), i) <- rs_all.zip(outer.configs.map(_.exuConfig)).zipWithIndex) {
     val rs = node.module
-
     rs.io.redirect <> io.redirect
 
     val issueWidth = rs.io.deq.length
@@ -464,28 +452,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.io.fastWakeup.get <> io.fastUopOut.slice(issueIdx, issueIdx + issueWidth)
     }
     issueIdx += issueWidth
-
-    if (rs.isJump) {
-      val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
-      rs.extra.jump.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
-      rs.extra.jump.jalr_target := io.extra.jalr_target
-    }
-    if (rs.checkWaitBit) {
-      rs.extra.checkwait.stIssuePtr <> io.extra.stIssuePtr
-      rs.extra.checkwait.memWaitUpdateReq <> io.extra.memWaitUpdateReq
-    }
-    if (rs.hasFeedback) {
-      val width = rs.extra.feedback.length
-      val feedback = io.extra.feedback.get.slice(feedbackIdx, feedbackIdx + width)
-      require(feedback(0).rsIdx.getWidth == rs.extra.feedback(0).rsIdx.getWidth)
-      rs.extra.feedback.zip(feedback).foreach{ case (r, f) =>
-        r.feedbackFast <> f.feedbackFast
-        r.feedbackSlow <> f.feedbackSlow
-        r.rsIdx <> f.rsIdx
-        r.isFirstIssue <> f.isFirstIssue
-      }
-      feedbackIdx += width
-    }
 
     val intWriteback = io.writebackInt
     val fpWriteback  = io.writebackFp
@@ -511,69 +477,11 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     require(outerUop.length == outerData.length)
   }
   require(issueIdx == io.issue.length)
-  if (io.extra.loadFastMatch.isDefined) {
-    val allLoadRS = outer.reservationStations.filter(_.params.isLoad).map(_.module.extra.load)
-    io.extra.loadFastMatch.get := allLoadRS.map(_.map(_.fastMatch)).fold(Seq())(_ ++ _)
-    io.extra.loadFastImm.get := allLoadRS.map(_.map(_.fastImm)).fold(Seq())(_ ++ _)
-  }
-
-  for ((dp, i) <- outer.dpPorts.zipWithIndex) {
-    // dp connects only one rs: don't use arbiter
-    if (dp.length == 1) {
-      rs_all(dp.head.rsIdx).module.io.fromDispatch(dp.head.dpIdx) <> allocate(i)
-    }
-    // dp connects more than one rs: use arbiter to route uop to the correct rs
-    else {
-      val func = dp.map(rs => (op: MicroOp) => rs_all(rs.rsIdx).canAccept(op.ctrl.fuType))
-      val arbiterOut = DispatchArbiter(allocate(i), func)
-      val rsIn = VecInit(dp.map(rs => rs_all(rs.rsIdx).module.io.fromDispatch(rs.dpIdx)))
-      rsIn <> arbiterOut
-    }
-
-
-  }
-
-  if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
-    val difftest = Module(new DifftestArchIntRegState)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData_asyn.takeRight(32))))
-  }
-  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
-    val fpReg = fpRfReadData_asyn.takeRight(64).take(32)
-    val difftest = Module(new DifftestArchFpRegState)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.fpr.zip(fpReg).map(r => r._1 := RegNext(RegNext(r._2(XLEN-1, 0))))
-  }
-  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
-    val vecReg = fpRfReadData_asyn.takeRight(32)
-    val difftest = Module(new DifftestArchVecRegState)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    for (i <- 0 until 32)
-      for (j <- 0 until (VLEN/XLEN))
-        difftest.io.vpr((VLEN/XLEN)*i +j) := RegNext(RegNext(vecReg(i)(XLEN*(j+1)-1, XLEN*j)))
-  }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
-
-  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
-    val stall_ls_dq = WireDefault(0.B)
-    ExcitingUtils.addSink(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
-    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val st_rs_full = !rs_all.filter(rs => rs.params.isSta || rs.params.isStd).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val stall_stores_bound = stall_ls_dq && (st_rs_full || io.extra.sqFull)
-    val stall_loads_bound = stall_ls_dq && (ld_rs_full || io.extra.lqFull)
-    val stall_ls_bandwidth_bound = stall_ls_dq && !(st_rs_full || io.extra.sqFull) && !(ld_rs_full || io.extra.lqFull)
-    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
-    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
-    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
-    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
-  }
 
   val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
   val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))
@@ -585,6 +493,17 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val fpBtPerf = if (fpBusyTable.isDefined && !io.extra.fpStateReadIn.isDefined) fpBusyTable.get.getPerfEvents else Seq()
   val perfEvents = schedulerPerf ++ intBtPerf ++ fpBtPerf ++ rs_all.flatMap(_.module.getPerfEvents)
   generatePerfEvent()
+}
+
+trait IntSchedulerImpMethod { this: IntSchedulerImp =>
+  override def genRegfile(): Seq[UInt] = {
+    val wbPorts = io.writebackInt
+    val waddr = wbPorts.map(_.bits.uop.pdest)
+    val wdata = wbPorts.map(_.bits.data)
+    val debugRead = io.extra.debug_int_rat
+    val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
+    IntRegFile("IntRegFile", IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
+  }
 }
 
 class IntScheduler(
@@ -608,9 +527,101 @@ class IntScheduler(
   override lazy val module = new IntSchedulerImp(this)
 }
 
-class IntSchedulerImp(out: Scheduler)(implicit p: Parameters) extends SchedulerImp(out) {
+class IntSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends SchedulerImp(outer) with IntSchedulerImpMethod{
+  // dirty code for ls dp
+  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) {
+    val lsqCtrl = Module(new LsqEnqCtrl)
+    lsqCtrl.io.redirect <> redirect
+    lsqCtrl.io.enq <> dp.io.enqLsq.get
+    lsqCtrl.io.lcommit := io.extra.lcommit
+    lsqCtrl.io.scommit := io.extra.scommit
+    lsqCtrl.io.lqCancelCnt := io.extra.lqCancelCnt
+    lsqCtrl.io.sqCancelCnt := io.extra.sqCancelCnt
+    io.extra.enqLsq.get <> lsqCtrl.io.enqLsq
+  })
+
+  /** Read Regfile Cross Domain
+    * The IntRfReadIn/Out is not used for now. But the dummp implementation of
+    * Vector may need.
+    * Currently, Store rs/iq read fp data.
+    */
+  if (io.extra.fpRfReadIn.isDefined) {
+    println("Scheduler: has fpRfReadIn")
+    // Due to distance issues, we RegNext the address for cross-block regfile read
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+    require(io.extra.fpRfReadIn.get.length == readFpRf.length)
+  }
+
+  if (io.extra.intRfReadOut.isDefined) {
+    println("Scheduler: has IntRfReadOut")
+    val extraIntReadData = intRfReadData_asyn.dropRight(32).takeRight(outer.outIntRfReadPorts)
+    io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
+    require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
+  }
+
+  var feedbackIdx = 0
+  var stDataIdx = 0
+  for (((node, cfg), i) <- rs_all.zip(outer.configs.map(_.exuConfig)).zipWithIndex) {
+    val rs = node.module
+
+    if (rs.isJump) {
+      val jumpFire = VecInit(rs.io.fromDispatch.map(dp => dp.fire && dp.bits.isJump)).asUInt.orR
+      rs.extra.jump.jumpPc := RegEnable(io.extra.jumpPc, jumpFire)
+      rs.extra.jump.jalr_target := io.extra.jalr_target
+    }
+    if (rs.checkWaitBit) {
+      rs.extra.checkwait.stIssuePtr <> io.extra.stIssuePtr
+      rs.extra.checkwait.memWaitUpdateReq <> io.extra.memWaitUpdateReq
+    }
+    if (rs.hasFeedback) {
+      val width = rs.extra.feedback.length
+      val feedback = io.extra.feedback.get.slice(feedbackIdx, feedbackIdx + width)
+      require(feedback(0).rsIdx.getWidth == rs.extra.feedback(0).rsIdx.getWidth)
+      rs.extra.feedback.zip(feedback).foreach{ case (r, f) =>
+        r.feedbackFast <> f.feedbackFast
+        r.feedbackSlow <> f.feedbackSlow
+        r.rsIdx <> f.rsIdx
+        r.isFirstIssue <> f.isFirstIssue
+      }
+      feedbackIdx += width
+    }
+  }
+
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
+    val difftest = Module(new DifftestArchIntRegState)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData_asyn.takeRight(32))))
+  }
+  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
+    val stall_ls_dq = WireDefault(0.B)
+    ExcitingUtils.addSink(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
+    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val st_rs_full = !rs_all.filter(rs => rs.params.isSta || rs.params.isStd).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
+    val stall_stores_bound = stall_ls_dq && (st_rs_full || io.extra.sqFull)
+    val stall_loads_bound = stall_ls_dq && (ld_rs_full || io.extra.lqFull)
+    val stall_ls_bandwidth_bound = stall_ls_dq && !(st_rs_full || io.extra.sqFull) && !(ld_rs_full || io.extra.lqFull)
+    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
+    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
+    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
+    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
+  }
 }
 
+
+trait VecSchedulerImpMethod { this: VecSchedulerImp =>
+  override def genRegfile(): Seq[UInt] = {
+    val wbPorts = io.writebackFp
+    val waddr = wbPorts.map(_.bits.uop.pdest)
+    val wdata = wbPorts.map(_.bits.data)
+    val debugRead = io.extra.debug_fp_rat ++ io.extra.debug_vec_rat
+    // For floating-point function units, every instruction writes either int or fp regfile.
+    // Multi-wen for each regfile
+    val wen = Seq.fill(VLEN/XLEN)(wbPorts.map(_.valid))
+    val widenWdata = wdata.map(ZeroExt(_, VLEN))
+    VfRegFile("VecFpRegFile", VfPhyRegs, VLEN/XLEN, readFpRf, wen, waddr, widenWdata, debugReadAddr = Some(debugRead))
+  }
+}
 class VecScheduler(
   val configVec: Seq[ScheLaneConfig],
   val dpPortVec: Seq[Seq[DpPortMapConfig]],
@@ -630,5 +641,39 @@ class VecScheduler(
   override lazy val module = new VecSchedulerImp(this)
 }
 
-class VecSchedulerImp(out: Scheduler)(implicit p: Parameters) extends SchedulerImp(out) {
+class VecSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends SchedulerImp(outer) with VecSchedulerImpMethod {
+  /** Read Regfile Cross Domain
+    * The IntRfReadIn/Out is not used for now. But the dummp implementation of
+    * Vector may need.
+    * Currently, Store rs/iq read fp data.
+    */
+  if (io.extra.intRfReadIn.isDefined) {
+    println("Scheduler: has IntRfReadIn")
+    io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
+    require(io.extra.intRfReadIn.get.length == readIntRf.length)
+  }
+
+  if (io.extra.fpRfReadOut.isDefined) {
+    println("Scheduler: has fpRfReadOut")
+    val extraFpReadData = fpRfReadData_asyn.dropRight(32).takeRight(outer.outFpRfReadPorts)
+    io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
+    require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
+  }
+
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
+    val fpReg = fpRfReadData_asyn.takeRight(64).take(32)
+    val difftest = Module(new DifftestArchFpRegState)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    difftest.io.fpr.zip(fpReg).map(r => r._1 := RegNext(RegNext(r._2(XLEN-1, 0))))
+  }
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
+    val vecReg = fpRfReadData_asyn.takeRight(32)
+    val difftest = Module(new DifftestArchVecRegState)
+    difftest.io.clock := clock
+    difftest.io.coreid := io.hartId
+    for (i <- 0 until 32)
+      for (j <- 0 until (VLEN/XLEN))
+        difftest.io.vpr((VLEN/XLEN)*i +j) := RegNext(RegNext(vecReg(i)(XLEN*(j+1)-1, XLEN*j)))
+  }
 }

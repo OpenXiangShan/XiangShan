@@ -40,7 +40,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   val csr_frm = WireInit(frm.getOrElse(0.U(3.W)))
 
   val hasRedirect = config.fuConfigs.zip(functionUnits).filter(_._1.hasRedirect).map(_._2)
-  println(s"${functionUnits.map(_.name)} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
+  println(s"ExeUnit: ${functionUnits.map(_.name).reduce(_ + " " + _)} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
   if (hasRedirect.nonEmpty) {
     require(hasRedirect.length <= 1)
     io.out.bits.redirectValid := hasRedirect.head.asInstanceOf[FUWithRedirect].redirectOutValid

@@ -207,6 +207,7 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   val readIntRf_asyn = IO(Vec((params.numDeq) * numIntRfPorts, Flipped(new RfReadPort(params.dataBits, IntPregIdxWidth))))
   val readFpRf_asyn = IO(Vec((params.numDeq) * numFpRfPorts, Flipped(new RfReadPort(params.dataBits, VfPregIdxWidth))))
   extra <> DontCare
+
   readIntRf_asyn <> rs.flatMap(_.readIntRf_asyn)
   readFpRf_asyn <> rs.flatMap(_.readFpRf_asyn)
 
