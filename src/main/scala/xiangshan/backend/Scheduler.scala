@@ -221,6 +221,8 @@ abstract class Scheduler(
   def canAccept(fuType: UInt): Bool = VecInit(configs.map(_.exuConfig.canAccept(fuType))).asUInt.orR
   def numRs: Int = reservationStations.map(_.numRS).sum
 
+  println(s"InScheduler: memRs ${memRsNum} lsqReplay ${numLsqReplayPorts} memRsEntries ${memRsEntries} getMemRsEntries ${getMemRsEntries} STD     ${numSTDPorts} IntRfRead ${numIntRfReadPorts} FpRfRead ${numFpRfReadPorts}")
+
   lazy val module = new SchedulerImp(this)
 }
 
@@ -247,6 +249,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of std ports: ${outer.numSTDPorts}")
   val numLoadPorts = outer.reservationStations.filter(_.params.isLoad).map(_.module.extra.load).map(_.length).sum
   println(s"  number of load ports: ${numLoadPorts}")
+  println(s"  hasIntRf ${outer.hasIntRf} IntRfRead ${outer.numIntRfReadPorts} IntRfWrite ${outer.numIntRfWritePorts} outIntRfRead ${outer.outIntRfReadPorts}")
+  println(s"  hasFpRf ${outer.hasFpRf} FpRfRead ${outer.numFpRfReadPorts} FpRfWrite ${outer.numFpRfWritePorts} outFpRfRead ${outer.outFpRfReadPorts}")
   if (intRfConfig._1) {
     println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
   }
@@ -354,12 +358,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     Some(busyTable)
   } else None
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
+  println(s"Scheduler: readFpState ${readFpState.length} fpStateOut ${io.extra.fpStateReadOut.getOrElse(Seq()).length} dispatch ${dispatch2.flatMap(_.io.readFpState.getOrElse(Seq())).length}")
   val fpBusyTable = if (readFpState.nonEmpty) {
     // Some fp states are read from outside
     val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
     // The left read requests are serviced by internal busytable
     val numBusyTableRead = readFpState.length - numInFpStateRead
+    println(s"Scheduler: fpBusyTable: InFp ${numInFpStateRead} BusyTableRead ${numBusyTableRead}")
     val busyTable = if (numBusyTableRead > 0) {
+      println(s"Scheduler: Gen FP BusyTable Read ${numBusyTableRead} Write ${fpRfWritePorts}")
       val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
       busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
         pregAlloc.valid := allocReq.isFp
@@ -374,6 +381,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       Some(busyTable)
     } else None
     if (io.extra.fpStateReadIn.isDefined && numInFpStateRead > 0) {
+      println(s"Scheduler: FP Out read ${numInFpStateRead}")
       io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
     }
     busyTable

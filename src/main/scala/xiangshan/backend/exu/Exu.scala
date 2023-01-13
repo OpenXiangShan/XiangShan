@@ -161,7 +161,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   //   }
   // )
   for (fu <- config.fuConfigs) {
-    println(s"FU ${fu.name} srcNum int ${fu.numIntSrc} fp ${fu.numFpSrc} vec ${fu.numVecSrc}")
+    println(s"FU-${fu.name} srcNum int ${fu.numIntSrc} fp ${fu.numFpSrc} vec ${fu.numVecSrc}")
   }
   // println("EXU require: " + config.fuConfigs.filter(a => a.numIntSrc > 0 && (a.numFpSrc > 0 || a.numVecSrc > 0)).map(_.name).reduce(_ + " " + _))
   // require(config.fuConfigs.filter(a => (a.numIntSrc > 0) && ((a.numFpSrc > 0) || (a.numVecSrc > 0))).isEmpty)
