@@ -313,6 +313,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.io.clock := clock
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
       difftest.io.valid := io.tlb(i).resp.fire
+      difftest.io.index := i.U
       difftest.io.satp := io.csr.tlb.satp.ppn
       difftest.io.vpn := io.tlb(i).resp.bits.entry.tag
       difftest.io.ppn := io.tlb(i).resp.bits.entry.ppn

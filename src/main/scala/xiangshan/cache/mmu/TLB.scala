@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
+import difftest._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
@@ -304,6 +305,31 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
   println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
+
+  if (env.EnableDifftest) {
+    val l1tlbid = Wire(UInt(2.W))
+    if (q.name == "itlb") {
+      l1tlbid := 0.U
+    } else if (q.name == "ldtlb") {
+      l1tlbid := 1.U
+    } else {
+      l1tlbid := 2.U
+    }
+
+    for (i <- 0 until Width) {
+      val pf = io.requestor(i).resp.bits.excp(0).pf.instr || io.requestor(i).resp.bits.excp(0).pf.st || io.requestor(i).resp.bits.excp(0).pf.ld
+      val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
+      val difftest = Module(new DifftestL1TLBEvent)
+      difftest.io.clock := clock
+      difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
+      difftest.io.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && vmEnable
+      difftest.io.index := i.U
+      difftest.io.l1tlbid := l1tlbid
+      difftest.io.satp := io.csr.satp.ppn
+      difftest.io.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
+      difftest.io.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
+    }
+  }
 
 }
 
