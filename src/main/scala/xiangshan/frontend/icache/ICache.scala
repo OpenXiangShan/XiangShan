@@ -88,8 +88,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
   def nIPFBufferSize   = cacheParams.nPrefBufferEntries
-  // def maxIPFMoveConf   = blockBytes/(instBytes*PredictWidth)
-  def maxIPFMoveConf   = 1
+  def maxIPFMoveConf   = blockBytes/(instBytes*PredictWidth)
 
   def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
     val valid  = RegInit(false.B)
