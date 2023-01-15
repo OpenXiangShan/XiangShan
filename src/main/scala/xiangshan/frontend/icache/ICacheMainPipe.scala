@@ -562,8 +562,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).foreach{
     i =>
       toIPFPipe(i).valid := miss_handle_reg(i) || s1_port_miss(i)
-      toIPFPipe(i).bits.vSetIdx := s2_req_vsetIdx(i)
-      toIPFPipe(i).bits.ptage := s2_req_ptags(i)
+      toIPFPipe(i).bits.vSetIdx := Mux(s1_port_miss(i), s1_req_vsetIdx(i), s2_req_vsetIdx(i))
+      toIPFPipe(i).bits.ptage := Mux(s1_port_miss(i), s1_req_ptags(i), s2_req_ptags(i))
   }
 
 
