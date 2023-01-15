@@ -32,7 +32,7 @@ abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 //TODO: remove this
 object DebugFlags {
-  val fdip = true
+  val fdip = false
 }
 
 class PIQReq(implicit p: Parameters) extends IPrefetchBundle {
