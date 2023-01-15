@@ -143,7 +143,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
                                                                   entry.tag === r_ptag_s1(i) &&
                                                                   entry.index === r_vidx_s1(i)))))
 
-  val r_buffer_hit_s1  = VecInit(r_hit_oh_s1.map(_.reduce(_||_)))
+  val r_buffer_hit_s1  = VecInit(r_hit_oh_s1.map(_.reduce(_||_) && io.read.req.bits.tlbRespValid))
   val r_buffer_hit_idx_s1 = VecInit(r_hit_oh_s1.map(PriorityEncoder(_)))
   val r_buffer_hit_data_s1 = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh_s1(i), data_buffer.map(_.cachline)) ))
 

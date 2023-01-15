@@ -203,11 +203,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //TODO: fix GTimer() condition
   fromIFU.map(_.ready := s0_can_go) //&& GTimer() > 500.U )
 
-  toIPF.valid       := s0_fire
-  toIPF.bits.vaddr  := s0_req_vaddr
-  toIPF.bits.rvalid(0) := s0_fire
-  toIPF.bits.rvalid(1) := s0_fire && s0_double_line
-
 
   /**
     ******************************************************************************
@@ -258,6 +253,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbExcp = VecInit((0 until PortNumber).map(i => tlbExcpPF(i) || tlbExcpPF(i)))
 
   val tlbRespAllValid = Cat((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i))).andR
+  toIPF.bits.tlbRespValid := tlbRespAllValid
+  val s1_wait_tlb = !tlbRespAllValid && s1_valid
+
+  val readIPF = s0_fire || s1_wait_tlb
+  toIPF.valid := readIPF
+  toIPF.bits.vaddr := Mux(s1_wait_tlb, s1_req_vaddr, s0_req_vaddr)
+  toIPF.bits.rvalid(0) := readIPF
+  toIPF.bits.rvalid(1) := (s0_fire && s0_double_line) || (s1_wait_tlb && s1_double_line)
+
   s1_ready := s2_ready && tlbRespAllValid && !s1_wait || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait
 
