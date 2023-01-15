@@ -310,7 +310,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit(fromPIQ.map(entry => entry.valid &&
       entry.bits.vSetIdx === s1_req_vsetIdx(i) &&
       entry.bits.ptage === s1_req_ptags(i)))))
-  val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line))
+  val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid && tlbRespAllValid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line && tlbRespAllValid)) // TODO: Handle TLB blocking in the PIQ
   val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
   val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
   val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
