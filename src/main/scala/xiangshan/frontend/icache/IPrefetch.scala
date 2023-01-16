@@ -392,8 +392,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)
+  val p1_paddr = tlb_resp_paddr
 
-  val p1_ptag = get_phy_tag(tlb_resp_paddr)
+  val p1_ptag = get_phy_tag(p1_paddr)
 
   val p1_meta_ptags       = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.tag)),valid = RegNext(p0_fire))
   val p1_meta_cohs        = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.coh)),valid = RegNext(p0_fire))
@@ -403,9 +404,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_valids(w)})
   val p1_tag_match        =  ParallelOR(p1_tag_match_vec)
   toIPFBuffer.vSetIdx := get_idx(p1_vaddr)
-  toIPFBuffer.paddr := tlb_resp_paddr
+  toIPFBuffer.paddr := p1_paddr
+  val p1_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p1_paddr, blockBytes, PAddrBits))).reduce(_||_)
   val p1_buffer_hit = fromIPFBuffer.ipf_hit
-  val (p1_hit, p1_miss)   =  (p1_valid && (p1_tag_match || p1_buffer_hit) && !p1_has_except , p1_valid && !p1_tag_match && !p1_has_except && !p1_buffer_hit)
+  val (p1_hit, p1_miss)   =  (p1_valid && (p1_tag_match || p1_buffer_hit || p1_check_in_mshr) && !p1_has_except , p1_valid && !p1_tag_match && !p1_has_except && !p1_buffer_hit && !p1_check_in_mshr)
+
 
   //overriding the invalid req
   val p1_req_cancle = (p1_hit || (tlb_resp_valid && p1_exception.reduce(_ || _))) && p1_valid
@@ -420,7 +423,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_pmp_fire = p2_valid
   val pmpExcpAF = fromPMP.instr
 
-  val p2_paddr     = RegEnable(tlb_resp_paddr,  p1_fire)
+  val p2_paddr     = RegEnable(p1_paddr,  p1_fire)
   val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
   val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(tlb_resp_af, p1_fire)
   val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
