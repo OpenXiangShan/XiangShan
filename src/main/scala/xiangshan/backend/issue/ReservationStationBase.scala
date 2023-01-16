@@ -75,7 +75,7 @@ case class RSParams
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
   def numSelect: Int = numDeq + numEnq + (if (oldestFirst._1) 1 else 0)
-  def optDeqFirstStage: Boolean = !exuCfg.get.readFpRf
+  def optDeqFirstStage: Boolean = !exuCfg.get.readFpVecRf
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -89,11 +89,11 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
 
   def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {
     require(params.numEnq == 0, "issue ports should be added before dispatch ports")
-    params.dataBits = XLEN
+    params.dataBits = if (cfg.isVPU) VLEN else XLEN
     params.dataIdBits = PhyRegIdxWidth
     params.numEntries += IssQueSize * deq
     params.numDeq = deq
-    params.numSrc = max(params.numSrc, max(cfg.intSrcCnt, cfg.fpSrcCnt))
+    params.numSrc = max(params.numSrc, max(cfg.intSrcCnt, cfg.fpVecSrcCnt))
     params.exuCfg = Some(cfg)
     cfg match {
       case AluExeUnitCfg => params.isAlu = true
@@ -129,7 +129,7 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
   }
   def canAccept(fuType: UInt): Bool = params.exuCfg.get.canAccept(fuType)
   def intSrcCnt = params.exuCfg.get.intSrcCnt
-  def fpSrcCnt = params.exuCfg.get.fpSrcCnt
+  def fpSrcCnt = params.exuCfg.get.fpVecSrcCnt
   def numOutFastWakeupPort: Int = if (params.fixedLatency >= 0) params.numDeq else 0
   def numExtFastWakeupPort: Int = if (params.exuCfg.get == LdExeUnitCfg) params.numDeq else 0
   def numAllFastWakeupPort: Int = numOutFastWakeupPort + numExtFastWakeupPort
@@ -138,7 +138,7 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
     if (privatePort) params.numDeq else 0
   }
   def numFpWbPort: Int = {
-    val privatePort = params.exuCfg.get.writeFpRf && params.exuCfg.get.wbFpPriority <= 1
+    val privatePort = params.exuCfg.get.writeFpVecRf && params.exuCfg.get.wbFpPriority <= 1
     if (privatePort) params.numDeq else 0
   }
   def wbIntPriority: Int = params.exuCfg.get.wbIntPriority
@@ -162,8 +162,10 @@ class BaseReservationStationWrapper(modGen: RSMod)(implicit p: Parameters) exten
   // duplicate with ModuleImp, fix it later
   val maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
-  def numIntRfPorts = params.exuCfg.get.fuConfigs.map(_.numIntSrc).max
-  def numFpRfPorts = params.exuCfg.get.fuConfigs.map(_.numFpSrc).max
+  // def numIntRfPorts = params.exuCfg.get.fuConfigs.map(_.numIntSrc).max
+  // def numFpRfPorts = params.exuCfg.get.fuConfigs.map(_.numFpSrc).max
+  def numIntRfPorts = params.exuCfg.get.intSrcCnt
+  def numFpRfPorts = params.exuCfg.get.fpVecSrcCnt
   lazy val module = new BaseReservationStationImp(params, this)
 }
 
@@ -239,7 +241,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
   // deq
-  val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
+  val deq = Vec(params.numDeq, DecoupledIO(new ExuInput(params.exuCfg.get.isVPU)))
   // wakeup
   val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
   val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
@@ -422,7 +424,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   val s1_in_oldestPtrOH = s1_oldestSel
   val s1_issue_oldest = Wire(Vec(params.numDeq, Bool()))
   val s1_issue_dispatch = Wire(Vec(params.numDeq, Bool()))
-  val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
+  val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput(params.exuCfg.get.isVPU))))
   val s1_issuePtrOH = Wire(Vec(params.numDeq, Valid(UInt(params.numEntries.W))))
   val s1_issuePtr = s1_issuePtrOH.map(iss => OHToUInt(iss.bits))
 

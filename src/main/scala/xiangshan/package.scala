@@ -84,10 +84,13 @@ package object xiangshan {
 
     def apply() = UInt(log2Up(num).W)
 
-    def isIntExu(fuType: UInt) = !fuType(3)
+    // TODO: Optimize FuTpye and its method
+    // FIXME: Vector FuType coding is not ready
+    def isVecExu(fuType: UInt) = fuType(4)
+    def isIntExu(fuType: UInt) = !isVecExu(fuType) && !fuType(3)
     def isJumpExu(fuType: UInt) = fuType === jmp
-    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
-    def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
+    def isFpExu(fuType: UInt) = !isVecExu(fuType) && (fuType(3, 2) === "b10".U)
+    def isMemExu(fuType: UInt) = !isVecExu(fuType) && (fuType(3, 2) === "b11".U)
     def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
     def isAMO(fuType: UInt) = fuType(1)
@@ -742,7 +745,7 @@ package object xiangshan {
   val fmacCfg = FuConfig(
     name = "fmac",
     fuGen = fmacGen,
-    fuSel = _ => true.B,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fmac,
     FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, writeFflags = true,
     latency = UncertainLatency(), fastUopOut = true, fastImplemented = true
   )
@@ -821,7 +824,7 @@ package object xiangshan {
     fuType = FuType.vipu,
     numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false,
     numVecSrc = 2, writeVecRf = true,
-    fastUopOut = true, // TODO: check
+    fastUopOut = false, // TODO: check
     fastImplemented = true, //TODO: check
   )
 

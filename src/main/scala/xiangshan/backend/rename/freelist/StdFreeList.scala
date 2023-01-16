@@ -76,7 +76,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
   val doCommit = io.commit.isCommit
-  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && info.fpWen }
+  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && info.fpVecWen }
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew   = archHeadPtr + numArchAllocate
   val archHeadPtrOHNew = archHeadPtrOHVec(numArchAllocate)

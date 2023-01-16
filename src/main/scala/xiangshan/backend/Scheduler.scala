@@ -69,24 +69,24 @@ trait HasExuWbHelper {
   def getFastWakeupIndex(cfg: ExuConfig, intSource: Seq[Int], fpSource: Seq[Int], offset: Int) : Seq[Int] = {
     val sources = Seq(
       (cfg.readIntRf, intSource),
-      (cfg.readFpRf, fpSource.map(_ + offset))
+      (cfg.readFpVecRf, fpSource.map(_ + offset))
     )
     sources.map(c => if (c._1) c._2 else Seq()).reduce(_ ++ _)
   }
   def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
     val uop = WireInit(x)
-    uop.valid := x.valid && x.bits.ctrl.fpWen
+    uop.valid := x.valid && x.bits.ctrl.fpVecWen
     uop
   }
   def fpOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
     val out = WireInit(x)
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out.valid := x.valid && x.bits.uop.ctrl.fpVecWen
     out
   }
   def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
     if(connectReady) x.ready := out.ready
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
+    out.valid := x.valid && x.bits.uop.ctrl.fpVecWen
     out
   }
   def intUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
@@ -96,13 +96,13 @@ trait HasExuWbHelper {
   }
   def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
     val out = WireInit(x)
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out.valid := x.valid && !x.bits.uop.ctrl.fpVecWen
     out
   }
   def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
     if(connectReady) x.ready := out.ready
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
+    out.valid := x.valid && !x.bits.uop.ctrl.fpVecWen
     out
   }
   def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
@@ -173,7 +173,7 @@ abstract class Scheduler(
   // instantiate reservation stations and connect the issue ports
   val wakeupPorts = configs.map(_.exuConfig).map(config => {
     val numInt = if (config.intSrcCnt > 0) numIntRfWritePorts else 0
-    val numFp = if (config.fpSrcCnt > 0) numFpRfWritePorts else 0
+    val numFp = if (config.fpVecSrcCnt > 0) numFpRfWritePorts else 0
     numInt + numFp
   })
   val innerIntFastSources: Seq[Seq[(ScheLaneConfig, Int)]] = configs.map(_.exuConfig).map{ cfg =>
@@ -218,6 +218,8 @@ abstract class Scheduler(
 
   val numFpRfReadPorts: Int = reservationStations.map(p => (p.params.numDeq) * p.numFpRfPorts).sum + outFpRfReadPorts
 
+  val hasVPU = configs.map(_.exuConfig.isVPU).reduce(_ || _)
+
   def canAccept(fuType: UInt): Bool = VecInit(configs.map(_.exuConfig.canAccept(fuType))).asUInt.orR
   def numRs: Int = reservationStations.map(_.numRS).sum
 
@@ -256,7 +258,7 @@ trait SchedulerImpMethod { this: SchedulerImp =>
         pregAlloc.bits := allocReq.preg
       }
       busyTable.io.wbPregs.zip(io.writebackFp).foreach { case (pregWb, exuWb) =>
-        pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
+        pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpVecWen
         pregWb.bits := exuWb.bits.uop.pdest
       }
       busyTable.io.read <> readFpState.take(numBusyTableRead)
@@ -370,7 +372,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
     val in = Vec(dpParams.IntDqDeqWidth * outer.dispatch2.length, Flipped(DecoupledIO(new MicroOp)))
-    val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
+    val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput(outer.hasVPU)))
     val fastUopOut = Vec(outer.numIssuePorts, ValidIO(new MicroOp))
     // wakeup-related ports
     val writebackInt = Vec(intRfWritePorts, Flipped(ValidIO(new ExuOutput(false))))
@@ -458,7 +460,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val intWriteback = io.writebackInt
     val fpWriteback  = io.writebackFp
     val writebackTotal = intWriteback ++ fpWriteback
-    (cfg.intSrcCnt > 0, cfg.fpSrcCnt > 0) match {
+    (cfg.intSrcCnt > 0, cfg.fpVecSrcCnt > 0) match {
       case (true,  false) => rs.io.slowPorts := intWriteback
       case (false, true) => rs.io.slowPorts := fpWriteback
       // delay fp for extra one cycle

@@ -688,7 +688,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.fpu := fpDecoder.io.fpCtrl
 
   // TODO: vec decode
-  cs.vecWen := DontCare
+  // FIXME: only 3 src
   cs.srcType(3) := DontCare
   cs.lsrc(3) := DontCare
   cs.uopIdx := "b11111".U

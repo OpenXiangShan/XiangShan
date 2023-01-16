@@ -63,6 +63,8 @@ case class FuConfig
   def srcCnt: Int = math.max(math.max(numIntSrc, numFpSrc), numVecSrc)
   def isVectorFU: Boolean = (numVecSrc > 0) && writeVecRf
 
+  require(numFpSrc == 0 || numVecSrc == 0, "numVecSrc+numFpSrc is not handled now. It's forbidden until someone add support for numVecSrc+numFpSrc")
+
   override def toString: String = {
     s"${name}: SrcNum(${numIntSrc}|${numFpSrc}|${numVecSrc}) " +
     s"Write(" +

@@ -106,8 +106,8 @@ case class VST(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Bo
 
 object VecDecoder extends DecodeConstants {
   val opivv: Array[(BitPat, XSDecodeBase)] = Array(
-    VADD_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
-    VSUB_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
+    VADD_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.add, T, F, F),
+    VSUB_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.sub, T, F, F),
 
     VMINU_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VMIN_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
@@ -162,8 +162,8 @@ object VecDecoder extends DecodeConstants {
   )
 
   val opivx: Array[(BitPat, XSDecodeBase)] = Array(
-    VADD_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
-    VSUB_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
+    VADD_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.add, T, F, F),
+    VSUB_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.sub, T, F, F),
     VRSUB_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
 
     VMINU_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
@@ -219,7 +219,7 @@ object VecDecoder extends DecodeConstants {
   )
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
-    VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
+    VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.add, T, F, F, SelImm.IMM_OPIVIS),
     VRSUB_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
 
     VAND_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
@@ -278,7 +278,7 @@ object VecDecoder extends DecodeConstants {
     VIOTA_M      -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
 
     // VMACC_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
-    
+
     VMADD_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VMAND_MM     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMANDN_MM    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),

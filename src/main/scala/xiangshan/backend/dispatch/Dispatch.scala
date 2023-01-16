@@ -81,7 +81,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // cover auipc (a fake branch)
     !req.bits.cf.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
   ))
-  val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
+  val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType) ||
+                                                  FuType.isVecExu(req.bits.ctrl.fuType)))
   val isMem    = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.ctrl.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStoreExu(req.bits.ctrl.fuType)))
@@ -105,7 +106,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
+  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire()
   ))
 
@@ -151,7 +152,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       if(i == 0){
         debug_runahead_checkpoint_id := checkpoint_id
       } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
           io.fromRename(i).fire()
         ))
       }
@@ -255,7 +256,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     )
 
     io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
-    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpWen
+    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpVecWen
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.recv)

@@ -62,14 +62,17 @@ case class ExuConfig
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
 
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
-  val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
-  val vecSrcCnt = max(fuConfigs.map(_.numVecSrc))
+  private val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
+  private val vecSrcCnt = max(fuConfigs.map(_.numVecSrc))
+  val fpVecSrcCnt = max(Seq(fpSrcCnt, vecSrcCnt))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
   val readVecRf = vecSrcCnt > 0
+  val readFpVecRf = readFpRf || readVecRf
   val writeIntRf = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf = fuConfigs.map(_.writeVecRf).reduce(_ || _)
+  val writeFpVecRf = writeFpRf || writeVecRf
   val writeFflags = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
@@ -102,11 +105,12 @@ case class ExuConfig
   val wakeupFromRS = hasCertainLatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
   val allWakeupFromRS = !hasUncertainlatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
   val wakeupFromExu = !wakeupFromRS
-  val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
+  val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpVecRf)
   val needLoadBalance = hasUncertainlatency
 
+  // NOTE: cross domain read or write
   def needWbPipeline(isFp: Boolean): Boolean = {
-    (isFp && readIntRf && writeFpRf) || (!isFp && readFpRf && writeIntRf)
+    (isFp && readIntRf && writeFpVecRf) || (!isFp && readFpVecRf && writeIntRf)
   }
 
   def canAccept(fuType: UInt): Bool = {
@@ -130,7 +134,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
 
   @public val io = IO(new Bundle() {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput(false))) else null
-    val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput(true))) else null
+    val fromFp = if (config.readFpVecRf) Flipped(DecoupledIO(new ExuInput(true))) else null
     val redirect = Flipped(ValidIO(new Redirect))
     val out = DecoupledIO(new ExuOutput(config.isVPU))
 
@@ -260,7 +264,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
     io.fromInt.ready := !io.fromInt.valid || inReady(readIntFu)
   }
 
-  if (config.readFpRf) {
+  if (config.readFpVecRf) {
     XSPerfAccumulate("from_fp_fire", io.fromFp.fire())
     XSPerfAccumulate("from_fp_valid", io.fromFp.valid)
     io.fromFp.ready := !io.fromFp.valid || inReady(readFpFu)

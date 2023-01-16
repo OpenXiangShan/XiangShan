@@ -32,7 +32,7 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
 
   val numOut = configs.length
   val numIntSrc = configs.map(_.map(_.intSrcCnt).max)
-  val numFpSrc = configs.map(_.map(_.fpSrcCnt).max)
+  val numFpSrc = configs.map(_.map(_.fpVecSrcCnt).max)
 
   val exuConfigCases = configs.distinct.sortBy(_.length).zipWithIndex
   val exuConfigTypes = configs.map(cfg => exuConfigCases.find(_._1 == cfg).get._2)
@@ -281,7 +281,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     // When both int and fp are needed, need Mux
     io.readFpState.get.map(_.resp).zip(stateReadResp).zip(srcTypeOut).foreach{
       case ((resp, state), srcType) =>
-        when (!io.readIntState.isDefined.B || SrcType.isFp(srcType)) {
+        when (!io.readIntState.isDefined.B || SrcType.isFp(srcType) || SrcType.isVp(srcType)) {
           state := resp
         }
     }

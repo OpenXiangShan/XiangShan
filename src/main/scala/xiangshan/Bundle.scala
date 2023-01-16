@@ -160,6 +160,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val isXSTrap = Bool()
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
@@ -265,13 +266,15 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
       val pdestMatch = pdest === src
       // For state: no need to check whether src is x0/imm/pc because they are always ready.
       val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
+      // FIXME: divide fpMatch and vecMatch then
       val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
-      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
-      val bothStateMatch = Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch)
-      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
+      val vecMatch = if (exuCfg.readVecRf) ctrl.fpWen else false.B
+      val allIntFpVec = exuCfg.readIntRf && exuCfg.readFpVecRf
+      val allStateMatch = Mux(SrcType.isVp(srcType), vecMatch, Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch))
+      val stateCond = pdestMatch && (if (allIntFpVec) allStateMatch else rfStateMatch || fpMatch || vecMatch)
       // For data: types are matched and int pdest is not $zero.
       val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
-      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
+      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType) || vecMatch && SrcType.isVp(srcType))
       (stateCond, dataCond)
     }
   }
@@ -370,6 +373,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)

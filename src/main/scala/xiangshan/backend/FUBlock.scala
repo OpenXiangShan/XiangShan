@@ -37,12 +37,12 @@ class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends X
 class FUBlockExtraIO(implicit p: Parameters) extends XSBundle
 
 abstract class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  require(configs.map(_._1).filter(a => a.readFpRf && a.readIntRf && a.readVecRf).isEmpty)
+  require(configs.map(_._1).filter(a => a.readFpVecRf && a.readIntRf).isEmpty)
 
   val configIntIn = configs.filter{a => a._1.readIntRf}
-  val configVecIn = configs.filter{a => a._1.readVecRf || a._1.readFpRf}
+  val configVecIn = configs.filter{a => a._1.readFpVecRf}
   val configIntOut = configs.filter{a => a._1.readIntRf && a._1.writeIntRf}
-  val configVecOut = configs.filter{a => (a._1.readVecRf || a._1.readFpRf) && (a._1.writeVecRf || a._1.writeFpRf)}
+  val configVecOut = configs.filter{a => (a._1.readFpVecRf) && a._1.writeFpVecRf}
 
   val numIntIn = configIntIn.map(_._2).sum
   val numVecIn = configVecIn.map(_._2).sum

@@ -71,7 +71,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   // fp and vec share `fpFreeList`
   def needDestReg[T <: CfCtrl](int: Boolean, x: T): Bool = {
-    if (int) x.ctrl.rfWen && x.ctrl.ldest =/= 0.U else x.ctrl.fpWen || x.ctrl.vecWen
+    if (int) (x.ctrl.rfWen && x.ctrl.ldest =/= 0.U) else x.ctrl.fpVecWen
   }
   def needDestReg[T <: CfCtrl](reg_t: RegType, x: T): Bool = reg_t match {
     case Reg_I => x.ctrl.rfWen && x.ctrl.ldest =/= 0.U
@@ -79,10 +79,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case Reg_V => x.ctrl.vecWen
   }
   def needDestRegCommit[T <: RobCommitInfo](int: Boolean, x: T): Bool = {
-    if (int) x.rfWen else x.fpWen || x.vecWen
+    if (int) x.rfWen else x.fpVecWen
   }
   def needDestRegWalk[T <: RobCommitInfo](int: Boolean, x: T): Bool = {
-    if(int) x.rfWen && x.ldest =/= 0.U else x.fpWen || x.vecWen
+    if(int) x.rfWen && x.ldest =/= 0.U else x.fpVecWen
   }
 
   // connect [redirect + walk] ports for __float point__ & __integer__ free list
