@@ -312,7 +312,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val difftest = Module(new DifftestL2TLBEvent)
       difftest.io.clock := clock
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := io.tlb(i).resp.fire
+      difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
       difftest.io.index := i.U
       difftest.io.satp := io.csr.tlb.satp.ppn
       difftest.io.vpn := io.tlb(i).resp.bits.entry.tag
