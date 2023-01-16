@@ -307,6 +307,22 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     difftest.io.data := refill_data.asTypeOf(difftest.io.data)
   }
 
+  if (env.EnableDifftest) {
+    for (i <- 0 until PtwWidth) {
+      val difftest = Module(new DifftestL2TLBEvent)
+      difftest.io.clock := clock
+      difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
+      difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
+      difftest.io.index := i.U
+      difftest.io.satp := io.csr.tlb.satp.ppn
+      difftest.io.vpn := io.tlb(i).resp.bits.entry.tag
+      difftest.io.ppn := io.tlb(i).resp.bits.entry.ppn
+      difftest.io.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.io.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
+      difftest.io.pf := io.tlb(i).resp.bits.pf
+    }
+  }
+
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
   ptw.io.pmp.resp <> pmp_check(0).resp
