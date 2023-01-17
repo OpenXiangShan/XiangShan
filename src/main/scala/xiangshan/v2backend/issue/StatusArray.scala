@@ -42,7 +42,7 @@ class StatusArrayDeqRespBundle(implicit p:Parameters, params: IssueQueueParams) 
 
 class StatusArrayDeqBundle(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
   val isFirstIssue = Output(Bool())
-  val issueGranted = Flipped(ValidIO(UInt(params.numEntries.W)))
+  val deqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
   val resp = Flipped(ValidIO(new StatusArrayDeqRespBundle))
 }
 
@@ -77,7 +77,7 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   val deqRespVec = Wire(Vec(params.numEntries, ValidIO(new StatusArrayDeqRespBundle)))
   val flushedVec = Wire(Vec(params.numEntries, Bool()))
   val clearVec = Wire(Vec(params.numEntries, Bool()))
-  val issueGrantedVec = Wire(Vec(params.numEntries, Bool()))
+  val deqSelVec = Wire(Vec(params.numEntries, Bool()))
 
   // Reg
   validVec := validNextVec
@@ -105,24 +105,24 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
         stateNext := wakeup | state
       }
       statusNext.blocked := false.B // Todo
-      statusNext.issued := MuxCase (issueGrantedVec(i) || status.issued, Seq(
+      statusNext.issued := MuxCase (deqSelVec(i) || status.issued, Seq(
         (deqRespVec(i).valid && !deqRespVec(i).bits.success) -> false.B
       ))
       statusNext.ready := statusNext.srcReady || status.ready
       statusNext.robIdx := status.robIdx
       statusNext.srcType := status.srcType
-      statusNext.firstIssue := status.firstIssue || issueGrantedVec(i)
+      statusNext.firstIssue := status.firstIssue || deqSelVec(i)
     }
   }
 
-  srcWakeUpVec.zipWithIndex.foreach { case (wakeups, i) =>
+  srcWakeUpVec.zipWithIndex.foreach { case (wakeups: Vec[Bool], i) =>
     // wakeupVec(i)(j): the ith psrc woken up by the jth bundle
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map(bundle => bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
     wakeups := wakeupVec.map(VecInit(_).asUInt.orR)
   }
 
-  issueGrantedVec.zipWithIndex.foreach { case (issueGranted, i) =>
-    issueGranted := VecInit(io.deq.map(x => x.issueGranted.valid && x.issueGranted.bits(i))).asUInt.orR
+  deqSelVec.zipWithIndex.foreach { case (deqSel: Bool, i) =>
+    deqSel := VecInit(io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i))).asUInt.orR
   }
 
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
@@ -152,7 +152,7 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   io.canIssue := canIssueVec.asUInt
   io.clear := clearVec.asUInt
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback)
-  io.deq.foreach(_.isFirstIssue := Mux1H(issueGrantedVec, statusVec.map(!_.firstIssue)))
+  io.deq.foreach(_.isFirstIssue := Mux1H(deqSelVec, statusVec.map(!_.firstIssue)))
 }
 
 object StatusArray {
