@@ -146,6 +146,14 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val r_buffer_hit_s1  = VecInit(r_hit_oh_s1.map(_.reduce(_||_) && io.read.req.bits.tlbRespValid))
   val r_buffer_hit_idx_s1 = VecInit(r_hit_oh_s1.map(PriorityEncoder(_)))
   val r_buffer_hit_data_s1 = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh_s1(i), data_buffer.map(_.cachline)) ))
+  (0 until PortNumber).foreach(
+    i =>
+      when(io.read.req.bits.both_hit_in_icache_and_ipfbuffer(i)){
+        meta_buffer(r_buffer_hit_idx_s1(i)).valid := false.B
+        meta_buffer(r_buffer_hit_idx_s1(i)).move := false.B
+        meta_buffer(r_buffer_hit_idx_s1(i)).confidence := 0.U
+      }
+  )
 
 
   io.read.req.ready := true.B//TODO: read-wite bypass
