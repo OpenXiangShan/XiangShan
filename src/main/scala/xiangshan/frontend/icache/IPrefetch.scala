@@ -359,7 +359,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /* Cancel request when prefetch not enable 
    * or the request from FTQ is same as last time */
-  val p0_req_cancel = !enableBit || (p0_vaddr === p0_vaddr_reg)
+  val p0_req_cancel = !enableBit || (p0_vaddr === p0_vaddr_reg) || io.fencei
   p0_fire   :=   p0_valid && p1_ready && toITLB.fire() && !fromITLB.bits.miss && toIMeta.ready && enableBit && !p0_req_cancel
   p0_discard := p0_valid && p0_req_cancel
 
@@ -419,7 +419,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
 
   //overriding the invalid req
-  val p1_req_cancle = (p1_hit || (tlb_resp_valid && p1_exception.reduce(_ || _))) && p1_valid
+  val p1_req_cancle = (p1_hit || (tlb_resp_valid && p1_exception.reduce(_ || _)) || io.fencei) && p1_valid
   val p1_req_accept   = p1_valid && tlb_resp_valid && p1_miss
 
   p1_ready    :=   p1_fire || p1_req_cancle || !p1_valid
@@ -451,7 +451,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   p2_ready :=   p2_fire || p2_discard || !p2_valid
   p2_fire  :=   p2_valid && !p2_exception && p3_ready && p2_pmp_fire
-  p2_discard := p2_valid && (p2_exception && p2_pmp_fire)
+  p2_discard := p2_valid && (p2_exception && p2_pmp_fire || io.fencei)
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)
@@ -466,7 +466,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   //Cache miss handling by main pipe
   val p3_hit_mp_miss = VecInit((0 until PortNumber).map(i => fromMainPipe(i).valid && (fromMainPipe(i).bits.ptage === get_phy_tag(p3_paddr) &&
                                                             (fromMainPipe(i).bits.vSetIdx === p3_vidx)))).reduce(_||_)
-  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss
+  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss || io.fencei
   p3_discard := p3_valid && p3_req_cancel
 
   toMissUnit.enqReq.valid := p3_valid && !p3_req_cancel

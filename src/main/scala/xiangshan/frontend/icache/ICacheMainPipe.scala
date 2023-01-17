@@ -346,6 +346,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       ResultHoldBypass(data = PIQ_hit_data(i), valid = PIQ_write_back(i))
   ))
 
+  toIPF.bits.both_hit_in_icache_and_ipfbuffer := VecInit((0 until PortNumber).map(i =>s1_port_hit(i) && s1_ipf_hit(i)))
+
   val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i) || s1_PIQ_hit(i)))
   val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), Mux(s1_port_hit(i),s1_hit_data(i),s1_PIQ_data(i)))))
 
