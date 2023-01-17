@@ -411,11 +411,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p1_tag_eq_vec       =  VecInit(p1_meta_ptags.map(_  ===  p1_ptag ))
   val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_valids(w)})
   val p1_tag_match        =  ParallelOR(p1_tag_match_vec)
-  toIPFBuffer.vSetIdx := get_idx(p1_vaddr)
-  toIPFBuffer.paddr := p1_paddr
+
   val p1_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p1_paddr, blockBytes, PAddrBits))).reduce(_||_)
-  val p1_buffer_hit = fromIPFBuffer.ipf_hit
-  val (p1_hit, p1_miss)   =  (p1_valid && (p1_tag_match || p1_buffer_hit || p1_check_in_mshr) && !p1_has_except , p1_valid && !p1_tag_match && !p1_has_except && !p1_buffer_hit && !p1_check_in_mshr)
+
+  val (p1_hit, p1_miss)   =  (p1_valid && (p1_tag_match || p1_check_in_mshr) && !p1_has_except , p1_valid && !p1_tag_match && !p1_has_except && !p1_check_in_mshr)
 
 
   //overriding the invalid req
@@ -460,13 +459,16 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
   val p3_vaddr   =  RegEnable(p2_vaddr,    p2_fire)
   val p3_vidx = get_idx(p3_vaddr)
-
+  // check in prefetch buffer
+  toIPFBuffer.vSetIdx := p3_vidx
+  toIPFBuffer.paddr := p3_paddr
+  val p3_buffer_hit = fromIPFBuffer.ipf_hit
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
   //Cache miss handling by main pipe
   val p3_hit_mp_miss = VecInit((0 until PortNumber).map(i => fromMainPipe(i).valid && (fromMainPipe(i).bits.ptage === get_phy_tag(p3_paddr) &&
                                                             (fromMainPipe(i).bits.vSetIdx === p3_vidx)))).reduce(_||_)
-  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss || io.fencei
+  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss || p3_buffer_hit || io.fencei
   p3_discard := p3_valid && p3_req_cancel
 
   toMissUnit.enqReq.valid := p3_valid && !p3_req_cancel
