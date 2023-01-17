@@ -7,7 +7,7 @@ import utils.XSError
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.v2backend.Bundles.DynInst
+import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
 
 class StatusEntry(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
   val srcState = Vec(params.numSrc, SrcState())
@@ -55,7 +55,7 @@ class StatusArrayIO(implicit p: Parameters, params: IssueQueueParams) extends XS
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
   // wakeup
-  val wakeup = Vec(params.numWakeup, Flipped(ValidIO(new DynInst)))
+  val wakeup = Vec(params.numWakeup, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)
   val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
@@ -117,7 +117,7 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
 
   srcWakeUpVec.zipWithIndex.foreach { case (wakeups: Vec[Bool], i) =>
     // wakeupVec(i)(j): the ith psrc woken up by the jth bundle
-    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map(bundle => bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
+    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map((bundle: ValidIO[IssueQueueWakeUpBundle]) => bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
     wakeups := wakeupVec.map(VecInit(_).asUInt.orR)
   }
 

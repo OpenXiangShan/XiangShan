@@ -100,6 +100,21 @@ object Bundles {
       this
     }
 
+    def asWakeUpBundle: IssueQueueWakeUpBundle = {
+      val wakeup = Output(new IssueQueueWakeUpBundle)
+      wakeup.rfWen := this.rfWen
+      wakeup.fpWen := this.fpWen
+      wakeup.vecWen := this.vecWen
+      wakeup.pdest := this.pdest
+      wakeup
+    }
+  }
+
+  class IssueQueueWakeUpBundle(implicit p: Parameters) extends XSBundle {
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val pdest = UInt(PhyRegIdxWidth.W)
     /**
       * @param successor Seq[(psrc, srcType)]
       * @return Seq[if wakeup psrc]
@@ -133,10 +148,12 @@ object Bundles {
     val idxEmul   = UInt(3.W)
   }
 
+  // DynInst --[IssueQueue]--> ExuInput
   class ExuInput(dataWidth: Int, numSrc: Int) extends Bundle {
     val data = Vec(numSrc, UInt(dataWidth.W))
   }
 
+  // ExuInput --[FuncUnit]--> ExuOutput
   class ExuOutput(
     dataWidth: Int,
     hasRedirect: Boolean = false,
@@ -146,5 +163,26 @@ object Bundles {
     val debug = new DebugBundle
     val redirect = if(hasRedirect) Some(ValidIO(new Redirect)) else None
     val fflag = if(hasFFlags) Some(UInt(5.W)) else None
+  }
+
+  // ExuOutput + DynInst --> WriteBackBundle
+  class WriteBackBundle(
+    dataWidth: Int,
+    hasRedirect: Boolean = false,
+    hasFFlags: Boolean = false
+  )(implicit p: Parameters) extends ExuOutput(dataWidth, hasRedirect, hasFFlags) {
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val pdest = UInt(PhyRegIdxWidth.W)
+
+    def asWakeUpBundle: IssueQueueWakeUpBundle = {
+      val wakeup = Output(new IssueQueueWakeUpBundle)
+      wakeup.rfWen := this.rfWen
+      wakeup.fpWen := this.fpWen
+      wakeup.vecWen := this.vecWen
+      wakeup.pdest := this.pdest
+      wakeup
+    }
   }
 }
