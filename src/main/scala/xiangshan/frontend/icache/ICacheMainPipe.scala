@@ -303,8 +303,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port_hit_data
   })
 
-  val s1_ipf_hit  = ResultHoldBypass(data = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid && tlbRespAllValid)), valid = RegNext(s0_fire)) // TODO: Handle TLB blocking in the prefetch buffer
-  val s1_ipf_data = ResultHoldBypass(data = fromIPF.bits.cacheline, valid = RegNext(s0_fire))
+  val s1_ipf_hit  = ResultHoldBypass(data = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid)), valid = RegNext(s0_fire || readIPF)) // TODO: Handle TLB blocking in the prefetch buffer
+  val s1_ipf_data = ResultHoldBypass(data = fromIPF.bits.cacheline, valid = RegNext(s0_fire || readIPF))
 
   /** check in PIQ, if hit, wait until prefetch port hit */
   //TODO: move this to PIQ
