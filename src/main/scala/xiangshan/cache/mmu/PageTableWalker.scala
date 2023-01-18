@@ -95,12 +95,14 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_addr_update = RegInit(false.B)
 
   val idle = RegInit(true.B)
-  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update)
+  val finish = WireInit(false.B)
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
 
   val pageFault = memPte.isPf(level)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
-  val find_pte = memPte.isLeaf() || pageFault
+  val ppn_af = memPte.isAf()
+  val find_pte = memPte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
 
@@ -112,7 +114,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.resp.valid := idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault))
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
+  io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
   io.llptw.bits.req_info.source := source
@@ -162,7 +164,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_mem_resp := false.B
   }
 
-  when(mem.resp.fire() &&  w_mem_resp === false.B){
+  when(mem.resp.fire() && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level + 1.U
     s_llptw_req := false.B
@@ -170,20 +172,26 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !(find_pte||accessFault)){
+    when(level === 0.U && !(find_pte || accessFault)){
       level := levelNext
       s_mem_req := false.B
       s_llptw_req := true.B
       mem_addr_update := false.B
-    }.elsewhen(io.llptw.fire()){
-      idle := true.B
-      s_llptw_req := true.B
-      mem_addr_update := false.B
-    }.elsewhen(io.resp.fire()){
-      idle := true.B
-      s_llptw_req := true.B
-      mem_addr_update := false.B
-      accessFault := false.B
+    }.elsewhen(io.llptw.valid){
+      when(io.llptw.fire()) {
+        idle := true.B
+        s_llptw_req := true.B
+        mem_addr_update := false.B
+      }
+      finish := true.B
+    }.elsewhen(io.resp.valid){
+      when(io.resp.fire()) {
+        idle := true.B
+        s_llptw_req := true.B
+        mem_addr_update := false.B
+        accessFault := false.B
+      }
+      finish := true.B
     }
   }
 

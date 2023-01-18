@@ -461,6 +461,7 @@ abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
+  val ppn_high = UInt(ppnHignLen.W)
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
   val perm = new Bundle {
@@ -482,6 +483,12 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 
   def isPf(level: UInt) = {
     !perm.v || (!perm.r && perm.w) || unaligned(level)
+  }
+
+  // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits
+  // access fault will be raised when ppn >> ppnLen is not zero
+  def isAf() = {
+    !(ppn_high === 0.U)
   }
 
   def isLeaf() = {

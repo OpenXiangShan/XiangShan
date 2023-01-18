@@ -432,7 +432,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val memPte = memSelData.map(a => a.asTypeOf(new PteBundle))
 
   // TODO: handle sfenceLatch outsize
-  when (!flush_dup(0) && refill.levelOH.l1 && !memPte(0).isLeaf() && !memPte(0).isPf(refill.level_dup(0))) {
+  when (!flush_dup(0) && refill.levelOH.l1 && !memPte(0).isLeaf() && !memPte(0).isPf(refill.level_dup(0)) && !memPte(0).isAf()) {
     // val refillIdx = LFSR64()(log2Up(l2tlbParams.l1Size)-1,0) // TODO: may be LRU
     val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
     refillIdx.suggestName(s"PtwL1RefillIdx")
@@ -459,7 +459,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfOH.suggestName(s"l1_rfOH")
   }
 
-  when (!flush_dup(1) && refill.levelOH.l2 && !memPte(1).isLeaf() && !memPte(1).isPf(refill.level_dup(1))) {
+  when (!flush_dup(1) && refill.levelOH.l2 && !memPte(1).isLeaf() && !memPte(1).isPf(refill.level_dup(1)) && !memPte(1).isAf()) {
     val refillIdx = genPtwL2SetIdx(refill.req_info_dup(1).vpn)
     val victimWay = replaceWrapper(getl2vSet(refill.req_info_dup(1).vpn), ptwl2replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -497,7 +497,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfvOH.suggestName(s"l2_rfvOH")
   }
 
-  when (!flush_dup(2) && refill.levelOH.l3) {
+  when (!flush_dup(2) && refill.levelOH.l3 && !memPte(2).isAf()) {
     val refillIdx = genPtwL3SetIdx(refill.req_info_dup(2).vpn)
     val victimWay = replaceWrapper(getl3vSet(refill.req_info_dup(2).vpn), ptwl3replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -537,7 +537,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
 
   // misc entries: super & invalid
-  when (!flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0)))) {
+  when (!flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0))) && !memPte(0).isAf()) {
     val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
     val rfOH = UIntToOH(refillIdx)
     sp(refillIdx).refill(
