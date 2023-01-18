@@ -380,7 +380,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
-    ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && af
+    ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && (af || pte_in.isAf())
     ptw_resp.entry.v := !ptw_resp.pf
     ptw_resp.entry.prefetch := DontCare
     ptw_resp.entry.asid := satp.asid
