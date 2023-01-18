@@ -482,8 +482,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
 
   // merge forward result
   // lsq has higher priority than sbuffer
-  val forwardMask = Wire(Vec(8, Bool()))
-  val forwardData = Wire(Vec(8, UInt(8.W)))
+  val forwardMask = Wire(Vec((VLEN/8), Bool()))
+  val forwardData = Wire(Vec((VLEN/8), UInt(8.W)))
 
   val fullForward = ((~forwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
   io.lsq := DontCare
@@ -491,14 +491,20 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.fullForward := fullForward
 
   // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
+  for (i <- 0 until VLEN / 8) {
     forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
     forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
   }
-
+  val lsqForwardMaskH = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i+8)))
+  val lsqForwardMaskL = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i)))
+  val lsqForwardMask = Mux(s2_paddr(3),lsqForwardMaskH,lsqForwardMaskL)
+  val lsqForwardDatdH = VecInit((0 until 8).map(i=>io.lsq.forwardData(i+8)))
+  val lsqForwardDatdL = VecInit((0 until 8).map(i=>io.lsq.forwardData(i)))
+  val lsqForwardData = Mux(s2_paddr(3),lsqForwardDatdH,lsqForwardDatdL)
   XSDebug(io.out.fire, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_uop.cf.pc,
-    io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
+    //io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
+    lsqForwardMask.asUInt,lsqForwardData.asUInt,
     io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
   )
 
@@ -553,8 +559,17 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // s2_loadDataFromDcache.forward_result_valid := io.forward_result_valid
   // io.loadDataFromDcache := RegEnable(s2_loadDataFromDcache, io.in.valid)
   io.loadDataFromDcache.respDcacheData := io.dcacheResp.bits.data_delayed
-  io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
-  io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
+  val LoadforwardMaskH = VecInit((0 until 8).map(i=>forwardMask(i+8)))
+  val LoadforwardMaskL = VecInit((0 until 8).map(i=>forwardMask(i)))
+  val LoadforwardMask = Mux(s2_paddr(3),LoadforwardMaskH,LoadforwardMaskL)
+  val LoadforwardDataH = VecInit((0 until 8).map(i=>forwardData(i+8)))
+  val LoadforwardDataL = VecInit((0 until 8).map(i=>forwardData(i)))
+  val LoadforwardData = Mux(s2_paddr(3),LoadforwardDataH,LoadforwardDataL)
+
+  //io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
+  //io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
+  io.loadDataFromDcache.forwardMask := RegEnable(LoadforwardMask, io.in.valid)
+  io.loadDataFromDcache.forwardData := RegEnable(LoadforwardData, io.in.valid)
   io.loadDataFromDcache.uop := RegEnable(io.out.bits.uop, io.in.valid)
   io.loadDataFromDcache.addrOffset := RegEnable(s2_paddr(2, 0), io.in.valid)
   // forward D or mshr
@@ -587,9 +602,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.dataForwarded := s2_cache_miss && !s2_exception &&
     (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
-  io.out.bits.forwardMask := forwardMask
+  //io.out.bits.forwardMask := forwardMask
+  io.out.bits.forwardMask := LoadforwardMask
   // data from dcache is not included in io.out.bits.forwardData
-  io.out.bits.forwardData := forwardData
+  //io.out.bits.forwardData := forwardData
+  io.out.bits.forwardData := LoadforwardData
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -782,7 +799,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_tryPointerChasing = RegNext(s0_doTryPointerChasing, false.B)
   val s1_pointerChasingVAddr = RegEnable(s0_pointerChasingVAddr, s0_doTryPointerChasing)
   val cancelPointerChasing = WireInit(false.B)
-  if (EnableLoadToLoadForward) {
+  if (EnableLoadToLoadForward){
     // Sometimes, we need to cancel the load-load forwarding.
     // These can be put at S0 if timing is bad at S1.
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)

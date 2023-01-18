@@ -53,8 +53,8 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
+  val data   = UInt(VLEN.W)
+  val mask   = UInt((VLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
 }
@@ -345,6 +345,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Write mask to sq
+
   for (i <- 0 until StorePipelineWidth) {
     // sq mask write s0
     when (io.storeMaskIn(i).fire()) {
@@ -479,8 +480,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  io.uncache.req.bits.data := dataModule.io.rdata(0).data
-  io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
+  io.uncache.req.bits.data := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).data(127,64),dataModule.io.rdata(0).data(63,0))
+  io.uncache.req.bits.mask := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).mask(15,8),dataModule.io.rdata(0).mask(7,0))
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
@@ -518,7 +519,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
+  io.mmioStout.bits.data := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).data(127,64),dataModule.io.rdata(0).data(63,0)) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
@@ -611,8 +612,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       fakeRAM.en    := allocated(ptr) && committed(ptr) && !mmio(ptr)
       fakeRAM.rIdx  := 0.U
       fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
-      fakeRAM.wdata := dataModule.io.rdata(i).data
-      fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      //fakeRAM.wdata := dataModule.io.rdata(i).data
+     // fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      fakeRAM.wdata := Mux(paddrModule.io.rdata(i)(3),dataModule.io.rdata(i).data(127,64),dataModule.io.rdata(i).data(63,0))
+      fakeRAM.wmask := Mux(paddrModule.io.rdata(i)(3),MaskExpand(dataModule.io.rdata(i).mask(15,8)),MaskExpand(dataModule.io.rdata(i).mask(7,0)))
       fakeRAM.wen   := allocated(ptr) && committed(ptr) && !mmio(ptr)
     }
   }
@@ -621,9 +624,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     for (i <- 0 until EnsbufferWidth) {
       val storeCommit = io.sbuffer(i).fire()
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
-      val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
-      val wmask = io.sbuffer(i).bits.mask
-
+      //val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
+      //val wmask = io.sbuffer(i).bits.mask
+      val sbufferMask = Mux(io.sbuffer(i).bits.addr(3),io.sbuffer(i).bits.mask(15,8),io.sbuffer(i).bits.mask(7,0))
+      val sbufferData = Mux(io.sbuffer(i).bits.addr(3),io.sbuffer(i).bits.data(127,64),io.sbuffer(i).bits.data(63,0))
+      val wmask = sbufferMask
+      val wdata = sbufferData & MaskExpand(sbufferMask)
       val difftest = Module(new DifftestStoreEvent)
       difftest.io.clock       := clock
       difftest.io.coreid      := io.hartId

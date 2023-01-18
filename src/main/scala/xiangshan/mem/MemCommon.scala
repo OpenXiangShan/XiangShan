@@ -42,10 +42,11 @@ object genWmask {
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
-      "b00".U -> Fill(8, data(7, 0)),
-      "b01".U -> Fill(4, data(15, 0)),
-      "b10".U -> Fill(2, data(31, 0)),
-      "b11".U -> data
+      "b00".U -> Fill(16, data(7, 0)),
+      "b01".U -> Fill(8, data(15, 0)),
+      "b10".U -> Fill(4, data(31, 0)),
+      //"b11".U -> data
+      "b11".U -> Fill(2,data(63,0))
     ))
   }
 }
@@ -54,7 +55,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
-  val mask = UInt(8.W)
+  val mask = UInt((VLEN/8).W)
   val data = UInt((XLEN+1).W)
   val wlineflag = Bool() // store write the whole cache line
 
@@ -118,14 +119,14 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
-  val mask = Output(UInt(8.W))
+  val mask = Output(UInt((VLEN/8).W))
   override val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
-  val forwardMaskFast = Input(Vec(8, Bool())) // resp to load_s1
-  val forwardMask = Input(Vec(8, Bool())) // resp to load_s2
-  val forwardData = Input(Vec(8, UInt(8.W))) // resp to load_s2
+  val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
+  val forwardMask = Input(Vec((VLEN/8), Bool())) // resp to load_s2
+  val forwardData = Input(Vec((VLEN/8), UInt(8.W))) // resp to load_s2
 
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
@@ -193,7 +194,7 @@ class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
 // Store byte valid mask write to SQ takes 2 cycles
 class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
   val sqIdx = new SqPtr
-  val mask = UInt(8.W)
+  val mask = UInt((VLEN/8).W)
 }
 
 class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {

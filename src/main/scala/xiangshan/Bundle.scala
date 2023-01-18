@@ -327,7 +327,7 @@ class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
 }
 
 class ExuOutput(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val data = UInt(XLEN.W)
+  val data = UInt(VLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

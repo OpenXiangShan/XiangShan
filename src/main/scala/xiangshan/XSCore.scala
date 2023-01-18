@@ -49,7 +49,7 @@ trait NeedImpl {
   }
 }
 
-class WritebackSourceParams(
+class WritebackSourceParamsle(
   var exuConfigs: Seq[Seq[ExuConfig]] = Seq()
  ) {
   def length: Int = exuConfigs.length
