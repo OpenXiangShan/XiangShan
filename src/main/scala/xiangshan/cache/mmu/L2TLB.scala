@@ -221,7 +221,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
   val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
   val last_resp_v = RegInit(false.B)
-  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
+  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR || cache.io.refill.bits.sel_pte_dup(0).asTypeOf(new PteBundle).isAf()
   when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
   when (flush) { last_resp_v := false.B }
   XSError(last_resp_v && cache.io.refill.valid &&
@@ -409,6 +409,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
   XSPerfAccumulate("mem_count", mem.a.fire())
+  for (i <- 0 until PtwWidth) {
+    XSPerfAccumulate(s"llptw_ppn_af${i}", outArb(i).in(outArbMqPort).valid && outArb(i).in(outArbMqPort).bits.af && !llptw_out.bits.af)
+    XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.af)
+  }
 
   // print configs
   println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
