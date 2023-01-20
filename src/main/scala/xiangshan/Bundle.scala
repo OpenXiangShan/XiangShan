@@ -152,6 +152,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
+  val globalID = UInt(XLEN.W)
   val srcType = Vec(3, SrcType())
   val lsrc = Vec(3, UInt(5.W))
   val ldest = UInt(5.W)
@@ -320,6 +321,10 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+  /* add L/S inst info in EXU */
+  val isL1TlbMiss = Bool()
+  // val L1toL2TlbLatency = UInt(XLEN.W)
+  // val levelTlbHit = UInt(2.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {

@@ -40,6 +40,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
+  val globalCounter = RegInit(0.U(XLEN.W))
 
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
@@ -47,8 +48,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // csr control
     decoders(i).io.csrCtrl := io.csrCtrl
 
+    io.out(i).bits       := DontCare
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
+    io.out(i).bits.ctrl.globalID := globalCounter + PopCount((0 until i+1).map(io.out(_).fire))
     io.in(i).ready       := io.out(i).ready
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
@@ -58,7 +61,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.intRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Floating-point instructions can not be fused now.
-    io.fpRat(i)(0).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(0)
+    io.fpRat(i)(0).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(0) 
     io.fpRat(i)(1).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(1)
     io.fpRat(i)(2).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(2)
     io.fpRat(i)(3).addr := decoders(i).io.deq.cf_ctrl.ctrl.ldest
@@ -66,6 +69,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
+  val hasOut = VecInit((0 until DecodeWidth).map(i => io.in(i).valid && io.out(i).ready)).asUInt.orR
+  
+  globalCounter := RegEnable(globalCounter + PopCount(io.out.map(_.fire)), 0.U(XLEN.W), hasOut)
+
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
