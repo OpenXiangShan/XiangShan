@@ -27,6 +27,32 @@ import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 
+class MDPInfo(implicit p: Parameters) extends XSBundle{
+  val ssid = UInt(SSIDWidth.W)
+  val waitAllStore = Bool()
+}
+
+class InstDB(implicit p: Parameters) extends XSBundle{
+  val globalID = UInt(XLEN.W)
+  val instType = FuType()
+  val ivaddr = UInt(VAddrBits.W)
+  val dvaddr = UInt(VAddrBits.W) // the l/s access address
+  val dpaddr = UInt(VAddrBits.W) // need the physical address when the TLB is valid
+  val isL1TlbMiss = Bool()
+  // val L1toL2TlbLatency = UInt(XLEN.W)
+  // val levelTlbHit = UInt(2.W) // 01, 10, 11(memory)
+  // val isDCacheFirstHit = Bool()
+  // val lsExceptType = // FIXME: what the type?
+  // val isLdBankConflict = Bool()
+  // val isLdForwardFail = Bool()
+  // val otherPerfNoteThing // FIXME: how much?
+  val accessLatency = UInt(XLEN.W)  // RS out time --> write back time
+  val executeLatency = UInt(XLEN.W)
+  val issueLatency = UInt(XLEN.W)
+  val replayCnt = UInt(XLEN.W)
+  val mdpInfo = new MDPInfo
+}
+
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
   p => p(XSCoreParamsKey).RobSize
 ) with HasCircularQueuePtrHelper {
@@ -341,6 +367,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
   val interrupt_safe = Mem(RobSize, Bool())
+  val replay_counter = RegInit(VecInit(Seq.fill(RobSize)(0.U(XLEN.W)))) // Mem(RobSize, UInt(XLEN.W))
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -739,6 +766,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     redirectHeadVec zip invMask foreach {
       case (redirectHead, inv) => when(inv) {
         valid(redirectHead.value) := false.B
+        replay_counter(redirectHead.value) := replay_counter(redirectHead.value) + 1.U
       }
     }
     when(!invMask.last) {
@@ -758,6 +786,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
       valid(allocatePtrVec(i).value) := true.B
+      replay_counter(allocatePtrVec(i).value) := 0.U
     }
   }
   // dequeue logic writes 6 valid
@@ -765,6 +794,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
       valid(commitReadAddr(i)) := false.B
+      replay_counter(allocatePtrVec(i).value) := 0.U
     }
   }
 
@@ -835,6 +865,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     VecInit(deqPtrVec_next.map(_.value)),
     VecInit(walkPtrVec_next.map(_.value))
   )
+  // NOTE lyq: dispatch info will record the uop of inst
   dispatchData.io.wen := canEnqueue
   dispatchData.io.waddr := allocatePtrVec.map(_.value)
   dispatchData.io.wdata.zip(io.enq.req.map(_.bits)).foreach{ case (wdata, req) =>
@@ -898,7 +929,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   fflagsDataModule.io.raddr := VecInit(deqPtrVec_next.map(_.value))
   fflagsDataRead := fflagsDataModule.io.rdata
 
-
+  // FIXME lyq: not understand
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
   val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
@@ -932,6 +963,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   def ifCommit(counter: UInt): UInt = Mux(io.commits.isCommit, counter, 0.U)
   def ifCommitReg(counter: UInt): UInt = Mux(RegNext(io.commits.isCommit), counter, 0.U)
 
+  val commitDebugExu = deqPtrVec.map(_.value).map(debug_exuDebug(_))
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
@@ -971,6 +1003,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val executeLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.issueTime)
   val rsFuLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.enqRsTime)
   val commitLatency = commitDebugUop.map(uop => timer - uop.debugInfo.writebackTime)
+  val accessLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.issueTime)
   def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
     cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)
   }
@@ -993,6 +1026,39 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
   }
 
+  /**
+    * DataBase info
+    */
+  val instTableName =  "InstDB" + p(XSCoreParamsKey).HartId.toString
+  val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
+  val instTable = ChiselDB.createTable(instTableName, new InstDB)
+  // instData assignment ==> commitData is a Vec
+  for (i <- 0 until CommitWidth) {
+    when(io.commits.commitValid(i)){
+      val instData = Wire(new InstDB)
+      instData.globalID := commitDebugUop(i).ctrl.globalID
+      instData.instType := commitDebugUop(i).ctrl.fuType
+      instData.ivaddr := io.commits.info(i).pc
+      instData.dvaddr := commitDebugExu(i).vaddr
+      instData.dpaddr := commitDebugExu(i).paddr
+      instData.isL1TlbMiss := commitDebugExu(i).isL1TlbMiss // if it is replayInst, is the signal always ture?
+      instData.accessLatency := accessLatency(i)
+      instData.executeLatency := executeLatency(i)
+      instData.issueLatency := issueLatency(i)
+      instData.replayCnt := replay_counter(deqPtrVec(i).value) // FIXME: is the timing correct?
+      instData.mdpInfo.ssid := commitDebugUop(i).cf.ssid
+      instData.mdpInfo.waitAllStore := commitDebugUop(i).cf.loadWaitStrict && commitDebugUop(i).cf.loadWaitBit
+
+      instTable.log(
+        data = instData,
+        en = io.commits.commitValid(i),
+        site = instSiteName,
+        clock = clock,
+        reset = reset
+      )
+    }
+  }
+  
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
 

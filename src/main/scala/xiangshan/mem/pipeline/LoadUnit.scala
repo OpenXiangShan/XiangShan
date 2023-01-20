@@ -948,6 +948,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   hitLoadOut.bits.debug.isPerfCnt := false.B
   hitLoadOut.bits.debug.paddr := load_s2.io.out.bits.paddr
   hitLoadOut.bits.debug.vaddr := load_s2.io.out.bits.vaddr
+  hitLoadOut.bits.debug.isL1TlbMiss := load_s2.io.out.bits.tlbMiss
   hitLoadOut.bits.fflags := DontCare
 
   load_s2.io.out.ready := true.B

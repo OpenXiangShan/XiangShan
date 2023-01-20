@@ -982,6 +982,7 @@ def detectRollback(i: Int) = {
   io.ldout(0).bits.debug.isPerfCnt := false.B
   io.ldout(0).bits.debug.paddr := debug_paddr(deqPtr)
   io.ldout(0).bits.debug.vaddr := vaddrModule.io.rdata(1)
+  io.ldout(0).bits.debug.isL1TlbMiss := tlb_hited(deqPtr) // FIXME: The code logic of MMIO is not very clear for me
   io.ldout(0).bits.fflags := DontCare
 
   io.ldout(0).valid := (uncacheState === s_wait) && !uncacheCommitFired

@@ -526,6 +526,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
   io.mmioStout.bits.debug.vaddr := DontCare
+  io.mmioStout.bits.debug.isL1TlbMiss := DontCare // FIXME: does it need add RegVec to store the situation of tlb
   // Remove MMIO inst from store queue after MMIO request is being sent
   // That inst will be traced by uncache state machine
   when (io.mmioStout.fire()) {
