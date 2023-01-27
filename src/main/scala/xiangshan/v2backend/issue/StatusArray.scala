@@ -6,7 +6,7 @@ import chisel3.util._
 import utils.XSError
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.SqPtr
 import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
 
 class StatusEntry(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
@@ -58,8 +58,6 @@ class StatusArrayIO(implicit p: Parameters, params: IssueQueueParams) extends XS
   val wakeup = Vec(params.numWakeup, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)
-  val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
-  val memWaitUpdateReq = if (params.checkWaitBit) Flipped(new MemWaitUpdateReq) else null
   val rsFeedback = Output(Vec(5, Bool()))
 }
 

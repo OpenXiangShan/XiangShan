@@ -7,16 +7,16 @@ import utility.SelectOne
 import xiangshan.XSModule
 
 class DeqPolicyIO(implicit p: IssueQueueParams) extends Bundle {
-  val valid = Input(UInt(p.numEntries.W))
+  val request = Input(UInt(p.numEntries.W))
   val deqSelOHVec = Vec(p.numDeq, ValidIO(UInt(p.numEntries.W)))
 }
 
 class DeqPolicy(implicit p: Parameters, iqP: IssueQueueParams) extends XSModule {
   val io = IO(new DeqPolicyIO)
 
-  private val emptyVec = io.valid.asBools.map(!_)
+  private val requestVec = VecInit(io.request.asBools)
   // Todo: support more policies
-  private val selVec: Seq[(Bool, Vec[Bool])] = io.deqSelOHVec.indices.map(i => SelectOne("circ", emptyVec, iqP.numDeq).getNthOH(i + 1))
+  private val selVec: Seq[(Bool, Vec[Bool])] = io.deqSelOHVec.indices.map(i => SelectOne("circ", requestVec, iqP.numDeq).getNthOH(i + 1))
 
   io.deqSelOHVec.zip(selVec).foreach { case (deqOH, (selValid, selOH)) =>
     deqOH.valid := selValid

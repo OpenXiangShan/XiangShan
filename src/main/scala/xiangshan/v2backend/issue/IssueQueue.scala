@@ -18,11 +18,6 @@ case class IssueQueueParams(
   var numFastWakeup   : Int = 0,
   var numWakeup       : Int = 0,
   var allWakeup       : Int = 0,
-  var hasFeedback     : Boolean = false,
-  var lsqFeedback     : Boolean = false,
-  var fixedLatency    : Int = -1,
-  var checkWaitBit    : Boolean = false,
-  var needScheduledBit: Boolean = false,
   var hasJump         : Boolean = false,
   var hasLoad         : Boolean = false,
   var hasStore        : Boolean = false,
@@ -43,7 +38,6 @@ object DummyIQParams {
       numFastWakeup    = 4,
       numWakeup        = 4,
       allWakeup        = 8,
-      fixedLatency     = 0,
     )
   }
 }
@@ -57,7 +51,7 @@ class IssueQueue(implicit p: Parameters) extends LazyModule {
 class IssueQueueStatusBundle(numEnq: Int) extends Bundle {
   val empty = Output(Bool())
   val full = Output(Bool())
-  val leftVec = Output(Vec(numEnq, Bool()))
+  val leftVec = Output(Vec(numEnq + 1, Bool()))
 }
 
 class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueQueueParams) extends StatusArrayDeqRespBundle
@@ -71,6 +65,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends X
   val deqResp = Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle))
   val writeBack = Vec(params.numWakeup, Flipped(ValidIO(new WriteBackBundle(params.dataBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
+  val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
   val jump = if (params.hasJump) new Bundle {
     val pc = Input(UInt(VAddrBits.W))
@@ -91,41 +86,32 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends X
 class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams) extends LazyModuleImp(outer) with HasXSParameter{
   val io = IO(new IssueQueueIO)
 
+  // Modules
   val statusArray   = Module(new StatusArray)
   val immArray      = Module(new DataArray(UInt(XLEN.W), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries))
   val payloadArray  = Module(new DataArray(Output(new DynInst), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
   val deqPolicy     = Module(new DeqPolicy)
 
+  // Wires
   val enqValidVec = io.enq.map(_.valid)
   val enqSelValidVec = Wire(Vec(iqParams.numEnq, Bool()))
   val enqSelOHVec = Wire(Vec(iqParams.numEnq, UInt(iqParams.numEntries.W)))
 
   val enqImmValidVec = io.enq.map(enq => enq.valid && enq.bits.imm.valid)
-  val enqImmVec = io.enq.map(_.bits.imm.bits)
+  val enqImmVec = VecInit(io.enq.map(_.bits.imm.bits))
 
   val deqSelValidVec = Wire(Vec(iqParams.numDeq, Bool()))
   val deqSelOHVec = Wire(Vec(iqParams.numDeq, UInt(iqParams.numEntries.W)))
-
-  val immArrayRdataVec = immArray.io.read.map(_.data)
-  immArray.io match { case immArrayIO: DataArrayIO[UInt] =>
-    immArrayIO.write.zipWithIndex.foreach { case (w, i) =>
-      w.en := enqSelValidVec(i) && enqImmValidVec(i)
-      w.addr := enqSelOHVec(i)
-      w.data := enqImmVec(i)
-    }
-    immArrayIO.read.zipWithIndex.foreach { case (r, i) =>
-      r.addr := Mux(deqSelValidVec(i), deqSelOHVec(i), 0.U)
-    }
-  }
-
   val deqRespVec = io.deqResp
+
   val validVec = VecInit(statusArray.io.valid.asBools)
   val canIssueVec = VecInit(statusArray.io.canIssue.asBools)
   val clearVec = VecInit(statusArray.io.clear.asBools)
   val deqFirstIssueVec = VecInit(statusArray.io.deq.map(_.isFirstIssue))
+
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
-    statusArrayIO.flush  := io.flush
+    statusArrayIO.flush  <> io.flush
     statusArrayIO.wakeup.zipWithIndex.foreach { case (wakeup: ValidIO[IssueQueueWakeUpBundle], i) =>
       wakeup.valid := io.writeBack(i).valid
       wakeup.bits := io.writeBack(i).bits
@@ -152,6 +138,18 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQu
     }
   }
 
+  val immArrayRdataVec = immArray.io.read.map(_.data)
+  immArray.io match { case immArrayIO: DataArrayIO[UInt] =>
+    immArrayIO.write.zipWithIndex.foreach { case (w, i) =>
+      w.en := enqSelValidVec(i) && enqImmValidVec(i)
+      w.addr := enqSelOHVec(i)
+      w.data := enqImmVec(i)
+    }
+    immArrayIO.read.zipWithIndex.foreach { case (r, i) =>
+      r.addr := Mux(deqSelValidVec(i), deqSelOHVec(i), 0.U)
+    }
+  }
+
   val payloadArrayRdata = Wire(Vec(iqParams.numDeq, Output(new DynInst)))
   payloadArray.io match { case payloadArrayIO: DataArrayIO[DynInst] =>
     payloadArrayIO.write.zipWithIndex.foreach { case (w, i) =>
@@ -172,8 +170,34 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQu
   }
 
   deqPolicy match { case dp =>
-    dp.io.valid     := validVec.asUInt
+    dp.io.request   := canIssueVec.asUInt
     deqSelValidVec  := dp.io.deqSelOHVec.map(oh => oh.valid)
     deqSelOHVec     := dp.io.deqSelOHVec.map(oh => oh.bits)
+  }
+
+  // Todo: better counter implementation
+  private val validCnt = PopCount(validVec)
+  private val enqSelCnt = PopCount(enqSelValidVec)
+  private val validCntNext = validCnt + enqSelCnt
+  io.status.full := validVec.asUInt.andR
+  io.status.empty := !validVec.asUInt.orR
+  io.status.leftVec(0) := io.status.full
+  for (i <- 0 until iqParams.numEnq) {
+    io.status.leftVec(i + 1) := validCnt === (i + 1).U
+  }
+  io.statusNext.full := validCntNext === iqParams.numEntries.U
+  io.statusNext.empty := validCntNext === 0.U // always false now
+  io.statusNext.leftVec(0) := io.statusNext.full
+  for (i <- 0 until iqParams.numEnq) {
+    io.statusNext.leftVec(i + 1) := validCntNext === (i + 1).U
+  }
+
+  io.deq.zipWithIndex.foreach { case (deq, i) =>
+    deq.valid := deqSelValidVec(i)
+    deq.bits.fuType := payloadArrayRdata(i).fuType
+    deq.bits.fuOpType := payloadArrayRdata(i).fuOpType
+    deq.bits.rfWen := payloadArrayRdata(i).rfWen
+    deq.bits.fpWen := payloadArrayRdata(i).fpWen
+    deq.bits.vecWen := payloadArrayRdata(i).vecWen
   }
 }
