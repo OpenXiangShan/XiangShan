@@ -55,6 +55,8 @@ object Bundles {
   class DynInst(implicit p: Parameters) extends XSBundle {
     val imm             = ValidIO(UInt(XLEN.W)) // Todo: check if it need minimized
 
+    val fuType          = FuType()
+    val fuOpType        = FuOpType()
     val rfWen           = Bool()
     val fpWen           = Bool()
     val vecWen          = Bool()
