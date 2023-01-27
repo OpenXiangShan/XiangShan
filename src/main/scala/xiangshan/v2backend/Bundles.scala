@@ -112,11 +112,16 @@ object Bundles {
     }
   }
 
-  class IssueQueueWakeUpBundle(implicit p: Parameters) extends XSBundle {
+  trait BundleSource {
+    var source = "not exist"
+  }
+
+  class IssueQueueWakeUpBundle(implicit p: Parameters) extends XSBundle with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
     val pdest = UInt(PhyRegIdxWidth.W)
+
     /**
       * @param successor Seq[(psrc, srcType)]
       * @return Seq[if wakeup psrc]
@@ -165,7 +170,7 @@ object Bundles {
     dataWidth: Int,
     hasRedirect: Boolean = false,
     hasFFlags: Boolean = false
-  )(implicit p: Parameters) extends XSBundle {
+  )(implicit p: Parameters) extends XSBundle with BundleSource {
     val data = UInt(dataWidth.W)
     val debug = new DebugBundle
     val redirect = if(hasRedirect) Some(ValidIO(new Redirect)) else None
@@ -177,7 +182,7 @@ object Bundles {
     dataWidth: Int,
     hasRedirect: Boolean = false,
     hasFFlags: Boolean = false
-  )(implicit p: Parameters) extends ExuOutput(dataWidth, hasRedirect, hasFFlags) {
+  )(implicit p: Parameters) extends ExuOutput(dataWidth, hasRedirect, hasFFlags) with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
@@ -189,6 +194,7 @@ object Bundles {
       wakeup.fpWen := this.fpWen
       wakeup.vecWen := this.vecWen
       wakeup.pdest := this.pdest
+      wakeup.source = this.source
       wakeup
     }
   }
