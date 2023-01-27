@@ -152,7 +152,12 @@ object Bundles {
 
   // DynInst --[IssueQueue]--> ExuInput
   class ExuInput(dataWidth: Int, numSrc: Int) extends Bundle {
-    val data = Vec(numSrc, UInt(dataWidth.W))
+    val fuType    = FuType()
+    val fuOpType  = FuOpType()
+    val rfWen     = Bool()
+    val fpWen     = Bool()
+    val vecWen    = Bool()
+    val data      = Vec(numSrc, UInt(dataWidth.W))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
