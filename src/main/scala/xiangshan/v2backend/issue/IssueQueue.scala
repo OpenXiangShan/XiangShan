@@ -8,36 +8,46 @@ import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, ExuInput, WriteBackBundle, IssueQueueWakeUpBundle}
 import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
 
+trait Region
+case class IntRegion() extends Region
+case class VfRegion() extends Region
+
 case class IssueQueueParams(
-  var numEntries      : Int = 0,
-  var numEnq          : Int = 0,
-  var numDeq          : Int = 0,
-  var numSrc          : Int = 0,
-  var dataBits        : Int = 0,
-  var pregBits        : Int = 0,
-  var numFastWakeup   : Int = 0,
-  var numWakeup       : Int = 0,
-  var allWakeup       : Int = 0,
-  var hasJump         : Boolean = false,
-  var hasLoad         : Boolean = false,
-  var hasStore        : Boolean = false,
-  var hasMemAddr      : Boolean = false,
+  region                 : Region,
+  var numEntries         : Int = 0,
+  var numEnq             : Int = 0,
+  var numDeq             : Int = 0,
+  var numSrc             : Int = 0,
+  var dataBits           : Int = 0,
+  var pregBits           : Int = 0,
+  var numWakeupFromWB    : Int = 0,
+  var numWakeupFromIQ    : Int = 0,
+  var numWakeupFromOthers: Int = 0,
+  var hasBranch          : Boolean = false,
+  var hasJump            : Boolean = false,
+  var hasLoad            : Boolean = false,
+  var hasStore           : Boolean = false,
+  var hasMemAddr         : Boolean = false,
 ) {
+  require(numWakeupFromWB > 0 && numWakeupFromIQ >= 0 && numWakeupFromOthers >= 0)
+  require(numEnq > 0 && numDeq > 0)
+
   def hasLoadStore = hasLoad || hasStore || hasMemAddr
+  def hasRedirectOut = hasBranch || hasJump
+  def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
 }
 
 object DummyIQParams {
   def apply(): IssueQueueParams = {
     IssueQueueParams(
+      region           = IntRegion(),
       numEntries       = 16,
       numEnq           = 2,
       numDeq           = 2,
       numSrc           = 3,
       dataBits         = 64,
       pregBits         = 8,
-      numFastWakeup    = 4,
-      numWakeup        = 4,
-      allWakeup        = 8,
+      numWakeupFromWB  = 4,
     )
   }
 }
@@ -45,7 +55,10 @@ object DummyIQParams {
 class IssueQueue(implicit p: Parameters) extends LazyModule {
   implicit val iqParams = DummyIQParams() // Todo: initialize it
 
-  lazy val module = new IssueQueueImp(this)
+  lazy val module = iqParams.region match {
+    case IntRegion() => new IssueQueueIntImp(this)
+    case VfRegion() => new IssueQueueImp(this)
+  }
 }
 
 class IssueQueueStatusBundle(numEnq: Int) extends Bundle {
@@ -63,28 +76,15 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends X
 
   val deq = Vec(params.numDeq, DecoupledIO(new ExuInput(params.dataBits, params.numSrc)))
   val deqResp = Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle))
-  val writeBack = Vec(params.numWakeup, Flipped(ValidIO(new WriteBackBundle(params.dataBits))))
+  val writeBack = Vec(params.numWakeupFromWB, Flipped(ValidIO(new WriteBackBundle(params.dataBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
-
-  val jump = if (params.hasJump) new Bundle {
-    val pc = Input(UInt(VAddrBits.W))
-    val target = Input(UInt(VAddrBits.W))
-  } else None
-
-  val mem = if (params.hasLoadStore) new Bundle {
-    val feedback = Vec(params.numDeq, new MemRSFeedbackIO)
-    val checkwait = new Bundle {
-      val stIssuePtr = Input(new SqPtr)
-      val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput(params.dataBits, params.numSrc))))
-      val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
-    }
-  }
   // Todo: wake up bundle
 }
 
 class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams) extends LazyModuleImp(outer) with HasXSParameter{
-  val io = IO(new IssueQueueIO)
+
+  lazy val io = IO(new IssueQueueIO())
 
   // Modules
   val statusArray   = Module(new StatusArray)
@@ -199,5 +199,48 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQu
     deq.bits.rfWen := payloadArrayRdata(i).rfWen
     deq.bits.fpWen := payloadArrayRdata(i).fpWen
     deq.bits.vecWen := payloadArrayRdata(i).vecWen
+  }
+}
+
+class IssueQueueJumpBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+  val pc = Input(UInt(VAddrBits.W))
+  val target = Input(UInt(VAddrBits.W))
+}
+
+class IssueQueueMemBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+  val feedback = Vec(params.numDeq, new MemRSFeedbackIO)
+  val checkwait = new Bundle {
+    val stIssuePtr = Input(new SqPtr)
+    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput(params.dataBits, params.numSrc))))
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+  }
+}
+
+class IssueQueueLoadBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+  val fastMatch = UInt(exuParameters.LduCnt.W)
+  val fastImm = UInt(12.W)
+}
+
+class IssueQueueIntIO()(implicit p: Parameters, params: IssueQueueParams) extends IssueQueueIO {
+  val jump = if (params.hasJump) Some(new IssueQueueJumpBundle) else None
+  val mem = if (params.hasLoadStore) Some(new IssueQueueMemBundle) else None
+  val toLdu = if (params.hasLoad) Some(Vec(params.numDeq, new IssueQueueLoadBundle)) else None
+}
+
+class IssueQueueIntImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams)
+  extends IssueQueueImp(outer)
+  with IssueQueueMemPart
+  {
+  override lazy val io = IO(new IssueQueueIntIO)
+
+}
+
+trait IssueQueueMemPart { this: IssueQueueIntImp =>
+  // Todo: correct it
+  if (io.toLdu.nonEmpty) {
+    io.toLdu.get.foreach(toLdu => {
+      toLdu.fastImm := 0.U
+      toLdu.fastMatch := false.B
+    })
   }
 }

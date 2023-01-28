@@ -55,7 +55,7 @@ class StatusArrayIO(implicit p: Parameters, params: IssueQueueParams) extends XS
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
   // wakeup
-  val wakeup = Vec(params.numWakeup, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
+  val wakeup = Vec(params.numAllWakeup, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)
   val rsFeedback = Output(Vec(5, Bool()))
