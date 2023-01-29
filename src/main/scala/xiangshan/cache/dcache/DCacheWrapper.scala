@@ -358,6 +358,8 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 
 class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
+  val meta_prefetch = Bool()
+  val meta_access = Bool()
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
 }

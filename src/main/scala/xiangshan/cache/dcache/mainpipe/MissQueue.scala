@@ -27,10 +27,10 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import huancun.prefetch.L1MissTrace
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
 import utility.FastArbiter
 import mem.{AddPipelineReg}
+import mem.trace._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)

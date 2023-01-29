@@ -3,13 +3,13 @@ package xiangshan.mem.prefetch
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import huancun.prefetch.L1MissTrace
-import huancun.utils.ChiselDB
 import xiangshan._
 import utils._
+import utility._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.trace._
 
 case class SMSParams
 (
