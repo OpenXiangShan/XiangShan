@@ -225,125 +225,6 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
 
 }
 
-class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
-  val io = IO(new Bundle() {
-    val stride_en = Input(Bool())
-    val s0_lookup = Flipped(new ValidIO(new Bundle() {
-      val pc = UInt(STRIDE_PC_BITS.W)
-      val vaddr = UInt(VAddrBits.W)
-      val paddr = UInt(PAddrBits.W)
-    }))
-    val s1_valid = Input(Bool())
-    val s2_gen_req = ValidIO(new PfGenReq())
-  })
-
-  val prev_valid = RegNext(io.s0_lookup.valid, false.B)
-  val prev_pc = RegEnable(io.s0_lookup.bits.pc, io.s0_lookup.valid)
-
-  val s0_valid = io.s0_lookup.valid && !(prev_valid && prev_pc === io.s0_lookup.bits.pc)
-
-  def entry_map[T](fn: Int => T) = (0 until smsParams.stride_entries).map(fn)
-
-  val replacement = ReplacementPolicy.fromString("plru", smsParams.stride_entries)
-  val valids = entry_map(_ => RegInit(false.B))
-  val entries_pc = entry_map(_ => Reg(UInt(STRIDE_PC_BITS.W)) )
-  val entries_conf = entry_map(_ => RegInit(1.U(2.W)))
-  val entries_last_addr = entry_map(_ => Reg(UInt(STRIDE_BLK_ADDR_BITS.W)) )
-  val entries_stride = entry_map(_ => Reg(SInt((STRIDE_BLK_ADDR_BITS+1).W)))
-
-
-  val s0_match_vec = valids.zip(entries_pc).map({
-    case (v, pc) => v && pc === io.s0_lookup.bits.pc
-  })
-
-  val s0_hit = s0_valid && Cat(s0_match_vec).orR
-  val s0_miss = s0_valid && !s0_hit
-  val s0_matched_conf = Mux1H(s0_match_vec, entries_conf)
-  val s0_matched_last_addr = Mux1H(s0_match_vec, entries_last_addr)
-  val s0_matched_last_stride = Mux1H(s0_match_vec, entries_stride)
-
-
-  val s1_vaddr = RegEnable(io.s0_lookup.bits.vaddr, s0_valid)
-  val s1_paddr = RegEnable(io.s0_lookup.bits.paddr, s0_valid)
-  val s1_hit = RegNext(s0_hit) && io.s1_valid
-  val s1_alloc = RegNext(s0_miss) && io.s1_valid
-  val s1_conf = RegNext(s0_matched_conf)
-  val s1_last_addr = RegNext(s0_matched_last_addr)
-  val s1_last_stride = RegNext(s0_matched_last_stride)
-  val s1_match_vec = RegNext(VecInit(s0_match_vec))
-
-  val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
-  val s1_new_stride_vaddr = s1_vaddr(BLOCK_OFFSET + STRIDE_BLK_ADDR_BITS - 1, BLOCK_OFFSET)
-  val s1_new_stride = (0.U(1.W) ## s1_new_stride_vaddr).asSInt - (0.U(1.W) ## s1_last_addr).asSInt
-  val s1_stride_non_zero = s1_last_stride =/= 0.S
-  val s1_stride_match = s1_new_stride === s1_last_stride && s1_stride_non_zero
-  val s1_replace_idx = replacement.way
-
-  for(i <- 0 until smsParams.stride_entries){
-    val alloc = s1_alloc && i.U === s1_replace_idx
-    val update = s1_hit && s1_match_vec(i)
-    when(update){
-      assert(valids(i))
-      entries_conf(i) := Mux(s1_stride_match,
-        Mux(s1_conf === 3.U, 3.U, s1_conf + 1.U),
-        Mux(s1_conf === 0.U, 0.U, s1_conf - 1.U)
-      )
-      entries_last_addr(i) := s1_new_stride_vaddr
-      when(!s1_conf(1)){
-        entries_stride(i) := s1_new_stride
-      }
-    }
-    when(alloc){
-      valids(i) := true.B
-      entries_pc(i) := prev_pc
-      entries_conf(i) := 0.U
-      entries_last_addr(i) := s1_new_stride_vaddr
-      entries_stride(i) := 0.S
-    }
-    assert(!(update && alloc))
-  }
-  when(s1_hit){
-    replacement.access(OHToUInt(s1_match_vec.asUInt))
-  }.elsewhen(s1_alloc){
-    replacement.access(s1_replace_idx)
-  }
-
-  val s1_block_vaddr = block_addr(s1_vaddr)
-  val s1_pf_block_vaddr = (s1_block_vaddr.asSInt + s1_last_stride).asUInt
-  val s1_pf_cross_page = s1_pf_block_vaddr(BLOCK_ADDR_PAGE_BIT) =/= s1_block_vaddr(BLOCK_ADDR_PAGE_BIT)
-
-  val s2_pf_gen_valid = RegNext(s1_hit && s1_stride_match, false.B)
-  val s2_pf_gen_paddr_valid = RegEnable(!s1_pf_cross_page, s1_hit && s1_stride_match)
-  val s2_pf_block_vaddr = RegEnable(s1_pf_block_vaddr, s1_hit && s1_stride_match)
-  val s2_block_paddr = RegEnable(block_addr(s1_paddr), s1_hit && s1_stride_match)
-
-  val s2_pf_block_addr = Mux(s2_pf_gen_paddr_valid,
-    Cat(
-      s2_block_paddr(PAddrBits - BLOCK_OFFSET - 1, BLOCK_ADDR_PAGE_BIT),
-      s2_pf_block_vaddr(BLOCK_ADDR_PAGE_BIT - 1, 0)
-    ),
-    s2_pf_block_vaddr
-  )
-  val s2_pf_full_addr = Wire(UInt(VAddrBits.W))
-  s2_pf_full_addr := s2_pf_block_addr ## 0.U(BLOCK_OFFSET.W)
-
-  val s2_pf_region_addr = region_addr(s2_pf_full_addr)
-  val s2_pf_region_offset = s2_pf_block_addr(REGION_OFFSET - 1, 0)
-
-  val s2_full_vaddr = Wire(UInt(VAddrBits.W))
-  s2_full_vaddr := s2_pf_block_vaddr ## 0.U(BLOCK_OFFSET.W)
-
-  val s2_region_tag = region_hash_tag(region_addr(s2_full_vaddr))
-
-  io.s2_gen_req.valid := s2_pf_gen_valid && io.stride_en
-  io.s2_gen_req.bits.region_tag := s2_region_tag
-  io.s2_gen_req.bits.region_addr := s2_pf_region_addr
-  io.s2_gen_req.bits.region_bits := region_offset_to_bits(s2_pf_region_offset)
-  io.s2_gen_req.bits.paddr_valid := s2_pf_gen_paddr_valid
-  io.s2_gen_req.bits.decr_mode := false.B
-
-}
-
 class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
   val pht_index = UInt(PHT_INDEX_BITS.W)
   val pht_tag = UInt(PHT_TAG_BITS.W)
@@ -1201,7 +1082,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   trace.pc := 0.U
   trace.paddr := io.pf_addr.bits
   trace.source := pf_filter.io.debug_source_type
-  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
+  val table = ChiselDB.createTable("L1MissTraceSMS", new L1MissTrace)
   table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",

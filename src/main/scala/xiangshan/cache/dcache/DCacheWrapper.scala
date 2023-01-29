@@ -368,9 +368,6 @@ class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
 {
   val bank_data = Vec(DCacheBanks, Bits(DCacheSRAMRowBits.W))
   val bank_oh = UInt(DCacheBanks.W)
-
-  val meta_prefetch = Bool()
-  val meta_access = Bool()
 }
 
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
