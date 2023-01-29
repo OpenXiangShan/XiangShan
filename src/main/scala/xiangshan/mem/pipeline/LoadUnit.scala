@@ -209,11 +209,21 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // TODO: update cache meta
   io.dcacheReq.bits.id   := DontCare
 
+  // address align check
+  val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
+    "b00".U   -> true.B,                   //b
+    "b01".U   -> (s0_vaddr(0)    === 0.U), //h
+    "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
+    "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
+  ))
+
   // prefetch ctrl signal gen
   val have_confident_hw_prefetch = io.prefetch_in.valid && (io.prefetch_in.bits.confidence > 0.U)
   val hw_prefetch_override = io.prefetch_in.valid &&
   ((io.prefetch_in.bits.confidence > 0.U) || !io.in.valid)
 
+  // load flow select/gen
+  //
   // load req may come from:
   // 1) normal read / software prefetch from RS (io.in.valid)
   // 2) load to load fast path (tryFastpath)
@@ -552,7 +562,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // ))
   // val rdataPartialLoad = rdataHelper(s2_uop, rdataSel) // s2_rdataPartialLoad is not used
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute !s2_is_hw_prefetch
+  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute && !s2_is_hw_prefetch
   // write_lq_safe is needed by dup logic
   // io.write_lq_safe := !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
@@ -667,6 +677,23 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.replaySlow.replayCarry := io.dcacheResp.bits.replayCarry
   io.replaySlow.miss_mshr_id := io.dcacheResp.bits.mshr_id
   io.replaySlow.data_in_last_beat := io.in.bits.paddr(log2Up(refillBytes))
+
+  // To be removed
+  val s2_need_replay_from_rs = Wire(Bool())
+  if (EnableFastForward) {
+    s2_need_replay_from_rs :=
+      needReExecute ||
+      s2_tlb_miss || // replay if dtlb miss
+      s2_cache_replay && !s2_is_prefetch && !s2_mmio && !s2_exception && !fullForward || // replay if dcache miss queue full / busy
+      s2_data_invalid && !s2_is_prefetch // replay if store to load forward data is not ready
+  } else {
+    // Note that if all parts of data are available in sq / sbuffer, replay required by dcache will not be scheduled
+    s2_need_replay_from_rs :=
+      needReExecute ||
+      s2_tlb_miss || // replay if dtlb miss
+      s2_cache_replay && !s2_is_prefetch && !s2_mmio && !s2_exception && !io.dataForwarded || // replay if dcache miss queue full / busy
+      s2_data_invalid && !s2_is_prefetch // replay if store to load forward data is not ready
+  }
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   if (EnableFastForward) {
