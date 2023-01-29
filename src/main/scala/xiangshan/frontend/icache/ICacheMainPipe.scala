@@ -90,7 +90,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val iprefetchBuf = Flipped(new IPFBufferRead)
   val PIQ          = Flipped(Vec(nPrefetchEntries,new PIQToMainPipe))
   val IPFBufMove   = Flipped(new IPFBufferMove)
-  val IPFPipe      = Vec(4 , ValidIO(new MainPipeToPrefetchPipe))
+  val IPFPipe      = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe))
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -551,17 +551,27 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
   /** miss handle information to iprefetch pipe */
   //TODO: better cancle logic
-  val valid_vec = Seq(s1_valid, s1_valid, s2_valid, s2_valid)
-  val vSetIdx_vec = Seq(s1_req_vsetIdx(0), s1_req_vsetIdx(1), s2_req_vsetIdx(0), s2_req_vsetIdx(1))
-  val ptag_vec = Seq(s1_req_ptags(0), s1_req_ptags(1), s2_req_ptags(0), s2_req_ptags(1))
-  /** To avoid multi-hit problem, we use a more aggressive filtering strategy:
-    * filtering all valid entries in s1 and s2, which may incur a performance penalty */
-  (0 until 4).foreach{
-    i =>
-      toIPFPipe(i).valid := valid_vec(i)
-      toIPFPipe(i).bits.vSetIdx := vSetIdx_vec(i)
-      toIPFPipe(i).bits.ptage := ptag_vec(i)
+  val miss_handle_reg = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  val s1_port_miss = Seq(s1_fire && !s1_final_port_hit(0), s1_fire && !s1_final_port_hit(1) && s1_double_line)
+  when(s1_port_miss(0)) {
+    miss_handle_reg(0) := true.B
   }
+  when(s1_port_miss(1)) {
+    miss_handle_reg(1) := true.B
+  }
+  when(fromMSHR(0).fire()) {
+    miss_handle_reg(0) := false.B
+  }
+  when(fromMSHR(1).fire()) {
+    miss_handle_reg(1) := false.B
+  }
+  (0 until PortNumber).foreach{
+    i =>
+      toIPFPipe(i).valid := miss_handle_reg(i) || s1_port_miss(i)
+      toIPFPipe(i).bits.vSetIdx := Mux(s1_port_miss(i), s1_req_vsetIdx(i), s2_req_vsetIdx(i))
+      toIPFPipe(i).bits.ptage := Mux(s1_port_miss(i), s1_req_ptags(i), s2_req_ptags(i))
+  }
+
 
   /*** secondary miss judgment ***/
 

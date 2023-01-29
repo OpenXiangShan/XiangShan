@@ -70,7 +70,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromMSHR        = Flipped(Vec(PortNumber,ValidIO(UInt(PAddrBits.W))))
   val IPFBufferRead   = Flipped(new IPFBufferFilterRead)
   /** icache main pipe to prefetch pipe*/
-  val fromMainPipe    = Flipped(Vec(4, ValidIO(new MainPipeToPrefetchPipe)))
+  val fromMainPipe    = Flipped(Vec(PortNumber,ValidIO(new MainPipeToPrefetchPipe)))
 
   val prefetchEnable = Input(Bool())
   val prefetchDisable = Input(Bool())
@@ -466,10 +466,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p3_hit_dir = VecInit((0 until nPrefetchEntries).map(i => prefetch_dir(i).valid && prefetch_dir(i).paddr === p3_paddr )).reduce(_||_)
   //Cache miss handling by main pipe
-  val p3_ptag = get_phy_tag(p3_paddr)
-  val p3_hit_mp = VecInit((0 until 4).map(i => fromMainPipe(i).valid && (fromMainPipe(i).bits.ptage === p3_ptag &&
+  val p3_hit_mp_miss = VecInit((0 until PortNumber).map(i => fromMainPipe(i).valid && (fromMainPipe(i).bits.ptage === get_phy_tag(p3_paddr) &&
                                                             (fromMainPipe(i).bits.vSetIdx === p3_vidx)))).reduce(_||_)
-  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp || p3_buffer_hit || io.fencei
+  val p3_req_cancel = p3_hit_dir || p3_check_in_mshr || !enableBit || p3_hit_mp_miss || p3_buffer_hit || io.fencei
   p3_discard := p3_valid && p3_req_cancel
 
   toMissUnit.enqReq.valid := p3_valid && !p3_req_cancel
