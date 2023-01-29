@@ -22,7 +22,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import huancun.PrefetchRecv
-import huancun.utils.{RegNextN, ValidIODelay}
 import utils._
 import utility._
 import xiangshan._
@@ -603,7 +602,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
-  when (state === s_atomics_0 || state === s_atomics_1) {
+  when (state =/= s_normal) {
     // use store wb port instead of load
     loadUnits(0).io.ldout.ready := false.B
     // use load_0's TLB
