@@ -70,8 +70,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U && !req.bits.no_translate)
-    else (satp.mode === 8.U && (mode < ModeM) && !req.bits.no_translate)
+  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
+    else (satp.mode === 8.U && (mode < ModeM))
+  val portTranslateEnable = (0 until Width).map(i => vmEnable && !req(i).bits.no_translate)
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
@@ -118,10 +119,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   def TLBRead(i: Int) = {
     val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
+    val enable = portTranslateEnable(i)
 
     val hit = e_hit || p_hit
-    val miss = !hit && vmEnable
-    val fast_miss = !(e_super_hit || p_hit) && vmEnable
+    val miss = !hit && enable
+    val fast_miss = !(e_super_hit || p_hit) && enable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -138,15 +140,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
 
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
-      resp(i).bits.paddr(d) := Mux(vmEnable, paddr, vaddr)
+      resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
 
-    val pmp_paddr = Mux(vmEnable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
+    val pmp_paddr = Mux(enable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
     // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
-    // val pmp_paddr = Mux(vmEnable, paddr, vaddr)
-    val static_pm_valid = !(e_super_hit || p_hit) && vmEnable && q.partialStaticPMP.B
+    // val pmp_paddr = Mux(enable, paddr, vaddr)
+    val static_pm_valid = !(e_super_hit || p_hit) && enable && q.partialStaticPMP.B
 
     (hit, miss, pmp_paddr, static_pm, static_pm_valid, perm)
   }
@@ -174,7 +176,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
-    val fault_valid = vmEnable
+    val fault_valid = portTranslateEnable(idx)
     resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
@@ -218,8 +220,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       io.ptw.req(idx).fire() || resp(idx).fire(), flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
-    resp(idx).valid := req_out_v(idx) && !(miss_v && vmEnable)
-    when (io.ptw.resp.fire() && hit && req_out_v(idx) && vmEnable) {
+    resp(idx).valid := req_out_v(idx) && !(miss_v && portTranslateEnable(idx))
+    when (io.ptw.resp.fire() && hit && req_out_v(idx) && portTranslateEnable(idx)) {
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
@@ -242,7 +244,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
     // just resp valid and raise page fault to go through. The pipe(ifu) will abandon it.
     if (!q.outsideRecvFlush) {
-      when (req_out_v(idx) && flush_pipe(idx) && vmEnable) {
+      when (req_out_v(idx) && flush_pipe(idx) && portTranslateEnable(idx)) {
         resp(idx).valid := true.B
         for (d <- 0 until nRespDups) {
           resp(idx).bits.excp(d).pf.ld := true.B // sfence happened, pf for not to use this addr
@@ -271,21 +273,21 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val result_ok = req_in.map(a => RegNext(a.fire()))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire() else vmEnable && result_ok(i) })),
-      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) vmEnable && result_ok(i) && missVec(i) else ptw.req(i).fire() })),
+      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire() else portTranslateEnable(i) && result_ok(i) })),
+      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire() })),
     )
   generatePerfEvent()
 
   // perf log
   for (i <- 0 until Width) {
     if (Block(i)) {
-      XSPerfAccumulate(s"access${i}",result_ok(i)  && vmEnable)
+      XSPerfAccumulate(s"access${i}",result_ok(i) && portTranslateEnable(i))
       XSPerfAccumulate(s"miss${i}", result_ok(i) && missVec(i))
     } else {
-      XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
-      XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && vmEnable)
-      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
-      XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && vmEnable && missVec(i))
+      XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i))
+      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
   }
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
@@ -322,7 +324,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val difftest = Module(new DifftestL1TLBEvent)
       difftest.io.clock := clock
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && vmEnable
+      difftest.io.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
       difftest.io.index := i.U
       difftest.io.l1tlbid := l1tlbid
       difftest.io.satp := io.csr.satp.ppn
