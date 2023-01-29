@@ -1011,7 +1011,7 @@ def detectRollback(i: Int) = {
   vaddrModule.io.raddr(1) := deqPtr
   // Read vaddr for debug
   (0 until LoadPipelineWidth).map(i => {
-    vaddrModule.io.raddr(i+1) := loadWbSelGen(i)
+    vaddrModule.io.raddr(i+1) := loadReplaySel(i)
   })
 
   (0 until LoadPipelineWidth).map(i => {
