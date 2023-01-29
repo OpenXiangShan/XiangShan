@@ -738,7 +738,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   debug_miss_trace.source := io.req.bits.source
   debug_miss_trace.pc := io.req.bits.pc
 
-  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
+  val table = ChiselDB.createTable("L1MissTraceMissQueue", new L1MissTrace)
   table.log(debug_miss_trace, io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
 
   // Difftest

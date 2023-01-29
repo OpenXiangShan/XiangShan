@@ -229,7 +229,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_st.io // let the module have name in waveform
   })
   val dtlb_prefetch = VecInit(Seq.fill(1){
-    val tlb_prefetch = Module(new TLBNonBlock(1, 1, sttlbParams))
+    val tlb_prefetch = Module(new TLBNonBlock(1, 2, sttlbParams))
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
