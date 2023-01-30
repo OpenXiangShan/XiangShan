@@ -217,6 +217,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("fsm_busy", !idle)
   XSPerfAccumulate("fsm_idle", idle)
   XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
+  XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
