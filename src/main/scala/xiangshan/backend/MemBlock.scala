@@ -228,6 +228,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_st.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR)
   }
 
+  // TODO: fhy; implement it
+  when (dtlb_ld(0).refill_to_mem.valid) {
+    printf("Load Refill idx = %d\n", dtlb_ld(0).refill_to_mem.memidx.idx)
+  }
+  when (dtlb_st(0).refill_to_mem.valid) {
+    printf("Store Refill idx = %d\n", dtlb_st(0).refill_to_mem.memidx.idx)
+  }
 
   // pmp
   val pmp = Module(new PMP())
@@ -281,7 +288,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
-    // st-ld violation query 
+    // st-ld violation query
     for (s <- 0 until StorePipelineWidth) {
       loadUnits(i).io.reExecuteQuery(s) := storeUnits(s).io.reExecuteQuery
     }
@@ -387,8 +394,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     // io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
     // io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
-    io.stIn(i).valid := stu.io.issue.valid 
-    io.stIn(i).bits := stu.io.issue.bits 
+    io.stIn(i).valid := stu.io.issue.valid
+    io.stIn(i).bits := stu.io.issue.bits
 
     stu.io.stout.ready := true.B
 
@@ -438,7 +445,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
-  
+
   // Uncahce
   uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
