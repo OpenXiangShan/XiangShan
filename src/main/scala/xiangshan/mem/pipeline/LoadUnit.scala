@@ -112,6 +112,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // the priority is 
   // 2 > 1 > 3
   // now in S0, choise a load according to priority
+  // TODO: io.prefetch_in.valid (source 4) to be added here
 
   val s0_vaddr = Wire(UInt(VAddrBits.W))
   val s0_mask = Wire(UInt(8.W))
@@ -220,7 +221,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // prefetch ctrl signal gen
   val have_confident_hw_prefetch = io.prefetch_in.valid && (io.prefetch_in.bits.confidence > 0.U)
   val hw_prefetch_override = io.prefetch_in.valid &&
-  ((io.prefetch_in.bits.confidence > 0.U) || !io.in.valid)
+  ((io.prefetch_in.bits.confidence > 0.U) || !io.in.valid) &&
+  !io.lsqOut.valid
 
   // load flow select/gen
   //
