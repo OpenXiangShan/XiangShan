@@ -108,6 +108,11 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isFirstIssue := input.isFirstIssue
     meta_prefetch := DontCare
     meta_access := DontCare
+    forward_tlDchannel := DontCare
+    mshrid := DontCare
+    replayCarry := DontCare
+    atomic := DontCare
+    isLoadReplay := DontCare
   }
 }
 

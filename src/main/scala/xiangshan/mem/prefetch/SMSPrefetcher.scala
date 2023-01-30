@@ -845,7 +845,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     tlb_req_arb.io.in(i).bits.size := 3.U
-    tlb_req_arb.io.in(i).bits.debug.robIdx := DontCare
+    tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
     tlb_req_arb.io.in(i).bits.debug := DontCare
 
@@ -1082,7 +1082,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   trace.pc := 0.U
   trace.paddr := io.pf_addr.bits
   trace.source := pf_filter.io.debug_source_type
-  val table = ChiselDB.createTable("L1MissTraceSMS", new L1MissTrace)
+  val table = ChiselDB.createTable("L1MissTrace", new L1MissTrace)
   table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",
