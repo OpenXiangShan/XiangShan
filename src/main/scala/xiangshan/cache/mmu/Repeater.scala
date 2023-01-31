@@ -157,6 +157,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
   val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
@@ -211,7 +212,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   def filter_req() = {
     val reqs =  tlb_req.indices.map{ i =>
-      val req = Wire(ValidIO(new PtwReq()))
+      val req = Wire(ValidIO(new PtwReqwithMemIdx()))
       val merge = canMerge(i)
       req.bits := tlb_req(i).bits
       req.valid := !merge && tlb_req(i).valid
@@ -241,7 +242,10 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && io.ptw.resp.bits.entry.hit(a.bits.vpn, 0.U, true, true))
 
   io.tlb.resp.valid := ptwResp_valid
-  io.tlb.resp.bits.data := ptwResp
+  io.tlb.resp.bits.data.entry := ptwResp.entry
+  io.tlb.resp.bits.data.pf := ptwResp.pf
+  io.tlb.resp.bits.data.af := ptwResp.af
+  io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
 
   val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
@@ -256,6 +260,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
+        memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }
   }

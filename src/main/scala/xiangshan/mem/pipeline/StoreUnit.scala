@@ -52,6 +52,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.memidx.is_ld := false.B
+  io.dtlbReq.bits.memidx.is_st := true.B
+  io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
   io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
@@ -109,6 +112,12 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
+  // TODO: fhy; implement it
+  val s1_tlb_memidx = io.dtlbResp.bits.memidx
+  when (s1_tlb_memidx.is_st && io.dtlbResp.valid && !s1_tlb_miss) {
+    printf("Store idx = %d\n", s1_tlb_memidx.idx)
+  }
+
   val s1_mmio = is_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
 
@@ -118,8 +127,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // st-ld violation dectect request.
   io.reExecuteQuery.valid := io.in.valid && !s1_tlb_miss
-  io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx 
-  io.reExecuteQuery.bits.paddr := s1_paddr 
+  io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx
+  io.reExecuteQuery.bits.paddr := s1_paddr
   io.reExecuteQuery.bits.mask := io.in.bits.mask
 
   // Send TLB feedback to store issue queue
@@ -222,7 +231,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stout = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val storeMaskOut = Valid(new StoreMaskBundle)
-    val reExecuteQuery = Valid(new LoadReExecuteQueryIO) 
+    val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
     val issue = Valid(new ExuInput)
   })
 
@@ -242,7 +251,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss 
+  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss
   io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.in.valid)
 
   store_s1.io.dtlbResp <> io.tlb.resp

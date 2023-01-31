@@ -354,11 +354,25 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 
 }
 
+class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
+  val is_ld = Bool()
+  val is_st = Bool()
+  val idx =
+    if (LoadQueueSize >= StoreQueueSize) {
+      val idx = UInt(log2Ceil(LoadQueueSize).W)
+      idx
+    } else {
+      val idx = UInt(log2Ceil(StoreQueueSize).W)
+      idx
+    }
+}
+
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val cmd = Output(TlbCmd())
   val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
+  val memidx = Output(new MemBlockidxBundle)
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val robIdx = Output(new RobPtr)
@@ -391,6 +405,8 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
     val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }
+  val memidx = Output(new MemBlockidxBundle)
+
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr(0))} miss:${miss} excp.pf: ld:${excp(0).pf.ld} st:${excp(0).pf.st} instr:${excp(0).pf.instr} ptwBack:${ptwBack}"
   }
@@ -405,6 +421,16 @@ class TlbRequestIO(nRespDups: Int = 1)(implicit p: Parameters) extends TlbBundle
 class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val req = Vec(Width, DecoupledIO(new PtwReq))
   val resp = Flipped(DecoupledIO(new PtwResp))
+
+
+  override def toPrintable: Printable = {
+    p"req(0):${req(0).valid} ${req(0).ready} ${req(0).bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
+  }
+}
+
+class TlbPtwIOwithMemIdx(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
+  val req = Vec(Width, DecoupledIO(new PtwReqwithMemIdx))
+  val resp = Flipped(DecoupledIO(new PtwRespwithMemIdx))
 
 
   override def toPrintable: Printable = {
@@ -431,11 +457,17 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
   }
 }
 
+class TlbRefilltoMemIO()(implicit p: Parameters) extends TlbBundle {
+  val valid = Bool()
+  val memidx = new MemBlockidxBundle
+}
+
 class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val flushPipe = Vec(Width, Input(Bool()))
-  val ptw = new TlbPtwIO(Width)
+  val ptw = new TlbPtwIOwithMemIdx(Width)
+  val refill_to_mem = Output(new TlbRefilltoMemIO())
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
@@ -443,13 +475,13 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
 }
 
 class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
-  val req = Vec(Width, DecoupledIO(new PtwReq))
+  val req = Vec(Width, DecoupledIO(new PtwReqwithMemIdx()))
   val resp = Flipped(DecoupledIO(new Bundle {
-    val data = new PtwResp
+    val data = new PtwRespwithMemIdx
     val vector = Output(Vec(Width, Bool()))
   }))
 
-  def connect(normal: TlbPtwIO): Unit = {
+  def connect(normal: TlbPtwIOwithMemIdx): Unit = {
     req <> normal.req
     resp.ready := normal.resp.ready
     normal.resp.bits := resp.bits.data
@@ -707,6 +739,10 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
   }
 }
 
+class PtwReqwithMemIdx(implicit p: Parameters) extends PtwReq {
+  val memidx = new MemBlockidxBundle
+}
+
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf = Bool()
@@ -728,6 +764,11 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     p"entry:${entry} pf:${pf} af:${af}"
   }
 }
+
+class PtwRespwithMemIdx(implicit p: Parameters) extends PtwResp {
+  val memidx = new MemBlockidxBundle
+}
+
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))

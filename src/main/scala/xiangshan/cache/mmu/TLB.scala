@@ -51,6 +51,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
   val pmp = io.pmp
+  val refill_to_mem = io.refill_to_mem
 
   /** Sfence.vma & Svinval
     * Sfence.vma will 1. flush old entries 2. flush inflight 3. flush pipe
@@ -78,6 +79,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
   val refill = ptw.resp.fire() && !flush_mmu && vmEnable
+  refill_to_mem.valid := refill
+  refill_to_mem.memidx := ptw.resp.bits.memidx
+
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
@@ -131,6 +135,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.miss := miss
     resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := ptw.resp.fire()
+    resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
@@ -202,6 +207,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       io.ptw.req(idx).valid := false.B
     }
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
+    io.ptw.req(idx).bits.memidx := RegNext(req_out(idx).memidx)
   }
 
   def handle_block(idx: Int): Unit = {
@@ -211,6 +217,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
+    val miss_req_memidx = req_out(idx).memidx
     val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
     val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
@@ -239,6 +246,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
+    ptw_req.bits.memidx := miss_req_memidx
 
     // NOTE: when flush pipe, tlb should abandon last req
     // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
