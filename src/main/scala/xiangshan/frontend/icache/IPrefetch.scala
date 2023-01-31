@@ -106,6 +106,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   toITLB.bits.kill                := DontCare
   toITLB.bits.cmd                 := TlbCmd.exec
+  toITLB.bits.memidx              := DontCare
   toITLB.bits.debug.robIdx        := DontCare
   toITLB.bits.debug.isFirstIssue  := DontCare
 
