@@ -32,6 +32,24 @@ class MDPInfo(implicit p: Parameters) extends XSBundle{
   val waitAllStore = Bool()
 }
 
+class LsInfo(implicit p: Parameters) extends XSBundle{
+  val isL1TlbMiss = Bool()
+}
+
+object LsInfo{
+  def apply(isL1TlbMiss: Bool)(implicit p: Parameters): LsInfo = {
+    val debugInst = Wire(new LsInfo)
+    debugInst.isL1TlbMiss := isL1TlbMiss
+    debugInst
+  }
+}
+class DebugLsInfo(implicit p: Parameters) extends LsInfo{
+  val robPtr = new RobPtr
+}
+class DebugLSIO(implicit p: Parameters) extends XSBundle {
+  val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfo))
+}
+
 class InstDB(implicit p: Parameters) extends XSBundle{
   val globalID = UInt(XLEN.W)
   val instType = FuType()
@@ -336,6 +354,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val robFull = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
+    val debug_ls = Flipped(new DebugLSIO)
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -374,6 +393,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_microOp = Mem(RobSize, new MicroOp)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
+  val debug_instInfo = Reg(Vec(RobSize, new LsInfo))
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -463,6 +483,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.selectTime := timer
       debug_microOp(enqIndex).debugInfo.issueTime := timer
       debug_microOp(enqIndex).debugInfo.writebackTime := timer
+      debug_instInfo(enqIndex).isL1TlbMiss := false.B
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -787,14 +808,25 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     when (canEnqueue(i) && !io.redirect.valid) {
       valid(allocatePtrVec(i).value) := true.B
       replay_counter(allocatePtrVec(i).value) := 0.U
+      debug_instInfo(allocatePtrVec(i).value).isL1TlbMiss := false.B
     }
   }
   // dequeue logic writes 6 valid
   for (i <- 0 until CommitWidth) {
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
-      valid(commitReadAddr(i)) := false.B
-      replay_counter(allocatePtrVec(i).value) := 0.U
+      val idx = commitReadAddr(i)
+      valid(idx) := false.B
+      replay_counter(idx) := 0.U
+      debug_instInfo(idx).isL1TlbMiss := false.B
+    }
+  }
+
+  // debug_inst update
+  for(i <- 0 until (exuParameters.LduCnt + exuParameters.StuCnt)) {
+    when(io.debug_ls.debugLsInfo(i).isL1TlbMiss){
+      val idx = io.debug_ls.debugLsInfo(i).robPtr.value
+      debug_instInfo(idx).isL1TlbMiss := true.B
     }
   }
 
@@ -965,6 +997,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val commitDebugExu = deqPtrVec.map(_.value).map(debug_exuDebug(_))
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
+  val commitDebugInst = deqPtrVec.map(_.value).map(debug_instInfo(_))
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
@@ -1041,7 +1074,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       instData.ivaddr := io.commits.info(i).pc
       instData.dvaddr := commitDebugExu(i).vaddr
       instData.dpaddr := commitDebugExu(i).paddr
-      instData.isL1TlbMiss := commitDebugExu(i).isL1TlbMiss // if it is replayInst, is the signal always ture?
+      instData.isL1TlbMiss := commitDebugInst(i).isL1TlbMiss
       instData.accessLatency := accessLatency(i)
       instData.executeLatency := executeLatency(i)
       instData.issueLatency := issueLatency(i)

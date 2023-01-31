@@ -211,6 +211,9 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
   val runahead_checkpoint_id = UInt(64.W)
+  // TODO lyq: need add
+  // val tlbReqTime = UInt(XLEN.W)
+  // val tlbRespTime = UInt(XLEN.W) // when getting hit result (including delay in L2TLB hit)
 }
 
 // Separate LSQ
@@ -322,7 +325,6 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   /* add L/S inst info in EXU */
-  val isL1TlbMiss = Bool()
   // val L1toL2TlbLatency = UInt(XLEN.W)
   // val levelTlbHit = UInt(2.W)
 }
