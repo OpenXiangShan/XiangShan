@@ -387,7 +387,10 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   })
   val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
-
+  val debug = new Bundle {
+    val robIdx = Output(new RobPtr)
+    val isFirstIssue = Output(Bool())
+  }
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr(0))} miss:${miss} excp.pf: ld:${excp(0).pf.ld} st:${excp(0).pf.st} instr:${excp(0).pf.instr} ptwBack:${ptwBack}"
   }

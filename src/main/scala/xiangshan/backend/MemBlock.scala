@@ -26,7 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.rob.{DebugLSIO, RobLsqIO}
 import xiangshan.cache._
 import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
@@ -106,6 +106,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val debug_ls = new DebugLSIO
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -258,11 +259,41 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for(j <- 0 until 3)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
+  // TODO lyq: add dtlb timer
+  // DTLB timer
+  // ldTlbReqTimes = Reg(VecInit(LoadQueueSize, 0.U(XLEN.W)))
+  // ldTlbRespTimes = Reg(VecInit(LoadQueueSize, 0.U(XLEN.W)))
+  // stTlbReqTimes = Reg(VecInit(StoreQueueSize, 0.U(XLEN.W)))
+  // stTlbRespTimes = Reg(VecInit(StoreQueueSize, 0.U(XLEN.W)))
+  // TODO lyq: need merge tlb interface after updating & merge writeback output ports
+  // stTlb is the same logic as ldTlb
+  // when(dtlb_ld(i).req.fire && isFirstIssue){
+  //   ldTlbReqTimes(dtlb_ld(i).req.idx) := GTimer()
+  // }
+  // when(dtlb_ld(i).resp.refill_valid) {
+  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
+  // }.elsewhen(replay(i).valid && dtlb_ld(i).resp.hit){
+  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
+  // }.elsewhen(dtlb_ld(i).resp.hit){
+  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
+  // }
+  for(i <- 0 until exuParameters.LduCnt){
+    val tmp_tlb = dtlb_ld(0).requestor(i)
+    io.debug_ls.debugLsInfo(i).isL1TlbMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
+    io.debug_ls.debugLsInfo(i).robPtr := tmp_tlb.resp.bits.debug.robIdx
+  }
+  for (i <- 0 until exuParameters.StuCnt) {
+    val tmp_tlb = dtlb_st(0).requestor(i)
+    io.debug_ls.debugLsInfo(i+exuParameters.LduCnt).isL1TlbMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
+    io.debug_ls.debugLsInfo(i+exuParameters.LduCnt).robPtr := tmp_tlb.resp.bits.debug.robIdx
+  }
+
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    loadUnits(i).io.rsIdx := DontCare
-    loadUnits(i).io.isFirstIssue := DontCare
+    // TODO: 
+    loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx // DontCare
+    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // DontCare
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access

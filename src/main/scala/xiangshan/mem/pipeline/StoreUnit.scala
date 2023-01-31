@@ -204,7 +204,6 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
   io.stout.bits.debug.paddr := io.in.bits.paddr
   io.stout.bits.debug.vaddr := io.in.bits.vaddr
   io.stout.bits.debug.isPerfCnt := false.B
-  io.stout.bits.debug.isL1TlbMiss := io.in.bits.tlbMiss
   io.stout.bits.fflags := DontCare
 
 }

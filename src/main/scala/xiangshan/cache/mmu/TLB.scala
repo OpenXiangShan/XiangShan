@@ -84,6 +84,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
     entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
+    resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
+    resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
 
   // read TLB, get hit/miss, paddr, perm bits
