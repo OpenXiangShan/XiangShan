@@ -394,7 +394,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
   // request rep-lay from load replay queue, fast port
-  io.replayFast.valid := io.in.valid && !io.s1_kill
+  io.replayFast.valid := io.in.valid && !io.s1_kill && !s1_is_prefetch
   io.replayFast.ld_ld_check_ok := !needLdVioCheckRedo
   io.replayFast.st_ld_check_ok := !needReExecute
   io.replayFast.cache_bank_no_conflict := !s1_bank_conflict
@@ -662,8 +662,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.rsFeedback.valid := false.B
   io.rsFeedback.bits := DontCare
 
-  // request rep-lay from load replay queue, fast port
-  io.replaySlow.valid := io.in.valid
+  // request replay from load replay queue, fast port
+  io.replaySlow.valid := io.in.valid && !s2_is_prefetch
   io.replaySlow.tlb_hited := !s2_tlb_miss
   io.replaySlow.st_ld_check_ok := !needReExecute
   if (EnableFastForward) {
