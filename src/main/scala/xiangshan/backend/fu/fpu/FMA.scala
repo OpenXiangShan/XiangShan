@@ -127,8 +127,8 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
         Mux(fpCtrl.fmaCmd(0), invert_sign(src2, t.len), src2(t.len - 1, 0)),
         0.U(t.precision.W)
       )
-      s1.io.a := in1
-      s1.io.b := in2
+      s1.io.a := in2
+      s1.io.b := in1
       s1.io.b_inter_valid := fma
       s1.io.b_inter_flags := Mux(fma,
         mulProd(i).inter_flags,
