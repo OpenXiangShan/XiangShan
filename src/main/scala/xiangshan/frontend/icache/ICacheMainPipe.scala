@@ -90,7 +90,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val iprefetchBuf = Flipped(new IPFBufferRead)
   val PIQ          = Flipped(Vec(nPrefetchEntries,new PIQToMainPipe))
   val IPFBufMove   = Flipped(new IPFBufferMove)
-  val IPFPipe      = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe))
+  val mainPipeMissInfo = new MainPipeMissInfo()
+  val IPFPipe      = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe)) // need to be discarded
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -122,6 +123,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val fromPIQ             = io.PIQ.map(_.info)
   val IPFBufferMove       = io.IPFBufMove
   val toIPFPipe           = io.IPFPipe
+  val mainPipeMissInfo    = io.mainPipeMissInfo
 
   io.itlb.foreach(_.req_kill := false.B)
 
@@ -253,14 +255,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbExcp = VecInit((0 until PortNumber).map(i => tlbExcpPF(i) || tlbExcpPF(i)))
 
   val tlbRespAllValid = Cat((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i))).andR
-  toIPF.bits.tlbRespValid := tlbRespAllValid
-  val s1_wait_tlb = !tlbRespAllValid && s1_valid
-
-  val readIPF = s0_fire || s1_wait_tlb
-  toIPF.valid := readIPF
-  toIPF.bits.vaddr := Mux(s1_wait_tlb, s1_req_vaddr, s0_req_vaddr)
-  toIPF.bits.rvalid(0) := readIPF
-  toIPF.bits.rvalid(1) := (s0_fire && s0_double_line) || (s1_wait_tlb && s1_double_line)
 
   s1_ready := s2_ready && tlbRespAllValid && !s1_wait || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait
@@ -268,8 +262,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
-
-  toIPF.bits.paddr := s1_req_paddr
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
@@ -294,7 +286,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
   IPFBufferMove.waymask := UIntToOH(replacers(0).way(IPFBufferMove.vsetIdx))
 
-  assert((PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line)) || !s1_valid, "Multiple hit in main pipe")
+  assert((PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line)) || !s1_valid,
+    "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
+    PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
+    PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
@@ -303,8 +298,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port_hit_data
   })
 
-  val s1_ipf_hit  = ResultHoldBypass(data = VecInit(fromIPF.bits.ipf_hit.map(_ && fromIPF.valid)), valid = RegNext(s0_fire || readIPF)) // TODO: Handle TLB blocking in the prefetch buffer
-  val s1_ipf_data = ResultHoldBypass(data = fromIPF.bits.cacheline, valid = RegNext(s0_fire || readIPF))
+  /** check ipf */
+  toIPF(0).valid := s1_valid && tlb_resp_valid(0)
+  toIPF(1).valid := s1_valid && s1_double_line && tlb_resp_valid(1)
+  (0 until PortNumber).foreach { i =>
+    toIPF(i).bits.vaddr := s1_req_vaddr(i)
+    toIPF(i).bits.paddr := s1_req_paddr(i)
+  }
+  val s1_ipf_hit = VecInit((0 until PortNumber).map(i => toIPF(i).valid && fromIPF(i).valid && fromIPF(i).bits.ipf_hit)) // check in same cycle
+  val s1_ipf_hit_latch = VecInit((0 until PortNumber).map(i => holdReleaseLatch(valid = s1_ipf_hit(i), release = s1_fire, flush = false.B))) // when ipf return hit data, latch it!
+  val s1_ipf_data = VecInit((0 until PortNumber).map(i => ResultHoldBypass(data = fromIPF(i).bits.cacheline, valid = s1_ipf_hit(i))))
+
 
   /** check in PIQ, if hit, wait until prefetch port hit */
   //TODO: move this to PIQ
@@ -317,8 +321,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid && tlbRespAllValid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line && tlbRespAllValid)) // TODO: Handle TLB blocking in the PIQ
   val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
   val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
-  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
-  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
   val s1_PIQ_hit      = VecInit((0 until PortNumber).map(i => PIQ_write_back(i) || PIQ_hold_res(i)))
   s1_wait := s1_wait_vec(0) || (s1_double_line && s1_wait_vec(1))
 
@@ -331,25 +335,35 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   )
 
   if(DebugFlags.fdip){
-    when(s1_valid && (RegNext(!s1_wait) && s1_wait)){
-      printf("|%d| ICache main pipe stage1: Hit in PIQ, waitting for prefetch\n", GTimer())
-    }
-    (0 until PortNumber).map(
-      i =>
-         when(s1_fire && !s1_port_hit(i) && !s1_ipf_hit(i) && PIQ_hit(i)){
-          printf("|%d| ICache main pipe stage1: Get prefetch data from PIQ, port: %d\n", GTimer(), i.U)
-        }
-    )
+//    when(s1_valid && (RegNext(!s1_wait) && s1_wait)){
+//      printf("|%d| ICache main pipe stage1: Hit in PIQ, waitting for prefetch\n", GTimer())
+//    }
+//    (0 until PortNumber).map(
+//      i =>
+//         when(s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i)){
+//          printf("|%d| ICache main pipe stage1: Get prefetch data from PIQ, port: %d\n", GTimer(), i.U)
+//        }
+//    )
   }
   val s1_PIQ_data = VecInit((0 until PortNumber).map(
     i =>
       ResultHoldBypass(data = PIQ_hit_data(i), valid = PIQ_write_back(i))
   ))
 
-  toIPF.bits.both_hit_in_icache_and_ipfbuffer := VecInit((0 until PortNumber).map(i =>s1_port_hit(i) && s1_ipf_hit(i)))
+//  toIPF.bits.both_hit_in_icache_and_ipfbuffer := VecInit((0 until PortNumber).map(i =>s1_port_hit(i) && s1_ipf_hit(i)))
 
-  val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit(i) || s1_PIQ_hit(i)))
-  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit(i),s1_ipf_data(i), Mux(s1_port_hit(i),s1_hit_data(i),s1_PIQ_data(i)))))
+  val s1_final_port_hit = VecInit((0 until PortNumber).map(i => s1_port_hit(i) || s1_ipf_hit_latch(i) || s1_PIQ_hit(i)))
+  val s1_final_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i),s1_ipf_data(i), Mux(s1_port_hit(i),s1_hit_data(i),s1_PIQ_data(i)))))
+
+  /** s1 mainPipe miss info : when s1_miss_info.valid=true,it means s1 "must will" send s2 the miss req which s1_miss_info contains */
+//  mainPipeMissInfo.s1_miss_info(0).valid := s1_valid && tlbRespAllValid && !tlbExcp(0) && !s1_wait_vec(0) && !s1_final_port_hit(0)
+//  mainPipeMissInfo.s1_miss_info(1).valid := s1_valid && s1_double_line && tlbRespAllValid && !tlbExcp(1) && !s1_wait_vec(1) && !s1_final_port_hit(1)
+//  (0 until PortNumber).foreach { i =>
+//    mainPipeMissInfo.s1_miss_info(i).bits.vSetIdx := s1_req_vsetIdx(i)
+//    mainPipeMissInfo.s1_miss_info(i).bits.ptage := s1_req_ptags(i)
+//  }
+  /** when tlb stall, ipfBuffer stage2 need also stall */
+  mainPipeMissInfo.s1_already_check_ipf := s1_valid && tlbRespAllValid // when tlb back, s1 must has already check ipf
 
   /** <PERF> replace victim way number */
 
@@ -520,14 +534,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val  miss_0_except_1  = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  &&  cacheline_0_miss
   val  except_0         = RegNext(s1_fire) && s2_except(0)
 
-  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
-    val bit = RegInit(false.B)
-    when(flush)                   { bit := false.B  }
-      .elsewhen(valid && !release)  { bit := true.B  }
-      .elsewhen(release)            { bit := false.B}
-    bit || valid
-  }
-
   /*** miss/hit pattern latch: <Control Signal> latch the miss/hit patter if pipeline stop ***/
   val  miss_0_hit_1_latch     =   holdReleaseLatch(valid = miss_0_hit_1,    release = s2_fire,      flush = false.B)
   val  miss_0_miss_1_latch    =   holdReleaseLatch(valid = miss_0_miss_1,   release = s2_fire,      flush = false.B)
@@ -542,12 +548,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val hit_0_hit_1_latch        = holdReleaseLatch(valid = hit_0_hit_1,   release = s2_fire,      flush = false.B)
 
   if (DebugFlags.fdip) {
-    when(only_0_miss || miss_0_hit_1 || miss_0_miss_1) {
-      printf("{%d} ICache miss, port: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), 0.U, s2_req_vaddr(0), addrAlign(s2_req_vaddr(0), blockBytes, VAddrBits))
-    }
-    when(hit_0_miss_1 || miss_0_miss_1) {
-      printf("{%d} ICache miss, port: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), 1.U, s2_req_vaddr(1), addrAlign(s2_req_vaddr(1), blockBytes, VAddrBits))
-    }
+//    when(only_0_miss || miss_0_hit_1 || miss_0_miss_1) {
+//      printf("{%d} ICache miss, port: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), 0.U, s2_req_vaddr(0), addrAlign(s2_req_vaddr(0), blockBytes, VAddrBits))
+//    }
+//    when(hit_0_miss_1 || miss_0_miss_1) {
+//      printf("{%d} ICache miss, port: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), 1.U, s2_req_vaddr(1), addrAlign(s2_req_vaddr(1), blockBytes, VAddrBits))
+//    }
   }
   /** miss handle information to iprefetch pipe */
   //TODO: better cancle logic
@@ -570,6 +576,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       toIPFPipe(i).valid := miss_handle_reg(i) || s1_port_miss(i)
       toIPFPipe(i).bits.vSetIdx := Mux(s1_port_miss(i), s1_req_vsetIdx(i), s2_req_vsetIdx(i))
       toIPFPipe(i).bits.ptage := Mux(s1_port_miss(i), s1_req_ptags(i), s2_req_ptags(i))
+  }
+
+  /** s2 mainPipe miss info */
+  mainPipeMissInfo.s2_miss_info(0).valid := s2_valid && (miss_0_hit_1_latch || miss_0_miss_1_latch || only_0_miss_latch || miss_0_except_1_latch) && !except_0_latch
+  mainPipeMissInfo.s2_miss_info(1).valid := s2_valid && (miss_0_miss_1_latch || hit_0_miss_1_latch)
+  (0 until 2).foreach { i =>
+    mainPipeMissInfo.s2_miss_info(i).bits.vSetIdx := s2_req_vsetIdx(i)
+    mainPipeMissInfo.s2_miss_info(i).bits.ptage := s2_req_ptags(i)
   }
 
 

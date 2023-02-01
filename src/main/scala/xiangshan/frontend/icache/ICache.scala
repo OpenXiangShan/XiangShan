@@ -1,3 +1,4 @@
+
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
@@ -49,7 +50,8 @@ case class ICacheParameters(
 )extends L1CacheParameters {
 
   val setBytes = nSets * blockBytes
-  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+//  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val aliasBitsOpt = DCacheParameters.apply().aliasBitsOpt // TODO : temporary method to slove alias problem
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
@@ -88,7 +90,8 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
   def nIPFBufferSize   = cacheParams.nPrefBufferEntries
-  def maxIPFMoveConf   = blockBytes/(instBytes*PredictWidth)
+//  def maxIPFMoveConf   = blockBytes/(instBytes*PredictWidth)
+  def maxIPFMoveConf   = 1 // temporary use small value to cause more "move" operation
 
   def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
     val valid  = RegInit(false.B)
@@ -100,6 +103,14 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
     Mux(valid, data, RegEnable(data, valid))
+  }
+
+  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
+    val bit = RegInit(false.B)
+    when(flush)                   { bit := false.B  }
+      .elsewhen(valid && !release)  { bit := true.B  }
+      .elsewhen(release)            { bit := false.B}
+    bit || valid
   }
 
   def generateState(enable: Bool, release: Bool): Bool = {
@@ -510,6 +521,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val metaArray = Module(new ICacheMetaArray)
   val metaArrayCopy = Module(new ICacheMetaArray)
+  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
   val dataArray = Module(new ICacheDataArray)
   val mainPipe = Module(new ICacheMainPipe)
   val missUnit = Module(new ICacheMissUnit(edge))
@@ -529,6 +541,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.IPFBufMove <> ipfBuffer.io.replace
   ipfBuffer.io.filter_read <> prefetchPipe.io.IPFBufferRead
   mainPipe.io.IPFPipe <> prefetchPipe.io.fromMainPipe
+  mainPipe.io.mainPipeMissInfo <> ipfBuffer.io.mainpipe_missinfo
 
   ipfBuffer.io.fencei := io.fencei
   missUnit.io.fencei := io.fencei
@@ -537,13 +550,16 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   metaArray.io.fencei     := io.fencei
   metaArrayCopy.io.fencei := io.fencei
+  metaArrayMoveFilterCopy.io.fencei := io.fencei
 
   meta_read_arb.io.in(0) <> mainPipe.io.metaArray.toIMeta
   metaArray.io.read <> meta_read_arb.io.out
   metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
+  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
 
   mainPipe.io.metaArray.fromIMeta <> metaArray.io.readResp
   prefetchPipe.io.fromIMeta <> metaArrayCopy.io.readResp
+  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayMoveFilterCopy.io.readResp
 
   data_read_arb.io.in(0) <> mainPipe.io.dataArray.toIData
   dataArray.io.read <> data_read_arb.io.out
@@ -557,6 +573,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   metaArray.io.write <> meta_write_arb.io.out
   metaArrayCopy.io.write <> meta_write_arb.io.out
+  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
   dataArray.io.write <> data_write_arb.io.out
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
@@ -633,6 +650,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid

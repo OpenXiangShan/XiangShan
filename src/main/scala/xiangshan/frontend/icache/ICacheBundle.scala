@@ -107,23 +107,35 @@ class PIQMetaWrite(implicit p: Parameters) extends  IPrefetchBundle{
   val paddr = UInt(PAddrBits.W)
 }
 
-class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
-  /** input */
-  val req = Flipped(Decoupled(new Bundle{
-    //stage 0: vaddr by s0
-    val vaddr  = Vec(PortNumber, UInt(VAddrBits.W))
-    val rvalid = Vec(PortNumber, Bool())
-    //stage 1: paddr by s1
-    val paddr = Vec(PortNumber, UInt(PAddrBits.W))
-    val tlbRespValid = Bool()
-    val both_hit_in_icache_and_ipfbuffer = Vec(PortNumber, Bool())
+class IPFBufferRead(implicit p: Parameters) extends IPrefetchBundle {
+  val req = Vec(PortNumber, Flipped(DecoupledIO(new Bundle {
+    val vaddr = UInt(VAddrBits.W)
+    val paddr = UInt(PAddrBits.W)
+  })))
+  val resp = Vec(PortNumber, ValidIO(new Bundle {
+    val ipf_hit = Bool()
+    val cacheline = UInt(blockBits.W)
   }))
-  /** output */
-  val resp = ValidIO(new Bundle{
-    val ipf_hit      = Vec(PortNumber, Bool())
-    val cacheline    = Vec(PortNumber, UInt(blockBits.W))
-  })
 }
+
+/** need to be discarded */
+//class IPFBufferRead(implicit p: Parameters) extends  IPrefetchBundle{
+//  /** input */
+//  val req = Flipped(Decoupled(new Bundle{
+//    //stage 0: vaddr by s0
+//    val vaddr  = Vec(PortNumber, UInt(VAddrBits.W))
+//    val rvalid = Vec(PortNumber, Bool())
+//    //stage 1: paddr by s1
+//    val paddr = Vec(PortNumber, UInt(PAddrBits.W))
+//    val tlbRespValid = Bool()
+//    val both_hit_in_icache_and_ipfbuffer = Vec(PortNumber, Bool())
+//  }))
+//  /** output */
+//  val resp = ValidIO(new Bundle{
+//    val ipf_hit      = Vec(PortNumber, Bool())
+//    val cacheline    = Vec(PortNumber, UInt(blockBits.W))
+//  })
+//}
 
 class IPFBufferFilterRead(implicit p: Parameters) extends  IPrefetchBundle{
   /** input */

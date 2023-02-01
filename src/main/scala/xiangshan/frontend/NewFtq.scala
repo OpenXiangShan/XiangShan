@@ -994,10 +994,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send && !prefetch_faraway_from_ifu && !prefetch_too_late
     io.toPrefetch.req.bits.target := prefetch_addr
     if(DebugFlags.fdip){
-      when(io.toPrefetch.req.fire()) {
-        printf("[%d] FTQ send a request to prefetch, distance of prefetch and ifu: %d, ifu: %d, prefetch: %d, bpu: %d, vaddr: 0x%x\n",
-          GTimer(), distance_between_prefetch_ifu, ifuPtr.value, prefetchPtr.value, bpuPtr.value, prefetch_addr)
-      }
+//      when(io.toPrefetch.req.fire()) {
+//        printf("[%d] FTQ send a request to prefetch, distance of prefetch and ifu: %d, ifu: %d, prefetch: %d, bpu: %d, vaddr: 0x%x\n",
+//          GTimer(), distance_between_prefetch_ifu, ifuPtr.value, prefetchPtr.value, bpuPtr.value, prefetch_addr)
+//      }
     }
 
 

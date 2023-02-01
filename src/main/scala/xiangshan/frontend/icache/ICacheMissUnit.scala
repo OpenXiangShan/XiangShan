@@ -234,6 +234,13 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
                               bankIdx = req_idx(0),
                               paddr = req.paddr)
 
+  if (DebugFlags.fdip) {
+    when(io.meta_write.fire) {
+      printf("<%d> MissUnit: write data to meta sram:ptag=0x%x,vidx=0x%x,waymask=0x%x, vaddr=0x%x\n",
+        GTimer(), req_tag, req_idx, req_waymask, req.vaddr)
+    }
+  }
+
   XSPerfAccumulate(
     "entryPenalty" + Integer.toString(id, 10),
     BoolStopWatch(
