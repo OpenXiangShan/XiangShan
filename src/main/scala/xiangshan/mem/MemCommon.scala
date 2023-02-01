@@ -71,6 +71,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   // prefetch
   val isPrefetch = Bool()
   val isHWPrefetch = Bool()
+  def isSWPrefetch = isPrefetch && !isHWPrefetch
 
   // For debug usage
   val isFirstIssue = Bool()

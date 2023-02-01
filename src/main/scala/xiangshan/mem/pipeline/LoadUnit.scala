@@ -152,7 +152,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.isFirstIssue
     s0_rsIdx := io.rsIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
-
   }.otherwise {
     if (EnableLoadToLoadForward) {
       tryFastpath := io.fastpath.valid
@@ -221,7 +220,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // prefetch ctrl signal gen
   val have_confident_hw_prefetch = io.prefetch_in.valid && (io.prefetch_in.bits.confidence > 0.U)
   val hw_prefetch_override = io.prefetch_in.valid &&
-  ((io.prefetch_in.bits.confidence > 0.U) || !io.in.valid) &&
+  ((io.prefetch_in.bits.confidence > 0.U) || !s0_valid) &&
   !io.lsqOut.valid
 
   // load flow select/gen
@@ -393,11 +392,11 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.rsFeedback.bits.sourceType := Mux(s1_bank_conflict, RSFeedbackType.bankConflict, RSFeedbackType.ldVioCheckRedo)
   io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
-  // request rep-lay from load replay queue, fast port
-  io.replayFast.valid := io.in.valid && !io.s1_kill && !s1_is_prefetch
-  io.replayFast.ld_ld_check_ok := !needLdVioCheckRedo
-  io.replayFast.st_ld_check_ok := !needReExecute
-  io.replayFast.cache_bank_no_conflict := !s1_bank_conflict
+  // request replay from load replay queue, fast port
+  io.replayFast.valid := io.in.valid && !io.s1_kill && !s1_is_hw_prefetch
+  io.replayFast.ld_ld_check_ok := !needLdVioCheckRedo || s1_is_prefetch
+  io.replayFast.st_ld_check_ok := !needReExecute || s1_is_prefetch
+  io.replayFast.cache_bank_no_conflict := !s1_bank_conflict || s1_is_prefetch
   io.replayFast.ld_idx := io.in.bits.uop.lqIdx.value
 
   // if replay is detected in load_s1,
