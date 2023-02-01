@@ -827,7 +827,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.loadPaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
   io.lsq.loadPaddrIn.bits.paddr := load_s1.io.lsuPAddr
 
-  io.lsq.loadVaddrIn.valid := load_s1.io.in.valid && !load_s1.io.s1_kill
+  io.lsq.loadVaddrIn.valid := load_s1.io.in.valid && !load_s1.io.s1_kill && !load_s1.io.out.bits.isHWPrefetch
   io.lsq.loadVaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
   io.lsq.loadVaddrIn.bits.vaddr := load_s1.io.out.bits.vaddr
 
