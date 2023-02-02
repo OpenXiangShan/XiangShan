@@ -204,6 +204,23 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   l1_pf_req.ready := (l1_pf_req.bits.confidence > 0.U) ||
     loadUnits.map(!_.io.ldin.valid).reduce(_ || _)
 
+  // l1 pf fuzzer interface
+  val DebugEnableL1PFFuzzer = false
+  if (DebugEnableL1PFFuzzer) {
+    // l1 pf req fuzzer
+    val fuzzer = Module(new L1PrefetchFuzzer())
+    fuzzer.io.vaddr := DontCare
+    fuzzer.io.paddr := DontCare
+
+    // override load_unit prefetch_req
+    loadUnits.foreach(load_unit => {
+      load_unit.io.prefetch_req.valid <> fuzzer.io.req.valid
+      load_unit.io.prefetch_req.bits <> fuzzer.io.req.bits
+    })
+
+    fuzzer.io.req.ready := l1_pf_req.ready
+  }
+
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrappper)
   val vlsq    = Module(new DummyVectorLsq)
