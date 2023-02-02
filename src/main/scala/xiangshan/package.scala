@@ -62,29 +62,31 @@ package object xiangshan {
 
   // Todo: Use OH instead
   object FuType {
-    def jmp          = "b00000".U
-    def i2f          = "b00001".U
-    def csr          = "b00010".U
-    def alu          = "b00110".U
-    def mul          = "b00100".U
-    def div          = "b00101".U
-    def fence        = "b00011".U
-    def bku          = "b00111".U
+    def jmp   = UIntToOH(0.U, num)
+    def brh   = UIntToOH(1.U, num)
+    def i2f   = UIntToOH(2.U, num)
+    def csr   = UIntToOH(3.U, num)
+    def alu   = UIntToOH(4.U, num)
+    def mul   = UIntToOH(5.U, num)
+    def div   = UIntToOH(6.U, num)
+    def fence = UIntToOH(7.U, num)
+    def bku   = UIntToOH(8.U, num)
+    def vset  = UIntToOH(9.U, num)
 
-    def fmac         = "b01000".U
-    def fmisc        = "b01011".U
-    def fDivSqrt     = "b01010".U
+    def fmac     = UIntToOH(10.U, num)
+    def fmisc    = UIntToOH(11.U, num)
+    def fDivSqrt = UIntToOH(12.U, num)
 
-    def ldu          = "b01100".U
-    def stu          = "b01101".U
-    def mou          = "b01111".U // for amo, lr, sc, fence
-    def vipu         = "b10000".U
-    def vfpu         = "b11000".U
-    def vldu         = "b11100".U
-    def vstu         = "b11101".U
-    def X            = BitPat("b00000")
+    def ldu      = UIntToOH(13.U, num)
+    def stu      = UIntToOH(14.U, num)
+    def mou      = UIntToOH(15.U, num) // for amo, lr, sc, fence
+    def vipu     = UIntToOH(16.U, num)
+    def vfpu     = UIntToOH(17.U, num)
+    def vldu     = UIntToOH(18.U, num)
+    def vstu     = UIntToOH(19.U, num)
+    def X        = BitPat.dontCare(num)
 
-    def num = 18
+    def num = 20
 
     def apply() = UInt(log2Up(num).W)
 
