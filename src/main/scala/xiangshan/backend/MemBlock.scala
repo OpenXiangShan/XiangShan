@@ -432,6 +432,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // Prefetcher
   val PrefetcherDTLBPortIndex = exuParameters.LduCnt + exuParameters.StuCnt
+  dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
+  dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
   prefetcherOpt.foreach(pf => {
     dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
   })
