@@ -32,6 +32,7 @@ import top.BusPerfMonitor
 import xiangshan.backend.fu.PMAConst
 import huancun._
 import huancun.debug.TLLogger
+import huancun.utils.RegNextN
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -115,11 +116,11 @@ trait HaveSlaveAXI4Port {
     TLBuffer() :=
     AXI4ToTL() :=
     AXI4Buffer() :=
-    AXI4UserYanker(Some(32)) :=
+    AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
-    AXI4IdIndexer(5) :=
+    AXI4IdIndexer(0) :=
     l3FrontendAXI4Node
   errorDevice.node := dma_xbar
   l3_xbar := TLBuffer.chainNode(2) := dma_xbar
@@ -286,10 +287,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   debugModule.debug.node := peripheralXbar
   val debug_xbar = TLXbar()
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    debug_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+    debug_xbar := TLBuffer.chainNode(2) := sb2tl.node
   }
-  l3_xbar := TLBuffer.chainNode(2) := TLWidthWidget(8) := TLBuffer.chainNode(2) := debug_xbar
-  peripheralXbar := TLBuffer.chainNode(4) := debug_xbar
+  l3_xbar := TLBuffer.chainNode(5) := TLWidthWidget(1) := TLBuffer.chainNode(5) := debug_xbar
+  peripheralXbar := TLBuffer.chainNode(5) := TLWidthWidget(1) := TLBuffer.chainNode(5) := debug_xbar
 
   val pma = LazyModule(new TLPMA)
   pma.node :=
@@ -308,7 +309,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     // sync external interrupts
     require(plicSource.module.in.length == ext_intrs.getWidth)
-    for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
+    val ext_intrs_pipe = RegNextN(ext_intrs, 20)
+    val interrupt_bits = Wire(UInt(NrExtIntr.W))
+    interrupt_bits := ext_intrs_pipe
+    for ((plic_in, interrupt) <- plicSource.module.in.zip(interrupt_bits.asBools)) {
       val ext_intr_sync = RegInit(0.U(3.W))
       ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
       plic_in := ext_intr_sync(2)
