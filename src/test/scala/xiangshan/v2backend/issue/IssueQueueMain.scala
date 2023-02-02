@@ -10,6 +10,7 @@ object IssueQueueMain extends App {
     val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val config: BaseConfig = new BaseConfig(1)
 
+    val p = config.alterPartial({case XSCoreParamsKey => XSCoreParameters})
     val iq: IssueQueue = LazyModule(new IssueQueue()(config.alterPartial({
       case XSCoreParamsKey => XSCoreParameters()
     })))

@@ -5,22 +5,19 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.v2backend.Bundles.{DynInst, ExuInput, WriteBackBundle, IssueQueueWakeUpBundle}
+import xiangshan.v2backend.Bundles.{DynInst, ExuInput, IssueQueueWakeUpBundle, WriteBackBundle}
+import xiangshan.v2backend._
 import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
 
-trait Region
-case class IntRegion() extends Region
-case class VfRegion() extends Region
-
 case class IssueQueueParams(
-  region                 : Region,
-  var numEntries         : Int = 0,
-  var numEnq             : Int = 0,
-  var numDeq             : Int = 0,
-  var numSrc             : Int = 0,
-  var dataBits           : Int = 0,
-  var pregBits           : Int = 0,
-  var numWakeupFromWB    : Int = 0,
+  var numEntries         : Int,
+  var numEnq             : Int,
+  var numDeq             : Int,
+  var numSrc             : Int,
+  var dataBits           : Int,
+  var pregBits           : Int,
+  var numWakeupFromWB    : Int,
+  var schdType           : SchedulerType = NoScheduler(),
   var numWakeupFromIQ    : Int = 0,
   var numWakeupFromOthers: Int = 0,
   var hasBranch          : Boolean = false,
@@ -35,12 +32,20 @@ case class IssueQueueParams(
   def hasLoadStore = hasLoad || hasStore || hasMemAddr
   def hasRedirectOut = hasBranch || hasJump
   def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
+
+  def generateIssueBundle: DecoupledIO[ExuInput] = {
+    DecoupledIO(new ExuInput(this.dataBits, this.numSrc))
+  }
+
+  def generateReadRfBundle: DecoupledIO[UInt] = {
+    DecoupledIO(UInt(this.pregBits.W))
+  }
 }
 
 object DummyIQParams {
   def apply(): IssueQueueParams = {
     IssueQueueParams(
-      region           = IntRegion(),
+      schdType         = IntScheduler(),
       numEntries       = 16,
       numEnq           = 2,
       numDeq           = 2,
@@ -52,12 +57,12 @@ object DummyIQParams {
   }
 }
 
-class IssueQueue(implicit p: Parameters) extends LazyModule {
-  implicit val iqParams = DummyIQParams() // Todo: initialize it
+class IssueQueue(params: IssueQueueParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  implicit val iqParams = params
 
-  lazy val module = iqParams.region match {
-    case IntRegion() => new IssueQueueIntImp(this)
-    case VfRegion() => new IssueQueueImp(this)
+  lazy val module = iqParams.schdType match {
+    case IntScheduler() => new IssueQueueIntImp(this)
+    case _ => new IssueQueueImp(this)
   }
 }
 

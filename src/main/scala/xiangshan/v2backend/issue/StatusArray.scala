@@ -4,10 +4,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.XSError
-import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.SqPtr
 import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
+import xiangshan._
 
 class StatusEntry(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
   val srcState = Vec(params.numSrc, SrcState())
