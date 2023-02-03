@@ -125,7 +125,6 @@ object ExeUnitDef {
       case JumpCSRExeUnitCfg => Definition(new JumpCSRExeUnit)
       case FmacExeUnitCfg => Definition(new FmacExeUnit)
       case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
-      case StdExeUnitCfg => Definition(new StdExeUnit)
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null
