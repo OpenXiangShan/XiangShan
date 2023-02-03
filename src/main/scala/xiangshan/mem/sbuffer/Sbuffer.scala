@@ -390,7 +390,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         cohCount(entryIdx) := 0.U
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
-        vtag(entryIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
+        vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
       }
     })
   }

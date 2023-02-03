@@ -186,7 +186,7 @@ class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
   val paddr = UInt(PAddrBits.W)
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask = UInt(8.W)  
+  val mask = UInt((VLEN/8).W)
 }
 
 // Store byte valid mask write bundle

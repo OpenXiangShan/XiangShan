@@ -724,7 +724,7 @@ def detectRollback(i: Int) = {
 
     // check if load already in lq needs to be rolledback
     dataModule.io.violation(i).paddr := io.storeIn(i).bits.paddr
-    dataModule.io.violation(i).mask := io.storeIn(i).bits.mask
+    dataModule.io.violation(i).mask := Mux(io.storeIn(i).bits.paddr(3),io.storeIn(i).bits.mask(15,8),io.storeIn(i).bits.mask(7,0))
     val addrMaskMatch = RegNext(dataModule.io.violation(i).violationMask)
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueSize).map(j => {
       allocated(j) && stToEnqPtrMask(j) && datavalid(j)

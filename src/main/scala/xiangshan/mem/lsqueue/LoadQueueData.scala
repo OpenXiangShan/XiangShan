@@ -67,7 +67,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numWBanks: Int
   val numEntryPerBank = numEntries / numWBanks
 
   val data = Reg(Vec(numEntries, UInt((PAddrBits).W)))
-
+ // val dataType = Reg(Vec(numEntries,Vec(3,Bool())))
   // read ports
   for (i <- 0 until numRead) {
     io.rdata(i) := data(RegNext(io.raddr(i)))
@@ -123,7 +123,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numWBanks: Int
   // content addressed match
   for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheWordOffset) === data(j)(PAddrBits-1, DCacheWordOffset)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
     }
   }
   for (i <- 0 until LoadPipelineWidth) {
