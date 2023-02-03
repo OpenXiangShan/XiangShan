@@ -72,7 +72,6 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     for (j <- 0 until numEntries) {
       // io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
       val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
-      //val wordhit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
       val hit128bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheVWordOffset) === data(j)(DCacheLineOffset-1, DCacheVWordOffset)
       io.forwardMmask(i)(j) := linehit && (hit128bit || lineflag(j))
     }
