@@ -489,9 +489,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   val forwardData = Wire(Vec((VLEN/8), UInt(8.W)))
 
 
-
-
-
   // generate XLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
     forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
@@ -630,6 +627,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
     //  2. Load instruction is younger than requestors(store instructions).
     //  3. Physical address match. 
     //  4. Data contains.
+    val s2_reExecuteQuery_mask = Mux(io.reExecuteQuery(i).bits.paddr(3),io.reExecuteQuery(i).bits.mask(15,8),io.reExecuteQuery(i).bits.mask(7,0))
     needReExecuteVec(i) := io.reExecuteQuery(i).valid &&
                               isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(i).bits.robIdx) && 
                               !s2_tlb_miss &&
