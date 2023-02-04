@@ -319,12 +319,12 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
     //  2. Load instruction is younger than requestors(store instructions).
     //  3. Physical address match. 
     //  4. Data contains.    
-   val reExecuteQuery_mask = Mux(io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
+   val s1_reExecuteQuery_mask = Mux(io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
     needReExecuteVec(w) := io.reExecuteQuery(w).valid &&
                           isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) && 
                           !s1_tlb_miss &&
                           (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3)) &&
-                          (s1_mask & reExecuteQuery_mask).orR
+                          (s1_mask & s1_reExecuteQuery_mask).orR
                           //(s1_mask & io.reExecuteQuery(w).bits.mask).orR
   }
   needReExecute := needReExecuteVec.asUInt.orR
@@ -632,7 +632,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
                               isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(i).bits.robIdx) && 
                               !s2_tlb_miss &&
                               (s2_paddr(PAddrBits-1,3) === io.reExecuteQuery(i).bits.paddr(PAddrBits-1, 3)) && 
-                              (s2_mask & io.reExecuteQuery(i).bits.mask).orR 
+                              (s2_mask & s2_reExecuteQuery_mask).orR
   }
   needReExecute := needReExecuteVec.asUInt.orR
   io.needReExecute := needReExecute
