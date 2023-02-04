@@ -154,4 +154,13 @@ simv:
 verilog-decode:
 	mill -i XiangShan.test.runMain xiangshan.DecodeMain -td build --output-file DecodeUnit.v
 
+# chiseltest
+# autorun all the chiselTest case
+test:
+	mill -i XiangShan.test.test
+
+# only run DecodeUnitTest
+test-DecodeUnit:
+	mill -i XiangShan.test.testOnly xiangshan.DecodeUnitTest
+
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
