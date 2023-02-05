@@ -24,6 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.rob.DebugLsInfo
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
@@ -73,6 +74,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
+  when(io.in.valid && io.isFirstIssue) {
+    io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
+  }
 
   // exception check
   val addrAligned = LookupTree(io.in.bits.uop.ctrl.fuOpType(1,0), List(
@@ -112,11 +116,6 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  // TODO: fhy; implement it
-  val s1_tlb_memidx = io.dtlbResp.bits.memidx
-  when (s1_tlb_memidx.is_st && io.dtlbResp.valid && !s1_tlb_miss) {
-    printf("Store idx = %d\n", s1_tlb_memidx.idx)
-  }
 
   val s1_mmio = is_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
@@ -162,6 +161,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // mmio inst with exception will be writebacked immediately
   // io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
+
+  // write below io.out.bits assign sentence to prevent overwriting values
+  val s1_tlb_memidx = io.dtlbResp.bits.memidx
+  when(s1_tlb_memidx.is_st && io.dtlbResp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === io.out.bits.uop.sqIdx.value) {
+    // printf("Store idx = %d\n", s1_tlb_memidx.idx)
+    io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
+  }
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -233,6 +239,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val storeMaskOut = Valid(new StoreMaskBundle)
     val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
     val issue = Valid(new ExuInput)
+    val debug_ls = Output(new DebugLsInfo)
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -270,6 +277,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout
+
+  io.debug_ls := DontCare
+  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
+  io.debug_ls.s1_robIdx := store_s1.io.in.bits.uop.robIdx.value
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,

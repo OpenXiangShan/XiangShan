@@ -229,13 +229,60 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_st.map(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR)
   }
 
-  // TODO: fhy; implement it
-  when (dtlb_ld(0).refill_to_mem.valid) {
-    printf("Load Refill idx = %d\n", dtlb_ld(0).refill_to_mem.memidx.idx)
+  for (i <- 0 until exuParameters.LduCnt) {
+    io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
   }
-  when (dtlb_st(0).refill_to_mem.valid) {
-    printf("Store Refill idx = %d\n", dtlb_st(0).refill_to_mem.memidx.idx)
+  for (i <- 0 until exuParameters.StuCnt) {
+    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
   }
+
+/*
+  // it take atomicsUnit tlb req in consideration in the follow codo
+  for (i <- 0 until exuParameters.LduCnt) {
+    val tmp_tlb = dtlb_ld(0).requestor(i)
+    io.debug_ls.debugLsInfo(i).isTlbFirstMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
+    io.debug_ls.debugLsInfo(i).robPtr := tmp_tlb.resp.bits.debug.robIdx
+  }
+  for (i <- 0 until exuParameters.StuCnt) {
+    val tmp_tlb = dtlb_st(0).requestor(i)
+    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt).isTlbFirstMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
+    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt).robPtr := tmp_tlb.resp.bits.debug.robIdx
+  }
+*/
+
+/*
+  // DTLB timer
+  val ldTlbFirstReqTimes = Reg(Vec(LoadQueueSize, 0.U(XLEN.W)))
+  val ldTlbRespTimes = Reg(Vec(LoadQueueSize, 0.U(XLEN.W)))
+  val stTlbFirstReqTimes = Reg(Vec(StoreQueueSize, 0.U(XLEN.W)))
+  val stTlbRespTimes = Reg(Vec(StoreQueueSize, 0.U(XLEN.W)))
+  for (i <- 0 until exuParameters.LduCnt) {
+    val tmp_tlb = dtlb_ld(0).requestor(i)
+    when(tmp_tlb.req.fire && tmp_tlb.req.bits.debug.isFirstIssue) {
+      ldTlbFirstReqTimes(tmp_tlb.req.bits.memidx.idx) := GTimer()
+    }
+    when(tmp_tlb.resp.valid && !tmp_tlb.resp.bits.miss) {
+      ldTlbRespTimes(tmp_tlb.resp.bits.memidx.idx) := GTimer()
+    }
+  }
+  for (i <- 0 until exuParameters.StuCnt) {
+    val tmp_tlb = dtlb_st(0).requestor(i)
+    when(tmp_tlb.req.fire && tmp_tlb.req.bits.debug.isFirstIssue) {
+      stTlbFirstReqTimes(tmp_tlb.req.bits.memidx.idx) := GTimer()
+    }
+    when(tmp_tlb.resp.valid && !tmp_tlb.resp.bits.miss) {
+      stTlbRespTimes(tmp_tlb.resp.bits.memidx.idx) := GTimer()
+    }
+  }
+  when(dtlb_ld(0).refill_to_mem.valid) {
+    // printf("Load Refill idx = %d\n", dtlb_ld(0).refill_to_mem.memidx.idx)
+    ldTlbRespTimes(dtlb_ld(0).refill_to_mem.memidx.idx) := GTimer()
+  }
+  when(dtlb_st(0).refill_to_mem.valid) {
+    // printf("Store Refill idx = %d\n", dtlb_st(0).refill_to_mem.memidx.idx)
+    stTlbRespTimes(dtlb_st(0).refill_to_mem.memidx.idx) := GTimer()
+  }
+*/
 
   // pmp
   val pmp = Module(new PMP())
@@ -266,41 +313,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for(j <- 0 until 3)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
-  // TODO lyq: add dtlb timer
-  // DTLB timer
-  // ldTlbReqTimes = Reg(VecInit(LoadQueueSize, 0.U(XLEN.W)))
-  // ldTlbRespTimes = Reg(VecInit(LoadQueueSize, 0.U(XLEN.W)))
-  // stTlbReqTimes = Reg(VecInit(StoreQueueSize, 0.U(XLEN.W)))
-  // stTlbRespTimes = Reg(VecInit(StoreQueueSize, 0.U(XLEN.W)))
-  // TODO lyq: need merge tlb interface after updating & merge writeback output ports
-  // stTlb is the same logic as ldTlb
-  // when(dtlb_ld(i).req.fire && isFirstIssue){
-  //   ldTlbReqTimes(dtlb_ld(i).req.idx) := GTimer()
-  // }
-  // when(dtlb_ld(i).resp.refill_valid) {
-  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
-  // }.elsewhen(replay(i).valid && dtlb_ld(i).resp.hit){
-  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
-  // }.elsewhen(dtlb_ld(i).resp.hit){
-  //   ldTlbRespTimes(dtlb_ld(i).resp.idx) := GTimer()
-  // }
-  for(i <- 0 until exuParameters.LduCnt){
-    val tmp_tlb = dtlb_ld(0).requestor(i)
-    io.debug_ls.debugLsInfo(i).isL1TlbMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
-    io.debug_ls.debugLsInfo(i).robPtr := tmp_tlb.resp.bits.debug.robIdx
-  }
-  for (i <- 0 until exuParameters.StuCnt) {
-    val tmp_tlb = dtlb_st(0).requestor(i)
-    io.debug_ls.debugLsInfo(i+exuParameters.LduCnt).isL1TlbMiss := tmp_tlb.resp.bits.miss && tmp_tlb.resp.bits.debug.isFirstIssue
-    io.debug_ls.debugLsInfo(i+exuParameters.LduCnt).robPtr := tmp_tlb.resp.bits.debug.robIdx
-  }
-
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    // TODO: 
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx // DontCare
-    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // DontCare
+    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // DontCare ==> always ture
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
