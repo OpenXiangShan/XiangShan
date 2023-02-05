@@ -108,8 +108,7 @@ trait HaveSlaveAXI4Port {
   ))
   private val error_xbar = TLXbar()
 
-  val dma_xbar = TLXbar()
-  dma_xbar :=
+  l3_xbar :=
     TLFIFOFixer() :=
     TLWidthWidget(32) :=
     TLBuffer() :=
@@ -121,8 +120,7 @@ trait HaveSlaveAXI4Port {
     AXI4Buffer() :=
     AXI4IdIndexer(5) :=
     l3FrontendAXI4Node
-  errorDevice.node := dma_xbar
-  l3_xbar := TLBuffer.chainNode(2) := dma_xbar
+  errorDevice.node := l3_xbar
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
@@ -158,10 +156,10 @@ trait HaveAXI4MemPort {
     TLCacheCork() :=*
     bankedNode
 
-  // mem_xbar :=
-  //   TLWidthWidget(8) :=
-  //   TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
-  //   peripheralXbar
+  mem_xbar :=
+    TLWidthWidget(8) :=
+    TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
+    peripheralXbar
 
   memAXI4SlaveNode :=
     AXI4Buffer() :=
@@ -284,12 +282,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
-  val debug_xbar = TLXbar()
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    debug_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
-  l3_xbar := TLBuffer.chainNode(2) := TLWidthWidget(8) := TLBuffer.chainNode(2) := debug_xbar
-  peripheralXbar := TLBuffer.chainNode(4) := debug_xbar
 
   val pma = LazyModule(new TLPMA)
   pma.node :=
