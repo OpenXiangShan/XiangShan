@@ -63,7 +63,7 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
 
   // prefetch req queue is not provided, prefetcher must maintain its
   // own prefetch req queue.
-  val rand_offset = LFSR64(seed=Some(123L))(3,0) << 6
+  val rand_offset = LFSR64(seed=Some(123L))(5,0) << 6
   val rand_addr_select = LFSR64(seed=Some(567L))(3,0) === 0.U
 
   // use valid vaddr and paddr
