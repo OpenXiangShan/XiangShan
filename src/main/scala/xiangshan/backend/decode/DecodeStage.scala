@@ -69,9 +69,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
-  val hasOut = VecInit((0 until DecodeWidth).map(i => io.in(i).valid && io.out(i).ready)).asUInt.orR
-  
-  globalCounter := RegEnable(globalCounter + PopCount(io.out.map(_.fire)), 0.U(XLEN.W), hasOut)
+
+  globalCounter := globalCounter + PopCount(io.out.map(_.fire))
 
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
