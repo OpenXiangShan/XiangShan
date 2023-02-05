@@ -382,6 +382,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   val s1_mask = io.in.bits.mask
   val s1_is_prefetch = io.in.bits.isPrefetch
   val s1_is_hw_prefetch = io.in.bits.isHWPrefetch
+  val s1_is_sw_prefetch = s1_is_prefetch && !s1_is_hw_prefetch
   val s1_bank_conflict = io.dcacheBankConflict
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
@@ -458,14 +459,14 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   // request replay from load replay queue, fast port
   io.replayFast.valid := io.in.valid && !io.s1_kill && !s1_is_hw_prefetch
-  io.replayFast.ld_ld_check_ok := !needLdVioCheckRedo || s1_is_prefetch
-  io.replayFast.st_ld_check_ok := !needReExecute || s1_is_prefetch
-  io.replayFast.cache_bank_no_conflict := !s1_bank_conflict || s1_is_prefetch
+  io.replayFast.ld_ld_check_ok := !needLdVioCheckRedo || s1_is_sw_prefetch
+  io.replayFast.st_ld_check_ok := !needReExecute || s1_is_sw_prefetch
+  io.replayFast.cache_bank_no_conflict := !s1_bank_conflict || s1_is_sw_prefetch
   io.replayFast.ld_idx := io.in.bits.uop.lqIdx.value
 
   // if replay is detected in load_s1,
   // load inst will be canceled immediately
-  io.out.valid := io.in.valid && (!needLdVioCheckRedo && !s1_bank_conflict && !needReExecute) && !io.s1_kill
+  io.out.valid := io.in.valid && (!needLdVioCheckRedo && !s1_bank_conflict && !needReExecute || s1_is_sw_prefetch) && !io.s1_kill
   io.out.bits.paddr := s1_paddr_dup_lsu
   io.out.bits.tlbMiss := s1_tlb_miss
 
@@ -627,7 +628,10 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // ))
   // val rdataPartialLoad = rdataHelper(s2_uop, rdataSel) // s2_rdataPartialLoad is not used
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !io.needReExecute && !s2_is_hw_prefetch
+  io.out.valid := io.in.valid &&
+    !s2_tlb_miss && // always request replay and cancel current flow if tlb miss
+    (!s2_data_invalid && !io.needReExecute || s2_is_prefetch) && // prefetch does not care about ld-st dependency
+    !s2_is_hw_prefetch // hardware prefetch flow should not be writebacked 
   // write_lq_safe is needed by dup logic
   // io.write_lq_safe := !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
@@ -726,15 +730,15 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.rsFeedback.bits := DontCare
 
   // request replay from load replay queue, fast port
-  io.replaySlow.valid := io.in.valid && !s2_is_prefetch
+  io.replaySlow.valid := io.in.valid && !s2_is_hw_prefetch // hardware prefetch flow should not be reported to load replay queue
   io.replaySlow.tlb_hited := !s2_tlb_miss
-  io.replaySlow.st_ld_check_ok := !needReExecute
+  io.replaySlow.st_ld_check_ok := !needReExecute || s2_is_prefetch // Note: soft prefetch does not care about ld-st dependency
   if (EnableFastForward) {
     io.replaySlow.cache_no_replay := !s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || fullForward
   }else {
     io.replaySlow.cache_no_replay := !s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || io.dataForwarded
   }
-  io.replaySlow.forward_data_valid := !s2_data_invalid || s2_is_prefetch
+  io.replaySlow.forward_data_valid := !s2_data_invalid || s2_is_prefetch // Note: soft prefetch does not care about ld-st dependency
   io.replaySlow.cache_hited := !io.out.bits.miss || io.out.bits.mmio
   io.replaySlow.can_forward_full_data := io.dataForwarded
   io.replaySlow.ld_idx := io.in.bits.uop.lqIdx.value
