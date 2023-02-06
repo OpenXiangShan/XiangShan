@@ -16,7 +16,7 @@ class EnqPolicy(implicit p: Parameters, iqP: IssueQueueParams) extends XSModule 
 
   val emptyVec = io.valid.asBools.map(!_)
   // Todo: support more policies
-  val selVec: Seq[(Bool, Vec[Bool])] = io.enqSelOHVec.indices.map(i => SelectOne("center", emptyVec, iqP.numEnq).getNthOH(i + 1))
+  val selVec: Seq[(Bool, Vec[Bool])] = io.enqSelOHVec.indices.map(i => SelectOne("circ", emptyVec, iqP.numEnq).getNthOH(i + 1))
 
   io.enqSelOHVec.zip(selVec).foreach { case (enqOH, (selValid, selOH)) =>
     enqOH.valid := selValid

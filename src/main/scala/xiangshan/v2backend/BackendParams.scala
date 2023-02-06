@@ -1,37 +1,54 @@
+/***************************************************************************************
+  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2020-2021 Peng Cheng Laboratory
+  *
+  * XiangShan is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+  * You may obtain a copy of Mulan PSL v2 at:
+  *          http://license.coscl.org.cn/MulanPSL2
+  *
+  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+  *
+  * See the Mulan PSL v2 for more details.
+  ***************************************************************************************/
+
 package xiangshan.v2backend
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.v2backend.issue.IssueQueueParams
-import xiangshan.{FuType, XSCoreParamsKey}
 
 object SchdBlockParams {
-  def dummyIntParams(numDeqOutside: Int = 0)(implicit p: Parameters): SchdBlockParams = {
+  def dummyIntParams(numDeqOutside: Int = 0): SchdBlockParams = {
     implicit val schdType: IntScheduler = IntScheduler()
     val numUopIn = 6
     val numRfRead = 14
     val numRfWrite = 8
     val numPregs = 160
-    val params = SchdBlockParams(Seq(
+    val pregBits = log2Up(numPregs)
+    val rfDataWidth = 64
+    var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExuBlockParams(Seq(AluCfg, VsetCfg, CsrCfg, FenceCfg, MulCfg, BkuCfg)),
-        ExuBlockParams(Seq(AluCfg, MulCfg, BkuCfg)),
-      ), numEntries = 16, pregBits = numPregs, numWakeupFromWB = numRfWrite, numEnq = 4),
+        ExeUnit(Seq(AluCfg, MulCfg, BkuCfg)),
+        ExeUnit(Seq(AluCfg, MulCfg, BkuCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExuBlockParams(Seq(AluCfg, DivCfg, I2fCfg)),
-        ExuBlockParams(Seq(AluCfg, DivCfg)),
-      ), numEntries = 16, pregBits = numPregs, numWakeupFromWB = numRfWrite, numEnq = 4),
+        ExeUnit(Seq(AluCfg, DivCfg, I2fCfg)),
+        ExeUnit(Seq(AluCfg, DivCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExuBlockParams(Seq(BrhCfg, JmpCfg)),
-        ExuBlockParams(Seq(BrhCfg))
-      ), numEntries = 16, pregBits = numPregs, numWakeupFromWB = numRfWrite, numEnq = 4),
+        ExeUnit(Seq(BrhCfg, JmpCfg, FenceCfg)),
+        ExeUnit(Seq(BrhCfg, VsetCfg, CsrCfg))
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
       numRfReadWrite = Some((numRfRead, numRfWrite)),
       numDeqOutside = numDeqOutside,
       schdType = schdType,
-      rfDataWidth = p(XSCoreParamsKey).XLEN,
+      rfDataWidth = rfDataWidth,
       numUopIn = numUopIn
     )
     params
@@ -74,23 +91,28 @@ case class SchdBlockParams(
   def numWriteIntRf: Int = issueBlockParams.map(_.numWriteIntRf).sum
   def numWriteFpRf : Int = issueBlockParams.map(_.numWriteFpRf ).sum
   def numWriteVecRf: Int = issueBlockParams.map(_.numWriteVecRf).sum
+
+  def numRfRead : Int = numRfReadWrite.getOrElse((0,0))._1
+  def numRfWrite: Int = numRfReadWrite.getOrElse((0,0))._2
+  def pregIdxWidth: Int = log2Up(numPregs)
 }
 
 case class IssueBlockParams(
   // top down
-  exuBlockParams     : Seq[ExuBlockParams],
+  exuBlockParams     : Seq[ExeUnit],
   numEntries         : Int,
   pregBits           : Int,
   numWakeupFromWB    : Int,
   numDeqOutside      : Int = 0,
   numWakeupFromOthers: Int = 0,
+  XLEN               : Int = 64,
+  VLEN               : Int = 128,
   // calculate in scheduler
   var numEnq         : Int = 0,
   var numWakeupFromIQ: Int = 0,
 )(implicit
   // top down
   val schdType       : SchedulerType,
-  val p              : Parameters,
 ) {
   def numIntSrc     : Int = exuBlockParams.map(_.numIntSrc).max
   def numFpSrc      : Int = exuBlockParams.map(_.numFpSrc ).max
@@ -113,7 +135,7 @@ case class IssueBlockParams(
   def numWriteVecRf : Int = exuBlockParams.count(_.writeVecRf)
 
   def numRegSrcMax  : Int = numIntSrc max numFpSrc max numVecSrc
-  def dataBitsMax   : Int = if (numVecSrc > 0) p(XSCoreParamsKey).VLEN else p(XSCoreParamsKey).XLEN
+  def dataBitsMax   : Int = if (numVecSrc > 0) VLEN else XLEN
   def numDeq        : Int = numDeqOutside + exuBlockParams.length
 
   def JmpCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.jmp)).sum
@@ -142,8 +164,9 @@ case class IssueBlockParams(
 
   def getWbParams: Seq[Seq[WriteBackConfig]] = exuBlockParams.map(params => params.getWbParamsOuter)
 
-  def generateIqParams: IssueQueueParams = {
+  def genIqParams: IssueQueueParams = {
     IssueQueueParams(
+      exuParams = exuBlockParams,
       numEntries = numEntries,
       numEnq = numEnq,
       numDeq = numDeq,
@@ -165,12 +188,16 @@ case class IssueBlockParams(
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 }
 
-case class ExuBlockParams(
+case class ExeUnit(
   fuConfigs: Seq[FuConfig],
-)(implicit val schdType: SchedulerType) {
+)(implicit
+  val schdType: SchedulerType,
+) {
   val numIntSrc     : Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc      : Int = fuConfigs.map(_.numFpSrc ).max
   val numVecSrc     : Int = fuConfigs.map(_.numVecSrc).max
+  val numSrc        : Int = numIntSrc max numFpSrc max numVecSrc
+  val dataBits      : Int = fuConfigs.map(_.dataBits ).max
   val readIntRf     : Boolean = numIntSrc > 0
   val readFpRf      : Boolean = numFpSrc  > 0
   val readVecRf     : Boolean = numVecSrc > 0
@@ -199,7 +226,7 @@ case class ExuBlockParams(
   }
 
   def canAccept(fuType: UInt): Bool = {
-    Cat(fuConfigs.map(_.fuType === fuType)).orR
+    Cat(fuConfigs.map(_.fuType.U === fuType)).orR
   }
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
@@ -219,6 +246,14 @@ case class ExuBlockParams(
     if (writeIntRf) res :+ WriteBackConfig(getWBSource, IntScheduler())
     if (writeFpRf || writeVecRf) res :+ WriteBackConfig(getWBSource, VfScheduler())
     res
+  }
+
+  def genExuInputBundle: ExuInput = {
+    Output(new ExuInput(this))
+  }
+
+  def genExuOutputBundle: ExuOutput = {
+    Output(new ExuOutput(this))
   }
 }
 

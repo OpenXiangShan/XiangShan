@@ -47,8 +47,7 @@ object Bundles {
     val vpu           = new VPUCtrlSignals
     val isMove        = Bool()
 
-    def isLUI: Bool = this.selImm === SelImm.IMM_U && this.fuType === FuType.alu
-    def isJump: Bool = FuType.isJumpExu(this.fuType)
+    def isLUI: Bool = this.selImm === SelImm.IMM_U && this.fuType === FuType.alu.U
   }
 
   // DecodedInst --[Rename]--> DynInst
@@ -156,37 +155,32 @@ object Bundles {
   }
 
   // DynInst --[IssueQueue]--> ExuInput
-  class ExuInput(dataWidth: Int, numSrc: Int) extends Bundle {
+  class ExuInput(params: ExeUnit) extends Bundle {
     val fuType    = FuType()
     val fuOpType  = FuOpType()
     val rfWen     = Bool()
     val fpWen     = Bool()
     val vecWen    = Bool()
-    val data      = Vec(numSrc, UInt(dataWidth.W))
+    val data      = Vec(params.numIntSrc, UInt(params.dataBits.W))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
   class ExuOutput(
-    dataWidth: Int,
-    hasRedirect: Boolean = false,
-    hasFFlags: Boolean = false
-  )(implicit p: Parameters) extends XSBundle with BundleSource {
-    val data = UInt(dataWidth.W)
-    val debug = new DebugBundle
-    val redirect = if(hasRedirect) Some(ValidIO(new Redirect)) else None
-    val fflag = if(hasFFlags) Some(UInt(5.W)) else None
+    params: ExeUnit,
+  ) extends Bundle with BundleSource {
+    val data = UInt(params.dataBits.W)
+//    val debug = new DebugBundle
+//    val redirect = if(params.hasRedirect) Some(ValidIO(new Redirect)) else None
+    val fflag = if(params.writeFflags) Some(UInt(5.W)) else None
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
-  class WriteBackBundle(
-    dataWidth: Int,
-    hasRedirect: Boolean = false,
-    hasFFlags: Boolean = false
-  )(implicit p: Parameters) extends ExuOutput(dataWidth, hasRedirect, hasFFlags) with BundleSource {
+  class WriteBackBundle(dataBits: Int)(implicit p: Parameters) extends XSBundle with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
     val pdest = UInt(PhyRegIdxWidth.W)
+    val data = UInt(dataBits.W)
 
     def asWakeUpBundle: IssueQueueWakeUpBundle = {
       val wakeup = Output(new IssueQueueWakeUpBundle)

@@ -4,12 +4,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xiangshan.backend.regfile.{IntRegFile, VfRegFile}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.v2backend.Bundles.{DynInst, ExuInput, ExuOutput}
-import xiangshan.{HasXSParameter, Redirect, ResetPregStateReq, XSBundle}
+import xiangshan.v2backend.Bundles.{DynInst, ExuInput, WriteBackBundle}
 import xiangshan.v2backend.issue._
-import xiangshan.FuType
+import xiangshan.{HasXSParameter, Redirect, ResetPregStateReq, XSBundle}
 
 sealed trait SchedulerType
 
@@ -34,17 +32,12 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
     val uops =  Vec(params.numUopIn, Flipped(DecoupledIO(new DynInst)))
   }
-  val writeback = MixedVec(
-    Vec(params.issueBlockParams.map(_.getWbParams).count { case WBFromInt() | WBFromMem() => true }, new ExuOutput(XLEN)),
-    Vec(params.issueBlockParams.map(_.getWbParams).count { case WBFromVec() => true }, new ExuOutput(VLEN)),
-    Vec(params.issueBlockParams.map(_.getWbParams).count { case WBFromFp() => true }, new ExuOutput(VLEN)),
-  )
+  val writeback = params.numRfReadWrite.map(x => Vec(x._2, new WriteBackBundle(params.rfDataWidth)))
   val toDataPath = new Bundle {
-    val exuInput: MixedVec[DecoupledIO[ExuInput]] = MixedVec(
-      params.iqConfigs.map(_.generateIssueBundle)
-    )
+    val exuInput: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(params.issueBlockParams.map(_.genIqParams.genIssueBundle))
+
     val rfRead = MixedVec(
-      params.iqConfigs.map(_.generateReadRfBundle)
+      params.issueBlockParams.map(_.genIqParams.genReadRfBundle)
     )
   }
 }
@@ -74,9 +67,9 @@ class SchedulerImp(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Para
 
   // RegFile Modules
   schdType match {
-    case IntScheduler() => IntRegFile("IntRegFile", numPregs, rfRaddr, rfRdata, rfWen(0), rfWaddr, rfWdata)
-    case VfScheduler() => VfRegFile("VfRegFile", numPregs, splitNum, rfRaddr, rfRdata, rfWen, rfWaddr, rfWdata)
-    case MemScheduler() => _
+    case IntScheduler() => IntRegFile("IntRegFile", numPregs, rfRaddr, rfRdata, rfWen(0), rfWaddr, rfWdata, None, None)
+    case VfScheduler() => VfRegFile("VfRegFile", numPregs, splitNum, rfRaddr, rfRdata, rfWen, rfWaddr, rfWdata, None, None)
+    case _ =>
   }
 
   // BusyTable Modules
@@ -90,12 +83,12 @@ class SchedulerImp(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Para
     case _ => None
   }
 
-  val issueQueueWrappers = wrapper.params.iqConfigs.map(x => LazyModule(new IssueQueue(x)))
+  val issueQueueWrappers = wrapper.params.issueBlockParams.map(x => LazyModule(new IssueQueue(x.genIqParams)))
   val issueQueues = issueQueueWrappers.map(_.module)
 
   private val (intBusyTableRead, intBusyTableWb) = schdType match {
     case IntScheduler() => (
-      Some(Vec(params.numRegFileReadPorts, new BusyTableReadIO)),
+      Some(Vec(params.numRfRead, new BusyTableReadIO)),
       Some(Vec(numRfWrite, ValidIO(UInt(params.pregIdxWidth.W))))
     )
     case _ => (None, None)
@@ -103,7 +96,7 @@ class SchedulerImp(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Para
 
   private val (vfBusyTableRead, vfBusyTableWb) = schdType match {
     case VfScheduler() => (
-      Some(Vec(params.numRegFileReadPorts, new BusyTableReadIO)),
+      Some(Vec(params.numRfRead, new BusyTableReadIO)),
       Some(Vec(numRfWrite, ValidIO(UInt(params.pregIdxWidth.W))))
     )
     case _ => (None, None)
@@ -131,22 +124,20 @@ class SchedulerImp(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Para
     case None =>
   }
 
-  issueQueues.zipWithIndex.foreach { case (iq, i) =>
-    iq.io.flush <> io.fromRob.flush
-    iq.io.enq.zip(io.fromDispatch.uops).foreach { case (iqEnq, dpUop) =>
-      iqEnq.valid := s1
-
-    }
-  }
+//  issueQueues.zipWithIndex.foreach { case (iq, i) =>
+//    iq.io.flush <> io.fromRob.flush
+//    iq.io.enq.zip(io.fromDispatch.uops).foreach { case (iqEnq, dpUop) =>
+//      iqEnq.valid := s1
+//
+//    }
+//  }
 
   // valid singals need initialize, while uop data need not
   val s1_uopsValid: Vec[Bool] = RegInit(VecInit(Seq.fill(params.numUopIn)(false.B)))
   val s1_uopsVec = Reg(Vec(params.numUopIn, new DynInst))
 
   val uopsInFired = io.fromDispatch.uops.map(_.fire)
-  val uopsOutFired = io.toDataPath.exuInput.zip(io.toDataPath.rfRead).map{ case (exuInput, rfRead) => exuInput.fire && rfRead.fire}
-
-
+  val uopsOutFired = io.toDataPath.exuInput.flatten.zip(io.toDataPath.rfRead).map{ case (exuInput, rfRead) => exuInput.fire && rfRead.fire}
 
   s1_uopsValid.zipWithIndex.foreach { case (valid, i) =>
     when (io.fromRob.flush.valid) {

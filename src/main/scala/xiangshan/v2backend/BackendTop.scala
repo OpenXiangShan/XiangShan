@@ -9,8 +9,8 @@ import xiangshan.backend.fu.CSRFileIO
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.FtqRead
 import xiangshan.mem.{LsqEnqIO, SqPtr}
-import xiangshan.{FrontendToCtrlIO, CustomCSRCtrlIO, TlbCsrBundle, MemRSFeedbackIO, HasXSParameter, XSBundle, XSCoreParamsKey, Redirect}
-import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, DynInst}
+import xiangshan.v2backend.Bundles.DynInst
+import xiangshan._
 
 class BackendTop(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
@@ -27,7 +27,7 @@ class BackendMemIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBund
     )
   })
 
-  val storeIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput(XLEN, 3))))
+//  val storeIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput(XLEN, 3))))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val enqLsq = Flipped(new LsqEnqIO)
   val sqDeq = Input(UInt(exuParameters.StuCnt.W)) // Todo: check it
@@ -37,7 +37,7 @@ class BackendMemIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBund
   // from memBlock
   val otherFastWakeup = Flipped(Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new DynInst)))
   val loadPc = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
-  val issueUop = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuInput(XLEN, 3)))
+//  val issueUop = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuInput(XLEN, 3)))
 
   val loadFastMatch = Vec(exuParameters.LduCnt, Output(UInt(exuParameters.LduCnt.W)))
   val loadFastImm   = Vec(exuParameters.LduCnt, Output(UInt(12.W))) // Imm_I
@@ -66,7 +66,7 @@ class BackendIO(implicit p: Parameters, numMemRsEntryMax: Int) extends XSBundle 
   val csrToFrontendCtrl = Output(new CustomCSRCtrlIO)
   val frontendIO = Flipped(new FrontendToCtrlIO)
   val mem = new BackendMemIO
-  val writeBack = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuOutput(XLEN))))
+//  val writeBack = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuOutput(XLEN))))
 }
 
 class BackendTopImp(outer: BackendTop)(implicit p: Parameters) extends LazyModuleImp(outer) {

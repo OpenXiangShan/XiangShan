@@ -17,28 +17,27 @@
 package xiangshan.backend
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3._
+import chisel3.{ExcitingUtils, _}
 import chisel3.util._
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestArchVecRegState}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
 import utility._
+import utils._
 import xiangshan._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.issue.{BaseReservationStationWrapper, RSParams, RSMod}
-import xiangshan.backend.regfile.{IntRegFile, VfRegFile, RfReadPort}
+import xiangshan.backend.issue.{BaseReservationStationWrapper, RSMod}
+import xiangshan.backend.regfile.{IntRegFile, RfReadPort, VfRegFile}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
-import chisel3.ExcitingUtils
 
-class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
+class DispatchArbiter[T <: chisel3.Data](gen: T, func: Seq[T => Bool])(implicit p: Parameters) extends XSModule {
   val numTarget = func.length
 
   val io = IO(new Bundle {
-    val in = Flipped(DecoupledIO(new MicroOp))
-    val out = Vec(numTarget, DecoupledIO(new MicroOp))
+    val in: DecoupledIO[T] = Flipped(DecoupledIO(gen))
+    val out: Vec[DecoupledIO[T]] = Vec(numTarget, DecoupledIO(gen))
   })
 
   io.out.zip(func).foreach{ case (o, f) =>
@@ -51,7 +50,13 @@ class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extend
 
 object DispatchArbiter {
   def apply(in: DecoupledIO[MicroOp], func: Seq[MicroOp => Bool])(implicit p: Parameters) = {
-    val arbiter = Module(new DispatchArbiter(func))
+    val arbiter = Module(new DispatchArbiter(new MicroOp, func))
+    arbiter.io.in <> in
+    arbiter.io.out
+  }
+
+  def apply[T <: chisel3.Data](gen: T, in: DecoupledIO[T], func: Seq[T => Bool])(implicit p: Parameters): Vec[DecoupledIO[T]] = {
+    val arbiter: DispatchArbiter[T] = Module(new DispatchArbiter[T](gen, func))
     arbiter.io.in <> in
     arbiter.io.out
   }
@@ -380,7 +385,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     busyTable
   } else None
-  val allocate = dispatch2.flatMap(_.io.out)
+  val allocate: Seq[DecoupledIO[MicroOp]] = dispatch2.flatMap(_.io.out)
 
   def extractReadRf(isInt: Boolean): Seq[UInt] = {
     if (isInt) {

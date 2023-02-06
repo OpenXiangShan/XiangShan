@@ -14,17 +14,17 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
-import xiangshan.backend.issue._
+import xiangshan.backend.Std
+import xiangshan.backend.exu._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.vector._
-import xiangshan.backend.exu._
-import xiangshan.backend.{Std, ScheLaneConfig}
+import xiangshan.backend.issue._
 
 package object xiangshan {
   object SrcType {
@@ -62,28 +62,28 @@ package object xiangshan {
 
   // Todo: Use OH instead
   object FuType {
-    def jmp   = UIntToOH(0.U, num)
-    def brh   = UIntToOH(1.U, num)
-    def i2f   = UIntToOH(2.U, num)
-    def csr   = UIntToOH(3.U, num)
-    def alu   = UIntToOH(4.U, num)
-    def mul   = UIntToOH(5.U, num)
-    def div   = UIntToOH(6.U, num)
-    def fence = UIntToOH(7.U, num)
-    def bku   = UIntToOH(8.U, num)
-    def vset  = UIntToOH(9.U, num)
+    def jmp   = (BigInt(1) << 0).U
+    def brh   = (BigInt(1) << 1).U
+    def i2f   = (BigInt(1) << 2).U
+    def csr   = (BigInt(1) << 3).U
+    def alu   = (BigInt(1) << 4).U
+    def mul   = (BigInt(1) << 5).U
+    def div   = (BigInt(1) << 6).U
+    def fence = (BigInt(1) << 7).U
+    def bku   = (BigInt(1) << 8).U
+    def vset  = (BigInt(1) << 9).U
 
-    def fmac     = UIntToOH(10.U, num)
-    def fmisc    = UIntToOH(11.U, num)
-    def fDivSqrt = UIntToOH(12.U, num)
+    def fmac     = (BigInt(1) << 10).U
+    def fmisc    = (BigInt(1) << 11).U
+    def fDivSqrt = (BigInt(1) << 12).U
 
-    def ldu      = UIntToOH(13.U, num)
-    def stu      = UIntToOH(14.U, num)
-    def mou      = UIntToOH(15.U, num) // for amo, lr, sc, fence
-    def vipu     = UIntToOH(16.U, num)
-    def vfpu     = UIntToOH(17.U, num)
-    def vldu     = UIntToOH(18.U, num)
-    def vstu     = UIntToOH(19.U, num)
+    def ldu      = (BigInt(1) << 13).U
+    def stu      = (BigInt(1) << 14).U
+    def mou      = (BigInt(1) << 15).U // for amo, lr, sc, fence
+    def vipu     = (BigInt(1) << 16).U
+    def vfpu     = (BigInt(1) << 17).U
+    def vldu     = (BigInt(1) << 18).U
+    def vstu     = (BigInt(1) << 19).U
     def X        = BitPat.dontCare(num)
 
     def num = 20

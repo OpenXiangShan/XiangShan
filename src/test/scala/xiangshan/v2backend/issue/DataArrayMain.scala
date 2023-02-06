@@ -8,7 +8,7 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 object DataArrayMain extends App {
   override def main(args: Array[String]): Unit = {
     val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
-    val config = new BaseConfig(1)
+    val config = new BaseConfig(1).alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
     implicit val iqParams: IssueQueueParams = DummyIQParams()
 
     Generator.execute(
