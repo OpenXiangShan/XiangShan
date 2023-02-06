@@ -246,19 +246,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
-  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
-    Some(io.writeback.map(writeback => {
-      val exuOutput = WireInit(writeback)
-      val timer = GTimer()
-      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
-        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)))
-        wb_next.bits := RegNext(wb.bits)
-        wb_next.bits.uop.debugInfo.writebackTime := timer
-      }
-      exuOutput
-    }))
-  }
-
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
@@ -274,22 +261,29 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6 + writebackLengthSum, 1, "BackendPC"))
   val rob = outer.rob.module
 
+  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
+    var pcMemIdx = 5
+    Some(io.writeback.map(writeback => {
+      val exuOutput = WireInit(writeback)
+      val timer = GTimer()
+      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
+        pcMem.io.raddr(pcMemIdx) := wb.bits.uop.cf.ftqPtr.value
+        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)))
+        wb_next.bits := RegNext(wb.bits)
+        wb_next.bits.uop.debugInfo.writebackTime := timer
+        wb_next.bits.uop.cf.pc := pcMem.io.rdata(pcMemIdx).getPc(RegNext(wb.bits.uop.cf.ftqOffset))
+        pcMemIdx = pcMemIdx + 1
+      }
+      exuOutput
+    }))
+  }
+
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
 
-
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
   val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
-
-  var pcMemIdx = 5
-  for(i <- 0 until writebackLengths.length){
-    for(j <- 0 until writebackLengths(i)){
-      pcMem.io.raddr(pcMemIdx+j) := rob.io.writeback(i)(j).bits.uop.cf.ftqPtr.value
-      rob.io.writeback(i)(j).bits.uop.cf.pc := pcMem.io.rdata(pcMemIdx+j).getPc(RegNext(rob.io.writeback(i)(j).bits.uop.cf.ftqOffset))
-    }
-    pcMemIdx = pcMemIdx + writebackLengths(i)
-  }
 
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
