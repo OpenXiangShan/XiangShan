@@ -201,6 +201,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   with HasPerfEvents
 {
   val writebackLengths = outer.writebackSinksParams.map(_.length)
+  val writebackLengthSum = writebackLengths.sum
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -269,8 +270,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + robFlush (1)
-  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6, 1, "BackendPC"))
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + robWriteback (sum(writebackLengths)) + robFlush (1)
+  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6 + writebackLengthSum, 1, "BackendPC"))
   val rob = outer.rob.module
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
@@ -280,6 +281,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
   val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
+
+  var pcMemIdx = 5
+  for(i <- 0 until writebackLengths.length){
+    for(j <- 0 until writebackLengths(i)){
+      pcMem.io.raddr(pcMemIdx+j) := rob.io.writeback(i)(j).bits.uop.cf.ftqPtr.value
+      rob.io.writeback(i)(j).bits.uop.cf.pc := pcMem.io.rdata(pcMemIdx+j).getPc(RegNext(rob.io.writeback(i)(j).bits.uop.cf.ftqOffset))
+    }
+    pcMemIdx = pcMemIdx + writebackLengths(i)
+  }
 
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)

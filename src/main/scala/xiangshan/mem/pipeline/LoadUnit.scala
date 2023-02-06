@@ -172,7 +172,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_mask := genWmask(0.U, LSUOpType.ld)
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
       // because these signals will be updated in S1
-      s0_isFirstIssue := DontCare
+      s0_isFirstIssue := true.B
       s0_rsIdx := DontCare
       s0_sqIdx := DontCare
     }
