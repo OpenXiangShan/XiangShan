@@ -377,8 +377,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.uop := uop(replayIdx)
     io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + i)
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
-    // io.loadOut(i).bits.isFirstIssue := false.B
-    io.loadOut(i).bits.isFirstIssue := Mux(uop(replayIdx).debugInfo.tlbFirstReqTime === 0.U, true.B, false.B)  // FIXME lyq: [stupid coding] lq replay probelm 
+    io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
     io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
