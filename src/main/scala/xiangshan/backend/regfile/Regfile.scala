@@ -21,12 +21,12 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 
-class RfReadPort(dataWidth: Int, addrWidth: Int)(implicit p: Parameters) extends XSBundle {
+class RfReadPort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val addr = Input(UInt(addrWidth.W))
   val data = Output(UInt(dataWidth.W))
 }
 
-class RfWritePort(dataWidth: Int, addrWidth: Int)(implicit p: Parameters) extends XSBundle {
+class RfWritePort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val wen = Input(Bool())
   val addr = Input(UInt(addrWidth.W))
   val data = Input(UInt(dataWidth.W))
@@ -35,21 +35,22 @@ class RfWritePort(dataWidth: Int, addrWidth: Int)(implicit p: Parameters) extend
 class Regfile
 (
   name: String,
+  numPregs: Int,
   numReadPorts: Int,
   numWritePorts: Int,
   hasZero: Boolean,
   len: Int,
   width: Int,
-)(implicit p: Parameters) extends XSModule {
+) extends Module {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
     val debug_rports = Vec(64, new RfReadPort(len, width))
   })
 
-  println(name + ": size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWritePorts)
+  println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
 
-  val mem = Reg(Vec(NRPhyRegs, UInt(len.W)))
+  val mem = Reg(Vec(numPregs, UInt(len.W)))
   for (r <- io.readPorts) {
     val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
     r.data := rdata
@@ -87,7 +88,7 @@ object Regfile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val regfile = Module(new Regfile(name, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
+    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
     val rdata = regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>
       rport.addr := addr
       rport.data

@@ -29,7 +29,7 @@ object RegFile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val regfile = Module(new Regfile(name, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
+    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
     rdata := regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>
       rport.addr := addr
       rport.data
