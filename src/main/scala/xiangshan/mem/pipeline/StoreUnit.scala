@@ -67,7 +67,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.rsIdx := io.rsIdx
 
   val Wmask = genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
-  io.out.bits.mask := Mux(io.out.bits.vaddr(3),ZeroExt(Wmask,8)<<8,ZeroExt(Wmask,8))
+  io.out.bits.mask := Mux(io.out.bits.vaddr(3),Wmask<<8,Wmask)
   io.out.bits.isFirstIssue := io.isFirstIssue
   io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid

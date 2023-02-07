@@ -187,7 +187,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.valid := s0_valid
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
-  io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
+  io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)//TODO:when have 128bit data,modify this
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.debug.robIdx := s0_uop.robIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
@@ -830,6 +830,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       val spec_paddr = io.tlb.resp.bits.paddr(0)
       load_s1.io.dtlbResp.bits.paddr.foreach(_ := Cat(spec_paddr(PAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W)))
     }
+    //
     when (cancelPointerChasing) {
       load_s1.io.s1_kill := true.B
     }.otherwise {
