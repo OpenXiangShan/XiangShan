@@ -123,7 +123,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
-  val DCacheVWordBytes = 128 / 8
+  val DCacheVWordBytes = VLEN / 8
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
@@ -138,7 +138,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   val DCacheBankOffset = log2Up(DCacheSRAMRowBytes) //3
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)  //6
-  val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
+  val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)//6+8
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
 

@@ -113,7 +113,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // now in S0, choise a load according to priority
 
   val s0_vaddr = Wire(UInt(VAddrBits.W))
-  val s0_mask = Wire(UInt(8.W))
+  val s0_mask = Wire(UInt((VLEN/8).W))
   val s0_uop = Wire(new MicroOp)
   val s0_isFirstIssue = Wire(Bool())
   val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
