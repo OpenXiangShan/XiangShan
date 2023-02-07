@@ -186,6 +186,9 @@ case class IssueBlockParams(
   }
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
+  def canAccept(fuType: UInt): Bool = {
+    Cat(getFuCfgs.map(_.fuType.U === fuType)).orR
+  }
 }
 
 case class ExeUnit(
