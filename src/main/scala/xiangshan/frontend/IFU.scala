@@ -552,6 +552,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.req.bits.cmd                 := TlbCmd.exec
   io.iTLBInter.req.bits.memidx              := DontCare
   io.iTLBInter.req.bits.debug.robIdx        := DontCare
+  io.iTLBInter.req.bits.no_translate        := false.B
   io.iTLBInter.req.bits.debug.isFirstIssue  := DontCare
 
   io.pmp.req.valid := (mmio_state === m_sendPMP) && f3_req_is_mmio

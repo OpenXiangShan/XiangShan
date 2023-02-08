@@ -27,12 +27,12 @@ import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 
-class MDPInfo(implicit p: Parameters) extends XSBundle{
+class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val ssid = UInt(SSIDWidth.W)
   val waitAllStore = Bool()
 }
 
-class LsInfo(implicit p: Parameters) extends XSBundle{
+class DebugLsInfo(implicit p: Parameters) extends XSBundle{
   val s1 = new Bundle{
     val isTlbFirstMiss = Bool() // in s1
     val isBankConflict = Bool() // in s1
@@ -48,7 +48,7 @@ class LsInfo(implicit p: Parameters) extends XSBundle{
   }
   val replayCnt = UInt(XLEN.W)
 
-  def s1SignalEnable(ena: LsInfo) = {
+  def s1SignalEnable(ena: DebugLsInfo) = {
     when(ena.s1.isTlbFirstMiss) { s1.isTlbFirstMiss := true.B }
     when(ena.s1.isBankConflict) { s1.isBankConflict := true.B }
     when(ena.s1.isLoadToLoadForward) { s1.isLoadToLoadForward := true.B }
@@ -58,7 +58,7 @@ class LsInfo(implicit p: Parameters) extends XSBundle{
     }
   }
 
-  def s2SignalEnable(ena: LsInfo) = {
+  def s2SignalEnable(ena: DebugLsInfo) = {
     when(ena.s2.isDcacheFirstMiss) { s2.isDcacheFirstMiss := true.B }
     when(ena.s2.isForwardFail) { s2.isForwardFail := true.B }
     when(ena.s2.isLoadReplayTLBMiss) { s2.isLoadReplayTLBMiss := true.B }
@@ -70,9 +70,9 @@ class LsInfo(implicit p: Parameters) extends XSBundle{
   }
 
 }
-object LsInfo{
-  def init(implicit p: Parameters): LsInfo = {
-    val lsInfo = Wire(new LsInfo)
+object DebugLsInfo{
+  def init(implicit p: Parameters): DebugLsInfo = {
+    val lsInfo = Wire(new DebugLsInfo)
     lsInfo.s1.isTlbFirstMiss := false.B
     lsInfo.s1.isBankConflict := false.B
     lsInfo.s1.isLoadToLoadForward := false.B
@@ -87,16 +87,16 @@ object LsInfo{
   }
 
 }
-class DebugLsInfo(implicit p: Parameters) extends LsInfo {
+class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
   // unified processing at the end stage of load/store  ==> s2  ==> bug that will write error robIdx data
   val s1_robIdx = UInt(log2Ceil(RobSize).W)
   val s2_robIdx = UInt(log2Ceil(RobSize).W)
 }
 class DebugLSIO(implicit p: Parameters) extends XSBundle {
-  val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfo))
+  val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfoBundle))
 }
 
-class InstDB(implicit p: Parameters) extends XSBundle{
+class DebugInstDB(implicit p: Parameters) extends XSBundle{
   val globalID = UInt(XLEN.W)
   val robIdx = UInt(log2Ceil(RobSize).W)
   val instType = FuType()
@@ -110,8 +110,8 @@ class InstDB(implicit p: Parameters) extends XSBundle{
   val accessLatency = UInt(XLEN.W)  // RS out time --> write back time
   val executeLatency = UInt(XLEN.W)
   val issueLatency = UInt(XLEN.W)
-  val lsInfo = new LsInfo
-  val mdpInfo = new MDPInfo
+  val lsInfo = new DebugLsInfo
+  val mdpInfo = new DebugMdpInfo
 }
 
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
@@ -435,7 +435,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_microOp = Mem(RobSize, new MicroOp)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
-  val debug_instInfo = RegInit(VecInit(Seq.fill(RobSize)(LsInfo.init)))
+  val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -527,7 +527,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.writebackTime := timer
       debug_microOp(enqIndex).debugInfo.tlbFirstReqTime := timer
       debug_microOp(enqIndex).debugInfo.tlbRespTime := timer
-      debug_instInfo(enqIndex) := LsInfo.init
+      debug_lsInfo(enqIndex) := DebugLsInfo.init
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -866,9 +866,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // debug_inst update
   for(i <- 0 until (exuParameters.LduCnt + exuParameters.StuCnt)) {
     // s1
-    debug_instInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
     // s2
-    debug_instInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
   }
 
   // status field: writebacked
@@ -1037,7 +1037,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val commitDebugExu = deqPtrVec.map(_.value).map(debug_exuDebug(_))
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
-  val commitDebugInst = deqPtrVec.map(_.value).map(debug_instInfo(_))
+  val commitDebugLsInfo = deqPtrVec.map(_.value).map(debug_lsInfo(_))
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
@@ -1106,28 +1106,28 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * */
   val instTableName =  "InstDB" + p(XSCoreParamsKey).HartId.toString
   val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-  val instTable = ChiselDB.createTable(instTableName, new InstDB)
+  val debugInstTable = ChiselDB.createTable(instTableName, new DebugInstDB)
   // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
   for(wb <- exuWriteback){
     when(wb.valid){
-      val instData = Wire(new InstDB)
+      val debugInstData = Wire(new DebugInstDB)
       val idx = wb.bits.uop.robIdx.value
-      instData.globalID := wb.bits.uop.ctrl.globalID
-      instData.robIdx := idx
-      instData.instType := wb.bits.uop.ctrl.fuType
-      instData.ivaddr := wb.bits.uop.cf.pc
-      instData.dvaddr := wb.bits.debug.vaddr
-      instData.dpaddr := wb.bits.debug.paddr
-      instData.tlbLatency := wb.bits.uop.debugInfo.tlbRespTime - wb.bits.uop.debugInfo.tlbFirstReqTime
-      instData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-      instData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-      instData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
-      instData.exceptType := wb.bits.uop.cf.exceptionVec
-      instData.lsInfo := debug_instInfo(idx)
-      instData.mdpInfo.ssid := wb.bits.uop.cf.ssid
-      instData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
-      instTable.log(
-        data = instData,
+      debugInstData.globalID := wb.bits.uop.ctrl.debugGlobalID
+      debugInstData.robIdx := idx
+      debugInstData.instType := wb.bits.uop.ctrl.fuType
+      debugInstData.ivaddr := wb.bits.uop.cf.pc
+      debugInstData.dvaddr := wb.bits.debug.vaddr
+      debugInstData.dpaddr := wb.bits.debug.paddr
+      debugInstData.tlbLatency := wb.bits.uop.debugInfo.tlbRespTime - wb.bits.uop.debugInfo.tlbFirstReqTime
+      debugInstData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
+      debugInstData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
+      debugInstData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
+      debugInstData.exceptType := wb.bits.uop.cf.exceptionVec
+      debugInstData.lsInfo := debug_lsInfo(idx)
+      debugInstData.mdpInfo.ssid := wb.bits.uop.cf.ssid
+      debugInstData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
+      debugInstTable.log(
+        data = debugInstData,
         en = wb.valid,
         site = instSiteName,
         clock = clock,
@@ -1135,41 +1135,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       )
     }
   }
-
-/*
-  /**
-  * DataBase info:
-  * log trigger is at commit valid
-  * exception info may not record because excepted instructions does not commit
-  * */
-  for (i <- 0 until CommitWidth) {
-    when(io.commits.commitValid(i)){
-      val instData = Wire(new InstDB)
-      val idx = commitDebugUop(i).robIdx.value
-      instData.globalID := commitDebugUop(i).ctrl.globalID
-      instData.robIdx := idx
-      instData.instType := commitDebugUop(i).ctrl.fuType
-      instData.ivaddr := io.commits.info(i).pc
-      instData.dvaddr := commitDebugExu(i).vaddr
-      instData.dpaddr := commitDebugExu(i).paddr
-      instData.tlbLatency := tlbLatency(i)
-      instData.accessLatency := accessLatency(i)
-      instData.executeLatency := executeLatency(i)
-      instData.issueLatency := issueLatency(i)
-      instData.exceptType := commitDebugUop(i).cf.exceptionVec
-      instData.lsInfo := debug_instInfo(idx)
-      instData.mdpInfo.ssid := commitDebugUop(i).cf.ssid
-      instData.mdpInfo.waitAllStore := commitDebugUop(i).cf.loadWaitStrict && commitDebugUop(i).cf.loadWaitBit
-      instTable.log(
-        data = instData,
-        en = io.commits.commitValid(i),
-        site = instSiteName,
-        clock = clock,
-        reset = reset
-      )
-    }
-  }
-*/
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value

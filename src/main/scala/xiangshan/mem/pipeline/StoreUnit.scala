@@ -24,7 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.DebugLsInfo
+import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
@@ -57,6 +57,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.memidx.is_st := true.B
   io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
   io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
+  io.dtlbReq.bits.no_translate := false.B
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
@@ -239,7 +240,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val storeMaskOut = Valid(new StoreMaskBundle)
     val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
     val issue = Valid(new ExuInput)
-    val debug_ls = Output(new DebugLsInfo)
+    val debug_ls = Output(new DebugLsInfoBundle)
   })
 
   val store_s0 = Module(new StoreUnit_S0)

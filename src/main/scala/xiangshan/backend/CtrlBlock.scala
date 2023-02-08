@@ -28,7 +28,7 @@ import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{DebugLSIO, Rob, RobCSRIO, RobLsqIO}
-import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
@@ -215,6 +215,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -246,6 +247,14 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
+  val PCMEMIDX_LD = 5
+  val PCMEMIDX_ROBWB = PCMEMIDX_LD + exuParameters.LduCnt
+  val pcMem = Module(new SyncDataModuleTemplate(
+    new Ftq_RF_Components, FtqSize,
+    6 + exuParameters.LduCnt + writebackLengthSum, 1, "CtrlPcMem")
+  )
+
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
@@ -257,12 +266,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + robWriteback (sum(writebackLengths)) + robFlush (1)
-  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6 + writebackLengthSum, 1, "BackendPC"))
   val rob = outer.rob.module
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
-    var pcMemIdx = 5
+    var pcMemIdx = PCMEMIDX_ROBWB
     Some(io.writeback.map(writeback => {
       val exuOutput = WireInit(writeback)
       val timer = GTimer()
@@ -544,6 +551,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val jalrTargetRead = pcMem.io.rdata(4).startAddr
   val read_from_newest_entry = RegNext(jalrTargetReadPtr) === RegNext(io.frontend.fromFtq.newest_entry_ptr)
   io.jalr_target := Mux(read_from_newest_entry, RegNext(io.frontend.fromFtq.newest_entry_target), jalrTargetRead)
+  for(i <- 0 until exuParameters.LduCnt){
+    // load s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
+    pcMem.io.raddr(i + PCMEMIDX_LD) := io.ld_pc_read(i).ptr.value
+    io.ld_pc_read(i).data := pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset))
+  }
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)

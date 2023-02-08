@@ -55,6 +55,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
+  val have_sent_first_tlb_req = RegInit(false.B)
   val isLr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
   // paddr after translation
   val paddr = Reg(UInt())
@@ -100,6 +101,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
       state := s_tlb_and_flush_sbuffer_req
+      have_sent_first_tlb_req := false.B
     }
   }
 
@@ -137,7 +139,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // send req to sbuffer to flush it if it is not empty
     io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
 
-    when(io.dtlb.resp.fire){
+    // do not accept tlb resp in the first cycle
+    // this limition is for hw prefetcher
+    // when !have_sent_first_tlb_req, tlb resp may come from hw prefetch
+    have_sent_first_tlb_req := true.B
+
+    when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr := io.dtlb.resp.bits.paddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(

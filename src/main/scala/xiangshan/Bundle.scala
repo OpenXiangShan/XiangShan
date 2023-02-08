@@ -152,7 +152,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  val globalID = UInt(XLEN.W)
+  val debugGlobalID = UInt(XLEN.W)
   val srcType = Vec(3, SrcType())
   val lsrc = Vec(3, UInt(5.W))
   val ldest = UInt(5.W)
@@ -483,6 +483,14 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
   val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  val l1D_pf_enable = Output(Bool())
+  val l1D_pf_train_on_hit = Output(Bool())
+  val l1D_pf_enable_agt = Output(Bool())
+  val l1D_pf_enable_pht = Output(Bool())
+  val l1D_pf_active_threshold = Output(UInt(4.W))
+  val l1D_pf_active_stride = Output(UInt(6.W))
+  val l1D_pf_enable_stride = Output(Bool())
+  val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
   // Labeled XiangShan
