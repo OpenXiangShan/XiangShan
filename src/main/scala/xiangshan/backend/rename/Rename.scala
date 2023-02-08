@@ -207,6 +207,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     when (io.out(i).bits.ctrl.fuType === FuType.fence) {
       io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
     }
+    // dirty code for vsetvl(11)/vsetvli(15). The lsrc0 is passed by imm.
+    val isVsetvl_ = FuType.isIntExu(io.in(i).bits.ctrl.fuType) && (ALUOpType.isVsetvli(io.in(i).bits.ctrl.fuOpType) || ALUOpType.isVsetvl(io.in(i).bits.ctrl.fuOpType))
+    when (isVsetvl_){
+      io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(0).orR.asUInt, io.in(i).bits.ctrl.imm(14,0))                           // lsrc(0) Not Zero
+    }
     // dirty code for SoftPrefetch (prefetch.r/prefetch.w)
     when (io.in(i).bits.ctrl.isSoftPrefetch) {
       io.out(i).bits.ctrl.fuType := FuType.ldu

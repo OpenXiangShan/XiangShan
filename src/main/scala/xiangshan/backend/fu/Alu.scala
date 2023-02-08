@@ -24,7 +24,7 @@ import xiangshan._
 
 class VsetModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val lsrc0 = Input(UInt(6.W))
+    val lsrc0NotZero = Input(Bool())
     val ldest = Input(UInt(6.W))
     val src0  = Input(UInt(XLEN.W))
     val src1  = Input(UInt(XLEN.W))
@@ -41,7 +41,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   val vlLast = io.vconfig(15, 8)
 
   val rd = io.ldest
-  val rs1 = io.lsrc0
+  val lsrc0NotZero = io.lsrc0NotZero
   val vl = WireInit(0.U(XLEN.W))
   val vconfig = WireInit(0.U(XLEN.W))
 
@@ -53,8 +53,9 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   val isVsetivli = io.func === ALUOpType.vsetivli2 || io.func === ALUOpType.vsetivli1
   val vlWhenRs1Not0 = Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
                                       Mux(io.src0 > vlmax, vlmax, io.src0))
-  vl := Mux(rs1 =/= 0.U, vlWhenRs1Not0,
-          Mux(rd === 0.U, Cat(0.U(56.W), vlLast), vlmax))
+  vl := Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
+        Mux(lsrc0NotZero, Mux(io.src0 > vlmax, vlmax, io.src0),
+        Mux(rd === 0.U, Cat(0.U(56.W), vlLast), vlmax)))
 
   vconfig := Cat(0.U(48.W), vl(7, 0), vtype)
 
@@ -222,7 +223,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
     val result = Output(UInt(XLEN.W))
-    val lsrc0 = Input(UInt(6.W))
+    val lsrc0NotZero = Input(Bool())
     val ldest = Input(UInt(6.W))
     val vconfig = Input(UInt(16.W))
   })
@@ -261,7 +262,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   // vset
   val vsetModule = Module(new VsetModule)
-  vsetModule.io.lsrc0 := io.lsrc0
+  vsetModule.io.lsrc0NotZero := io.lsrc0NotZero
   vsetModule.io.ldest := io.ldest
   vsetModule.io.src0 := io.src(0)
   vsetModule.io.src1 := io.src(1)
@@ -423,7 +424,7 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
 
   dataModule.io.src := io.in.bits.src.take(2)
   dataModule.io.func := io.in.bits.uop.ctrl.fuOpType
-  dataModule.io.lsrc0 := uop.ctrl.lsrc(0)
+  dataModule.io.lsrc0NotZero := uop.ctrl.imm(15) //  lsrc(0) Not Zero
   dataModule.io.ldest := uop.ctrl.ldest
   dataModule.io.vconfig := uop.ctrl.vconfig
 
