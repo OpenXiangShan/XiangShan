@@ -219,6 +219,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   )
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.memidx.is_ld := true.B
+  io.dtlbReq.bits.memidx.is_st := false.B
+  io.dtlbReq.bits.memidx.idx := s0_uop.lqIdx.value
   io.dtlbReq.bits.debug.robIdx := s0_uop.robIdx
   // hw prefetch addr does not need to be translated
   io.dtlbReq.bits.no_translate := lfsrc_hwprefetch_select
@@ -774,6 +777,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.replaySlow.replayCarry := io.dcacheResp.bits.replayCarry
   io.replaySlow.miss_mshr_id := io.dcacheResp.bits.mshr_id
   io.replaySlow.data_in_last_beat := io.in.bits.paddr(log2Up(refillBytes))
+  io.replaySlow.debugInfo := io.in.bits.uop.debugInfo
 
   // To be removed
   val s2_need_replay_from_rs = Wire(Bool())
