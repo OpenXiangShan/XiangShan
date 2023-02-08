@@ -27,6 +27,7 @@ import utility.ChiselDB
 import top.TopMain.writeOutputFile
 import utility.GTimer
 import xiangshan.DebugOptionsKey
+import utility.Constantin
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -115,10 +116,12 @@ object SimTop extends App {
       firrtlComplier
     )
     ChiselDB.addToElaborationArtefacts
+    Constantin.addToElaborationArtefacts
     ElaborationArtefacts.files.foreach{
       case (extension, contents) =>
         val prefix = extension match {
           case "h" | "cpp" => "chisel_db"
+          case "hxx" | "cxx" => "constantin"
           case _ => "XSTop"
         }
         writeOutputFile("./build", s"$prefix.${extension}", contents())
