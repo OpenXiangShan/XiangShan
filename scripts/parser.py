@@ -680,7 +680,7 @@ def export_sram_files(release_path, top_module):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Verilog parser for XS')
     parser.add_argument('top', type=str, help='top-level module')
-    parser.add_argument('--xs-home', type=str, help='path to XS')
+    parser.add_argument('--build-dir', type=str, default="./build", help='path to build directory')
     parser.add_argument('--config', type=str, default="Unknown", help='XSConfig')
     parser.add_argument('--prefix', type=str, help='module prefix')
     parser.add_argument('--ignore', type=str, default="", help='ignore modules (and their submodules)')
@@ -691,11 +691,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    xs_home = args.xs_home
-    if xs_home is None:
-        xs_home = os.path.realpath(os.getenv("NOOP_HOME"))
-        assert(xs_home is not None)
-    build_path = os.path.join(xs_home, "build")
+    build_path = args.build_dir
+    assert(build_path is not None)
     files = get_files(build_path)
     if args.include is not None:
         for inc_path in args.include.split(","):
