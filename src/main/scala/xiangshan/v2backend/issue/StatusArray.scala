@@ -90,7 +90,13 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   }
 
   validNextVec.zipWithIndex.foreach { case (validNext, i) =>
-    validNext := enqStatusVec(i).valid || validVec(i)
+    when (enqStatusVec(i).valid) {
+      validNext := true.B
+    }.elsewhen(clearVec(i)) {
+      validNext := false.B
+    }.otherwise {
+      validNext := validVec(i)
+    }
   }
 
   statusNextVec.zip(statusVec).zipWithIndex.foreach { case ((statusNext, status), i) =>
