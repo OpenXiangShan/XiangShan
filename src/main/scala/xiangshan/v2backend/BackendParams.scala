@@ -32,16 +32,16 @@ object SchdBlockParams {
     val rfDataWidth = 64
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnit(Seq(AluCfg, MulCfg, BkuCfg)),
-        ExeUnit(Seq(AluCfg, MulCfg, BkuCfg)),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnit(Seq(AluCfg, DivCfg, I2fCfg)),
-        ExeUnit(Seq(AluCfg, DivCfg)),
+        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg)),
+        ExeUnitParams(Seq(AluCfg, DivCfg)),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnit(Seq(BrhCfg, JmpCfg, FenceCfg)),
-        ExeUnit(Seq(BrhCfg, VsetCfg, CsrCfg))
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg)),
+        ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg))
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -49,7 +49,7 @@ object SchdBlockParams {
       numDeqOutside = numDeqOutside,
       schdType = schdType,
       rfDataWidth = rfDataWidth,
-      numUopIn = numUopIn
+      numUopIn = numUopIn,
     )
     params
   }
@@ -95,11 +95,17 @@ case class SchdBlockParams(
   def numRfRead : Int = numRfReadWrite.getOrElse((0,0))._1
   def numRfWrite: Int = numRfReadWrite.getOrElse((0,0))._2
   def pregIdxWidth: Int = log2Up(numPregs)
+
+  def numWakeupFromWB: Int = schdType match {
+    case IntScheduler() | VfScheduler() => numRfWrite
+    case MemScheduler() => 0 // Todo
+    case _ => 0
+  }
 }
 
 case class IssueBlockParams(
   // top down
-  exuBlockParams     : Seq[ExeUnit],
+  exuBlockParams     : Seq[ExeUnitParams],
   numEntries         : Int,
   pregBits           : Int,
   numWakeupFromWB    : Int,
@@ -107,6 +113,7 @@ case class IssueBlockParams(
   numWakeupFromOthers: Int = 0,
   XLEN               : Int = 64,
   VLEN               : Int = 128,
+  vaddrBits          : Int = 39,
   // calculate in scheduler
   var numEnq         : Int = 0,
   var numWakeupFromIQ: Int = 0,
@@ -177,11 +184,7 @@ case class IssueBlockParams(
       schdType = schdType,
       numWakeupFromIQ = numWakeupFromIQ,
       numWakeupFromOthers = numWakeupFromOthers,
-      hasBranch = BrhCnt > 0,
-      hasJump = JmpCnt > 0,
-      hasLoad = LduCnt > 0,
-      hasStore = StuCnt > 0,
-      hasMemAddr = LduCnt > 0 || StuCnt > 0
+      vaddrBits = vaddrBits
     )
   }
 
@@ -191,7 +194,7 @@ case class IssueBlockParams(
   }
 }
 
-case class ExeUnit(
+case class ExeUnitParams(
   fuConfigs: Seq[FuConfig],
 )(implicit
   val schdType: SchedulerType,
@@ -258,6 +261,11 @@ case class ExeUnit(
   def genExuOutputBundle: ExuOutput = {
     Output(new ExuOutput(this))
   }
+
+  def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
+  def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
+  def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
+  def hasStoreFu = fuConfigs.map(_.fuType == FuType.stu).reduce(_ || _)
 }
 
 

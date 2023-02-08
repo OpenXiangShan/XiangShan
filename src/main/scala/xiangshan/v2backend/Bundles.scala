@@ -6,7 +6,9 @@ import chipsalliance.rocketchip.config.Parameters
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.rob.RobPtr
 import xiangshan._
+import xiangshan.backend.regfile.RfReadPort
 import xiangshan.frontend._
+import xiangshan.v2backend.issue.IssueQueueJumpBundle
 
 object Bundles {
   // vector inst need vs1, vs2, v0, vd, vl&vtype, 5 psrcs
@@ -154,8 +156,15 @@ object Bundles {
     val idxEmul   = UInt(3.W)
   }
 
-  // DynInst --[IssueQueue]--> ExuInput
-  class ExuInput(params: ExeUnit) extends Bundle {
+  // DynInst --[IssueQueue]--> DataPath
+  class IssueQueueIssueBundle(exuParams: ExeUnitParams, dataWidth: Int, addrWidth: Int, vaddrBits: Int) extends Bundle {
+    val rf = Flipped(Vec(exuParams.numIntSrc, new RfReadPort(dataWidth, addrWidth)))
+    val common = new ExuInput(exuParams)
+    val jmp = if (exuParams.hasJmpFu) Some(Flipped(new IssueQueueJumpBundle(vaddrBits))) else None
+  }
+
+  // DataPath --[ExuInput]--> ExuInput
+  class ExuInput(params: ExeUnitParams) extends Bundle {
     val fuType    = FuType()
     val fuOpType  = FuOpType()
     val rfWen     = Bool()
@@ -166,7 +175,7 @@ object Bundles {
 
   // ExuInput --[FuncUnit]--> ExuOutput
   class ExuOutput(
-    params: ExeUnit,
+    params: ExeUnitParams,
   ) extends Bundle with BundleSource {
     val data = UInt(params.dataBits.W)
 //    val debug = new DebugBundle

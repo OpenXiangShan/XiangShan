@@ -4,8 +4,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xiangshan._
 import utils._
+import xiangshan._
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.v2backend.Bundles.DynInst
 import xiangshan.v2backend.{AluCfg, FuConfig, SchdBlockParams}
@@ -17,8 +17,10 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
   require(issueBlockParams.size > 0 && issueBlockParams.forall(_.numEnq == issueBlockParams.head.numEnq), "issueBlock is null or the enq size of all issueBlock not be the same all\n")
   val numOut = issueBlockParams.head.numEnq
   val numIntSrc = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).max)
-
   val numIntStateRead = numIntSrc.max * numIn
+
+  val numFpSrc = issueBlockParams.map(_.exuBlockParams.map(_.numFpSrc).max)
+  val numFpStateRead = numFpSrc.max * numIn
 
   lazy val module = new Dispatch2IqImp(this)(p)
 }

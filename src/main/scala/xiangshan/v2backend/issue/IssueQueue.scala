@@ -5,12 +5,12 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.v2backend.Bundles.{DynInst, ExuInput, IssueQueueWakeUpBundle}
+import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
-import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle, FuType}
+import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
 
 case class IssueQueueParams(
-  val exuParams          : Seq[ExeUnit],
+  val exuParams          : Seq[ExeUnitParams],
   var numEntries         : Int,
   var numEnq             : Int,
   var numDeq             : Int,
@@ -21,25 +21,21 @@ case class IssueQueueParams(
   var schdType           : SchedulerType = NoScheduler(),
   var numWakeupFromIQ    : Int = 0,
   var numWakeupFromOthers: Int = 0,
-  var hasBranch          : Boolean = false,
-  var hasJump            : Boolean = false,
-  var hasLoad            : Boolean = false,
-  var hasStore           : Boolean = false,
-  var hasMemAddr         : Boolean = false,
+  var vaddrBits          : Int = 39,
 ) {
   require(numWakeupFromWB > 0 && numWakeupFromIQ >= 0 && numWakeupFromOthers >= 0)
   require(numEnq > 0 && numDeq > 0)
 
-  def hasLoadStore = hasLoad || hasStore || hasMemAddr
-  def hasRedirectOut = hasBranch || hasJump
+  def hasBrhFu = exuParams.map(_.hasBrhFu).reduce(_ || _)
+  def hasJmpFu = exuParams.map(_.hasJmpFu).reduce(_ || _)
+  def hasLoadFu = exuParams.map(_.hasLoadFu).reduce(_ || _)
+  def hasStoreFu = exuParams.map(_.hasStoreFu).reduce(_ || _)
+  def hasLoadStore = hasLoadFu || hasStoreFu
+  def hasRedirectOut = hasBrhFu || hasJmpFu
   def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
 
-  def genIssueBundle: MixedVec[DecoupledIO[ExuInput]] = {
-    MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuInputBundle)))
-  }
-
-  def genReadRfBundle: DecoupledIO[UInt] = {
-    DecoupledIO(UInt(this.pregBits.W))
+  def genIssueBundle: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
+    MixedVec(this.exuParams.map(x => DecoupledIO(new IssueQueueIssueBundle(x, dataBits, pregBits, vaddrBits))))
   }
 }
 
@@ -72,7 +68,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends X
   val enq = Vec(params.numEnq, Flipped(DecoupledIO(new DynInst)))
 
   val deq = params.genIssueBundle
-  val deqResp = Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle))
+  val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
@@ -96,15 +92,16 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
   val payloadArray  = Module(new DataArray(Output(new DynInst), params.numDeq, params.numEnq, params.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
   val mainDeqPolicy = Module(new DeqPolicy)
-  val subDeqPolicies  = specialFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy()(p, params.copy(numDeq = 1)))) else None)
+  val subDeqPolicies  = specialFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
 
   // Wires
   val enqValidVec = io.enq.map(_.valid)
   val enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
   val enqSelOHVec = Wire(Vec(params.numEnq, UInt(params.numEntries.W)))
-  val enqMask: UInt = (enqSelValidVec zip enqSelOHVec).map { case (valid, oh) =>
+  val enqOH: IndexedSeq[UInt] = (enqSelValidVec zip enqSelOHVec).map { case (valid, oh) =>
     Mux(valid, oh, 0.U)
-  }.reduce(_ | _)
+  }
+  val enqMask: UInt = enqOH.reduce(_ | _)
 
   val enqImmValidVec = io.enq.map(enq => enq.valid && enq.bits.imm.valid)
   val enqImmVec = VecInit(io.enq.map(_.bits.imm.bits))
@@ -236,12 +233,15 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
   })}
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
-    deq.valid         := finalDeqSelValidVec(i)
-    deq.bits.fuType   := payloadArrayRdata(i).fuType
-    deq.bits.fuOpType := payloadArrayRdata(i).fuOpType
-    deq.bits.rfWen    := payloadArrayRdata(i).rfWen
-    deq.bits.fpWen    := payloadArrayRdata(i).fpWen
-    deq.bits.vecWen   := payloadArrayRdata(i).vecWen
+    deq.valid                := finalDeqSelValidVec(i)
+    deq.bits.common.fuType   := payloadArrayRdata(i).fuType
+    deq.bits.common.fuOpType := payloadArrayRdata(i).fuOpType
+    deq.bits.common.rfWen    := payloadArrayRdata(i).rfWen
+    deq.bits.common.fpWen    := payloadArrayRdata(i).fpWen
+    deq.bits.common.vecWen   := payloadArrayRdata(i).vecWen
+    deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
+      rf.addr := psrc
+    }
   }
 
   // Todo: better counter implementation
@@ -263,9 +263,9 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
 
 }
 
-class IssueQueueJumpBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
-  val pc = Input(UInt(VAddrBits.W))
-  val target = Input(UInt(VAddrBits.W))
+class IssueQueueJumpBundle(vaddrBits: Int) extends Bundle {
+  val pc = Input(UInt(vaddrBits.W))
+  val target = Input(UInt(vaddrBits.W))
 }
 
 class IssueQueueMemBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
@@ -283,37 +283,38 @@ class IssueQueueLoadBundle()(implicit p: Parameters, params: IssueQueueParams) e
 }
 
 class IssueQueueIntIO()(implicit p: Parameters, params: IssueQueueParams) extends IssueQueueIO {
-  val jump = if (params.hasJump) Some(new IssueQueueJumpBundle) else None
-  val mem = if (params.hasLoadStore) Some(new IssueQueueMemBundle) else None
-  val toLdu = if (params.hasLoad) Some(Vec(params.numDeq, new IssueQueueLoadBundle)) else None
+  val jmp = if (params.hasJmpFu) Some(new IssueQueueJumpBundle(VAddrBits)) else None
 }
 
 class IssueQueueIntImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams)
   extends IssueQueueImp(outer)
-  with IssueQueueJumpPart {
+{
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueIntIO).suggestName("io")
-}
 
-trait IssueQueueMemPart { this: IssueQueueIntImp =>
-  // Todo: correct it
-  if (io.toLdu.nonEmpty) {
-    io.toLdu.get.foreach(toLdu => {
-      toLdu.fastImm := 0.U
-      toLdu.fastMatch := false.B
-    })
-  }
-}
-
-trait IssueQueueJumpPart { this: IssueQueueIntImp =>
-  io.jump.foreach(jump => {
-    val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
-    val targetMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
+  val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
+  val targetMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
+  if (io.jmp.nonEmpty) {
+    val jmp = io.jmp.get
     for (i <- 0 until params.numEntries) {
-      when(enqSelValidVec(i)) {
-        pcMem(i) := jump.pc
-        targetMem(i) := jump.target
+      when(enqMask(i)) {
+        pcMem(i) := jmp.pc
+        targetMem(i) := jmp.target
       }
     }
-  })
+  }
+
+  val pcRead = Wire(Vec(params.numDeq, UInt(VAddrBits.W)))
+  val targetRead = Wire(Vec(params.numDeq, UInt(VAddrBits.W)))
+
+  for (i <- 0 until params.numDeq) {
+    pcRead(i) := Mux1H(finalDeqOH(i), pcMem)
+    targetRead(i) := Mux1H(finalDeqOH(i), targetMem)
+  }
+  io.deq.zipWithIndex.foreach{ case (deq, i) =>
+    deq.bits.jmp.foreach((deqJmp: IssueQueueJumpBundle) => {
+      deqJmp.pc := pcRead(i)
+      deqJmp.target := targetRead(i)
+    }
+  )}
 }

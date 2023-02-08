@@ -1,7 +1,7 @@
 package xiangshan
 
 import chisel3._
-import chisel3.util.{BitPat, log2Up}
+import chisel3.util.BitPat
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.{CertainLatency, HasFuLatency, UncertainLatency}
 
@@ -55,7 +55,7 @@ package object v2backend {
 
     def num = 20
 
-    def apply() = UInt(log2Up(num).W)
+    def apply() = UInt(num.W)
 
     val functionNameMap = Map(
       jmp -> "jmp",
