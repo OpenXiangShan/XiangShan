@@ -499,7 +499,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     firstVInstrRobIdx    := firstVInstrWait.bits.robIdx
   }
 
-  val hasVInstrAfterI = Cat(enqIsVInstrVec(0)).orR
+  val hasVInstrAfterI = Cat(enqIsVInstrVec.drop(1)).orR
   when(vsetvlState === vs_idle){
     when(enq0IsVsetFlush){
       vsetvlState := Mux(hasVInstrAfterI, vs_waitFlush, vs_waitVinstr)
