@@ -865,9 +865,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // debug_inst update
   for(i <- 0 until (exuParameters.LduCnt + exuParameters.StuCnt)) {
-    // s1
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
-    // s2
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
   }
 
