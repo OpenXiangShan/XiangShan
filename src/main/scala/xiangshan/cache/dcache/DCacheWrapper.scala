@@ -316,9 +316,9 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   // read in s2
-  val data = UInt(DataBits.W)
+  val data = UInt(VLEN.W)
   // select in s3
-  val data_delayed = UInt(DataBits.W)
+  val data_delayed = UInt(VLEN.W)
   val id     = UInt(reqIdWidth.W)
 
   // cache req missed, send it to miss queue
@@ -401,8 +401,8 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val data = UInt(DataBits.W)
-  val mask = UInt((DataBits/8).W)
+  val data = UInt(XLEN.W)
+  val mask = UInt((XLEN/8).W)
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
@@ -414,10 +414,10 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   }
 }
 
-class UncacheWorResp(implicit p: Parameters) extends DCacheBundle 
+class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
-  val data      = UInt(DataBits.W)
-  val data_delayed = UInt(DataBits.W)
+  val data      = UInt(XLEN.W)
+  val data_delayed = UInt(XLEN.W)
   val id        = UInt(uncacheIdxBits.W)
   val miss      = Bool()
   val replay    = Bool()
@@ -435,7 +435,7 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new UncacheWordReq)
-  val resp = Flipped(DecoupledIO(new UncacheWorResp))
+  val resp = Flipped(DecoupledIO(new UncacheWordResp))
 }
 
 class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
@@ -521,17 +521,23 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
                 req_paddr(log2Up(refillBytes)) === last
 
     val forward_D = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
     val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
     val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
     (0 until l1BusDataWidth / 64).map(i => {
       block_data(i) := data(64 * i + 63, 64 * i)
     })
-    val selected_data = block_data(block_idx)
+    //val selected_data = block_data(block_idx)
+    val selected_data = Wire(UInt(128.W))
+    when(req_paddr(3)){
+      selected_data := block_data(block_idx) << 64
+    }.otherwise{
+      selected_data := Cat(block_data(block_idx + 1.U), block_data(block_idx))
+    }
 
     forward_D := all_match
-    for (i <- 0 until 8) {
+    for (i <- 0 until VLEN/8) {
       forwardData(i) := selected_data(8 * i + 7, 8 * i)
     }
 
@@ -564,7 +570,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
                     (req_paddr(log2Up(refillBytes)) === 1.U && lastbeat_valid)
 
     val forward_mshr = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
     val beat_data = raw_data(req_paddr(log2Up(refillBytes)))
     val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
@@ -572,10 +578,16 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     (0 until l1BusDataWidth / 64).map(i => {
       block_data(i) := beat_data(64 * i + 63, 64 * i)
     })
-    val selected_data = block_data(block_idx)
+    //val selected_data = block_data(block_idx)
+    val selected_data = Wire(UInt(128.W))
+    when(req_paddr(3)){
+      selected_data := block_data(block_idx) << 64
+    }.otherwise{
+      selected_data := Cat(block_data(block_idx + 1.U), block_data(block_idx))
+    }
 
     forward_mshr := all_match
-    for (i <- 0 until 8) {
+    for (i <- 0 until VLEN/8) {
       forwardData(i) := selected_data(8 * i + 7, 8 * i)
     }
 
@@ -591,7 +603,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val paddr = Input(UInt(PAddrBits.W))
   // resp
   val forward_mshr = Output(Bool())
-  val forwardData = Output(Vec(8, UInt(8.W)))
+  val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
 
   def connect(sink: LduToMissqueueForwardIO) = {

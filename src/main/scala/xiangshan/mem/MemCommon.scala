@@ -35,7 +35,7 @@ object genWmask {
       "b01".U -> 0x3.U, //0011
       "b10".U -> 0xf.U, //1111
       "b11".U -> 0xff.U //11111111
-    )) << addr(2, 0)).asUInt()
+    )) << addr(3, 0)).asUInt()
   }
 }
 
@@ -56,7 +56,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
-  val data = UInt((XLEN+1).W)
+  val data = UInt((VLEN+1).W)
   val wlineflag = Bool() // store write the whole cache line
 
   val miss = Bool()
@@ -66,8 +66,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val atomic = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 
-  val forwardMask = Vec(8, Bool())
-  val forwardData = Vec(8, UInt(8.W))
+  val forwardMask = Vec(VLEN/8, Bool())
+  val forwardData = Vec(VLEN/8, UInt(8.W))
 
   //softprefetch
   val isSoftPrefetch = Bool() 
@@ -203,19 +203,19 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   // val bank_oh = UInt(DCacheBanks.W)  
   
   // new dcache
-  val respDcacheData = UInt(XLEN.W)
-  val forwardMask = Vec(8, Bool())
-  val forwardData = Vec(8, UInt(8.W))
+  val respDcacheData = UInt(VLEN.W)
+  val forwardMask = Vec(VLEN/8, Bool())
+  val forwardData = Vec(VLEN/8, UInt(8.W))
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
-  val addrOffset = UInt(3.W) // for data selection
+  val addrOffset = UInt(4.W) // for data selection
   
   // forward tilelink D channel
   val forward_D = Input(Bool())
-  val forwardData_D = Input(Vec(8, UInt(8.W)))
+  val forwardData_D = Input(Vec(VLEN/8, UInt(8.W)))
 
   // forward mshr data
   val forward_mshr = Input(Bool())
-  val forwardData_mshr = Input(Vec(8, UInt(8.W)))
+  val forwardData_mshr = Input(Vec(VLEN/8, UInt(8.W)))
 
   val forward_result_valid = Input(Bool())
   
@@ -230,7 +230,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   }
 
   def mergedData(): UInt = {
-    val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+    val rdataVec = VecInit((0 until VLEN / 8).map(j =>
       Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
     ))
     rdataVec.asUInt
@@ -239,7 +239,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 
 // Load writeback data from load queue (refill)
 class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
-  val lqData = UInt(64.W) // load queue has merged data
+  val lqData = UInt(XLEN.W) // load queue has merged data
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
 

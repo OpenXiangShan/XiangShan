@@ -150,7 +150,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.isFirstIssue
     s0_rsIdx := io.rsIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
-
   }.otherwise {
     if (EnableLoadToLoadForward) {
       tryFastpath := io.fastpath.valid
@@ -158,7 +157,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_vaddr := io.fastpath.data
       // Assume the pointer chasing is always ld.
       s0_uop.ctrl.fuOpType := LSUOpType.ld
-      s0_mask := genWmask(0.U, LSUOpType.ld)
+      s0_mask := genWmask(Cat(io.fastpath.data(3),0.U(3.W)), LSUOpType.ld)
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing 
       // because these signals will be updated in S1
       s0_isFirstIssue := DontCare
@@ -319,23 +318,23 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
     //  2. Load instruction is younger than requestors(store instructions).
     //  3. Physical address match. 
     //  4. Data contains.    
-   val s1_reExecuteQuery_mask = Mux(io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
+   //val s1_reExecuteQuery_mask = Mux(io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
     needReExecuteVec(w) := io.reExecuteQuery(w).valid &&
                           isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) && 
                           !s1_tlb_miss &&
-                          (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3)) &&
-                          (s1_mask & s1_reExecuteQuery_mask).orR
+                          (s1_paddr_dup_lsu(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4)) &&
+                          (s1_mask & io.reExecuteQuery(w).bits.mask).orR
                           //(s1_mask & io.reExecuteQuery(w).bits.mask).orR
   }
   needReExecute := needReExecuteVec.asUInt.orR
   io.needReExecute := needReExecute
 
   // Generate forwardMaskFast to wake up insts earlier
-  //val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
-  val forwardMaskFast = Mux(io.in.bits.vaddr(3),io.lsq.forwardMaskFast.asUInt>>8 | io.sbuffer.forwardMaskFast.asUInt>>8,
-    io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt)
-  //io.fullForwardFast := ((~forwardMaskFast).asUInt & s1_mask) === 0.U
-  io.fullForwardFast := ((~forwardMaskFast(7,0)).asUInt & s1_mask) === 0.U
+  val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
+  //val forwardMaskFast = Mux(io.in.bits.vaddr(3),io.lsq.forwardMaskFast.asUInt>>8 | io.sbuffer.forwardMaskFast.asUInt>>8,
+  //  io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt)
+  io.fullForwardFast := ((~forwardMaskFast).asUInt & s1_mask) === 0.U
+  //io.fullForwardFast := ((~forwardMaskFast(7,0)).asUInt & s1_mask) === 0.U
   // Generate feedback signal caused by:
   // * dcache bank conflict
   // * need redo ld-ld violation check
@@ -411,11 +410,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
     val needReExecute = Output(Bool())
     // forward tilelink D channel
     val forward_D = Input(Bool())
-    val forwardData_D = Input(Vec(8, UInt(8.W)))
+    val forwardData_D = Input(Vec(VLEN/8, UInt(8.W)))
 
     // forward mshr data
     val forward_mshr = Input(Bool())
-    val forwardData_mshr = Input(Vec(8, UInt(8.W)))
+    val forwardData_mshr = Input(Vec(VLEN/8, UInt(8.W)))
 
     // indicate whether forward tilelink D channel or mshr data is valid
     val forward_result_valid = Input(Bool())
@@ -489,33 +488,34 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   val forwardData = Wire(Vec((VLEN/8), UInt(8.W)))
 
 
-  // generate XLEN/8 Muxs
+  // generate VLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
     forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
     forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
   }
-  val LoadforwardMaskH = VecInit((0 until 8).map(i=>forwardMask(i+8)))
-  val LoadforwardMaskL = VecInit((0 until 8).map(i=>forwardMask(i)))
-  val LoadforwardMask = Mux(s2_paddr(3),LoadforwardMaskH,LoadforwardMaskL)
-  val LoadforwardDataH = VecInit((0 until 8).map(i=>forwardData(i+8)))
-  val LoadforwardDataL = VecInit((0 until 8).map(i=>forwardData(i)))
-  val LoadforwardData = Mux(s2_paddr(3),LoadforwardDataH,LoadforwardDataL)
+  //val LoadforwardMaskH = VecInit((0 until 8).map(i=>forwardMask(i+8)))
+  //val LoadforwardMaskL = VecInit((0 until 8).map(i=>forwardMask(i)))
+  //val LoadforwardMask = Mux(s2_paddr(3),LoadforwardMaskH,LoadforwardMaskL)
+  //val LoadforwardDataH = VecInit((0 until 8).map(i=>forwardData(i+8)))
+  //val LoadforwardDataL = VecInit((0 until 8).map(i=>forwardData(i)))
+  //val LoadforwardData = Mux(s2_paddr(3),LoadforwardDataH,LoadforwardDataL)
 
-  val fullForward = ((~LoadforwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
+  //val fullForward = ((~LoadforwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
+  val fullForward = ((~forwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
   io.lsq := DontCare
   io.sbuffer := DontCare
   io.fullForward := fullForward
 
-  val lsqForwardMaskH = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i+8)))
-  val lsqForwardMaskL = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i)))
-  val lsqForwardMask = Mux(s2_paddr(3),lsqForwardMaskH,lsqForwardMaskL)
-  val lsqForwardDatdH = VecInit((0 until 8).map(i=>io.lsq.forwardData(i+8)))
-  val lsqForwardDatdL = VecInit((0 until 8).map(i=>io.lsq.forwardData(i)))
-  val lsqForwardData = Mux(s2_paddr(3),lsqForwardDatdH,lsqForwardDatdL)
+  //val lsqForwardMaskH = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i+8)))
+  //val lsqForwardMaskL = VecInit((0 until 8).map(i=>io.lsq.forwardMask(i)))
+  //val lsqForwardMask = Mux(s2_paddr(3),lsqForwardMaskH,lsqForwardMaskL)
+  //val lsqForwardDatdH = VecInit((0 until 8).map(i=>io.lsq.forwardData(i+8)))
+  //val lsqForwardDatdL = VecInit((0 until 8).map(i=>io.lsq.forwardData(i)))
+  //val lsqForwardData = Mux(s2_paddr(3),lsqForwardDatdH,lsqForwardDatdL)
   XSDebug(io.out.fire, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_uop.cf.pc,
-    //io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
-    lsqForwardMask.asUInt,lsqForwardData.asUInt,
+    io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
+    //lsqForwardMask.asUInt,lsqForwardData.asUInt,
     io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
   )
 
@@ -572,12 +572,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.loadDataFromDcache.respDcacheData := io.dcacheResp.bits.data_delayed
 
 
-  //io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
-  //io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
-  io.loadDataFromDcache.forwardMask := RegEnable(LoadforwardMask, io.in.valid)
-  io.loadDataFromDcache.forwardData := RegEnable(LoadforwardData, io.in.valid)
+  io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
+  io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
+  //io.loadDataFromDcache.forwardMask := RegEnable(LoadforwardMask, io.in.valid)
+  //io.loadDataFromDcache.forwardData := RegEnable(LoadforwardData, io.in.valid)
   io.loadDataFromDcache.uop := RegEnable(io.out.bits.uop, io.in.valid)
-  io.loadDataFromDcache.addrOffset := RegEnable(s2_paddr(2, 0), io.in.valid)
+  io.loadDataFromDcache.addrOffset := RegEnable(s2_paddr(3, 0), io.in.valid)
   // forward D or mshr
   io.loadDataFromDcache.forward_D := RegEnable(io.forward_D, io.in.valid)
   io.loadDataFromDcache.forwardData_D := RegEnable(io.forwardData_D, io.in.valid)
@@ -608,11 +608,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.dataForwarded := s2_cache_miss && !s2_exception &&
     (fullForward || io.csrCtrl.cache_error_enable && s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
-  //io.out.bits.forwardMask := forwardMask
-  io.out.bits.forwardMask := LoadforwardMask
+  io.out.bits.forwardMask := forwardMask
+  //io.out.bits.forwardMask := LoadforwardMask
   // data from dcache is not included in io.out.bits.forwardData
-  //io.out.bits.forwardData := forwardData
-  io.out.bits.forwardData := LoadforwardData
+  io.out.bits.forwardData := forwardData
+  //io.out.bits.forwardData := LoadforwardData
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -627,12 +627,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
     //  2. Load instruction is younger than requestors(store instructions).
     //  3. Physical address match. 
     //  4. Data contains.
-    val s2_reExecuteQuery_mask = Mux(io.reExecuteQuery(i).bits.paddr(3),io.reExecuteQuery(i).bits.mask(15,8),io.reExecuteQuery(i).bits.mask(7,0))
+    //val s2_reExecuteQuery_mask = Mux(io.reExecuteQuery(i).bits.paddr(3),io.reExecuteQuery(i).bits.mask(15,8),io.reExecuteQuery(i).bits.mask(7,0))
     needReExecuteVec(i) := io.reExecuteQuery(i).valid &&
                               isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(i).bits.robIdx) && 
                               !s2_tlb_miss &&
-                              (s2_paddr(PAddrBits-1,3) === io.reExecuteQuery(i).bits.paddr(PAddrBits-1, 3)) && 
-                              (s2_mask & s2_reExecuteQuery_mask).orR
+                              (s2_paddr(PAddrBits-1,4) === io.reExecuteQuery(i).bits.paddr(PAddrBits-1, 4)) &&
+                              (s2_mask & io.reExecuteQuery(i).bits.mask).orR
   }
   needReExecute := needReExecuteVec.asUInt.orR
   io.needReExecute := needReExecute
@@ -998,14 +998,22 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_loadDataFromDcache = load_s2.io.loadDataFromDcache
   val s3_rdataDcache = s3_loadDataFromDcache.mergedData()
   val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(
-    "b000".U -> s3_rdataDcache(63, 0),
-    "b001".U -> s3_rdataDcache(63, 8),
-    "b010".U -> s3_rdataDcache(63, 16),
-    "b011".U -> s3_rdataDcache(63, 24),
-    "b100".U -> s3_rdataDcache(63, 32),
-    "b101".U -> s3_rdataDcache(63, 40),
-    "b110".U -> s3_rdataDcache(63, 48),
-    "b111".U -> s3_rdataDcache(63, 56)
+    "b0000".U -> s3_rdataDcache(128, 0),
+    "b0001".U -> s3_rdataDcache(128, 8),
+    "b0010".U -> s3_rdataDcache(128, 16),
+    "b0011".U -> s3_rdataDcache(128, 24),
+    "b0100".U -> s3_rdataDcache(128, 32),
+    "b0101".U -> s3_rdataDcache(128, 40),
+    "b0110".U -> s3_rdataDcache(128, 48),
+    "b0111".U -> s3_rdataDcache(128, 56),
+    "b1000".U -> s3_rdataDcache(128, 64),
+    "b1001".U -> s3_rdataDcache(128, 72),
+    "b1010".U -> s3_rdataDcache(128, 80),
+    "b1011".U -> s3_rdataDcache(128, 88),
+    "b1100".U -> s3_rdataDcache(128, 96),
+    "b1101".U -> s3_rdataDcache(128, 104),
+    "b1110".U -> s3_rdataDcache(128, 112),
+    "b1111".U -> s3_rdataDcache(128, 120)
   ))
   val s3_rdataPartialLoadDcache = rdataHelper(s3_loadDataFromDcache.uop, s3_rdataSelDcache)
 
@@ -1019,7 +1027,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   io.fastpathOut.valid := RegNext(load_s2.io.out.valid) // for debug only
-  io.fastpathOut.data := s3_loadDataFromDcache.mergedData() // fastpath is for ld only
+  io.fastpathOut.data := Mux(s3_loadDataFromDcache.addrOffset(3),s3_loadDataFromDcache.mergedData()>>64,s3_loadDataFromDcache.mergedData()) // fastpath is for ld only
+  //io.fastpathOut.data := s3_loadDataFromDcache.mergedData() // fastpath is for ld only
 
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
