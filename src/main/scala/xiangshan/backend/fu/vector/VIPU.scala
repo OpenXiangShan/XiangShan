@@ -37,7 +37,7 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   for(i <- 0 until NumAdder) {
     adder(i).io.in_0 := io.in.bits.src(0)(AdderWidth*(i+1)-1, AdderWidth*i)
     adder(i).io.in_1 := io.in.bits.src(1)(AdderWidth*(i+1)-1, AdderWidth*i)
-    adder(i).io.int_format := VectorElementFormat.d // TODO
+    adder(i).io.int_format := uop.ctrl.vconfig(5,3) // TODO
     adder(i).io.op_code := uop.ctrl.fuOpType
     adder(i).io.carry_or_borrow_in := DontCare
   }
