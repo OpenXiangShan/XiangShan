@@ -94,7 +94,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
-  val s_idle  :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_send_replace :: s_wait_replace :: s_wait_resp :: Nil = Enum(8)
+  val s_idle  :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
   /** control logic transformation */
   //request register
@@ -105,9 +105,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val release_id  = Cat(MainPipeKey.U, id.U)
   val req_corrupt = RegInit(false.B)
 
-  io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
-  io.victimInfor.vidx  := req_idx
-
+  io.victimInfor.valid := false.B
+  io.victimInfor.vidx  := false.B
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
   //cacheline register
@@ -131,7 +130,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   io.req.ready := (state === s_idle)
   io.mem_acquire.valid := (state === s_send_mem_aquire)
-  io.release_req.valid := (state === s_send_replace)
+  io.release_req.valid := false.B
 
   io.toPrefetch.valid := (state =/= s_idle)
   io.toPrefetch.bits  :=  addrAlign(req.paddr, blockBytes, PAddrBits)
@@ -164,33 +163,33 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
           req_corrupt := io.mem_grant.bits.corrupt
-          grant_param := io.mem_grant.bits.param
-          is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
+//          grant_param := io.mem_grant.bits.param
+//          is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
           when(readBeatCnt === (refillCycles - 1).U) {
             assert(refill_done, "refill not done!")
-            state := s_send_grant_ack
+            state := s_write_back
           }
         }
       }
     }
 
-    is(s_send_grant_ack) {
-      when(io.mem_finish.fire()) {
-        state := s_send_replace
-      }
-    }
+    // is(s_send_grant_ack) {
+    //   when(io.mem_finish.fire()) {
+    //     state := s_send_replace
+    //   }
+    // }
 
-    is(s_send_replace){
-      when(io.release_req.fire()){
-        state := s_wait_replace
-      }
-    }
+    // is(s_send_replace){
+    //   when(io.release_req.fire()){
+    //     state := s_wait_replace
+    //   }
+    // }
 
-    is(s_wait_replace){
-      when(io.release_resp.valid && io.release_resp.bits === release_id){
-        state := s_write_back
-      }
-    }
+    // is(s_wait_replace){
+    //   when(io.release_resp.valid && io.release_resp.bits === release_id){
+    //     state := s_write_back
+    //   }
+    // }
 
     is(s_write_back) {
       state := Mux(io.meta_write.fire() && io.data_write.fire(), s_wait_resp, s_write_back)
@@ -214,13 +213,19 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     lgSize = (log2Up(cacheParams.blockBytes)).U,
     growPermissions = grow_param
   )._2
-  io.mem_acquire.bits := acquireBlock
+//  io.mem_acquire.bits := acquireBlock
+  val GetBlock = edge.Get(
+    fromSource = io.id,
+    toAddress = addrAlign(req.paddr, blockBytes, PAddrBits),
+    lgSize = (log2Up(cacheParams.blockBytes)).U
+  )._2
+  io.mem_acquire.bits := GetBlock
   // resolve cache alias by L2
-  io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
+//  io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
   require(nSets <= 256) // icache size should not be more than 128KB
 
   /** Grant ACK */
-  io.mem_finish.valid := (state === s_send_grant_ack) && is_grant
+  io.mem_finish.valid := false.B
   io.mem_finish.bits := grantack
 
   //resp to ifu
@@ -234,7 +239,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
       Cat(toT, true.B)  -> Dirty))
   }
 
-  val miss_new_coh = ClientMetadata(missCohGen(grant_param, is_dirty))
+  val miss_new_coh = ClientMetadata(ClientStates.Branch) // ClientMetadata(missCohGen(grant_param, is_dirty))
 
   io.meta_write.valid := (state === s_write_back)
   io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
