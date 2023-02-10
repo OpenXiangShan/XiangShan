@@ -30,6 +30,8 @@ class RefillPipeReqCtrl(implicit p: Parameters) extends DCacheBundle {
 
   val id = UInt(reqIdWidth.W)
   val error = Bool()
+  val prefetch = Bool()
+  val access = Bool()
 
   def paddrWithVirtualAlias: UInt = {
     Cat(alias, addr(DCacheSameVPAddrLength - 1, 0))
@@ -51,6 +53,8 @@ class RefillPipeReq(implicit p: Parameters) extends RefillPipeReqCtrl {
     ctrl.miss_id := miss_id
     ctrl.id := id
     ctrl.error := error
+    ctrl.prefetch := prefetch
+    ctrl.access := access
     ctrl
   }
 }
@@ -67,8 +71,10 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
 
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
-    val meta_write = DecoupledIO(new MetaWriteReq)
-    val error_flag_write = DecoupledIO(new ErrorWriteReq)
+    val meta_write = DecoupledIO(new CohMetaWriteReq)
+    val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val prefetch_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
     val store_resp = ValidIO(new DCacheLineResp)
     val release_wakeup = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
@@ -113,7 +119,17 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.error_flag_write.valid := io.req_dup_for_err_w.valid
   io.error_flag_write.bits.idx := req_dup_for_err_w.idx
   io.error_flag_write.bits.way_en := req_dup_for_err_w.way_en
-  io.error_flag_write.bits.error := refill_w_req.error
+  io.error_flag_write.bits.flag := refill_w_req.error
+
+  io.prefetch_flag_write.valid := io.req_dup_for_err_w.valid
+  io.prefetch_flag_write.bits.idx := req_dup_for_err_w.idx
+  io.prefetch_flag_write.bits.way_en := req_dup_for_err_w.way_en
+  io.prefetch_flag_write.bits.flag := refill_w_req.prefetch
+
+  io.access_flag_write.valid := io.req_dup_for_err_w.valid
+  io.access_flag_write.bits.idx := req_dup_for_err_w.idx
+  io.access_flag_write.bits.way_en := req_dup_for_err_w.way_en
+  io.access_flag_write.bits.flag := refill_w_req.access
 
   io.tag_write.valid := io.req_dup_for_tag_w.valid
   io.tag_write.bits.idx := req_dup_for_tag_w.idx
