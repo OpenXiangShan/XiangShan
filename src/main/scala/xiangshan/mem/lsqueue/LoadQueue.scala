@@ -180,7 +180,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // specific cycles to block
   val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   block_cycles_tlb := io.tlbReplayDelayCycleCtrl
-  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
+  val block_cycles_cache = RegInit(VecInit(Seq(7.U(ReSelectLen.W), 0.U(ReSelectLen.W), 32.U(ReSelectLen.W), 51.U(ReSelectLen.W))))
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
 
   XSPerfAccumulate("block_in_last", PopCount((0 until LoadQueueSize).map(i => block_ptr_cache(i) === 3.U)))
