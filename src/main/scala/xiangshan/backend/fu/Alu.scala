@@ -22,46 +22,6 @@ import chisel3.util._
 import utility.{LookupTree, LookupTreeDefault, ParallelMux, SignExt, ZeroExt}
 import xiangshan._
 
-class VsetModule(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val lsrc0NotZero = Input(Bool())
-    val ldest = Input(UInt(6.W))
-    val src0  = Input(UInt(XLEN.W))
-    val src1  = Input(UInt(XLEN.W))
-    val func  = Input(FuOpType())
-    val vconfig = Input(UInt(16.W))
-
-    val res   = Output(UInt(XLEN.W))
-  })
-  val vtype = io.src1(7, 0)
-  val vlmul = vtype(2, 0)
-  val vsew = vtype(5, 3)
-
-  val avlImm = Cat(0.U(3.W), io.src1(14, 10))
-  val vlLast = io.vconfig(15, 8)
-
-  val rd = io.ldest
-  val lsrc0NotZero = io.lsrc0NotZero
-  val vl = WireInit(0.U(XLEN.W))
-  val vconfig = WireInit(0.U(XLEN.W))
-
-  // vlen =  128
-  val vlmaxVec = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
-  val shamt = vlmul + (~vsew).asUInt + 1.U
-  val vlmax = ParallelMux((0 to 7).map(_.U).map(_ === shamt), vlmaxVec)
-
-  val isVsetivli = io.func === ALUOpType.vsetivli2 || io.func === ALUOpType.vsetivli1
-  val vlWhenRs1Not0 = Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
-                                      Mux(io.src0 > vlmax, vlmax, io.src0))
-  vl := Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
-        Mux(lsrc0NotZero, Mux(io.src0 > vlmax, vlmax, io.src0),
-        Mux(rd === 0.U, Cat(0.U(56.W), vlLast), vlmax)))
-
-  vconfig := Cat(0.U(48.W), vl(7, 0), vtype)
-
-  io.res := Mux(io.func === ALUOpType.vsetvli2 || io.func === ALUOpType.vsetvl2 || io.func === ALUOpType.vsetivli2, vl, vconfig)
-}
-
 class AddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -207,14 +167,13 @@ class WordResultSelect(implicit p: Parameters) extends XSModule {
 
 class AluResSel(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val func = Input(UInt(4.W))
-    val addRes, shiftRes, miscRes, compareRes, wordRes, vsetRes = Input(UInt(XLEN.W))
+    val func = Input(UInt(3.W))
+    val addRes, shiftRes, miscRes, compareRes, wordRes = Input(UInt(XLEN.W))
     val aluRes = Output(UInt(XLEN.W))
   })
 
-  val res = Mux(io.func(3), io.vsetRes,
-              Mux(io.func(2, 1) === 0.U, Mux(io.func(0), io.wordRes, io.shiftRes),
-                Mux(!io.func(2), Mux(io.func(0), io.compareRes, io.addRes), io.miscRes)))
+  val res = Mux(io.func(2, 1) === 0.U, Mux(io.func(0), io.wordRes, io.shiftRes),
+            Mux(!io.func(2), Mux(io.func(0), io.compareRes, io.addRes), io.miscRes))
   io.aluRes := res
 }
 
@@ -223,9 +182,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
     val result = Output(UInt(XLEN.W))
-    val lsrc0NotZero = Input(Bool())
-    val ldest = Input(UInt(6.W))
-    val vconfig = Input(UInt(16.W))
   })
   val (src1, src2, func) = (io.src(0), io.src(1), io.func)
 
@@ -259,15 +215,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   val rol = revSrl | sll
   val ror = srl | revSll
-
-  // vset
-  val vsetModule = Module(new VsetModule)
-  vsetModule.io.lsrc0NotZero := io.lsrc0NotZero
-  vsetModule.io.ldest := io.ldest
-  vsetModule.io.src0 := io.src(0)
-  vsetModule.io.src1 := io.src(1)
-  vsetModule.io.func := io.func
-  vsetModule.io.vconfig := io.vconfig
 
   // addw
   val addModule = Module(new AddModule)
@@ -398,13 +345,12 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val wordRes = wordResSel.io.wordRes
 
   val aluResSel = Module(new AluResSel)
-  aluResSel.io.func := func(7, 4)
+  aluResSel.io.func := func(6, 4)
   aluResSel.io.addRes := add
   aluResSel.io.compareRes := compareRes
   aluResSel.io.shiftRes := shiftRes
   aluResSel.io.miscRes := miscRes
   aluResSel.io.wordRes := wordRes
-  aluResSel.io.vsetRes := vsetModule.io.res
   val aluRes = aluResSel.io.aluRes
 
   io.result := aluRes
@@ -416,17 +362,20 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
 
   val dataModule = Module(new AluDataModule)
   val bru = Module(new Branch()(p))
+  val vset = Module(new Vset()(p))
 
   bru.io.in <> io.in
   bru.io.in.bits.uop <> io.in.bits.uop
   bru.io.redirectIn <> io.redirectIn
   bru.io.out.ready := io.out.ready
 
+  vset.io.in <> io.in
+  vset.io.in.bits.uop <> io.in.bits.uop
+  vset.io.redirectIn <> io.redirectIn
+  vset.io.out.ready := io.out.ready
+
   dataModule.io.src := io.in.bits.src.take(2)
   dataModule.io.func := io.in.bits.uop.ctrl.fuOpType
-  dataModule.io.lsrc0NotZero := uop.ctrl.imm(15) //  lsrc(0) Not Zero
-  dataModule.io.ldest := uop.ctrl.ldest
-  dataModule.io.vconfig := uop.ctrl.vconfig
 
   redirectOutValid := bru.redirectOutValid
   redirectOut <> bru.redirectOut
@@ -434,5 +383,5 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := dataModule.io.result
+  io.out.bits.data := Mux(vset.io.out.valid, vset.io.out.bits.data, dataModule.io.result)  
 }

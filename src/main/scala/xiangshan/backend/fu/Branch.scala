@@ -21,7 +21,6 @@ import chisel3._
 import chisel3.util._
 import utility.LookupTree
 import xiangshan._
-import xiangshan.backend.fu.SubModule
 
 class BranchModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -75,7 +74,7 @@ class Branch(implicit p: Parameters) extends FUWithRedirect {
   redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
 
   io.in.ready := io.out.ready
-  io.out.valid := io.in.valid
+  io.out.valid := io.in.valid && isBranch
   io.out.bits.uop <> DontCare
   io.out.bits.data := DontCare
 }
