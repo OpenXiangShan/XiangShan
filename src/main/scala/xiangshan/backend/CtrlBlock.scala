@@ -402,6 +402,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   decode.io.in <> io.frontend.cfVec
+  decode.io.in.zip(io.frontend.cfVec).map{ case (decodeIn, cf) => decodeIn.valid := cf.valid && !pendingRedirect}
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
