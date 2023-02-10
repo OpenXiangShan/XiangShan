@@ -118,14 +118,14 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   // update srcState when enqueue, wakeup
   // For better timing, we use different conditions for data write and srcState update
   // srcInfo: (psrc, srcType)
-  def wakeupMatch(srcInfo: (UInt, UInt)): (Bool, UInt) = {
+  def wakeupMatch(srcInfo: (Bool, (UInt, UInt))): (Bool, UInt) = {
     val (stateMatchVec, dataMatchVec) = io.wakeup.map(w => {
-      val (stateMatch, dataMatch) = w.bits.wakeup(Seq(srcInfo), params.exuCfg.get).head
+      val (stateMatch, dataMatch) = w.bits.wakeup(Seq(srcInfo._2), params.exuCfg.get).head
       (w.valid && stateMatch, w.valid && dataMatch)
     }).unzip
     val stateMatch = VecInit(stateMatchVec).asUInt.orR
     val dataMatch = VecInit(dataMatchVec).asUInt
-    XSError(PopCount(dataMatchVec) > 1.U, p"matchVec ${Binary(dataMatch)} should be one-hot\n")
+    XSError(PopCount(dataMatchVec) > 1.U && srcInfo._1, p"matchVec ${Binary(dataMatch)} should be one-hot\n")
     (stateMatch, dataMatch)
   }
 
@@ -222,7 +222,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       p"instructions $i with credit ${status.credit} must not be scheduled\n")
 
     // srcState: indicate whether the operand is ready for issue
-    val (stateWakeupEn, dataWakeupEnVec) = statusNext.psrc.zip(statusNext.srcType).map(wakeupMatch).unzip
+    val (stateWakeupEn, dataWakeupEnVec) = statusArrayValidNext.zip(statusNext.psrc.zip(statusNext.srcType)).map(wakeupMatch).unzip
     io.wakeupMatch(i) := dataWakeupEnVec.map(en => Mux(updateValid(i) || statusValid, en, 0.U))
     // For best timing of srcState, we don't care whether the instruction is valid or not.
     // We also don't care whether the instruction can really enqueue.
@@ -245,6 +245,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     statusNext.isFirstIssue := Mux(hasIssued, false.B, updateValid(i) || status.isFirstIssue)
 
     XSDebug(statusValid, p"entry[$i]: $status\n")
+    XSError(statusValid && Cat(status.srcType.map(SrcType.isNull)).orR, p"Error src Type, entry[$i]: $status")
   }
 
   io.isValid := statusArrayValid.asUInt

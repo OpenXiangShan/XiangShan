@@ -46,6 +46,9 @@ package object xiangshan {
     def isVp(srcType: UInt) = srcType(2)
     def isPcOrImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
 
+    def isNull(srcType: UInt) = !(isPcOrImm(srcType) || isReg(srcType) ||
+      isFp(srcType) || isVp(srcType))
+
     def apply() = UInt(3.W)
   }
 
