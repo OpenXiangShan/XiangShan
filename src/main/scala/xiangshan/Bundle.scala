@@ -268,7 +268,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
       val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
       // FIXME: divide fpMatch and vecMatch then
       val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
-      val vecMatch = if (exuCfg.readVecRf) ctrl.fpWen else false.B
+      val vecMatch = if (exuCfg.readVecRf) ctrl.vecWen else false.B
       val allIntFpVec = exuCfg.readIntRf && exuCfg.readFpVecRf
       val allStateMatch = Mux(SrcType.isVp(srcType), vecMatch, Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch))
       val stateCond = pdestMatch && (if (allIntFpVec) allStateMatch else rfStateMatch || fpMatch || vecMatch)
