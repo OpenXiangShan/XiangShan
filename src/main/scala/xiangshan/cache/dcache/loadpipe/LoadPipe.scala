@@ -40,7 +40,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
+    //val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits,new L1BankedDataReadResult())) ////TODO:when have is128Req
     val banked_data_resp = Input(new L1BankedDataReadResult())
+    //val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits,Bool()))////TODO:when have is128Req
     val read_error_delayed = Input(Bool())
 
     // banked data read conflict
@@ -115,6 +117,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
+  // s1_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s1_vaddr)) //TODO:when have is128Req
+  //val s1_bank_oh_128 = (s1_bank_oh_64 << 1.U).asUInt | s1_bank_oh_64.asUInt
+  //val s1_bank_oh = Mux(is128Req,s1_bank_oh_128,s1_bank_oh_64)
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
@@ -340,8 +345,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
 
-  val s3_banked_data_resp_word = io.banked_data_resp.raw_data
+  //val s3_banked_data_resp_word = io.banked_data_resp.raw_data
+  val s3_banked_data_resp_word = Mux(s3_paddr(3),io.banked_data_resp.raw_data<<64,io.banked_data_resp.raw_data)
+  //val data128bit = Cat(io.banked_data_resp(1).raw_data,io.banked_data_resp(0).raw_data) //TODO:when have is128Req
+  //val data64bit = Mux(s3_paddr(3),io.banked_data_resp(0).raw_data<<64,io.banked_data_resp(0).raw_data)
+  //val s3_banked_data_resp_word = Mux(is128Req,data128bit,data64bit)
   val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
+  //val s3_data_error = Mux(is128Req,io.read_error_delayed.asUInt.orR,io.read_error_delayed(0)) // banked_data_resp_word.error && !bank_conflict//TODO:when have is128Req
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error

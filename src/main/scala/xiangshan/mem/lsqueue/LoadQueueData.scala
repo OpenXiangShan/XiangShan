@@ -28,7 +28,7 @@ import xiangshan.mem._
 import xiangshan.backend.rob.RobPtr
 
 class LQDataEntryWoPaddr(implicit p: Parameters) extends XSBundle {
-  val mask = UInt(8.W)
+  val mask = UInt((XLEN/8).W)
   val data = UInt(XLEN.W)
   val fwdMask = Vec(8, Bool())
 }
@@ -144,16 +144,16 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numWBanks: Int
 class LQMaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
-    val rdata = Output(Vec(numRead, UInt(8.W)))
+    val rdata = Output(Vec(numRead, UInt((VLEN/8).W)))
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
-    val wdata = Input(Vec(numWrite, UInt(8.W)))
+    val wdata = Input(Vec(numWrite, UInt((VLEN/8).W)))
     // st-ld violation check wmask compare 
-    val violationMdata = Input(Vec(StorePipelineWidth, UInt(8.W))) // input 8-bit wmask
+    val violationMdata = Input(Vec(StorePipelineWidth, UInt((VLEN/8).W))) // input 16-bit wmask
     val violationMmask = Output(Vec(StorePipelineWidth, Vec(numEntries, Bool()))) // output wmask overlap vector
   })
 
-  val data = Reg(Vec(numEntries, UInt(8.W)))
+  val data = Reg(Vec(numEntries, UInt((VLEN/8).W)))
 
   // read ports
   for (i <- 0 until numRead) {
@@ -287,7 +287,7 @@ class LoadQueueDataWrapper(size: Int, wbNumWrite: Int)(implicit p: Parameters) e
     val wb = new Bundle() {
       val wen = Vec(wbNumWrite, Input(Bool()))
       val waddr = Input(Vec(wbNumWrite, UInt(log2Up(size).W)))
-      val wdata = Input(Vec(wbNumWrite, UInt(8.W)))
+      val wdata = Input(Vec(wbNumWrite, UInt((VLEN/8).W)))
     }
     val uncache = new Bundle() {
       val raddr = Input(UInt(log2Up(size).W))
@@ -296,7 +296,7 @@ class LoadQueueDataWrapper(size: Int, wbNumWrite: Int)(implicit p: Parameters) e
     // st-ld violation query, word level cam
     val violation = Vec(StorePipelineWidth, new Bundle() {
       val paddr = Input(UInt(PAddrBits.W))
-      val mask = Input(UInt(8.W))
+      val mask = Input(UInt((VLEN/8).W))
       val violationMask = Output(Vec(size, Bool()))
     })
     // ld-ld violation query, cache line level cam
@@ -324,7 +324,7 @@ class LoadQueueDataWrapper(size: Int, wbNumWrite: Int)(implicit p: Parameters) e
   maskModule.io.raddr(0) := io.uncache.raddr
 
   io.uncache.rdata.paddr := paddrModule.io.rdata(0)
-  io.uncache.rdata.mask := maskModule.io.rdata(0)
+  io.uncache.rdata.mask := Mux(paddrModule.io.rdata(0)(3),maskModule.io.rdata(0)>>8,maskModule.io.rdata(0))
   io.uncache.rdata.data := DontCare
   io.uncache.rdata.fwdMask := DontCare
 

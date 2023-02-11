@@ -724,7 +724,8 @@ def detectRollback(i: Int) = {
 
     // check if load already in lq needs to be rolledback
     dataModule.io.violation(i).paddr := io.storeIn(i).bits.paddr
-    dataModule.io.violation(i).mask := Mux(io.storeIn(i).bits.paddr(3),io.storeIn(i).bits.mask(15,8),io.storeIn(i).bits.mask(7,0))
+    dataModule.io.violation(i).mask := io.storeIn(i).bits.mask
+    //dataModule.io.violation(i).mask := Mux(io.storeIn(i).bits.paddr(3),io.storeIn(i).bits.mask(15,8),io.storeIn(i).bits.mask(7,0))
     val addrMaskMatch = RegNext(dataModule.io.violation(i).violationMask)
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueSize).map(j => {
       allocated(j) && stToEnqPtrMask(j) && datavalid(j)
@@ -827,7 +828,7 @@ def detectRollback(i: Int) = {
   * the same line paddr as released.
   */
 
-  // Load-Load Memory violation query
+  // Load-Load Memory violation query(from LU S1)
   val deqRightMask = UIntToMask.rightmask(deqPtr, LoadQueueSize)
   (0 until LoadPipelineWidth).map(i => {
     dataModule.io.release_violation(i).paddr := io.loadViolationQuery(i).req.bits.paddr
@@ -860,7 +861,7 @@ def detectRollback(i: Int) = {
   // 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
-
+  //Paddr from Dcache
   when(release1cycle.valid){
     // Take over ld-ld paddr cam port
     dataModule.io.release_violation.takeRight(1)(0).paddr := release1cycle.bits.paddr

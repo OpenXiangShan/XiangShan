@@ -998,22 +998,22 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_loadDataFromDcache = load_s2.io.loadDataFromDcache
   val s3_rdataDcache = s3_loadDataFromDcache.mergedData()
   val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(
-    "b0000".U -> s3_rdataDcache(128, 0),
-    "b0001".U -> s3_rdataDcache(128, 8),
-    "b0010".U -> s3_rdataDcache(128, 16),
-    "b0011".U -> s3_rdataDcache(128, 24),
-    "b0100".U -> s3_rdataDcache(128, 32),
-    "b0101".U -> s3_rdataDcache(128, 40),
-    "b0110".U -> s3_rdataDcache(128, 48),
-    "b0111".U -> s3_rdataDcache(128, 56),
-    "b1000".U -> s3_rdataDcache(128, 64),
-    "b1001".U -> s3_rdataDcache(128, 72),
-    "b1010".U -> s3_rdataDcache(128, 80),
-    "b1011".U -> s3_rdataDcache(128, 88),
-    "b1100".U -> s3_rdataDcache(128, 96),
-    "b1101".U -> s3_rdataDcache(128, 104),
-    "b1110".U -> s3_rdataDcache(128, 112),
-    "b1111".U -> s3_rdataDcache(128, 120)
+    "b0000".U -> s3_rdataDcache(63, 0),
+    "b0001".U -> s3_rdataDcache(63, 8),
+    "b0010".U -> s3_rdataDcache(63, 16),
+    "b0011".U -> s3_rdataDcache(63, 24),
+    "b0100".U -> s3_rdataDcache(63, 32),
+    "b0101".U -> s3_rdataDcache(63, 40),
+    "b0110".U -> s3_rdataDcache(63, 48),
+    "b0111".U -> s3_rdataDcache(63, 56),
+    "b1000".U -> s3_rdataDcache(127, 64),
+    "b1001".U -> s3_rdataDcache(127, 72),
+    "b1010".U -> s3_rdataDcache(127, 80),
+    "b1011".U -> s3_rdataDcache(127, 88),
+    "b1100".U -> s3_rdataDcache(127, 96),
+    "b1101".U -> s3_rdataDcache(127, 104),
+    "b1110".U -> s3_rdataDcache(127, 112),
+    "b1111".U -> s3_rdataDcache(127, 120)
   ))
   val s3_rdataPartialLoadDcache = rdataHelper(s3_loadDataFromDcache.uop, s3_rdataSelDcache)
 
