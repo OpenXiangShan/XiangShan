@@ -385,7 +385,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * (2) write: write back from exe units
     */
   val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth))
-//  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth))
   val dispatchDataRead = dispatchData.io.rdata
 
   val exceptionGen = Module(new ExceptionGen)

@@ -219,7 +219,7 @@ object VecDecoder extends DecodeConstants {
   )
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
-    VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.add, T, F, F, SelImm.IMM_OPIVIS),
+    VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.add,   T, F, F, SelImm.IMM_OPIVIS),
     VRSUB_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
 
     VAND_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
