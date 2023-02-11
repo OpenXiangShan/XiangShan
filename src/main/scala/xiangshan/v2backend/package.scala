@@ -1,7 +1,7 @@
 package xiangshan
 
 import chisel3._
-import chisel3.util.BitPat
+import chisel3.util._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.{CertainLatency, HasFuLatency, UncertainLatency}
 
@@ -74,12 +74,27 @@ package object v2backend {
       mou -> "mou"
     )
   }
-  
+
+  case class DataConfig (
+    name: String,
+    dataWidth: Int,
+  ) {
+    override def toString: String = name
+  }
+
+  val IntData = DataConfig("int", 64)
+  val FpData = DataConfig("fp", 64)
+  val VecData = DataConfig("vec", 128)
+  val ImmData = DataConfig("imm", 64)
+  val AddrData = DataConfig("addr", 39)
+  val VCfgData = DataConfig("vcfg", 2 + 3 + 1 + 1 + 1 + log2Up(VecData.dataWidth)) // 16: vsew + vlmul + vma + vta + vill + vl
+  val MaskSrcData = DataConfig("masksrc", VecData.dataWidth) // 128
+  val MaskDstData = DataConfig("maskdst", VecData.dataWidth / 8) // 16
+  val RegSrcDatas = Set(IntData, FpData, VecData, MaskSrcData)
+
   case class FuConfig (
     fuType: Int,
-    numIntSrc: Int,
-    numFpSrc: Int,
-    numVecSrc: Int = 0,
+    srcData: Seq[Seq[DataConfig]],
     writeIntRf: Boolean,
     writeFpRf: Boolean,
     writeVecRf: Boolean = false,
@@ -93,12 +108,30 @@ package object v2backend {
     flushPipe: Boolean = false,
     replayInst: Boolean = false,
     trigger: Boolean = false,
-  )
+  ) {
+    def numIntSrc: Int = srcData.map(_.count(_ == IntData)).max
+    def numFpSrc: Int = srcData.map(_.count(_ == FpData)).max
+    def numVecSrc: Int = srcData.map(_.count(x => x == VecData || x == MaskSrcData)).max
+    def numSrcMax: Int = srcData.map(_.length).max
+
+    /**
+      * params(i): data type set of the ith src port
+      * @return
+      */
+    def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
+      val numSrcMax = srcData.map(_.length).max
+      // make srcData is uniform sized to avoid exception when transpose
+      val alignedSrcData: Seq[Seq[DataConfig]] = srcData.map(x => x ++ Seq.fill(numSrcMax - x.length)(null))
+      alignedSrcData.transpose.map(_.toSet.intersect(RegSrcDatas))
+    }
+  }
 
   def JmpCfg: FuConfig = FuConfig (
     fuType = FuType.jmp,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, ImmData), // jalr
+      Seq(IntData, AddrData),// auipc
+    ),
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = true,
@@ -106,8 +139,9 @@ package object v2backend {
 
   def BrhCfg = FuConfig (
     fuType = FuType.brh,
-    numIntSrc = 2,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     hasRedirect = true,
@@ -115,8 +149,9 @@ package object v2backend {
 
   def I2fCfg = FuConfig (
     FuType.i2f,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = false,
     writeFpRf = true,
     writeFflags = true,
@@ -125,8 +160,9 @@ package object v2backend {
 
   def CsrCfg = FuConfig (
     fuType = FuType.csr,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     exceptionOut = Seq(illegalInstr, breakPoint, ecallU, ecallS, ecallM),
@@ -135,25 +171,28 @@ package object v2backend {
 
   def AluCfg: FuConfig = FuConfig (
     fuType = FuType.alu,
-    numIntSrc = 2,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
   )
 
   def MulCfg = FuConfig (
-    FuType.mul,
-    2,
-    0,
+    fuType = FuType.mul,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     latency = CertainLatency(2),
   )
 
   def DivCfg = FuConfig (
-    FuType.div,
-    2,
-    0,
+    fuType = FuType.div,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     latency = UncertainLatency(),
@@ -162,8 +201,9 @@ package object v2backend {
 
   def FenceCfg: FuConfig = FuConfig (
     FuType.fence,
-    numIntSrc = 2,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency(),
@@ -174,8 +214,9 @@ package object v2backend {
   // Todo: split it to simple bitmap exu and complex bku
   def BkuCfg = FuConfig (
     fuType = FuType.bku,
-    numIntSrc = 2,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     latency = CertainLatency(1),
@@ -183,8 +224,9 @@ package object v2backend {
 
   def VsetCfg = FuConfig (
     fuType = FuType.vset,
-    numIntSrc = 2,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData, IntData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     latency = CertainLatency(0)
@@ -192,8 +234,10 @@ package object v2backend {
 
   def FmacCfg = FuConfig (
     fuType = FuType.fmac,
-    numIntSrc = 0,
-    numFpSrc = 3,
+    srcData = Seq(
+      Seq(FpData, FpData),
+      Seq(FpData, FpData, FpData),
+    ),
     writeIntRf = false,
     writeFpRf = true,
     writeFflags = true,
@@ -202,8 +246,9 @@ package object v2backend {
 
   def F2iCfg = FuConfig (
     fuType = FuType.fmisc,
-    numIntSrc = 0,
-    numFpSrc = 1,
+    srcData = Seq(
+      Seq(FpData),
+    ),
     writeIntRf = true,
     writeFpRf = false,
     writeFflags = true,
@@ -212,8 +257,9 @@ package object v2backend {
 
   def F2fCfg = FuConfig (
     fuType = FuType.fDivSqrt,
-    numIntSrc = 0,
-    numFpSrc = 2,
+    srcData = Seq(
+      Seq(FpData),
+    ),
     writeIntRf = false,
     writeFpRf = true,
     writeFflags = true,
@@ -223,8 +269,9 @@ package object v2backend {
 
   def FDivSqrtCfg = FuConfig (
     fuType = FuType.fDivSqrt,
-    numIntSrc = 0,
-    numFpSrc = 2,
+    srcData = Seq(
+      Seq(FpData, FpData),
+    ),
     writeIntRf = false,
     writeFpRf = true,
     writeFflags = true,
@@ -234,8 +281,9 @@ package object v2backend {
 
   def LduCfg = FuConfig (
     fuType = FuType.ldu,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = true,
     writeFpRf = true,
     latency = UncertainLatency(),
@@ -247,8 +295,9 @@ package object v2backend {
 
   def StaCfg = FuConfig (
     fuType = FuType.stu,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency(),
@@ -257,8 +306,10 @@ package object v2backend {
 
   def StdCfg = FuConfig (
     fuType = FuType.stu,
-    numIntSrc = 1,
-    numFpSrc = 1,
+    srcData = Seq(
+      Seq(IntData),
+      Seq(FpData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     latency = CertainLatency(1),
@@ -267,8 +318,9 @@ package object v2backend {
 
   def MouCfg = FuConfig (
     fuType = FuType.mou,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency(),
@@ -277,8 +329,9 @@ package object v2backend {
 
   def MoudCfg = FuConfig (
     fuType = FuType.mou,
-    numIntSrc = 1,
-    numFpSrc = 0,
+    srcData = Seq(
+      Seq(IntData),
+    ),
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency()
@@ -286,9 +339,10 @@ package object v2backend {
 
   def VipuCfg = FuConfig (
     fuType = FuType.vipu,
-    numIntSrc = 1,
-    numFpSrc = 0,
-    numVecSrc = 4,
+    srcData = Seq(
+      Seq(VecData, VecData, VecData, MaskSrcData),  // vs1, vs2, vd_old, v0
+      Seq(VecData, VecData, VecData, VecData),      // vs1_1, vs2, vs1_2, vs2_2 // no mask and vta
+    ),
     writeIntRf = true,
     writeFpRf = false,
     writeVecRf = true,
@@ -297,9 +351,11 @@ package object v2backend {
 
   def VfpuCfg = FuConfig (
     fuType = FuType.vfpu,
-    numIntSrc = 0,
-    numFpSrc = 1,
-    numVecSrc = 4,
+    srcData = Seq(
+      Seq(VecData, VecData, VecData, MaskSrcData),  // vs1, vs2, vd_old, v0
+      Seq(VecData, VecData, VecData, VecData),      // vs1_1, vs2, vs1_2, vs2_2 // no mask and vta
+      Seq(FpData, VecData, VecData, MaskSrcData),   // f[rs1], vs2, vd_old, v0
+    ),
     writeIntRf = true,
     writeFpRf = false,
     writeVecRf = true,
