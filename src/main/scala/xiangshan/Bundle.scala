@@ -150,6 +150,18 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val rm = UInt(3.W)
 }
 
+class VType(implicit p: Parameters) extends XSBundle {
+  val vma   = Bool()
+  val vta   = Bool()
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class VConfig(implicit p: Parameters) extends XSBundle {
+  val vl    = UInt(8.W)
+  val vtype = new VType
+}
+
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val srcType = Vec(4, SrcType())
@@ -170,7 +182,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UInt(5.W)
-  val vconfig = UInt(16.W)
+  val vconfig = new VConfig
   val isMove = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
@@ -386,7 +398,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
 
   val uopIdx = UInt(5.W)
-  val vconfig = UInt(16.W)
+  val vconfig = new VConfig
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {

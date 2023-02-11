@@ -29,7 +29,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
     val src0  = Input(UInt(XLEN.W))
     val src1  = Input(UInt(XLEN.W))
     val func  = Input(FuOpType())
-    val vconfig = Input(UInt(16.W))
+    val vconfig = Input(new VConfig)
 
     val res   = Output(UInt(XLEN.W))
   })
@@ -39,7 +39,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   val vsew = vtype(5, 3)
 
   val avlImm = Cat(0.U(3.W), io.src1(14, 10))
-  val vlLast = io.vconfig(15, 8)
+  val vlLast = io.vconfig.vl
 
   val rd = io.ldest
   val lsrc0NotZero = io.lsrc0NotZero
