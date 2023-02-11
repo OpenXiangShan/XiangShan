@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
+import xiangshan.v2backend.Bundles.{DynInst, ExuInput, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
 import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
 
@@ -35,8 +35,10 @@ case class IssueQueueParams(
   def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
 
   def genIssueBundle: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(this.exuParams.map(x => DecoupledIO(new IssueQueueIssueBundle(x, dataBits, pregBits, vaddrBits))))
+    MixedVec(this.exuParams.map(x => DecoupledIO(new IssueQueueIssueBundle(x, pregBits, vaddrBits))))
   }
+
+  def genExuInputBundle = MixedVec(this.exuParams.map(x => DecoupledIO(new ExuInput(x))))
 }
 
 object DummyIQParams {
@@ -240,7 +242,7 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
     deq.bits.common.fpWen    := payloadArrayRdata(i).fpWen
     deq.bits.common.vecWen   := payloadArrayRdata(i).vecWen
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
-      rf.addr := psrc
+      rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
     }
   }
 

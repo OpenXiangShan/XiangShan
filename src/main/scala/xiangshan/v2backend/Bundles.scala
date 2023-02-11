@@ -1,12 +1,11 @@
 package xiangshan.v2backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.rob.RobPtr
-import xiangshan._
-import xiangshan.backend.regfile.RfReadPort
 import xiangshan.frontend._
 import xiangshan.v2backend.issue.IssueQueueJumpBundle
 
@@ -157,10 +156,20 @@ object Bundles {
   }
 
   // DynInst --[IssueQueue]--> DataPath
-  class IssueQueueIssueBundle(exuParams: ExeUnitParams, dataWidth: Int, addrWidth: Int, vaddrBits: Int) extends Bundle {
-    val rf = Flipped(Vec(exuParams.numIntSrc, new RfReadPort(dataWidth, addrWidth)))
+  class IssueQueueIssueBundle(exuParams: ExeUnitParams, addrWidth: Int, vaddrBits: Int) extends Bundle {
+    private val rfReadDataCfgSet: Seq[Set[DataConfig]] = exuParams.getRfReadDataCfgSet
+
+    val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
+      rfReadDataCfgSet.map((set: Set[DataConfig]) =>
+        MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, addrWidth)).toSeq)
+      )
+    ))
     val common = new ExuInput(exuParams)
     val jmp = if (exuParams.hasJmpFu) Some(Flipped(new IssueQueueJumpBundle(vaddrBits))) else None
+
+    def getSource: SchedulerType = exuParams.getWBSource
+    def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
+    def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readFp)
   }
 
   // DataPath --[ExuInput]--> ExuInput

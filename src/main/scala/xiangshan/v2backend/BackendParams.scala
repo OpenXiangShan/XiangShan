@@ -53,6 +53,66 @@ object SchdBlockParams {
     )
     params
   }
+
+  def dummyVfParams(numDeqOutside: Int = 0): SchdBlockParams = {
+    implicit val schdType: SchedulerType = VfScheduler()
+    val numUopIn = 6
+    val numRfRead = 12
+    val numRfWrite = 8
+    val numPregs = 160
+    val pregIdxWidth = log2Up(numPregs)
+    val rfDataWidth = 128
+
+    var params = SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(VipuCfg)),
+        ExeUnitParams(Seq(VipuCfg)),
+      ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg)),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg)),
+      ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
+    ),
+      numPregs = numPregs,
+      numRfReadWrite = Some((numRfRead, numRfWrite)),
+      numDeqOutside = numDeqOutside,
+      schdType = schdType,
+      rfDataWidth = rfDataWidth,
+      numUopIn = numUopIn,
+    )
+    params
+  }
+
+  def dummyMemParams(): SchdBlockParams = {
+    implicit val schdType: SchedulerType = MemScheduler()
+    val numUopIn = 6
+    val numPregs = 160
+    val pregBits = log2Up(numPregs)
+    val rfDataWidth = 64
+
+    var params = SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(LduCfg)),
+        ExeUnitParams(Seq(LduCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StaCfg)),
+        ExeUnitParams(Seq(StaCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StdCfg)),
+        ExeUnitParams(Seq(StdCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+    ),
+      numPregs = numPregs,
+      numRfReadWrite = None,
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = rfDataWidth,
+      numUopIn = numUopIn,
+    )
+    params
+  }
 }
 
 case class SchdBlockParams(
@@ -92,8 +152,6 @@ case class SchdBlockParams(
   def numWriteFpRf : Int = issueBlockParams.map(_.numWriteFpRf ).sum
   def numWriteVecRf: Int = issueBlockParams.map(_.numWriteVecRf).sum
 
-  def numRfRead : Int = numRfReadWrite.getOrElse((0,0))._1
-  def numRfWrite: Int = numRfReadWrite.getOrElse((0,0))._2
   def pregIdxWidth: Int = log2Up(numPregs)
 
   def numWakeupFromWB: Int = schdType match {
@@ -101,6 +159,13 @@ case class SchdBlockParams(
     case MemScheduler() => 0 // Todo
     case _ => 0
   }
+
+  def numTotalIntRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).sum).sum
+  def numTotalIntRfWrite: Int = issueBlockParams.map(_.exuBlockParams.length).sum
+
+  // Todo: 14R8W
+  def numRfRead : Int = numTotalIntRfRead
+  def numRfWrite: Int = numTotalIntRfWrite
 }
 
 case class IssueBlockParams(
@@ -252,6 +317,15 @@ case class ExeUnitParams(
     if (writeIntRf) res :+ WriteBackConfig(getWBSource, IntScheduler())
     if (writeFpRf || writeVecRf) res :+ WriteBackConfig(getWBSource, VfScheduler())
     res
+  }
+
+  def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
+    val fuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuConfigs.map(_.getRfReadDataCfgSet)
+    val alignedFuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuSrcsCfgSet.map(x => x ++ Seq.fill(numSrc - x.length)(Set[DataConfig]()))
+
+    val exuSrcsCfgSet = alignedFuSrcsCfgSet.reduce((x, y) => (x zip y).map { case (cfg1, cfg2) => cfg1 union cfg2 } )
+
+    exuSrcsCfgSet
   }
 
   def genExuInputBundle: ExuInput = {
