@@ -298,7 +298,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val walkSel = PriorityMux(isWalkWriteVconfigVec, pdestReverse)
   val vconfigAddr = Mux(rob.io.commits.isCommit, commitSel, walkSel)
   io.vconfigReadPort.addr := RegNext(vconfigAddr)
-  decode.io.vconfig := io.vconfigReadPort.data
+  decode.io.vconfig := io.vconfigReadPort.data(15, 0).asTypeOf(new VConfig)
   decode.io.isVsetFlushPipe := rob.io.isVsetFlushPipe
 
   val stage2Redirect = Mux(flushRedirect.valid, flushRedirect, redirectGen.io.stage2Redirect)

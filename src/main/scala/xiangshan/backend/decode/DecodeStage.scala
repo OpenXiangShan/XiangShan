@@ -81,31 +81,31 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
     val isFirstVset = Input(Bool())
 
     val isVsetFlushPipe = Input(Bool())
-    val vconfig = Input(UInt(XLEN.W))
+    val vconfig = Input(new VConfig)
     val isRedirect = Input(Bool())
     val robCommits = Input(new RobCommitIO)
 
-    val vconfigPre = Output(UInt(8.W))
-    val vconfigNxt = Output(UInt(8.W))
+    val vconfigPre = Output(new VConfig)
+    val vconfigNxt = Output(new VConfig)
   })
-  val vconfig_arch = RegInit(0.U(XLEN.W))
-  val vconfig_spec = RegInit(0.U(XLEN.W))
 
+  val vconfig_arch = RegInit(0.U.asTypeOf(new VConfig))
+  val vconfig_spec = RegInit(0.U.asTypeOf(new VConfig))
   // compute vlmaxs
-  val vtype = io.firstInstr(27, 20)
-  val vlmul = vtype(2, 0)
-  val vsew  = vtype(5, 3)
-  val vma   = vtype(6)
-  val vta   = vtype(7)
+  val vtype = io.firstInstr(27, 20).asTypeOf(new VType)
+  val vlmul = vtype.vlmul
+  val vsew  = vtype.vsew
+  val vma   = vtype.vma
+  val vta   = vtype.vta
 
 //  val avlImm = Cat(0.U(3.W), io.src1(14, 10))
-  val vlLast = vconfig_spec(15, 8)
+  val vlLast = vconfig_spec.vl
 
   val rd = io.firstInstr(11, 7)
   val rs1 = io.firstInstr(19, 15)
   val vl = WireInit(0.U(8.W))
-  val vconfig_spec_next = WireInit(0.U(XLEN.W))
 
+  val vconfig_spec_next = WireInit(0.U.asTypeOf(new VConfig))
   // vlen = 128
   val vlmaxVec = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
   val shamt = vlmul + (~vsew).asUInt + 1.U
@@ -114,7 +114,8 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
   vl := Mux(rs1 =/= 0.U, Mux(rs1 > vlmax, vlmax, rs1),
           Mux(rd === 0.U, vlLast, vlmax))
 
-  vconfig_spec_next := Cat(0.U(48.W), vl, vtype)
+  vconfig_spec_next.vl := vl
+  vconfig_spec_next.vtype := vtype
 
   // vconfig update
   val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U)}
@@ -155,7 +156,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
     val isVsetFlushPipe = Input(Bool())
-    val vconfig = Input(UInt(XLEN.W))
+    val vconfig = Input(new VConfig)
     val isRedirect = Input(Bool())
     // from rob
     val robCommits = Input(new RobCommitIO)

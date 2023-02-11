@@ -641,7 +641,7 @@ case class Imm_LUI_LOAD() {
  */
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
-  val vconfig = Input(UInt(XLEN.W))
+  val vconfig = Input(new VConfig)
   val deq = new Bundle {
     val cf_ctrl = Output(new CfCtrl)
     val isVset = Output(Bool())
@@ -732,7 +732,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  cs.vconfig := 0.U(16.W)
+  cs.vconfig := 0.U.asTypeOf(new VConfig)
   when(FuType.isVpu(cs.fuType)){
     cs.vconfig := io.vconfig
   }
