@@ -5,6 +5,15 @@ import chisel3._
 import chisel3.util.{Cat, log2Up}
 import xiangshan.backend.regfile.Regfile
 
+class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extends Bundle {
+  val addr: UInt = Input(UInt(addrWidth.W))
+  val data: UInt = Output(UInt(rfReadDataCfg.dataWidth.W))
+
+  def readInt: Boolean = rfReadDataCfg == IntData
+  def readFp : Boolean = rfReadDataCfg == FpData
+  def readVec: Boolean = rfReadDataCfg == VecData
+}
+
 object RegFile {
   // non-return version
   def apply(
