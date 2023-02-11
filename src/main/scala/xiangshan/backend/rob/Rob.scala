@@ -385,7 +385,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * (2) write: write back from exe units
     */
   val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth))
-//  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth))
   val dispatchDataRead = dispatchData.io.rdata
 
   val exceptionGen = Module(new ExceptionGen)
@@ -1098,8 +1097,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.fpvecwen := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).fpVecWen)))
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
-
-      difftest.io.isVsetFirst := RegNext(RegNext(RegNext(io.commits.commitValid(i) && !io.commits.info(i).uopIdx.orR)))
+      difftest.io.uopIdx   := RegNext(RegNext(RegNext(io.commits.info(i).uopIdx))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
