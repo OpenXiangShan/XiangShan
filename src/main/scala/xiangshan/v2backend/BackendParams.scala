@@ -32,16 +32,16 @@ object SchdBlockParams {
     val rfDataWidth = 64
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg)),
-        ExeUnitParams(Seq(AluCfg, DivCfg)),
+        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg), Seq(IntWB(port = 2, 0), VfWB(port = 7, Int.MaxValue))),
+        ExeUnitParams(Seq(AluCfg, DivCfg), Seq(IntWB(port = 3, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg)),
-        ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg))
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg), Seq(IntWB(port = 4, 0))),
+        ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg), Seq(IntWB(port = 5, 0)))
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -65,12 +65,12 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VipuCfg)),
-        ExeUnitParams(Seq(VipuCfg)),
+        ExeUnitParams(Seq(VipuCfg), Seq(VfWB(port = 0, 0))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VfWB(port = 0, 0))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg)),
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg)),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VfWB(port = 0, 0))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg), Seq(IntWB(port = 5, Int.MaxValue), VfWB(port = 0, 0))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -92,16 +92,16 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg)),
-        ExeUnitParams(Seq(LduCfg)),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VfWB(6, 0))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(7, 0), VfWB(7, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StaCfg)),
-        ExeUnitParams(Seq(StaCfg)),
+        ExeUnitParams(Seq(StaCfg), WBSeq()),
+        ExeUnitParams(Seq(StaCfg), WBSeq()),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StdCfg)),
-        ExeUnitParams(Seq(StdCfg)),
+        ExeUnitParams(Seq(StdCfg), WBSeq()),
+        ExeUnitParams(Seq(StdCfg), WBSeq()),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -259,8 +259,30 @@ case class IssueBlockParams(
   }
 }
 
+trait WBPortConfig {
+  val port: Int
+  val priority: Int
+}
+
+case class IntWB(
+  override val port    : Int,
+  override val priority: Int,
+) extends WBPortConfig
+
+case class VfWB(
+  override val port    : Int,
+  override val priority: Int,
+) extends WBPortConfig
+
+object WBSeq {
+  def apply(elems: WBPortConfig*): Seq[WBPortConfig] = {
+    elems
+  }
+}
+
 case class ExeUnitParams(
   fuConfigs: Seq[FuConfig],
+  wbPortConfigs: Seq[WBPortConfig],
 )(implicit
   val schdType: SchedulerType,
 ) {
@@ -305,17 +327,19 @@ case class ExeUnitParams(
   def getWbParamsInner: Seq[Seq[WriteBackConfig]] = {
     this.fuConfigs.map(cfg => {
       val res = Seq()
-      if (cfg.writeIntRf) res :+ WriteBackConfig(getWBSource, IntScheduler())
-      if (cfg.writeFpRf)  res :+ WriteBackConfig(getWBSource, VfScheduler())
-      if (cfg.writeVecRf) res :+ WriteBackConfig(getWBSource, VfScheduler())
+      if (cfg.writeIntRf) res :+ WriteBackConfig(getWBSource, IntWB(-1, 0))
+      if (cfg.writeFpRf)  res :+ WriteBackConfig(getWBSource, VfWB(-1, 0))
+      if (cfg.writeVecRf) res :+ WriteBackConfig(getWBSource, VfWB(-1, 0))
       res
     })
   }
 
   def getWbParamsOuter: Seq[WriteBackConfig] = {
     val res = Seq()
-    if (writeIntRf) res :+ WriteBackConfig(getWBSource, IntScheduler())
-    if (writeFpRf || writeVecRf) res :+ WriteBackConfig(getWBSource, VfScheduler())
+    if (writeIntRf)
+      res :+ WriteBackConfig(getWBSource, wbPortConfigs.filter(_.isInstanceOf[IntWB]).head)
+    if (writeFpRf || writeVecRf)
+      res :+ WriteBackConfig(getWBSource, wbPortConfigs.filter(_.isInstanceOf[VfWB]).head)
     res
   }
 

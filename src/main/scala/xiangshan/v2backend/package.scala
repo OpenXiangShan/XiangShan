@@ -20,9 +20,9 @@ package object v2backend {
 
   case class WriteBackConfig(
     wbSource: SchedulerType,
-    wbSink: SchedulerType,
+    wbPortCfg: WBPortConfig,
   ) {
-
+    
   }
 
   object FuType {
