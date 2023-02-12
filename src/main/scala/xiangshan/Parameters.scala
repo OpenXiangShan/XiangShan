@@ -171,7 +171,7 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
-  EnableUncacheWriteOutstanding: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 6, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
