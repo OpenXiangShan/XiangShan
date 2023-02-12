@@ -28,6 +28,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val io = IO(new DCacheBundle {
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
+    val load128Req = Input(Bool())////TODO:when have load128Req
     // req got nacked in stage 0?
     val nack      = Input(Bool())
 
@@ -40,10 +41,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
-    //val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits,new L1BankedDataReadResult())) ////TODO:when have is128Req
-    val banked_data_resp = Input(new L1BankedDataReadResult())
-    //val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits,Bool()))////TODO:when have is128Req
-    val read_error_delayed = Input(Bool())
+    val is128Req = Output(Bool())//TODO:when have load128Req
+    val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits,new L1BankedDataReadResult())) ////TODO:when have load128Req
+    //val banked_data_resp = Input(new L1BankedDataReadResult())
+    val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits,Bool()))////TODO:when have load128Req
+    //val read_error_delayed = Input(Bool())
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
@@ -101,6 +103,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.addr
   val s0_replayCarry = s0_req.replayCarry
+  val s0_load128Req = io.load128Req//TODO:when have load128Req
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -114,12 +117,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
+  val s1_load128Req = RegEnable(s0_load128Req, s0_fire)//TODO:when have load128Req
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
-  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
-  // s1_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s1_vaddr)) //TODO:when have is128Req
-  //val s1_bank_oh_128 = (s1_bank_oh_64 << 1.U).asUInt | s1_bank_oh_64.asUInt
-  //val s1_bank_oh = Mux(is128Req,s1_bank_oh_128,s1_bank_oh_64)
+  //val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
+  val s1_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s1_vaddr)) //TODO:when have load128Req
+  val s1_bank_oh_128 = (s1_bank_oh_64 << 1.U).asUInt | s1_bank_oh_64.asUInt
+  val s1_bank_oh = Mux(s1_load128Req,s1_bank_oh_128,s1_bank_oh_64)
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
@@ -205,6 +209,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way_dup_dc
+  io.is128Req := s1_load128Req //TODO:when have load128Req
 
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
@@ -224,6 +229,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_load128Req = RegEnable(s1_load128Req, s1_fire)////TODO:when have load128Req
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
@@ -342,16 +348,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report ecc error and get selected dcache data
 
   val s3_valid = RegNext(s2_valid)
+  val s3_load128Req = RegEnable(s2_load128Req , s2_fire)//TODO:when have load128Req
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
 
   //val s3_banked_data_resp_word = io.banked_data_resp.raw_data
-  val s3_banked_data_resp_word = Mux(s3_paddr(3),io.banked_data_resp.raw_data<<64,io.banked_data_resp.raw_data)
-  //val data128bit = Cat(io.banked_data_resp(1).raw_data,io.banked_data_resp(0).raw_data) //TODO:when have is128Req
-  //val data64bit = Mux(s3_paddr(3),io.banked_data_resp(0).raw_data<<64,io.banked_data_resp(0).raw_data)
-  //val s3_banked_data_resp_word = Mux(is128Req,data128bit,data64bit)
-  val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
-  //val s3_data_error = Mux(is128Req,io.read_error_delayed.asUInt.orR,io.read_error_delayed(0)) // banked_data_resp_word.error && !bank_conflict//TODO:when have is128Req
+  //val s3_banked_data_resp_word = Mux(s3_paddr(3),io.banked_data_resp.raw_data<<64,io.banked_data_resp.raw_data)
+  val data128bit = Cat(io.banked_data_resp(1).raw_data,io.banked_data_resp(0).raw_data) //TODO:when have load128Req
+  val data64bit = Mux(s3_paddr(3),io.banked_data_resp(0).raw_data<<64,io.banked_data_resp(0).raw_data)
+  val s3_banked_data_resp_word = Mux(s3_load128Req,data128bit,data64bit)
+  //val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
+  val s3_data_error = Mux(s3_load128Req,io.read_error_delayed.asUInt.orR,io.read_error_delayed(0)) // banked_data_resp_word.error && !bank_conflict//TODO:when have load128Req
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error

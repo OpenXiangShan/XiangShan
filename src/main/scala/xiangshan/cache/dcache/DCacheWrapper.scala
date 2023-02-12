@@ -771,6 +771,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
+    bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp_delayed(i)
@@ -794,7 +795,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // only lsu uses this, replay never kills
   for (w <- 0 until LoadPipelineWidth) {
     ldu(w).io.lsu <> io.lsu.load(w)
-
+    ldu(w).io.load128Req := false.B////TODO:when have load128Req
     // replay and nack not needed anymore
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B

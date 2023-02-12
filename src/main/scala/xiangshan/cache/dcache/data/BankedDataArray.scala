@@ -29,7 +29,8 @@ import scala.math.max
 class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
   val addr = Vec(LoadPipelineWidth, Bits(PAddrBits.W))
   val set_index = Vec(LoadPipelineWidth, UInt((DCacheAboveIndexOffset - DCacheSetOffset).W))
-  val bank_index = UInt((DCacheSetOffset - DCacheBankOffset).W)
+  //val bank_index = UInt((DCacheSetOffset - DCacheBankOffset).W)
+  val bank_index = Vec(VLEN/DCacheSRAMRowBits,UInt((DCacheSetOffset - DCacheBankOffset).W))
   val way_index = UInt(wayBits.W)
   val fake_rr_bank_conflict = Bool()
 }
@@ -88,6 +89,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   val io = IO(new DCacheBundle {
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
+    val is128Req = Input(Vec(LoadPipelineWidth,Bool()))
     // main pipeline read / write line req
     val readline_intend = Input(Bool())
     val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
@@ -96,10 +98,10 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data for readline and loadpipe
     val readline_resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Output(Bool())
-    val read_resp_delayed = Output(Vec(LoadPipelineWidth, new L1BankedDataReadResult()))
-    //val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec((VLEN/DCacheSRAMRowBits),new L1BankedDataReadResult())))//TODO:when have is128Req
-    val read_error_delayed = Output(Vec(LoadPipelineWidth,Bool()))
-    //val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec((VLEN/DCacheSRAMRowBits), Bool())))//TODO:when have is128Req
+    //val read_resp_delayed = Output(Vec(LoadPipelineWidth, new L1BankedDataReadResult()))
+    val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec((VLEN/DCacheSRAMRowBits),new L1BankedDataReadResult())))//TODO:when have is128Req
+    //val read_error_delayed = Output(Vec(LoadPipelineWidth,Bool()))
+    val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec((VLEN/DCacheSRAMRowBits), Bool())))//TODO:when have is128Req
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
@@ -111,7 +113,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val cacheOp_req_dup = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(11, UInt(XLEN.W)))
   })
-
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
   def dumpRead() = {
@@ -142,10 +143,10 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   def dumpResp() = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
-      XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r).raw_data)
-      //XSDebug(s"cycle: $r data: %x\n", Mux(is128Req(r),
-      //                                Cat(io.read_resp_delayed(r)(1).raw_data,io.read_resp_delayed(r)(0).raw_data),
-      //                                io.read_resp_delayed(r)(0).raw_data))//TODO:when have is128Req
+      //XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r).raw_data)
+      XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),
+                                      Cat(io.read_resp_delayed(r)(1).raw_data,io.read_resp_delayed(r)(0).raw_data),
+                                      io.read_resp_delayed(r)(0).raw_data))//TODO:when have is128Req
     }
   }
 
@@ -163,6 +164,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
 
   val ReduceReadlineConflict = false
+
 
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
@@ -250,8 +252,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val way_en_reg = RegNext(way_en)
   val set_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
-  val bank_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
-  //val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits,UInt())))//TODO:when have is128Req
+  //val bank_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
+  val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits,UInt())))//TODO:when have is128Req
 
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
@@ -259,14 +261,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     set_addrs(rport_index)     := addr_to_dcache_set(io.read(rport_index).bits.addr)
-    bank_addrs(rport_index)    := addr_to_dcache_bank(io.read(rport_index).bits.addr)
-    //bank_addrs(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr)//TODO:when have is128Req
+    //bank_addrs(rport_index)    := addr_to_dcache_bank(io.read(rport_index).bits.addr)
+    bank_addrs(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr)//TODO:when have is128Req
     //if data requiring is not 128bit,set bank_addrs(rport_index)(1) to an impossible data(for example 8)
-    //if(is128Req(rport_index)){//TODO:when have is128Req
-    //  bank_addrs(rport_index)(1) := addr_to_dcache_bank(io.read(rport_index).bits.addr ) + 1.U
-    //}else{
-    //  bank_addrs(rport_index)(1) := DCacheBanks.asUInt
-    //}
+    when(io.is128Req(rport_index)){//TODO:when have is128Req
+      bank_addrs(rport_index)(1) := addr_to_dcache_bank(io.read(rport_index).bits.addr ) + 1.U
+    }otherwise{
+      bank_addrs(rport_index)(1) := DCacheBanks.asUInt
+    }
     io.read(rport_index).ready := !(rwhazard || rrhazard)
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
@@ -275,26 +277,26 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.readline.ready := !(rwhazard)
 
   // read conflict
-  //val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => //TODO:when have is128Req
-  //  (bank_addrs(x)(0) === bank_addrs(y)(0) || bank_addrs(x)(0) === bank_addrs(y)(1) || bank_addrs(x)(1) === bank_addrs(y)(0) || bank_addrs(x)(1) === bank_addrs(y)(1)) &&
-  //    io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
-  //))
-  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
-    bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
+  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => //TODO:when have is128Req
+    (bank_addrs(x)(0) === bank_addrs(y)(0) || bank_addrs(x)(0) === bank_addrs(y)(1) || bank_addrs(x)(1) === bank_addrs(y)(0) || bank_addrs(x)(1) === bank_addrs(y)(1)) &&
+      io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
   ))
+  //val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
+  //  bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
+  //))
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
-    //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && //TODO:when have is128Req
-    //  Mux(is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
+    //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && //TODO:when have is128Req
+      Mux(io.is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.rmask(bank_addrs(i)))
-    //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && //TODO:when have is128Req
-    //  Mux(is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
+    //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.rmask(bank_addrs(i)))
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && //TODO:when have is128Req
+      Mux(io.is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
@@ -340,12 +342,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       //     +--------+--------+
       //     |    Data Bank    |
       //     +-----------------+
-      //val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {//TODO:when have is128Req
-      //  (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U) && io.read(i).valid && way_en(i)(way_index)
-      //})))
-      val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-        bank_addrs(i) === bank_index.U && io.read(i).valid && way_en(i)(way_index)
+      val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {//TODO:when have is128Req
+        (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U) && io.read(i).valid && way_en(i)(way_index)
       })))
+      //val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+      //  bank_addrs(i) === bank_index.U && io.read(i).valid && way_en(i)(way_index)
+      //})))
       val readline_en = Wire(Bool())
       if (ReduceReadlineConflict) {
         readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && io.readline.bits.way_en(way_index)
@@ -386,14 +388,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
 
   (0 until LoadPipelineWidth).map(i => {
-    //if(is128Req(i)){ //TODO:when have is128Req
-    //  (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-    //    io.read_resp_delayed(i)(j) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(j))))(RegNext(RegNext(OHToUInt(way_en(i)))))
-    //  })
-    //}else{
-    //  io.read_resp_delayed(i)(0) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(0))))(RegNext(RegNext(OHToUInt(way_en(i)))))
-    //}
-    io.read_resp_delayed(i) := read_result_delayed(RegNext(RegNext(bank_addrs(i))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+    when(io.is128Req(i)){ //TODO:when have is128Req
+      (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+        io.read_resp_delayed(i)(j) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(j))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+      })
+    }.otherwise{
+      io.read_resp_delayed(i)(0) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(0))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+      io.read_resp_delayed(i)(1) := DontCare
+    }
+    //io.read_resp_delayed(i) := read_result_delayed(RegNext(RegNext(bank_addrs(i))))(RegNext(RegNext(OHToUInt(way_en(i)))))
   })
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
@@ -402,20 +405,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    //if(is128Req(rport_index)){ //TODO:when have is128Req
-    //  (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-    //    io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //      read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
-    //      !RegNext(io.bank_conflict_slow(rport_index))
-    //  })
-    //}else{
-    //  io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //    read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
-    //    !RegNext(io.bank_conflict_slow(rport_index))
-    //}
-    io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
-      read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
-      !RegNext(io.bank_conflict_slow(rport_index))
+    when(io.is128Req(rport_index)){ //TODO:when have is128Req
+      (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+        io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
+          read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+          !RegNext(io.bank_conflict_slow(rport_index))
+      })
+    }.otherwise{
+      io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
+        read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+        !RegNext(io.bank_conflict_slow(rport_index))
+      io.read_error_delayed(rport_index)(1) := DontCare
+    }
+    //io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
+    //  read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+    //  !RegNext(io.bank_conflict_slow(rport_index))
   })
   // readline port
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) &&
@@ -616,11 +620,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // FIXME: rr_bank_conflict(0)(1) no generalization
   when(rr_bank_conflict(0)(1)) {
-    bankConflictData.bank_index := bank_addrs(0)
+    //bankConflictData.bank_index := bank_addrs(0)
+    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+      bankConflictData.bank_index(i) := bank_addrs(0)(i)
+    })
     bankConflictData.way_index  := OHToUInt(way_en(0))
     bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1)
   }.otherwise {
-    bankConflictData.bank_index := 0.U
+    //bankConflictData.bank_index := 0.U
+    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+      bankConflictData.bank_index(i) := 0.U
+    })
     bankConflictData.way_index := 0.U
     bankConflictData.fake_rr_bank_conflict := false.B
   }
