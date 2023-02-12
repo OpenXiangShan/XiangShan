@@ -163,7 +163,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           l3nWays = 8,
           spSize = 2,
         ),
-        L2CacheParamsOpt = None // remove L2 Cache
+        L2CacheParamsOpt = None, // remove L2 Cache
+        prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
     )
     case SoCParamsKey =>
@@ -246,7 +247,7 @@ class WithNKBL2
         )),
         reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.BOPParameters()),
+        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
         enablePerf = true,
         sramDepthDiv = 2,
         tagECC = Some("secded"),

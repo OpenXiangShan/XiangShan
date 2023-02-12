@@ -30,6 +30,8 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -156,6 +158,7 @@ case class XSCoreParameters
     LduCnt = 2,
     StuCnt = 2
   ),
+  prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -241,7 +244,7 @@ case class XSCoreParameters
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.BOPParameters())
+    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
