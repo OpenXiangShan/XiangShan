@@ -84,11 +84,6 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
 
   val forward_tlDchannel = Bool()
-
-  // TODO: For inst db
-  // val cacheFirstMiss = Bool()
-  // val isBankConflict = Bool()
-  // val isForwardSucc = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {

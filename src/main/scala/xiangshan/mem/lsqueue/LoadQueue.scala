@@ -529,7 +529,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       cache_bank_no_conflict(idx) := io.replayFast(i).cache_bank_no_conflict
 
       // update tlbReqFirstTime
-      uop(idx).debugInfo := io.replayFast(i).debugInfo
+      uop(idx).debugInfo := io.replayFast(i).debug
 
       when(io.replayFast(i).needreplay) {
         creditUpdate(idx) := block_cycles_others(block_ptr_others(idx))
@@ -555,7 +555,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       cache_hited(idx) := io.replaySlow(i).cache_hited
 
       // update tlbReqFirstTime
-      uop(idx).debugInfo := io.replaySlow(i).debugInfo
+      uop(idx).debugInfo := io.replaySlow(i).debug
 
       val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
 

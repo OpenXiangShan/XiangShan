@@ -35,7 +35,7 @@ class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
   val st_ld_check_ok = Output(Bool())
   val cache_bank_no_conflict = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
-  val debugInfo = Output(new PerfDebugInfo)
+  val debug = Output(new PerfDebugInfo)
 
   def needreplay: Bool = {
     !ld_ld_check_ok || !st_ld_check_ok || !cache_bank_no_conflict
@@ -55,7 +55,7 @@ class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle with HasDCachePar
   val replayCarry = Output(new ReplayCarry)
   val miss_mshr_id = Output(UInt(log2Up(cfg.nMissEntries).W))
   val data_in_last_beat = Output(Bool())
-  val debugInfo = Output(new PerfDebugInfo)
+  val debug = Output(new PerfDebugInfo)
 
   def needreplay: Bool = {
     !tlb_hited || !st_ld_check_ok || !cache_no_replay || !forward_data_valid || !cache_hited
@@ -490,7 +490,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.replayFast.st_ld_check_ok := !needReExecute || s1_is_sw_prefetch
   io.replayFast.cache_bank_no_conflict := !s1_bank_conflict || s1_is_sw_prefetch
   io.replayFast.ld_idx := io.in.bits.uop.lqIdx.value
-  io.replayFast.debugInfo := io.in.bits.uop.debugInfo
+  io.replayFast.debug := io.in.bits.uop.debugInfo
 
   // if replay is detected in load_s1,
   // load inst will be canceled immediately
@@ -777,7 +777,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.replaySlow.replayCarry := io.dcacheResp.bits.replayCarry
   io.replaySlow.miss_mshr_id := io.dcacheResp.bits.mshr_id
   io.replaySlow.data_in_last_beat := io.in.bits.paddr(log2Up(refillBytes))
-  io.replaySlow.debugInfo := io.in.bits.uop.debugInfo
+  io.replaySlow.debug := io.in.bits.uop.debugInfo
 
   // To be removed
   val s2_need_replay_from_rs = Wire(Bool())

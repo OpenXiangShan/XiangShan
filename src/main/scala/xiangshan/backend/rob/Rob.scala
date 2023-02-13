@@ -858,8 +858,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   for (i <- 0 until CommitWidth) {
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
-      val idx = commitReadAddr(i)
-      valid(idx) := false.B
+      valid(commitReadAddr(i)) := false.B
     }
   }
 
@@ -1102,37 +1101,40 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * DataBase info:
     * log trigger is at writeback valid
     * */
-  val instTableName =  "InstDB" + p(XSCoreParamsKey).HartId.toString
-  val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-  val debugInstTable = ChiselDB.createTable(instTableName, new DebugInstDB)
-  // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
-  for(wb <- exuWriteback){
-    when(wb.valid){
-      val debugInstData = Wire(new DebugInstDB)
-      val idx = wb.bits.uop.robIdx.value
-      debugInstData.globalID := wb.bits.uop.ctrl.debugGlobalID
-      debugInstData.robIdx := idx
-      debugInstData.instType := wb.bits.uop.ctrl.fuType
-      debugInstData.ivaddr := wb.bits.uop.cf.pc
-      debugInstData.dvaddr := wb.bits.debug.vaddr
-      debugInstData.dpaddr := wb.bits.debug.paddr
-      debugInstData.tlbLatency := wb.bits.uop.debugInfo.tlbRespTime - wb.bits.uop.debugInfo.tlbFirstReqTime
-      debugInstData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-      debugInstData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-      debugInstData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
-      debugInstData.exceptType := wb.bits.uop.cf.exceptionVec
-      debugInstData.lsInfo := debug_lsInfo(idx)
-      debugInstData.mdpInfo.ssid := wb.bits.uop.cf.ssid
-      debugInstData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
-      debugInstTable.log(
-        data = debugInstData,
-        en = wb.valid,
-        site = instSiteName,
-        clock = clock,
-        reset = reset
-      )
+  if(env.FPGAPlatform){
+    val instTableName = "InstDB" + p(XSCoreParamsKey).HartId.toString
+    val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
+    val debug_instTable = ChiselDB.createTable(instTableName, new DebugInstDB)
+    // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
+    for (wb <- exuWriteback) {
+      when(wb.valid) {
+        val debug_instData = Wire(new DebugInstDB)
+        val idx = wb.bits.uop.robIdx.value
+        debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
+        debug_instData.robIdx := idx
+        debug_instData.instType := wb.bits.uop.ctrl.fuType
+        debug_instData.ivaddr := wb.bits.uop.cf.pc
+        debug_instData.dvaddr := wb.bits.debug.vaddr
+        debug_instData.dpaddr := wb.bits.debug.paddr
+        debug_instData.tlbLatency := wb.bits.uop.debugInfo.tlbRespTime - wb.bits.uop.debugInfo.tlbFirstReqTime
+        debug_instData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
+        debug_instData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
+        debug_instData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
+        debug_instData.exceptType := wb.bits.uop.cf.exceptionVec
+        debug_instData.lsInfo := debug_lsInfo(idx)
+        debug_instData.mdpInfo.ssid := wb.bits.uop.cf.ssid
+        debug_instData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
+        debug_instTable.log(
+          data = debug_instData,
+          en = wb.valid,
+          site = instSiteName,
+          clock = clock,
+          reset = reset
+        )
+      }
     }
   }
+
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value

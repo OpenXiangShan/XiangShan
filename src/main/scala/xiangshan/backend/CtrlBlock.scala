@@ -201,7 +201,6 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   with HasPerfEvents
 {
   val writebackLengths = outer.writebackSinksParams.map(_.length)
-  val writebackLengthSum = writebackLengths.sum
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -247,13 +246,18 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
-  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
-  val PCMEMIDX_LD = 5
-  val PCMEMIDX_ROBWB = PCMEMIDX_LD + exuParameters.LduCnt
-  val pcMem = Module(new SyncDataModuleTemplate(
-    new Ftq_RF_Components, FtqSize,
-    6 + exuParameters.LduCnt + writebackLengthSum, 1, "CtrlPcMem")
-  )
+  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
+    Some(io.writeback.map(writeback => {
+      val exuOutput = WireInit(writeback)
+      val timer = GTimer()
+      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
+        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)))
+        wb_next.bits := RegNext(wb.bits)
+        wb_next.bits.uop.debugInfo.writebackTime := timer
+      }
+      exuOutput
+    }))
+  }
 
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
@@ -268,23 +272,12 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val redirectGen = Module(new RedirectGenerator)
   val rob = outer.rob.module
 
-  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
-    var pcMemIdx = PCMEMIDX_ROBWB
-    Some(io.writeback.map(writeback => {
-      val exuOutput = WireInit(writeback)
-      val timer = GTimer()
-      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
-        pcMem.io.raddr(pcMemIdx) := wb.bits.uop.cf.ftqPtr.value
-        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)))
-        wb_next.bits := RegNext(wb.bits)
-        wb_next.bits.uop.debugInfo.writebackTime := timer
-        wb_next.bits.uop.cf.pc := pcMem.io.rdata(pcMemIdx).getPc(RegNext(wb.bits.uop.cf.ftqOffset))
-        pcMemIdx = pcMemIdx + 1
-      }
-      exuOutput
-    }))
-  }
-
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
+  val PCMEMIDX_LD = 5
+  val pcMem = Module(new SyncDataModuleTemplate(
+    new Ftq_RF_Components, FtqSize,
+    6 + exuParameters.LduCnt, 1, "CtrlPcMem")
+  )
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)

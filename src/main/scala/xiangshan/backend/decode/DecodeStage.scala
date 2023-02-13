@@ -40,7 +40,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-  val debugGlobalCounter = RegInit(0.U(XLEN.W))
+  val debug_globalCounter = RegInit(0.U(XLEN.W))
 
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
@@ -51,7 +51,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.out(i).bits       := DontCare
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
-    io.out(i).bits.ctrl.debugGlobalID := debugGlobalCounter + PopCount((0 until i+1).map(io.out(_).fire))
+    io.out(i).bits.ctrl.debug_globalID := debug_globalCounter + PopCount((0 until i+1).map(io.out(_).fire))
     io.in(i).ready       := io.out(i).ready
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
@@ -70,7 +70,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
 
-  debugGlobalCounter := debugGlobalCounter + PopCount(io.out.map(_.fire))
+  debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
 
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
