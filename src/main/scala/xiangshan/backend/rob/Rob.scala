@@ -1148,6 +1148,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.fpvecwen := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).fpVecWen)))
       difftest.io.wpdest  := RegNext(RegNext(RegNext(commitInfo.pdest)))
       difftest.io.wdest   := RegNext(RegNext(RegNext(commitInfo.ldest)))
+      difftest.io.uopIdx  := RegNext(RegNext(RegNext(commitInfo.uopIdx)))
     }
   }
 
