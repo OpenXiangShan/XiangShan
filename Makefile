@@ -150,17 +150,6 @@ emu-run:
 simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
-# only generate a small module: example
-verilog-decode:
-	mill -i XiangShan.test.runMain xiangshan.DecodeMain -td build --output-file DecodeUnit.v
-
-# chiseltest
-# autorun all the chiselTest case
-test:
-	mill -i XiangShan.test.test
-
-# only run DecodeUnitTest
-test-DecodeUnit:
-	mill -i XiangShan.test.testOnly xiangshan.DecodeUnitTest
+include Makefile.test
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
