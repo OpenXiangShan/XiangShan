@@ -347,7 +347,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })
 
   (0 until LoadPipelineWidth).map(i => {
-    vaddrModule.io.raddr(LoadPipelineWidth + i) := loadReplaySelGen(i)
+    // vaddrModule rport 0 and 1 is used by exception and mmio 
+    vaddrModule.io.raddr(2 + i) := loadReplaySelGen(i)
   })
 
   (0 until LoadPipelineWidth).map(i => {
