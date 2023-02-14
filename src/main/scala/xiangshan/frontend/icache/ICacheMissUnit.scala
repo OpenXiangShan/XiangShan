@@ -75,8 +75,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
-    val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
-    val data_write = DecoupledIO(new ICacheDataWriteBundle)
+    val meta_write = DecoupledIO(new ICacheMetaWrapperWriteBundle)
+    val data_write = DecoupledIO(new ICacheDataWrapperWriteBundle)
 
     //write back to Prefetch Buffer
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
@@ -97,7 +97,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   /** control logic transformation */
   //request register
   val req = Reg(new ICacheMissReq)
-  val req_idx = req.getVirSetIdx //virtual index
+//  val req_idx = req.getVirSetIdx //virtual index
+  val req_phyIdx = getPhyIdxFromPaddr(req.paddr)
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
   val req_corrupt = RegInit(false.B)
@@ -114,9 +115,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val needFlush = needFlushReg || io.fencei
 
   if(DebugFlags.fdip){
-    when(io.mem_acquire.fire()) {
-      printf("{%d} Miss unit: send an acquire, source id: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), id.U, req.vaddr, addrAlign(req.vaddr, blockBytes, VAddrBits))
-    }
+//    when(io.mem_acquire.fire()) {
+//      printf("{%d} Miss unit: send an acquire, source id: %d, vaddr: 0x%x, aligned vaddr: 0x%x\n", GTimer(), id.U, req.vaddr, addrAlign(req.vaddr, blockBytes, VAddrBits))
+//    }
   }
 
   //cacheline register
@@ -225,19 +226,19 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val miss_new_coh = ClientMetadata(ClientStates.Branch)
 
   io.meta_write.valid := (state === s_write_back) && !needFlush
-  io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
+  io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, phyIdx = req_phyIdx, waymask = req_waymask, bankIdx = req_phyIdx(0))
 
   io.data_write.valid := (state === s_write_back) && !needFlush
   io.data_write.bits.generate(data = respDataReg.asUInt,
-                              idx  = req_idx,
+                              phyIdx  = req_phyIdx,
                               waymask = req_waymask,
-                              bankIdx = req_idx(0),
+                              bankIdx = req_phyIdx(0),
                               paddr = req.paddr)
 
   if (DebugFlags.fdip) {
     when(io.meta_write.fire) {
-      printf("<%d> MissUnit: write data to meta sram:ptag=0x%x,vidx=0x%x,waymask=0x%x, vaddr=0x%x\n",
-        GTimer(), req_tag, req_idx, req_waymask, req.vaddr)
+      printf("<%d> MissUnit: write data to meta sram:ptag=0x%x,pidx=0x%x,waymask=0x%x\n",
+        GTimer(), req_tag, req_phyIdx, req_waymask)
     }
   }
 
@@ -264,8 +265,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
 
-    val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
-    val data_write  = DecoupledIO(new ICacheDataWriteBundle)
+    val meta_write  = DecoupledIO(new ICacheMetaWrapperWriteBundle)
+    val data_write  = DecoupledIO(new ICacheDataWrapperWriteBundle)
 
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
@@ -279,8 +280,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   // assign default values to output signals
   io.mem_grant.ready := false.B
 
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  PortNumber))
-  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  PortNumber))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrapperWriteBundle,  PortNumber))
+  val refill_arb     = Module(new Arbiter(new ICacheDataWrapperWriteBundle,  PortNumber))
   val ipf_write_arb  = Module(new Arbiter(new IPFBufferWrite,  nPrefetchEntries))
 
   io.mem_grant.ready := true.B

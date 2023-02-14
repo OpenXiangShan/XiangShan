@@ -40,16 +40,16 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
   def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
 }
 
-class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
+class ICacheMetaWrapperWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val virIdx  = UInt(idxBits.W)
-  val phyTag  = UInt(tagBits.W)
-  val coh     = new ClientMetadata
+  val phyIdx = UInt(phyIdxBits.W)
+  val phyTag = UInt(tagBits.W)
+  val coh = new ClientMetadata
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def generate(tag:UInt, coh: ClientMetadata, idx:UInt, waymask:UInt, bankIdx: Bool){
-    this.virIdx  := idx
+  def generate(tag:UInt, coh: ClientMetadata, phyIdx:UInt, waymask:UInt, bankIdx: Bool){
+    this.phyIdx  := phyIdx
     this.phyTag  := tag
     this.coh     := coh
     this.waymask := waymask
@@ -58,16 +58,51 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 
 }
 
+class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
+{
+  val idx  = UInt(idxBits.W)
+  val phyTag  = UInt(tagBits.W)
+  val coh     = new ClientMetadata
+  val waymask = UInt(nWays.W)
+  val bankIdx = Bool()
+
+  def generate(tag:UInt, coh: ClientMetadata, idx:UInt, waymask:UInt, bankIdx: Bool){
+    this.idx  := idx
+    this.phyTag  := tag
+    this.coh     := coh
+    this.waymask := waymask
+    this.bankIdx   := bankIdx
+  }
+
+}
+
+class ICacheDataWrapperWriteBundle(implicit p: Parameters) extends ICacheBundle
+{
+  val phyIdx  = UInt(phyIdxBits.W)
+  val data    = UInt(blockBits.W)
+  val waymask = UInt(nWays.W)
+  val bankIdx = Bool()
+  val paddr   = UInt(PAddrBits.W)
+
+  def generate(data:UInt, phyIdx:UInt, waymask:UInt, bankIdx: Bool, paddr: UInt){
+    this.phyIdx  := phyIdx
+    this.data    := data
+    this.waymask := waymask
+    this.bankIdx := bankIdx
+    this.paddr   := paddr
+  }
+}
+
 class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val virIdx  = UInt(idxBits.W)
+  val idx  = UInt(idxBits.W)
   val data    = UInt(blockBits.W)
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
   val paddr   = UInt(PAddrBits.W)
 
   def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool, paddr: UInt){
-    this.virIdx  := idx
+    this.idx  := idx
     this.data    := data
     this.waymask := waymask
     this.bankIdx := bankIdx
@@ -82,12 +117,13 @@ class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
   val codes = Vec(2, Vec(nWays , UInt(dataCodeEntryBits.W)))
 }
 
+// not use
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
 {
     val req     = Flipped(DecoupledIO(new ICacheReadBundle))
     val resp = Output(new ICacheMetaRespBundle)
 }
-
+// not use
 class ICacheCommonReadBundle(isMeta: Boolean)(implicit p: Parameters) extends ICacheBundle
 {
     val req     = Flipped(DecoupledIO(new ICacheReadBundle))
@@ -103,13 +139,13 @@ class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
 
 class PIQMetaWrite(implicit p: Parameters) extends  IPrefetchBundle{
   val tag = UInt(tagBits.W)
-  val index = UInt(idxBits.W)
+//  val index = UInt(idxBits.W)
   val paddr = UInt(PAddrBits.W)
 }
 
 class IPFBufferRead(implicit p: Parameters) extends IPrefetchBundle {
   val req = Vec(PortNumber, Flipped(DecoupledIO(new Bundle {
-    val vaddr = UInt(VAddrBits.W)
+//    val vaddr = UInt(VAddrBits.W)
     val paddr = UInt(PAddrBits.W)
   })))
   val resp = Vec(PortNumber, ValidIO(new Bundle {
@@ -140,7 +176,7 @@ class IPFBufferRead(implicit p: Parameters) extends IPrefetchBundle {
 class IPFBufferFilterRead(implicit p: Parameters) extends  IPrefetchBundle{
   /** input */
   val req = Flipped(new Bundle {
-    val vSetIdx = Output(UInt(log2Ceil(nSets).W))
+//    val vSetIdx = Output(UInt(log2Ceil(nSets).W))
     val paddr = Output(UInt(PAddrBits.W))
   })
   /** output */
@@ -156,7 +192,8 @@ class IPFBufferWrite(implicit p: Parameters) extends  IPrefetchBundle{
 }
 
 class IPFBufferMove(implicit p: Parameters) extends  IPrefetchBundle{
-  val vsetIdx = Output(UInt(idxBits.W))
+//  val vsetIdx = Output(UInt(idxBits.W))
+  val phySetIdx = Output(UInt(phyIdxBits.W))
   val waymask = Input(UInt(nWays.W))
 }
 

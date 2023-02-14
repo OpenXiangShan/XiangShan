@@ -32,7 +32,7 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
 
 case class ICacheParameters(
-    nSets: Int =  64,
+    nSets: Int =  128,
     nWays: Int = 8,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
@@ -48,14 +48,11 @@ case class ICacheParameters(
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
-
-  val setBytes = nSets * blockBytes
-//  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
-  val aliasBitsOpt = DCacheParameters.apply().aliasBitsOpt // TODO : temporary method to slove alias problem
+  val toL2aliasBitsOpt = DCacheParameters.apply().aliasBitsOpt // TODO : temporary method to solve compile problem
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
-  ) ++ aliasBitsOpt.map(AliasField)
+  ) ++ toL2aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
@@ -64,6 +61,49 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst{
   val cacheParams = icacheParameters
+
+  val ICacheSets = cacheParams.nSets
+  val ICacheWays = cacheParams.nWays
+
+  def logicSetBytes = ICacheSets * cacheParams.blockBytes
+  def pageBytes = cacheParams.pageSize
+  def aliasBits = if (logicSetBytes > pageBytes) log2Ceil(logicSetBytes / pageBytes) else 0
+  def hasAliasBits = aliasBits > 0
+
+  def aliasBankNum = if (logicSetBytes > pageBytes) logicSetBytes / pageBytes else 1
+
+  override def nSets = ICacheSets / aliasBankNum
+
+  override def idxBits = log2Up(nSets)
+  def logicIdxBits = log2Up(ICacheSets)
+  def phyIdxBits = logicIdxBits
+
+  override def untagBits = blockOffBits + idxBits + aliasBits
+  override def pgUntagBits = untagBits
+  override def tagBits = PAddrBits - pgUntagBits
+
+  override def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt
+  override def get_tag(addr: UInt) = get_phy_tag(addr)
+  override def get_idx(addr: UInt) = addr(idxBits + blockOffBits - 1, blockOffBits)
+  override def get_untag(addr: UInt) = {
+    require(false, "should not use this function")
+    addr
+  }
+  def getPhyIdxFromPaddr(paddr: UInt) = paddr(blockOffBits + idxBits + aliasBits - 1 , blockOffBits)
+  def getIdxFromPhyIdx(phyIdx: UInt) = phyIdx(phyIdxBits - aliasBits - 1, 0)
+  def getIdxFromPaddr(paddr: UInt) = paddr(blockOffBits + idxBits - 1 , blockOffBits)
+  def getAliasBankIdxFromPhyIdx(phyIdx: UInt) = if (hasAliasBits) {
+    (phyIdx >> idxBits).asUInt
+  } else {
+    0.U
+  }
+  def getAliasBankIdxFromPhyAddr(phyAddr: UInt) = if (hasAliasBits) {
+    phyAddr(blockOffBits + idxBits + aliasBits - 1 ,blockOffBits + idxBits)
+  } else {
+    0.U // TODO : does have better implementation?
+  }
+  def getPhyTagAndPhyIdxFromPaddr(paddr: UInt) = (paddr >> blockOffBits).asUInt
+
   val dataCodeUnit = 16
   val dataCodeUnitNum  = blockBits/dataCodeUnit
 
@@ -71,17 +111,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def encDataUnitBits   = cacheParams.dataCode.width(dataCodeUnit)
   def dataCodeBits      = encDataUnitBits - dataCodeUnit
   def dataCodeEntryBits = dataCodeBits * dataCodeUnitNum
-
-  val ICacheSets = cacheParams.nSets
-  val ICacheWays = cacheParams.nWays
-
-  val ICacheSameVPAddrLength = 12
-  val ReplaceIdWid = 5
-
-  val ICacheWordOffset = 0
-  val ICacheSetOffset = ICacheWordOffset + log2Up(blockBytes)
-  val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
-  val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
 
   def ReplacePipeKey = 0
   def MainPipeKey = 1
@@ -143,11 +172,89 @@ class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
 
 object ICacheMetadata {
   def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
-    val meta = Wire(new L1Metadata)
+    val meta = Wire(new ICacheMetadata)
     meta.tag := tag
     meta.coh := coh
     meta
   }
+}
+
+class ICacheMetaArrayWrapper()(implicit p: Parameters) extends ICacheArray
+{
+  val io=IO{new Bundle{
+    val write    = Flipped(DecoupledIO(new ICacheMetaWrapperWriteBundle))
+    val read     = Flipped(DecoupledIO(new ICacheReadBundle))
+    val readResp = Vec(aliasBankNum, Output(new ICacheMetaRespBundle))
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
+    val fencei   = Input(Bool())
+  }}
+
+  val aliasMetaBanks = (0 until aliasBankNum) map { bank =>
+    val aliasMetaBank = Module(new ICacheMetaArray())
+    aliasMetaBank.io.write.bits.generate(
+      tag = io.write.bits.phyTag,
+      coh = io.write.bits.coh,
+      idx = getIdxFromPhyIdx(io.write.bits.phyIdx),
+      waymask = io.write.bits.waymask,
+      bankIdx = io.write.bits.bankIdx)
+
+    aliasMetaBank.io.read.valid := io.read.valid
+    aliasMetaBank.io.read.bits.isDoubleLine := io.read.bits.isDoubleLine
+    aliasMetaBank.io.read.bits.vSetIdx := io.read.bits.vSetIdx
+
+    aliasMetaBank.io.readResp <> io.readResp(bank)
+
+    aliasMetaBank.io.cacheOp <> io.cacheOp
+    aliasMetaBank.io.fencei <> io.fencei
+    aliasMetaBank
+  }
+
+  val aliasBankIdx = getAliasBankIdxFromPhyIdx(io.write.bits.phyIdx)
+  val alias_bank_oh = UIntToOH(aliasBankIdx)
+  (0 until aliasBankNum).foreach { i =>
+    aliasMetaBanks(i).io.write.valid := io.write.valid && alias_bank_oh(i)
+  }
+  io.write.ready := Mux1H(alias_bank_oh, aliasMetaBanks.map(_.io.write.ready))
+  io.read.ready := aliasMetaBanks.map(_.io.read.ready).reduce(_&&_)
+
+}
+
+class ICacheDataArrayWrapper()(implicit p: Parameters) extends ICacheArray
+{
+  val io=IO{new Bundle{
+    val write    = Flipped(DecoupledIO(new ICacheDataWrapperWriteBundle))
+    val read     = Flipped(DecoupledIO(new ICacheReadBundle))
+    val readResp = Vec(aliasBankNum, Output(new ICacheDataRespBundle))
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
+  }}
+
+  val aliasDataBanks = (0 until aliasBankNum) map { bank =>
+    val aliasDataBank = Module(new ICacheDataArray())
+    aliasDataBank.io.write.bits.generate(
+      data = io.write.bits.data,
+      idx = getIdxFromPhyIdx(io.write.bits.phyIdx),
+      waymask = io.write.bits.waymask,
+      bankIdx = io.write.bits.bankIdx,
+      paddr = io.write.bits.paddr)
+
+    aliasDataBank.io.read.valid := io.read.valid
+    aliasDataBank.io.read.bits.isDoubleLine := io.read.bits.isDoubleLine
+    aliasDataBank.io.read.bits.vSetIdx := io.read.bits.vSetIdx
+
+    aliasDataBank.io.readResp <> io.readResp(bank)
+
+    aliasDataBank.io.cacheOp <> io.cacheOp
+    aliasDataBank
+  }
+
+  val aliasBankIdx = getAliasBankIdxFromPhyIdx(io.write.bits.phyIdx)
+  val alias_bank_oh = UIntToOH(aliasBankIdx)
+  (0 until aliasBankNum).foreach { i =>
+    aliasDataBanks(i).io.write.valid := io.write.valid && alias_bank_oh(i)
+  }
+  io.write.ready := Mux1H(alias_bank_oh, aliasDataBanks.map(_.io.write.ready))
+  io.read.ready := aliasDataBanks.map(_.io.read.ready).reduce(_&&_)
+
 }
 
 
@@ -201,13 +308,13 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
       tagArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
       tagArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     tagArray
@@ -238,7 +345,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
   val wayNum   = OHToUInt(io.write.bits.waymask)
-  val validPtr = Cat(io.write.bits.virIdx, wayNum)
+  val validPtr = Cat(io.write.bits.idx, wayNum)
   when(io.write.valid){
     validArray := validArray.bitSet(validPtr, true.B)
   }
@@ -360,13 +467,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       dataArray.io.r.req.valid := port_0_read_0 || port_1_read_0
       dataArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_0
-      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       dataArray.io.r.req.valid := port_0_read_1 || port_1_read_1
       dataArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_1
-      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     dataArray
@@ -386,13 +493,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       codeArray.io.r.req.valid := port_0_read_0 || port_1_read_0
       codeArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       codeArray.io.w.req.valid := write_bank_0
-      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       codeArray.io.r.req.valid := port_0_read_1 || port_1_read_1
       codeArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       codeArray.io.w.req.valid := write_bank_1
-      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
+      codeArray.io.w.req.bits.apply(data=write_data_code, setIdx=io.write.bits.idx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     codeArray
@@ -512,6 +619,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println("  ICacheWays: " + cacheParams.nWays)
   println("  ICacheBanks: " + PortNumber)
   println("  hasPrefetch: " + cacheParams.hasPrefetch)
+  println("  ICacheAliasBits " + aliasBits)
   if (cacheParams.hasPrefetch) {
     println("  nPrefetchEntries: " + cacheParams.nPrefetchEntries)
     println("  nPrefetchBufferEntries: " + cacheParams.nPrefBufferEntries)
@@ -519,10 +627,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val metaArray = Module(new ICacheMetaArray)
-  val metaArrayCopy = Module(new ICacheMetaArray)
-  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
-  val dataArray = Module(new ICacheDataArray)
+  val metaArrayWrapper = Module(new ICacheMetaArrayWrapper)
+  val metaArrayWrapperCopy = Module(new ICacheMetaArrayWrapper)
+  val metaArrayWrapperMoveFilterCopy = Module(new ICacheMetaArrayWrapper)
+  val dataArrayWrapper = Module(new ICacheDataArrayWrapper)
   val mainPipe = Module(new ICacheMainPipe)
   val missUnit = Module(new ICacheMissUnit(edge))
   val prefetchPipe = Module(new IPrefetchPipe)
@@ -530,8 +638,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val meta_read_arb = Module(new Arbiter(new ICacheReadBundle, 1))
   val data_read_arb = Module(new Arbiter(new ICacheReadBundle, 1))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(), 2))
-  val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrapperWriteBundle(), 2))
+  val data_write_arb = Module(new Arbiter(new ICacheDataWrapperWriteBundle(), 2))
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
   mainPipe.io.PIQ <> missUnit.io.to_main_pipe
@@ -548,22 +656,22 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
-  metaArray.io.fencei     := io.fencei
-  metaArrayCopy.io.fencei := io.fencei
-  metaArrayMoveFilterCopy.io.fencei := io.fencei
+  metaArrayWrapper.io.fencei     := io.fencei
+  metaArrayWrapperCopy.io.fencei := io.fencei
+  metaArrayWrapperMoveFilterCopy.io.fencei := io.fencei
 
   meta_read_arb.io.in(0) <> mainPipe.io.metaArray.toIMeta
-  metaArray.io.read <> meta_read_arb.io.out
-  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
-  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
+  metaArrayWrapper.io.read <> meta_read_arb.io.out
+  metaArrayWrapperCopy.io.read <> prefetchPipe.io.toIMeta
+  metaArrayWrapperMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
 
-  mainPipe.io.metaArray.fromIMeta <> metaArray.io.readResp
-  prefetchPipe.io.fromIMeta <> metaArrayCopy.io.readResp
-  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayMoveFilterCopy.io.readResp
+  mainPipe.io.metaArray.fromIMeta <> metaArrayWrapper.io.readResp
+  prefetchPipe.io.fromIMeta <> metaArrayWrapperCopy.io.readResp
+  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayWrapperMoveFilterCopy.io.readResp
 
   data_read_arb.io.in(0) <> mainPipe.io.dataArray.toIData
-  dataArray.io.read <> data_read_arb.io.out
-  mainPipe.io.dataArray.fromIData <> dataArray.io.readResp
+  dataArrayWrapper.io.read <> data_read_arb.io.out
+  mainPipe.io.dataArray.fromIData <> dataArrayWrapper.io.readResp
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
@@ -571,10 +679,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   meta_write_arb.io.in(0) <> missUnit.io.meta_write
   data_write_arb.io.in(0) <> missUnit.io.data_write
 
-  metaArray.io.write <> meta_write_arb.io.out
-  metaArrayCopy.io.write <> meta_write_arb.io.out
-  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
-  dataArray.io.write <> data_write_arb.io.out
+  metaArrayWrapper.io.write <> meta_write_arb.io.out
+  metaArrayWrapperCopy.io.write <> meta_write_arb.io.out
+  metaArrayWrapperMoveFilterCopy.io.write <> meta_write_arb.io.out
+  dataArrayWrapper.io.write <> data_write_arb.io.out
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
 
@@ -647,17 +755,17 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr
-  dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  dataArrayWrapper.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayWrapper.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayWrapperCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayWrapperMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=
-    dataArray.io.cacheOp.resp.valid ||
-    metaArray.io.cacheOp.resp.valid
+    dataArrayWrapper.io.cacheOp.resp.valid ||
+    metaArrayWrapper.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
-    dataArray.io.cacheOp.resp.valid -> dataArray.io.cacheOp.resp.bits,
-    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
+    dataArrayWrapper.io.cacheOp.resp.valid -> dataArrayWrapper.io.cacheOp.resp.bits,
+    metaArrayWrapper.io.cacheOp.resp.valid -> metaArrayWrapper.io.cacheOp.resp.bits, // TODO : seems have bug
   ))
   cacheOpDecoder.io.error := io.error
-  assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
+  assert(!((dataArrayWrapper.io.cacheOp.resp.valid +& metaArrayWrapper.io.cacheOp.resp.valid) > 1.U))
 }
