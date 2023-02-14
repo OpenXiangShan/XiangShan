@@ -19,9 +19,8 @@ package futest
 import chisel3._
 import chiseltest._
 import chiseltest.ChiselScalatestTester
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
-import chiseltest.legacy.backends.verilator.VerilatorFlags
+import chiseltest.VerilatorBackendAnnotation
+import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -68,10 +67,12 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
   it should "run" in {
     val rand = new Random(0x14226)
     val testNum = 1000
+
     test(new SRT4DividerWrapper).withAnnotations(Seq(VerilatorBackendAnnotation,
-      LineCoverageAnnotation,
-      ToggleCoverageAnnotation,
-      VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000",
+      // LineCoverageAnnotation,
+      // ToggleCoverageAnnotation,
+      VerilatorFlags(Seq(
+        // "--output-split 20", "--output-split-cfuncs 20",
         "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT", "--trace")),
       RunFirrtlTransformAnnotation(new PrintModuleName))){ m =>
       println("Test started!")
