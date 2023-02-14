@@ -336,7 +336,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx // DontCare
-    loadUnits(i).io.isFirstIssue := io.rsfeedback(i).isFirstIssue // DontCare ==> always ture
+    loadUnits(i).io.isFirstIssue := true.B
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
