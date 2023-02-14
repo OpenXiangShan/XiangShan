@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2020-2021 Peng Cheng Laboratory
+  *
+  * XiangShan is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+  * You may obtain a copy of Mulan PSL v2 at:
+  *          http://license.coscl.org.cn/MulanPSL2
+  *
+  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+  *
+  * See the Mulan PSL v2 for more details.
+  ***************************************************************************************/
 
 package xiangshan.backend.decode
 
@@ -24,54 +24,7 @@ import utils._
 import utility._
 import xiangshan.backend.rename.RatReadPort
 
-class CfCtrlReorder(implicit p: Parameters) extends XSModule{
-  val io = IO(new Bundle(){
-    // from ibuffer
-    val ibufValid = Vec(DecodeWidth, Input(Bool()))
-    // to   ibuffer
-    val ibufReady = Vec(DecodeWidth, Output(Bool()))
-    // from DecodeUnit s
-    val isVset    = Vec(DecodeWidth, Input(Bool()))
-    val decodeRes = Vec(DecodeWidth, Input(new CfCtrl))
-    // to Rename
-    val out       = Vec(RenameWidth, DecoupledIO(new CfCtrl))
-  })
-  // vset split
-  val vsetUop0 = Wire(new CfCtrl)
-  val vsetUop1 = Wire(new CfCtrl)
-  vsetUop0 := io.decodeRes(0)
-  vsetUop1 := io.decodeRes(0)
 
-  // modify uop0
-  vsetUop0.ctrl.uopIdx := 0.U
-  vsetUop0.ctrl.flushPipe := false.B
-  vsetUop0.ctrl.fuOpType := ALUOpType.vsetExchange(io.decodeRes(0).ctrl.fuOpType)
-  // modify uop1
-  vsetUop1.ctrl.ldest := 32.U
-
-  val isVsetvli = FuType.isIntExu(io.decodeRes(0).ctrl.fuType) && ALUOpType.isVsetvli(io.decodeRes(0).ctrl.fuOpType)
-  val rs1NotZero = io.decodeRes(0).ctrl.lsrc(0).orR
-  when(isVsetvli && rs1NotZero){
-    vsetUop1.ctrl.flushPipe := true.B
-  }
-
-
-  val firstIsVset = io.isVset(0) && io.ibufValid(0)
-  // for io.out.bits
-  io.out.map(_.bits).zip(io.decodeRes.zip((vsetUop0 +: vsetUop1 +:io.decodeRes.drop(1)).take(DecodeWidth))).map{ case(dst, (src0, src1)) => dst := Mux(firstIsVset, src1, src0)}
-
-  val isVsetVec = io.isVset.zip(io.ibufValid).map(x => x._1 && x._2)
-  val canAcceptVec = true.B +: (1 until DecodeWidth).map(i => !(Cat(isVsetVec.drop(1).take(i)).orR))
-
-  // for io.out.valid
-  val realValid = io.ibufValid.zip(canAcceptVec).map(x => x._1 && x._2)
-  io.out.map(_.valid).zip(realValid.zip(true.B +: true.B +:realValid.drop(1).take(DecodeWidth - 2))).map{ case(dst, (src0, src1)) => dst := Mux(firstIsVset, src1, src0)}
-
-  // for io.ibufReady
-  val realReady = io.out.map(_.ready).zip(canAcceptVec).map(x => x._1 && x._2)
-  val spRealReady = (Cat(io.out.map(_.ready).take(2)).andR +: io.out.map(_.ready).drop(2) :+ false.B).zip(canAcceptVec).map(x => x._1 && x._2)
-  io.ibufReady.zip(realReady.zip(spRealReady)).map{ case(dst, (src0, src1)) => dst := Mux(firstIsVset, src1, src0)}
-}
 
 class VConfigGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle(){
@@ -98,7 +51,7 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
   val vma   = vtype.vma
   val vta   = vtype.vta
 
-//  val avlImm = Cat(0.U(3.W), io.src1(14, 10))
+  //  val avlImm = Cat(0.U(3.W), io.src1(14, 10))
   val vlLast = vconfig_spec.vl
 
   val rd = io.firstInstr(11, 7)
@@ -112,7 +65,7 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
   val vlmax = ParallelMux((0 to 7).map(_.U).map(_ === shamt), vlmaxVec)
 
   vl := Mux(rs1 =/= 0.U, Mux(rs1 > vlmax, vlmax, rs1),
-          Mux(rd === 0.U, vlLast, vlmax))
+    Mux(rd === 0.U, vlLast, vlmax))
 
   vconfig_spec_next.vl := vl
   vconfig_spec_next.vtype := vtype
@@ -162,35 +115,108 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val robCommits = Input(new RobCommitIO)
   })
 
-  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-
-  val cfCtrlReorder = Module(new CfCtrlReorder)
-  cfCtrlReorder.io.ibufValid.zip(io.in).map(x => x._1 := x._2.valid)
-  cfCtrlReorder.io.ibufReady.zip(io.in).map(x => x._2.ready := x._1)
-  cfCtrlReorder.io.decodeRes.zip(decoders).map(x => x._1 := x._2.io.deq.cf_ctrl)
-  cfCtrlReorder.io.isVset.zip(decoders).map(x => x._1 := x._2.io.deq.isVset)
-  cfCtrlReorder.io.out.zip(io.out).map(x => x._2 <> x._1)
-
+  val decoderComp = Module(new DecodeUnitComp)
+  val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
   val vconfigGen = Module(new VConfigGen)
+
+  val isComplex = Wire(Vec(DecodeWidth, Bool()))
+  val cfComplex = Wire(Vec(DecodeWidth, new CfCtrl))
+  val isFirstVset = Wire(Bool())
+  val complexNum = Wire(UInt(3.W))
+
+  val cfSimple = Wire(Vec(DecodeWidth - 1, new CfCtrl))
+
+  //Comp 1
+  decoderComp.io.enq.ctrl_flow := io.in(0).bits
+  decoderComp.io.csrCtrl := io.csrCtrl
+  decoderComp.io.vconfig := vconfigGen.io.vconfigPre
+  decoderComp.io.isComplex := isComplex
+  decoderComp.io.validFromIBuf.zip(io.in).map{ case (dst, src) => dst := src.valid}
+  decoderComp.io.readyFromRename.zip(io.out).map{ case (dst, src) => dst := src.ready}
+  cfComplex := decoderComp.io.deq.cf_ctrl
+  io.out.zip(decoderComp.io.deq.validToRename).map{ case (dst, src) => dst.valid := src}
+  io.in.zip(decoderComp.io.deq.readyToIBuf).map{ case (dst, src) => dst.ready := src}
+  isFirstVset := decoderComp.io.deq.isVset
+  complexNum := decoderComp.io.deq.complexNum
+
+  //Simple 5
+  decoders.zip(io.in.drop(1)).map { case (dst, src) => dst.io.enq.ctrl_flow := src.bits }
+  decoders.map { case dst => dst.io.csrCtrl := io.csrCtrl }
+  decoders.map { case dst => dst.io.vconfig := vconfigGen.io.vconfigNxt }
+  cfSimple.zip(decoders.map(_.io.deq.cf_ctrl)).map { case (dst, src) => dst := src }
+
+  //vconfigGen
   vconfigGen.io.firstInstr := io.in(0).bits.instr
   // from DecodeUnit
-  vconfigGen.io.isFirstVset := decoders(0).io.deq.isVset && io.in(0).valid
+  vconfigGen.io.isFirstVset := isFirstVset && io.in(0).valid
   vconfigGen.io.isVsetFlushPipe := io.isVsetFlushPipe
   vconfigGen.io.vconfig := io.vconfig
   vconfigGen.io.isRedirect := io.isRedirect
   vconfigGen.io.robCommits := io.robCommits
 
-  for (i <- 0 until DecodeWidth) {
-    decoders(i).io.enq.ctrl_flow <> io.in(i).bits
-
-    // csr control
-    decoders(i).io.csrCtrl := io.csrCtrl
-
-    if(i == 0){
-      decoders(i).io.vconfig := vconfigGen.io.vconfigPre
-    }else{
-      decoders(i).io.vconfig := vconfigGen.io.vconfigNxt
+  isComplex(0) := true.B //DontCare
+  for (i <- 1 until 6) {
+    when(decoders(i - 1).io.deq.isVset) {
+      isComplex(i) := true.B
+    }.elsewhen(vconfigGen.io.vconfigNxt.vtype.vlmul === "b001".U || vconfigGen.io.vconfigNxt.vtype.vlmul === "b010".U || vconfigGen.io.vconfigNxt.vtype.vlmul === "b011".U) {
+      isComplex(i) := true.B
+    }.otherwise {
+      isComplex(i) := false.B
     }
+  }
+
+  //output default
+  io.out.zip(cfComplex).map { case (dst, src) => dst.bits := src }
+
+  //output mux
+  switch(complexNum) {
+    is(1.U) {
+      io.out(0).bits := cfComplex(0)
+      for(i <- 1 until 6) {
+        io.out(i).bits := cfSimple(i - 1)
+      }
+    }
+    is(2.U) {
+      for (i <- 0 until 2) {
+        io.out(i).bits := cfComplex(i)
+      }
+      for (i <- 2 until 6) {
+        io.out(i).bits := cfSimple(i - 2)
+      }
+    }
+    is(3.U) {
+      for (i <- 0 until 3) {
+        io.out(i).bits := cfComplex(i)
+      }
+      for (i <- 3 until 6) {
+        io.out(i).bits := cfSimple(i -3)
+      }
+    }
+    is(4.U) {
+      for (i <- 0 until 4) {
+        io.out(i).bits := cfComplex(i)
+      }
+      for (i <- 4 until 6) {
+        io.out(i).bits := cfSimple(i - 4)
+      }
+    }
+    is(5.U) {
+      for (i <- 0 until 5) {
+        io.out(i).bits := cfComplex(i)
+      }
+      for (i <- 5 until 6) {
+        io.out(i).bits := cfSimple(i - 5)
+      }
+    }
+    is(6.U) {
+      for (i <- 0 until 6) {
+        io.out(i).bits := cfComplex(i)
+      }
+    }
+  }
+
+
+  for (i <- 0 until DecodeWidth) {
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.ctrl.lsrc(0)
@@ -207,11 +233,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // Vec instructions
     // TODO: vec uop dividers need change this
-    io.vecRat(i)(0).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(0)
-    io.vecRat(i)(1).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(1)
-    io.vecRat(i)(2).addr := decoders(i).io.deq.cf_ctrl.ctrl.lsrc(2)
-    io.vecRat(i)(3).addr := decoders(i).io.deq.cf_ctrl.ctrl.ldest
-    io.vecRat(i)(4).addr := 0.U
+    io.vecRat(i)(0).addr := io.out(i).bits.ctrl.lsrc(0)
+    io.vecRat(i)(1).addr := io.out(i).bits.ctrl.lsrc(1)
+    io.vecRat(i)(2).addr := io.out(i).bits.ctrl.lsrc(2)
+    io.vecRat(i)(3).addr := 0.U
+    io.vecRat(i)(4).addr := io.out(i).bits.ctrl.ldest
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
