@@ -271,7 +271,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_vaddr := io.prefetch_in.bits.getVaddr()
     s0_mask := 0.U
     s0_uop := DontCare
-    s0_isFirstIssue := DontCare
+    s0_isFirstIssue := false.B
     s0_rsIdx := DontCare
     s0_sqIdx := DontCare
     s0_replayCarry := DontCare
