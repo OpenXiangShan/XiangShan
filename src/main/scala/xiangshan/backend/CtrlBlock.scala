@@ -28,7 +28,7 @@ import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
-import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
@@ -214,6 +214,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -267,8 +268,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
-  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + robFlush (1)
-  val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 6, 1, "BackendPC"))
+  // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robFlush (1)
+  val pcMem = Module(new SyncDataModuleTemplate(
+    new Ftq_RF_Components, FtqSize,
+    6 + exuParameters.LduCnt, 1, "CtrlPcMem")
+  )
   val rob = outer.rob.module
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
@@ -468,7 +472,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     }
   }
 
-  rename.io.redirect <> stage2Redirect
+  rename.io.redirect := stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
   rename.io.debug_int_rat <> rat.io.debug_int_rat
@@ -480,7 +484,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   dispatch.io.hartId := io.hartId
-  dispatch.io.redirect <> stage2Redirect
+  dispatch.io.redirect := stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.toIntDq <> intDq.io.enq
   dispatch.io.toFpDq <> fpDq.io.enq
@@ -538,13 +542,18 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val jalrTargetRead = pcMem.io.rdata(4).startAddr
   val read_from_newest_entry = RegNext(jalrTargetReadPtr) === RegNext(io.frontend.fromFtq.newest_entry_ptr)
   io.jalr_target := Mux(read_from_newest_entry, RegNext(io.frontend.fromFtq.newest_entry_target), jalrTargetRead)
+  for(i <- 0 until exuParameters.LduCnt){
+    // load s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
+    pcMem.io.raddr(i + 5) := io.ld_pc_read(i).ptr.value
+    io.ld_pc_read(i).data := pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset))
+  }
 
   rob.io.hartId := io.hartId
   io.cpu_halt := DelayN(rob.io.cpu_halt, 5)
-  rob.io.redirect <> stage2Redirect
+  rob.io.redirect := stage2Redirect
   outer.rob.generateWritebackIO(Some(outer), Some(this))
 
-  io.redirect <> stage2Redirect
+  io.redirect := stage2Redirect
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr

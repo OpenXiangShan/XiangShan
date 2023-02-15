@@ -30,6 +30,8 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -153,6 +155,7 @@ case class XSCoreParameters
     LduCnt = 2,
     StuCnt = 2
   ),
+  prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -169,7 +172,7 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
-  EnableUncacheWriteOutstanding: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 6, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
@@ -238,11 +241,12 @@ case class XSCoreParameters
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.BOPParameters())
+    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
-  softPTW: Boolean = false, // dpi-c debug only
+  softTLB: Boolean = false, // dpi-c l1tlb debug only
+  softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1
 ){
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength

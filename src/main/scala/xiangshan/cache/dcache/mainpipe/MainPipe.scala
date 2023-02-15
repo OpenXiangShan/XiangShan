@@ -131,9 +131,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     // meta array
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
-    val meta_write = DecoupledIO(new MetaWriteReq)
-    val error_flag_resp = Input(Vec(nWays, Bool()))
-    val error_flag_write = DecoupledIO(new ErrorWriteReq)
+    val meta_write = DecoupledIO(new CohMetaWriteReq)
+    val extra_meta_resp = Input(Vec(nWays, new DCacheExtraMeta))
+    val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val prefetch_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
 
     // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
@@ -282,8 +284,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit_tag = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => tag_resp(w))), get_tag(s1_req.addr))
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => enc_tag_resp(w)))
-  val s1_flag_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_flag_resp(w))), false.B)
+  val s1_flag_error = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.extra_meta_resp(w).error)), false.B)
+  val s1_extra_meta = Mux1H(s1_tag_match_way, wayMap(w => io.extra_meta_resp(w)))
   val s1_l2_error = s1_req.error
+
+  XSPerfAccumulate("probe_unused_prefetch", s1_req.probe && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
+  XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -1412,6 +1418,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.replace_tag := s2_repl_tag
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
+  miss_req.pc := DontCare
 
   io.store_replay_resp.valid := s2_valid_dup(5) && s2_can_go_to_mq_dup(1) && replay && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare
@@ -1470,7 +1477,22 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.error_flag_write.valid := s3_fire_dup_for_err_w_valid && update_meta_dup_for_err_w_valid && s3_l2_error
   io.error_flag_write.bits.idx := s3_idx_dup(3)
   io.error_flag_write.bits.way_en := s3_way_en_dup(1)
-  io.error_flag_write.bits.error := s3_l2_error
+  io.error_flag_write.bits.flag := s3_l2_error
+
+  // if we use (prefetch_flag && meta =/= ClientStates.Nothing) for prefetch check
+  // prefetch_flag_write can be omited
+  // io.prefetch_flag_write.valid := io.meta_write.valid && new_coh === ClientStates.Nothing
+  // io.prefetch_flag_write.bits.idx := s3_idx_dup(3)
+  // io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
+  // io.prefetch_flag_write.bits.flag := false.B
+  io.prefetch_flag_write.valid := false.B
+  io.prefetch_flag_write.bits := DontCare
+
+  // probe / replace will not update access bit
+  io.access_flag_write.valid := s3_fire_dup_for_meta_w_valid && !s3_req.probe && !s3_req.replace
+  io.access_flag_write.bits.idx := s3_idx_dup(3)
+  io.access_flag_write.bits.way_en := s3_way_en_dup(1)
+  io.access_flag_write.bits.flag := true.B
 
   io.tag_write.valid := s3_fire_dup_for_tag_w_valid && s3_req_miss_dup_for_tag_w_valid
   io.tag_write.bits.idx := s3_idx_dup(4)

@@ -100,12 +100,21 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
-  def nSourceType = 3
+  def nSourceType = 10
   def sourceTypeWidth = log2Up(nSourceType)
+  // non-prefetch source < 3
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
-  def SOFT_PREFETCH = 3
+  // prefetch source >= 3
+  def DCACHE_PREFETCH_SOURCE = 3
+  def SOFT_PREFETCH = 4
+  def HW_PREFETCH_AGT = 5
+  def HW_PREFETCH_PHT_CUR = 6
+  def HW_PREFETCH_PHT_INC = 7
+  def HW_PREFETCH_PHT_DEC = 8
+  def HW_PREFETCH_BOP = 9
+  def HW_PREFETCH_STRIDE = 10
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
@@ -144,6 +153,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   // uncache
   val uncacheIdxBits = log2Up(StoreQueueSize) max log2Up(LoadQueueSize)
+  // hardware prefetch parameters
+  // high confidence hardware prefetch port
+  val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default
+  val IgnorePrefetchConfidence = false
 
   // parameters about duplicating regs to solve fanout
   // In Main Pipe:
@@ -276,6 +289,15 @@ class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
   val way = Input(UInt(log2Up(nWays).W))
 }
 
+class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
+{
+  val error = Bool() // cache line has been marked as corrupted by l2 / ecc error detected when store
+  val prefetch = Bool() // cache line is first required by prefetch
+  val access = Bool() // cache line has been accessed by load / store
+
+  // val debug_access_timestamp = UInt(64.W) // last time a load / store / refill access that cacheline
+}
+
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 {
@@ -338,6 +360,8 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 
 class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
+  val meta_prefetch = Bool()
+  val meta_access = Bool()
   // 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
 }
@@ -463,6 +487,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
   val s2_kill  = Output(Bool())
+  val s2_pc = Output(UInt(VAddrBits.W))
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
@@ -632,6 +657,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(8.W))
+  val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
@@ -678,8 +704,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
-  val metaArray = Module(new AsynchronousMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
-  val errorArray = Module(new ErrorArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // TODO: add it to meta array
+  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
+  val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
+  val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array
+  val accessArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = LoadPipelineWidth + 2))
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
@@ -694,6 +722,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wb         = Module(new WritebackQueue(edge))
 
   missQueue.io.hartId := io.hartId
+  missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error 
@@ -701,6 +730,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // meta array
+
+  // read / write coh meta
   val meta_read_ports = ldu.map(_.io.meta_read) ++
     Seq(mainPipe.io.meta_read)
   val meta_resp_ports = ldu.map(_.io.meta_resp) ++
@@ -713,15 +744,40 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
-  val error_flag_resp_ports = ldu.map(_.io.error_flag_resp) ++
-    Seq(mainPipe.io.error_flag_resp)
-  val error_flag_write_ports = Seq(
-    mainPipe.io.error_flag_write,
-    refillPipe.io.error_flag_write
-  )
+  // read extra meta
   meta_read_ports.zip(errorArray.io.read).foreach { case (p, r) => r <> p }
-  error_flag_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => p := r }
+  meta_read_ports.zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
+  meta_read_ports.zip(accessArray.io.read).foreach { case (p, r) => r <> p }
+  val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp) ++
+    Seq(mainPipe.io.extra_meta_resp)
+  extra_meta_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => {
+    (0 until nWays).map(i => { p(i).error := r(i) })
+  }}
+  extra_meta_resp_ports.zip(prefetchArray.io.resp).foreach { case (p, r) => {
+    (0 until nWays).map(i => { p(i).prefetch := r(i) })
+  }}
+  extra_meta_resp_ports.zip(accessArray.io.resp).foreach { case (p, r) => {
+    (0 until nWays).map(i => { p(i).access := r(i) })
+  }}
+
+  // write extra meta
+  val error_flag_write_ports = Seq(
+    mainPipe.io.error_flag_write, // error flag generated by corrupted store
+    refillPipe.io.error_flag_write // corrupted signal from l2
+  )
   error_flag_write_ports.zip(errorArray.io.write).foreach { case (p, w) => w <> p }
+
+  val prefetch_flag_write_ports = Seq(
+    mainPipe.io.prefetch_flag_write, // set prefetch_flag to false if coh is set to Nothing
+    refillPipe.io.prefetch_flag_write // refill required by prefetch will set prefetch_flag
+  )
+  prefetch_flag_write_ports.zip(prefetchArray.io.write).foreach { case (p, w) => w <> p }
+
+  val access_flag_write_ports = ldu.map(_.io.access_flag_write) ++ Seq(
+    mainPipe.io.access_flag_write,
+    refillPipe.io.access_flag_write
+  )
+  access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
 
   //----------------------------------------
   // tag array
