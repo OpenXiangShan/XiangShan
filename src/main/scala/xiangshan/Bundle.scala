@@ -152,6 +152,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
+  val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(3, SrcType())
   val lsrc = Vec(3, UInt(5.W))
   val ldest = UInt(5.W)
@@ -201,15 +202,17 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
-  // val fetchTime = UInt(64.W)
+  // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)
   val enqRsTime = UInt(XLEN.W)
   val selectTime = UInt(XLEN.W)
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
-  // val commitTime = UInt(64.W)
-  val runahead_checkpoint_id = UInt(64.W)
+  // val commitTime = UInt(XLEN.W)
+  val runahead_checkpoint_id = UInt(XLEN.W)
+  val tlbFirstReqTime = UInt(XLEN.W)
+  val tlbRespTime = UInt(XLEN.W) // when getting hit result (including delay in L2TLB hit)
 }
 
 // Separate LSQ
@@ -320,6 +323,9 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+  /* add L/S inst info in EXU */
+  // val L1toL2TlbLatency = UInt(XLEN.W)
+  // val levelTlbHit = UInt(2.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
