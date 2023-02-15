@@ -273,13 +273,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.isFirstIssue
     s0_rsIdx := io.rsIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
-<<<<<<< HEAD
-=======
     val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.ctrl.fuOpType))
     when (issueUopIsPrefetch) {
       isPrefetch := true.B
     }
->>>>>>> origin/master
   }.otherwise {
     if (EnableLoadToLoadForward) {
       tryFastpath := lfsrc_l2lForward_select

@@ -362,16 +362,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report ecc error and get selected dcache data
 
   val s3_valid = RegNext(s2_valid)
-<<<<<<< HEAD
   val s3_load128Req = RegEnable(s2_load128Req , s2_fire)//TODO:when have load128Req
-=======
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
->>>>>>> origin/master
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
 
-<<<<<<< HEAD
   //val s3_banked_data_resp_word = io.banked_data_resp.raw_data
   //val s3_banked_data_resp_word = Mux(s3_paddr(3),io.banked_data_resp.raw_data<<64,io.banked_data_resp.raw_data)
   val data128bit = Cat(io.banked_data_resp(1).raw_data,io.banked_data_resp(0).raw_data) //TODO:when have load128Req
@@ -379,10 +375,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_banked_data_resp_word = Mux(s3_load128Req,data128bit,data64bit)
   //val s3_data_error = io.read_error_delayed // banked_data_resp_word.error && !bank_conflict
   val s3_data_error = Mux(s3_load128Req,io.read_error_delayed.asUInt.orR,io.read_error_delayed(0)) // banked_data_resp_word.error && !bank_conflict//TODO:when have load128Req
-=======
-  val s3_banked_data_resp_word = io.banked_data_resp.raw_data
-  val s3_data_error = io.read_error_delayed && s3_hit // banked_data_resp_word.error && !bank_conflict
->>>>>>> origin/master
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
