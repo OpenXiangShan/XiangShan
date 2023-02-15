@@ -298,7 +298,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_vaddr := io.fastpath.data
       // Assume the pointer chasing is always ld.
       s0_uop.ctrl.fuOpType := LSUOpType.ld
-      s0_mask := genWmask(Cat(io.fastpath.data(3),0.U(3.W)), LSUOpType.ld)
+      s0_mask := genVWmask(Cat(io.fastpath.data(3),0.U(3.W)), LSUOpType.ld)
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
       // because these signals will be updated in S1
       s0_isFirstIssue := true.B
