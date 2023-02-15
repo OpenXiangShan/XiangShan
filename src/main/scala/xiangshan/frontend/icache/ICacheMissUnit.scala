@@ -97,9 +97,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   /** control logic transformation */
   //request register
   val req = Reg(new ICacheMissReq)
-//  val req_idx = req.getVirSetIdx //virtual index
   val req_phyIdx = getPhyIdxFromPaddr(req.paddr)
-  val req_tag = req.getPhyTag //physical tag
+  val req_tag = req.getPhyTag
   val req_waymask = req.waymask
   val req_corrupt = RegInit(false.B)
 
@@ -204,12 +203,10 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   )._2
 
   io.mem_acquire.bits := GetBlock
-  // resolve cache alias by L2
-//  io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
   require(nSets <= 256) // icache size should not be more than 128KB
 
   /** Grant ACK */
-  io.mem_finish.valid := false.B//(state === s_send_grant_ack) && is_grant
+  io.mem_finish.valid := false.B
   io.mem_finish.bits := grantack
 
   //resp to ifu

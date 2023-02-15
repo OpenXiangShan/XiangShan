@@ -95,7 +95,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def getAliasBankIdxFromPhyIdx(phyIdx: UInt) = if (hasAliasBits) {
     (phyIdx >> idxBits).asUInt
   } else {
-    0.U
+    0.U // TODO : does have better implementation?
   }
   def getAliasBankIdxFromPhyAddr(phyAddr: UInt) = if (hasAliasBits) {
     phyAddr(blockOffBits + idxBits + aliasBits - 1 ,blockOffBits + idxBits)
