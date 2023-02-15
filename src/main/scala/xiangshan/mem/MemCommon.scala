@@ -28,7 +28,18 @@ import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.dcache.ReplayCarry
 
-object genWmask {
+object genWmask {//used by atomic
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
+    (LookupTree(sizeEncode, List(
+      "b00".U -> 0x1.U, //0001 << addr(2:0)
+      "b01".U -> 0x3.U, //0011
+      "b10".U -> 0xf.U, //1111
+      "b11".U -> 0xff.U //11111111
+    )) << addr(2, 0)).asUInt()
+  }
+}
+
+object genVWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
     (LookupTree(sizeEncode, List(
       "b00".U -> 0x1.U, //0001 << addr(2:0)

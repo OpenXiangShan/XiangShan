@@ -145,7 +145,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.elsewhen(io.in.valid) {
     val imm12 = io.in.bits.uop.ctrl.imm(11, 0)
     s0_vaddr := io.in.bits.src(0) + SignExt(imm12, VAddrBits)
-    s0_mask := genWmask(s0_vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+    s0_mask := genVWmask(s0_vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
     s0_uop := io.in.bits.uop
     s0_isFirstIssue := io.isFirstIssue
     s0_rsIdx := io.rsIdx
@@ -157,7 +157,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_vaddr := io.fastpath.data
       // Assume the pointer chasing is always ld.
       s0_uop.ctrl.fuOpType := LSUOpType.ld
-      s0_mask := genWmask(Cat(io.fastpath.data(3),0.U(3.W)), LSUOpType.ld)
+      s0_mask := genVWmask(Cat(io.fastpath.data(3),0.U(3.W)), LSUOpType.ld)
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing 
       // because these signals will be updated in S1
       s0_isFirstIssue := DontCare
@@ -997,7 +997,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // data from dcache hit
   val s3_loadDataFromDcache = load_s2.io.loadDataFromDcache
   val s3_rdataDcache = s3_loadDataFromDcache.mergedData()
-  val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(
+  val s3_rdataSelDcache = LookupTree(s3_loadDataFromDcache.addrOffset, List(//TODO:when have is128Req
     "b0000".U -> s3_rdataDcache(63, 0),
     "b0001".U -> s3_rdataDcache(63, 8),
     "b0010".U -> s3_rdataDcache(63, 16),
@@ -1027,7 +1027,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   io.fastpathOut.valid := RegNext(load_s2.io.out.valid) // for debug only
-  io.fastpathOut.data := Mux(s3_loadDataFromDcache.addrOffset(3),s3_loadDataFromDcache.mergedData()>>64,s3_loadDataFromDcache.mergedData()) // fastpath is for ld only
+  io.fastpathOut.data := Mux(s3_loadDataFromDcache.addrOffset(3),s3_loadDataFromDcache.mergedData()>>64,s3_loadDataFromDcache.mergedData()) //TODO:when have load128Req
   //io.fastpathOut.data := s3_loadDataFromDcache.mergedData() // fastpath is for ld only
 
   // feedback tlb miss / dcache miss queue full

@@ -330,6 +330,7 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
       io.forwardMaskFast(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValidFast(i)))
       io.forwardMask(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValid(i)))
       io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
+      io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
     }
   })
 }

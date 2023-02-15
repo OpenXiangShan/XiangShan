@@ -123,7 +123,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numWBanks: Int
   // content addressed match
   for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 4) === data(j)(PAddrBits-1, 4)
     }
   }
   for (i <- 0 until LoadPipelineWidth) {

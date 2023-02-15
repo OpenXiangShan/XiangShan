@@ -376,7 +376,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits := DontCare
     io.loadOut(i).bits.uop := uop(replayIdx)
     io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + i)
-    io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
+    io.loadOut(i).bits.mask := genVWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
     io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)

@@ -265,7 +265,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bank_addrs(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr)//TODO:when have is128Req
     //if data requiring is not 128bit,set bank_addrs(rport_index)(1) to an impossible data(for example 8)
     when(io.is128Req(rport_index)){//TODO:when have is128Req
-      bank_addrs(rport_index)(1) := addr_to_dcache_bank(io.read(rport_index).bits.addr ) + 1.U
+      bank_addrs(rport_index)(1) := bank_addrs(rport_index)(0) + 1.U
     }otherwise{
       bank_addrs(rport_index)(1) := DCacheBanks.asUInt
     }
