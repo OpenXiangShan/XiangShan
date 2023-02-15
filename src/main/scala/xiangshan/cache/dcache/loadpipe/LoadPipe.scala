@@ -64,6 +64,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+
+    // // debug_ls_info
+    // val debug_s2_cache_miss = Bool()
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -316,7 +319,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
-  val real_miss = !s2_hit_dup_lsu
+  val real_miss = Wire(Bool())
+  when (wpu.io.resp.valid){
+    real_miss := s2_real_way_en.orR
+  }.otherwise{
+    real_miss := !s2_hit_dup_lsu
+  }
+  // io.debug_s2_cache_miss := real_miss
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
