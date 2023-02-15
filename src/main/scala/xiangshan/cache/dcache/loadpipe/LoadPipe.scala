@@ -51,7 +51,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
 
     // access bit update
-    val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    //val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
