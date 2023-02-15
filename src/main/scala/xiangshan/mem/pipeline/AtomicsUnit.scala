@@ -134,6 +134,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
+    io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
     // send req to sbuffer to flush it if it is not empty
     io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
@@ -161,6 +162,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
+        io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned) {
           // NOTE: when addrAligned, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing

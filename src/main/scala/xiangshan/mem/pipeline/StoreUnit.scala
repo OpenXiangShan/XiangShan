@@ -24,6 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
@@ -52,6 +53,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
+  io.dtlbReq.bits.memidx.is_ld := false.B
+  io.dtlbReq.bits.memidx.is_st := true.B
+  io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
   io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.no_translate := false.B
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
@@ -74,6 +78,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
+  when(io.in.valid && io.isFirstIssue) {
+    io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
+  }
 
   // exception check
   val addrAligned = LookupTree(io.in.bits.uop.ctrl.fuOpType(1,0), List(
@@ -113,6 +120,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
+
   val s1_mmio = is_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
 
@@ -122,8 +130,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // st-ld violation dectect request.
   io.reExecuteQuery.valid := io.in.valid && !s1_tlb_miss
-  io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx 
-  io.reExecuteQuery.bits.paddr := s1_paddr 
+  io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx
+  io.reExecuteQuery.bits.paddr := s1_paddr
   io.reExecuteQuery.bits.mask := io.in.bits.mask
 
   // Send TLB feedback to store issue queue
@@ -157,6 +165,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // mmio inst with exception will be writebacked immediately
   // io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
+
+  // write below io.out.bits assign sentence to prevent overwriting values
+  val s1_tlb_memidx = io.dtlbResp.bits.memidx
+  when(s1_tlb_memidx.is_st && io.dtlbResp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === io.out.bits.uop.sqIdx.value) {
+    // printf("Store idx = %d\n", s1_tlb_memidx.idx)
+    io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
+  }
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -226,8 +241,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stout = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val storeMaskOut = Valid(new StoreMaskBundle)
-    val reExecuteQuery = Valid(new LoadReExecuteQueryIO) 
+    val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
     val issue = Valid(new ExuInput)
+    val debug_ls = Output(new DebugLsInfoBundle)
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -246,7 +262,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss 
+  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss
   io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.in.valid)
 
   store_s1.io.dtlbResp <> io.tlb.resp
@@ -265,6 +281,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout
+
+  io.debug_ls := DontCare
+  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
+  io.debug_ls.s1_robIdx := store_s1.io.in.bits.uop.robIdx.value
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
