@@ -268,6 +268,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+  // s2 miss merged
+  val s2_miss_merged = io.miss_req.valid && io.miss_resp.merged
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   dontTouch(s2_bank_addr)
@@ -378,7 +380,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.valid := s3_error && s3_valid
 
   // update plru in s3
-  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && !s2_nack_no_mshr)
+  io.replace_access.valid := RegNext(RegNext(
+    RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && 
+    !s2_nack_no_mshr &&
+    !s2_miss_merged
+  )
   io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
   io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
 

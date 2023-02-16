@@ -116,6 +116,9 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
 
 class MissResp(implicit p: Parameters) extends DCacheBundle {
   val id = UInt(log2Up(cfg.nMissEntries).W)
+  // cache req missed, merged into one of miss queue entries
+  // i.e. !miss_merged means this access is the first miss for this cacheline
+  val merged = Bool()
 }
 
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
@@ -635,6 +638,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val req_handled_vec = entries.map(_.io.req_handled_by_this_entry)
   assert(PopCount(req_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.id := OHToUInt(req_handled_vec)
+  io.resp.merged := merge
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {
