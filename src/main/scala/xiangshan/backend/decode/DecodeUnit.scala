@@ -38,7 +38,7 @@ abstract trait DecodeConstants {
   def T = true
   def F = false
 
-  def decodeDefault: List[BitPat] = // illegal instruction
+  def decodeDefault: List[BitPat] = { // illegal instruction
     //   srcType(0) srcType(1) srcType(2) fuType    fuOpType    rfWen
     //   |          |          |          |         |           |  fpWen
     //   |          |          |          |         |           |  |  vecWen
@@ -46,8 +46,10 @@ abstract trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  noSpecExec
     //   |          |          |          |         |           |  |  |  |  |  blockBackward
     //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
-    //   |          |          |          |         |           |  |  |  |  |  |  |  selImm
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    //   |          |          |          |         |           |  |  |  |  |  |  |  uopDivType
+    //   |          |          |          |         |           |  |  |  |  |  |  |  |             selImm
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopDivType.X, SelImm.INVALID_INSTR)
+  } // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -83,6 +85,7 @@ abstract class XSDecodeBase {
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: BitPat, fuOp: BitPat, selImm: BitPat,
+  uopDivType: BitPat = UopDivType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -93,13 +96,14 @@ case class XSDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, fu, fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, selImm)
+    List (src1, src2, src3, fu, fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopDivType, selImm)
   }
 }
 
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: BitPat, fuOp: BitPat, selImm: BitPat = SelImm.X,
+  uopDivType: BitPat = UopDivType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -110,7 +114,7 @@ case class FDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, selImm, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, uopDivType, selImm,  xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
   }
 }
 
@@ -192,7 +196,7 @@ object XDecode extends DecodeConstants {
 
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopDivType = UopDivType.SCA_SIM, xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bge   , SelImm.IMM_SB          ),
@@ -645,6 +649,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val deq = new Bundle {
     val cf_ctrl = Output(new CfCtrl)
     val isVset = Output(Bool())
+    val isComplex = Output(Bool())
   }
   val deq_isVset = new Bundle{ }
   val csrCtrl = Input(new CustomCSRCtrlIO)
@@ -671,7 +676,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     SvinvalDecode.table ++
     VecDecoder.table
 
-  require(decode_table.map(_._2.length == 13).reduce(_ && _), "Decode tables have different column size")
+  require(decode_table.map(_._2.length == 14).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
@@ -741,6 +746,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.cf_ctrl := cf_ctrl
 
   io.deq.isVset := FuType.isIntExu(cs.fuType) && ALUOpType.isVset(cs.fuOpType)
+  io.deq.isComplex := (cs.uopDivType === UopDivType.DIR) || (cs.uopDivType === UopDivType.VEC_LMUL) || (cs.uopDivType === UopDivType.VEC_MV_LMUL)
 
   //-------------------------------------------------------------
   // Debug Info

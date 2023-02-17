@@ -119,7 +119,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
   val vconfigGen = Module(new VConfigGen)
 
-  val isComplex = Wire(Vec(DecodeWidth, Bool()))
+  val isComplex = Wire(Vec(DecodeWidth - 1, Bool()))
   val cfComplex = Wire(Vec(DecodeWidth, new CfCtrl))
   val isFirstVset = Wire(Bool())
   val complexNum = Wire(UInt(3.W))
@@ -143,6 +143,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   decoders.zip(io.in.drop(1)).map { case (dst, src) => dst.io.enq.ctrl_flow := src.bits }
   decoders.map { case dst => dst.io.csrCtrl := io.csrCtrl }
   decoders.map { case dst => dst.io.vconfig := vconfigGen.io.vconfigNxt }
+  isComplex.zip(decoders.map(_.io.deq.isComplex)).map{ case (dst, src) => dst := src}
   cfSimple.zip(decoders.map(_.io.deq.cf_ctrl)).map { case (dst, src) => dst := src }
 
   //vconfigGen
@@ -154,67 +155,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   vconfigGen.io.isRedirect := io.isRedirect
   vconfigGen.io.robCommits := io.robCommits
 
-  isComplex(0) := true.B //DontCare
-  for (i <- 1 until 6) {
-    when(decoders(i - 1).io.deq.isVset) {
-      isComplex(i) := true.B
-    }.elsewhen(vconfigGen.io.vconfigNxt.vtype.vlmul === "b001".U || vconfigGen.io.vconfigNxt.vtype.vlmul === "b010".U || vconfigGen.io.vconfigNxt.vtype.vlmul === "b011".U) {
-      isComplex(i) := true.B
-    }.otherwise {
-      isComplex(i) := false.B
-    }
-  }
 
-  //output default
-  io.out.zip(cfComplex).map { case (dst, src) => dst.bits := src }
 
-  //output mux
-  switch(complexNum) {
-    is(1.U) {
-      io.out(0).bits := cfComplex(0)
-      for(i <- 1 until 6) {
-        io.out(i).bits := cfSimple(i - 1)
-      }
-    }
-    is(2.U) {
-      for (i <- 0 until 2) {
-        io.out(i).bits := cfComplex(i)
-      }
-      for (i <- 2 until 6) {
-        io.out(i).bits := cfSimple(i - 2)
-      }
-    }
-    is(3.U) {
-      for (i <- 0 until 3) {
-        io.out(i).bits := cfComplex(i)
-      }
-      for (i <- 3 until 6) {
-        io.out(i).bits := cfSimple(i -3)
-      }
-    }
-    is(4.U) {
-      for (i <- 0 until 4) {
-        io.out(i).bits := cfComplex(i)
-      }
-      for (i <- 4 until 6) {
-        io.out(i).bits := cfSimple(i - 4)
-      }
-    }
-    is(5.U) {
-      for (i <- 0 until 5) {
-        io.out(i).bits := cfComplex(i)
-      }
-      for (i <- 5 until 6) {
-        io.out(i).bits := cfSimple(i - 5)
-      }
-    }
-    is(6.U) {
-      for (i <- 0 until 6) {
-        io.out(i).bits := cfComplex(i)
-      }
-    }
-  }
-
+  //output
+  io.out.zip(0 until RenameWidth).map { case (dst, i) => dst.bits := Mux(complexNum > i.U, cfComplex(i), cfSimple(i.U - complexNum)) }
 
   for (i <- 0 until DecodeWidth) {
 

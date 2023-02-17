@@ -177,6 +177,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+  val uopDivType = UopDivType()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
@@ -190,7 +191,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 
   private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, uopDivType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder: Seq[UInt] = ListLookup(
