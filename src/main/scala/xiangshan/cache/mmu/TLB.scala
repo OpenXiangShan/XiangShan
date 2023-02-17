@@ -324,8 +324,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       l1tlbid := 0.U
     } else if (q.name == "ldtlb") {
       l1tlbid := 1.U
-    } else {
+    } else if (q.name == "sttlb") {
       l1tlbid := 2.U
+    } else {
+      l1tlbid := 3.U
     }
 
     for (i <- 0 until Width) {
@@ -334,7 +336,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val difftest = Module(new DifftestL1TLBEvent)
       difftest.io.clock := clock
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
+      difftest.io.valid := l1tlbid =/= 3.U && RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
       difftest.io.index := i.U
       difftest.io.l1tlbid := l1tlbid
       difftest.io.satp := io.csr.satp.ppn
