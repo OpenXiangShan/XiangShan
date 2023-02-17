@@ -550,6 +550,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   io.iTLBInter.req.bits.kill                := false.B // IFU use itlb for mmio, doesn't need sync, set it to false
   io.iTLBInter.req.bits.cmd                 := TlbCmd.exec
+  io.iTLBInter.req.bits.memidx              := DontCare
   io.iTLBInter.req.bits.debug.robIdx        := DontCare
   io.iTLBInter.req.bits.no_translate        := false.B
   io.iTLBInter.req.bits.debug.isFirstIssue  := DontCare
