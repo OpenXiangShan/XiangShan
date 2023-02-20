@@ -40,7 +40,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
-    val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
+    //val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
+    val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
     val is128Req = Output(Bool())//TODO:when have load128Req
     val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits,new L1BankedDataReadResult())) ////TODO:when have load128Req
     //val banked_data_resp = Input(new L1BankedDataReadResult())
@@ -113,6 +114,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_vaddr = s0_req.addr
   val s0_replayCarry = s0_req.replayCarry
   val s0_load128Req = io.load128Req//TODO:when have load128Req
+  val s0_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s0_vaddr)) //TODO:when have load128Req
+  val s0_bank_oh_128 = (s0_bank_oh_64 << 1.U).asUInt | s0_bank_oh_64.asUInt
+  val s0_bank_oh = Mux(s0_load128Req,s0_bank_oh_128,s0_bank_oh_64)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -130,9 +134,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
   //val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
-  val s1_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s1_vaddr)) //TODO:when have load128Req
-  val s1_bank_oh_128 = (s1_bank_oh_64 << 1.U).asUInt | s1_bank_oh_64.asUInt
-  val s1_bank_oh = Mux(s1_load128Req,s1_bank_oh_128,s1_bank_oh_64)
+  val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
@@ -221,6 +223,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way_dup_dc
+  io.banked_data_read.bits.bankMask := s1_bank_oh
   io.is128Req := s1_load128Req //TODO:when have load128Req
 
   // get s1_will_send_miss_req in lpad_s1

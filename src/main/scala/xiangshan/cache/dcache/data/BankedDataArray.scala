@@ -41,6 +41,14 @@ class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
   val addr = Bits(PAddrBits.W)
 }
 
+class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
+{
+  val way_en = Bits(DCacheWays.W)
+  val addr = Bits(PAddrBits.W)
+  val bankMask = Bits(DCacheBanks.W)
+
+}
+
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
 {
   val rmask = Bits(DCacheBanks.W)
@@ -88,7 +96,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
     // load pipeline read word req
-    val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
+    //val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
+    val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReqWithMask)))
     val is128Req = Input(Vec(LoadPipelineWidth,Bool()))
     // main pipeline read / write line req
     val readline_intend = Input(Bool())
@@ -278,25 +287,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read conflict
   val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => //TODO:when have is128Req
-    (bank_addrs(x)(0) === bank_addrs(y)(0) || bank_addrs(x)(0) === bank_addrs(y)(1) || bank_addrs(x)(1) === bank_addrs(y)(0) || bank_addrs(x)(1) === bank_addrs(y)(1)) &&
-      io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
-  ))
+    (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)))
   //val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
   //  bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
   //))
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && //TODO:when have is128Req
-      Mux(io.is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U)//TODO:when have is128Req
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.rmask(bank_addrs(i)))
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && //TODO:when have is128Req
-      Mux(io.is128Req(i),io.readline.bits.rmask(bank_addrs(i)(0)) || io.readline.bits.rmask(bank_addrs(i)(1)), io.readline.bits.rmask(bank_addrs(i)(0))))
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U) //TODO:when have is128Req
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
