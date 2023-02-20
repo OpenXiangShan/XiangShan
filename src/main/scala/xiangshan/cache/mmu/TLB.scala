@@ -159,7 +159,10 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       val pf = perm.pf
       val af = perm.af
       val paddr = Cat(ppn, offReg)
-      resp(i).bits.paddr(d) := Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+      //resp(i).bits.paddr(d) := Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+      // add offset to paddr for nohype cores
+      val origin_paddr = Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+      resp(i).bits.paddr(d) := Cat(origin_paddr(35,25) +  (io.memOffset(35,25)&io.memMask(35,25)), origin_paddr(24,0))
 
       val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
       val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
@@ -363,7 +366,10 @@ object TLB {
     width: Int,
     nRespDups: Int = 1,
     shouldBlock: Boolean,
-    q: TLBParameters
+    q: TLBParameters,
+    // add nohype control
+    memOffset: UInt,
+    memMask: UInt
   )(implicit p: Parameters) = {
     require(in.length == width)
 
@@ -372,6 +378,9 @@ object TLB {
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")
+    // add nohype control
+    tlb.io.memOffset := memOffset
+    tlb.io.memMask := memMask
 
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

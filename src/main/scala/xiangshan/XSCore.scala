@@ -249,6 +249,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
+    // add nohype control to frontend and memBlock from control plane
+    val memOffset = Input(UInt(64.W))
+    val memMask = Input(UInt(64.W))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -266,6 +269,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
+  // add nohype control to frontend and memBlock from control plane
+  frontend.io.memOffset  := io.memOffset
+  frontend.io.memMask  := io.memMask
+  memBlock.io.memOffset  := io.memOffset
+  memBlock.io.memMask  := io.memMask
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 

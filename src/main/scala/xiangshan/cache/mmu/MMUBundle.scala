@@ -452,7 +452,9 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
-
+  // add nohype control about mem_offset, mem_mask
+  val memOffset = Input(UInt(64.W))
+  val memMask = Input(UInt(64.W))
 }
 
 class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {

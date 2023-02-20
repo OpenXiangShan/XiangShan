@@ -32,6 +32,7 @@ import top.BusPerfMonitor
 import xiangshan.backend.fu.PMAConst
 import huancun._
 import huancun.debug.TLLogger
+import device.lvna._
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -291,6 +292,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     TLBuffer.chainNode(4) :=
     peripheralXbar
 
+  val controlPlane = LazyModule(new ControlPlane(8)(p))
+  controlPlane.tlNode := peripheralXbar
+
   lazy val module = new LazyModuleImp(this){
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
@@ -336,5 +340,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
         ))
       )
     )
+
+    val memBases  = IO(Vec(NumCores, Output(UInt(64.W))))
+    val memMasks  = IO(Vec(NumCores, Output(UInt(64.W))))
+    memBases <> controlPlane.module.io.memBases
+    memMasks <> controlPlane.module.io.memMasks
   }
 }

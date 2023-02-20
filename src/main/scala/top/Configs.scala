@@ -316,3 +316,14 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new WithNKBL1D(64)
     ++ new BaseConfig(n)
 )
+
+// * Config for labeled XiangShan
+// * L1 cache included
+// * L2 cache NOT included, very small
+// * L3 cache NOT included
+class LabeledConfig(n: Int = 1) extends Config(
+  new WithNKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(64)
+    ++ new BaseConfig(n)
+)

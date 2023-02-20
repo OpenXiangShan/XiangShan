@@ -272,6 +272,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mhartid := csrio.hartId
   }
+  // TODO: set hartid for nohype-OS: mhartid-0 for each core, vhartid-0/1 for each core when nohype-on
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
   val mstatus = RegInit("ha00002000".U(XLEN.W))
 

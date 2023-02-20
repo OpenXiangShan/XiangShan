@@ -148,6 +148,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val cpu_halt = Output(Bool())
+      // add nohype control to frontend and memBlock from control plane
+      val memOffset = Input(UInt(64.W))
+      val memMask = Input(UInt(64.W))
     })
 
     dontTouch(io.hartId)
@@ -156,6 +159,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     io.cpu_halt := core.module.io.cpu_halt
+    // nohype control
+    core.module.io.memOffset := io.memOffset
+    core.module.io.memMask := io.memMask
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }
