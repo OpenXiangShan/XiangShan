@@ -626,8 +626,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
       //val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
       //val wmask = io.sbuffer(i).bits.mask
-      val sbufferMask = Mux(io.sbuffer(i).bits.addr(3),io.sbuffer(i).bits.mask(15,8),io.sbuffer(i).bits.mask(7,0))
-      val sbufferData = Mux(io.sbuffer(i).bits.addr(3),io.sbuffer(i).bits.data(127,64),io.sbuffer(i).bits.data(63,0))
+      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr,io.sbuffer(i).bits.mask)
+      val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr,io.sbuffer(i).bits.data)
       val wmask = sbufferMask
       val wdata = sbufferData & MaskExpand(sbufferMask)
       val difftest = Module(new DifftestStoreEvent)

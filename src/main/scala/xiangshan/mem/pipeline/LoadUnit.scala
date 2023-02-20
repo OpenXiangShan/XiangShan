@@ -466,7 +466,8 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
     //  2. Load instruction is younger than requestors(store instructions).
     //  3. Physical address match. 
     //  4. Data contains.    
-   //val s1_reExecuteQuery_mask = Mux(io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
+   //val s1_reExecuteQuery_mask = Mux(
+    // io.reExecuteQuery(w).bits.paddr(3),io.reExecuteQuery(w).bits.mask(15,8),io.reExecuteQuery(w).bits.mask(7,0))
     needReExecuteVec(w) := io.reExecuteQuery(w).valid &&
                           isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
                           !s1_tlb_miss &&

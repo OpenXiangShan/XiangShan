@@ -460,9 +460,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         //p"mask:${Binary(req.bits.mask)} " +
-        p"mask:${Binary(Mux(req.bits.addr(3),req.bits.mask(15,8),req.bits.mask(7,0)))} " +
+        p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
         //p"data:${Hexadecimal(req.bits.data)}\n"
-        p"data:${Hexadecimal(Mux(req.bits.addr(3),req.bits.data(127,64),req.bits.data(63,0)))}\n"
+        p"data:${Hexadecimal(shiftDataToLow(req.bits.addr,req.bits.data))}\n"
     )
     XSDebug(req.valid && !req.ready,
       p"req [$i] blocked by sbuffer\n"

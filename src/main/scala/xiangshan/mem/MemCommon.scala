@@ -62,6 +62,20 @@ object genWdata {
   }
 }
 
+object shiftDataToLow {
+  def apply(addr: UInt,data : UInt): UInt = {
+    Mux(addr(3),(data >> 64).asUInt,data)
+  }
+}
+object shiftMaskToLow {
+  def apply(addr: UInt,mask: UInt): UInt = {
+    Mux(addr(3),(mask>>8).asUInt,mask)
+  }
+}
+
+
+
+
 class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
