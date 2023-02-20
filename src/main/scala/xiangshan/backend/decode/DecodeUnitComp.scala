@@ -45,7 +45,7 @@ class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
-class DecodeUnitComp(implicit p : Parameters) extends XSModule with DecodeUnitConstants {
+class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitCompIO)
   //input bits
   val ctrl_flow = Wire(new CtrlFlow)
@@ -86,8 +86,8 @@ class DecodeUnitComp(implicit p : Parameters) extends XSModule with DecodeUnitCo
     UopDivType.VEC_MV_LMUL -> (lmul + 1.U)
   ))
 
-  //uop div up to 9
-  val csBundle = Wire(Vec(9, new CfCtrl))
+  //uop div up to maxNumOfUop
+  val csBundle = Wire(Vec(maxNumOfUop, new CfCtrl))
   csBundle.map { case dst => dst := cf_ctrl_u }
 
   switch(typeOfDiv) {
@@ -112,7 +112,7 @@ class DecodeUnitComp(implicit p : Parameters) extends XSModule with DecodeUnitCo
     }
   }
 
-  //9 uop dispatch
+  //uops dispatch
   val normal :: ext :: Nil = Enum(2)
   val stateReg = RegInit(normal)
   val uopRes = RegInit(0.U)
@@ -150,7 +150,7 @@ class DecodeUnitComp(implicit p : Parameters) extends XSModule with DecodeUnitCo
   for(i <- 0 until RenameWidth) {
     cf_ctrl(i) := MuxCase(csBundle(i), Seq(
       (stateReg === normal) -> csBundle(i),
-      (stateReg === ext) -> Mux((i.U + numOfUop -uopRes) < 9.U, csBundle(i.U + numOfUop - uopRes), csBundle(8))
+      (stateReg === ext) -> Mux((i.U + numOfUop -uopRes) < maxNumOfUop.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxNumOfUop - 1))
     ))
   }
 
