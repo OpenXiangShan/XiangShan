@@ -1552,7 +1552,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     // generated in mainpipe s2
     Mux(
       io.miss_req.valid, 
-      !io.miss_resp.merged, // if store miss, only update plru for the first miss
+      !io.miss_resp.merged && io.miss_req.ready, // if store miss, only update plru for the first miss
       true.B // normal store access
     )
   )
