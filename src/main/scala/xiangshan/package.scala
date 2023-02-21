@@ -625,6 +625,7 @@ package object xiangshan {
   def mouDataGen(p: Parameters) = new Std()(p)
   def vipuGen(p: Parameters) = new VIPU()(p)
   def vppuGen(p: Parameters) = new VPPU()(p)
+  def vfpuGen(p: Parameters) = new VFPU()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -844,11 +845,23 @@ package object xiangshan {
     fastImplemented = true, //TODO: check
   )
 
+  val vfpuCfg = FuConfig(
+    name = "vfpu",
+    fuGen = vfpuGen,
+    fuSel = (uop: MicroOp) => FuType.vfpu === uop.ctrl.fuType,
+    fuType = FuType.vfpu,
+    numIntSrc = 0, numFpSrc = 1, writeIntRf = false, writeFpRf = false, writeFflags = true,
+    numVecSrc = 2, writeVecRf = true,
+    fastUopOut = false, // TODO: check
+    fastImplemented = true, //TODO: check
+    // latency = CertainLatency(2)
+  )
+
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg), Int.MaxValue, 0)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg, vfpuCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",
