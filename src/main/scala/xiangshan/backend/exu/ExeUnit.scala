@@ -26,6 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
+import xiangshan.backend.fu.vector.VFPU
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
@@ -74,6 +75,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   }
 
   val fpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[FPUSubModule])
+  val vfpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[VFPU])
   if (fpModules.nonEmpty) {
     // frm is from csr/frm (from CSR) or instr_rm (from instruction decoding)
     val fpSubModules = fpModules.map(_._1.asInstanceOf[FPUSubModule])
@@ -91,7 +93,14 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     }
     io.out.bits.fflags := Mux1H(fflagsSel.map(_._1), fflagsSel.map(_._2))
   }
-
+  // Overwrite write operation of fpModules
+  if (vfpModules.nonEmpty) {
+    val vfpSubModules = vfpModules.map(_._1.asInstanceOf[VFPU])
+    vfpSubModules.foreach(mod => {
+      val instr_rm = mod.io.in.bits.uop.ctrl.fpu.rm
+      mod.rm := csr_frm
+    })
+  }
   val fmaModules = functionUnits.filter(_.isInstanceOf[FMA]).map(_.asInstanceOf[FMA])
   if (fmaModules.nonEmpty) {
     require(fmaModules.length == 1)
