@@ -31,6 +31,7 @@ import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
+import xiangshan.mem.L1PrefetchFuzzer
 
 import scala.collection.mutable.ListBuffer
 
@@ -382,6 +383,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   intExuBlock.io.scheExtra.fpRfReadIn.get <> vecExuBlock.io.scheExtra.fpRfReadOut.get
   intExuBlock.io.scheExtra.fpStateReadIn.get <> vecExuBlock.io.scheExtra.fpStateReadOut.get
 
+  for((c, e) <- ctrlBlock.io.ld_pc_read.zip(intExuBlock.extraio.issue.get)){
+    // read load pc at load s0
+    c.ptr := e.bits.uop.cf.ftqPtr
+    c.offset := e.bits.uop.cf.ftqOffset
+  }
+  // return load pc at load s2
+  memBlock.io.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
   memBlock.io.issue <> intExuBlock.extraio.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
@@ -474,6 +482,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
+  memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)

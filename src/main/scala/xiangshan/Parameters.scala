@@ -30,6 +30,8 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -156,6 +158,7 @@ case class XSCoreParameters
     LduCnt = 2,
     StuCnt = 2
   ),
+  prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -172,7 +175,7 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
-  EnableUncacheWriteOutstanding: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 6, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
@@ -199,6 +202,19 @@ case class XSCoreParameters
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
+    normalNSets = 64,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 16,
+    normalAsVictim = true,
+    outReplace = false,
+    partialStaticPMP = true,
+    outsideRecvFlush = true,
+    saveLevel = true
+  ),
+  pftlbParameters: TLBParameters = TLBParameters(
+    name = "pftlb",
     normalNSets = 64,
     normalNWays = 1,
     normalAssociative = "sa",
@@ -241,7 +257,7 @@ case class XSCoreParameters
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.BOPParameters())
+    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
@@ -419,6 +435,7 @@ trait HasXSParameter {
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
+  val pftlbParams = coreParams.pftlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters

@@ -164,6 +164,7 @@ class VConfig(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
+  val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
   val lsrc = Vec(4, UInt(6.W))
   val ldest = UInt(6.W)
@@ -221,15 +222,17 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
-  // val fetchTime = UInt(64.W)
+  // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)
   val enqRsTime = UInt(XLEN.W)
   val selectTime = UInt(XLEN.W)
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
-  // val commitTime = UInt(64.W)
-  val runahead_checkpoint_id = UInt(64.W)
+  // val commitTime = UInt(XLEN.W)
+  val runahead_checkpoint_id = UInt(XLEN.W)
+  val tlbFirstReqTime = UInt(XLEN.W)
+  val tlbRespTime = UInt(XLEN.W) // when getting hit result (including delay in L2TLB hit)
 }
 
 // Separate LSQ
@@ -342,6 +345,9 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+  /* add L/S inst info in EXU */
+  // val L1toL2TlbLatency = UInt(XLEN.W)
+  // val levelTlbHit = UInt(2.W)
 }
 
 class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
@@ -508,6 +514,14 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
   val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  val l1D_pf_enable = Output(Bool())
+  val l1D_pf_train_on_hit = Output(Bool())
+  val l1D_pf_enable_agt = Output(Bool())
+  val l1D_pf_enable_pht = Output(Bool())
+  val l1D_pf_active_threshold = Output(UInt(4.W))
+  val l1D_pf_active_stride = Output(UInt(6.W))
+  val l1D_pf_enable_stride = Output(Bool())
+  val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
   // Labeled XiangShan

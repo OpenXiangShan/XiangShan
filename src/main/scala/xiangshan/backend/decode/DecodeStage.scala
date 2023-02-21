@@ -156,7 +156,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   vconfigGen.io.robCommits := io.robCommits
 
 
-
   //output
   io.out.zip(0 until RenameWidth).map { case (dst, i) => dst.bits := Mux(complexNum > i.U, cfComplex(i), cfSimple(i.U - complexNum)) }
 
@@ -186,6 +185,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
+
+  debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
+
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)

@@ -347,7 +347,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })
 
   (0 until LoadPipelineWidth).map(i => {
-    vaddrModule.io.raddr(LoadPipelineWidth + i) := loadReplaySelGen(i)
+    // vaddrModule rport 0 and 1 is used by exception and mmio 
+    vaddrModule.io.raddr(2 + i) := loadReplaySelGen(i)
   })
 
   (0 until LoadPipelineWidth).map(i => {
@@ -522,13 +523,15 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       */
     when(io.replayFast(i).valid){
       val idx = io.replayFast(i).ld_idx
-      val needreplay = !io.replayFast(i).ld_ld_check_ok || !io.replayFast(i).st_ld_check_ok || !io.replayFast(i).cache_bank_no_conflict
-      
+
       ld_ld_check_ok(idx) := io.replayFast(i).ld_ld_check_ok
       st_ld_check_ok(idx) := io.replayFast(i).st_ld_check_ok
       cache_bank_no_conflict(idx) := io.replayFast(i).cache_bank_no_conflict
 
-      when(needreplay) {
+      // update tlbReqFirstTime
+      uop(idx).debugInfo := io.replayFast(i).debug
+
+      when(io.replayFast(i).needreplay) {
         creditUpdate(idx) := block_cycles_others(block_ptr_others(idx))
         block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
         // try to replay this load in next cycle
@@ -543,7 +546,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     when(io.replaySlow(i).valid){
       val idx = io.replaySlow(i).ld_idx
-      val needreplay = !io.replaySlow(i).tlb_hited || !io.replaySlow(i).st_ld_check_ok || !io.replaySlow(i).cache_no_replay || !io.replaySlow(i).forward_data_valid || !io.replaySlow(i).cache_hited
 
       tlb_hited(idx) := io.replaySlow(i).tlb_hited
       st_ld_check_ok(idx) := io.replaySlow(i).st_ld_check_ok
@@ -552,9 +554,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       replayCarryReg(idx) := io.replaySlow(i).replayCarry
       cache_hited(idx) := io.replaySlow(i).cache_hited
 
+      // update tlbReqFirstTime
+      uop(idx).debugInfo := io.replaySlow(i).debug
+
       val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
 
-      when(needreplay) {
+      when(io.replaySlow(i).needreplay) {
         // update credit and ptr
         val data_in_last_beat = io.replaySlow(i).data_in_last_beat
         creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
