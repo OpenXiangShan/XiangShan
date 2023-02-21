@@ -656,7 +656,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
-  
+  XSError(isBefore(ifuWbPtr, commPtr) && !isFull(ifuWbPtr, commPtr), "\ncommPtr is before ifuWbPtr!\n")  
+
   (0 until copyNum).map{i =>
     XSError(copied_bpu_ptr(i) =/= bpuPtr, "\ncopiedBpuPtr is different from bpuPtr!\n")
   }
