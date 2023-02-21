@@ -72,9 +72,9 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     for (j <- 0 until numEntries) {
       // io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
       val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
-      //val hit128bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheVWordOffset) === data(j)(DCacheLineOffset-1, DCacheVWordOffset)
-      val hit64bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
-      io.forwardMmask(i)(j) := linehit && (hit64bit || lineflag(j))//TODO:when have 128 control logic,need modify this
+      val hit128bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheVWordOffset) === data(j)(DCacheLineOffset-1, DCacheVWordOffset)
+      //val hit64bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
+      io.forwardMmask(i)(j) := linehit && (hit128bit || lineflag(j))//TODO:when have 128 control logic,need modify this
     }
   }
 
@@ -330,7 +330,7 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
       io.forwardMaskFast(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValidFast(i)))
       io.forwardMask(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValid(i)))
       io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
-      io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
+      //io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
     }
   })
 }

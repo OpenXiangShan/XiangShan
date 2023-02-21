@@ -480,8 +480,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  io.uncache.req.bits.data := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).data(127,64),dataModule.io.rdata(0).data(63,0))
-  io.uncache.req.bits.mask := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).mask(15,8),dataModule.io.rdata(0).mask(7,0))
+  io.uncache.req.bits.data := shiftDataToLow(paddrModule.io.rdata(0),dataModule.io.rdata(0).data)
+  io.uncache.req.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0),dataModule.io.rdata(0).mask)
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
@@ -519,7 +519,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.data := Mux(paddrModule.io.rdata(0)(3),dataModule.io.rdata(0).data(127,64),dataModule.io.rdata(0).data(63,0)) // dataModule.io.rdata.read(deqPtr)
+  io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0),dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
