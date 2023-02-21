@@ -27,7 +27,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.rob.{DebugLSIO, RobLsqIO}
 import xiangshan.cache._
 import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
@@ -114,6 +114,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val debug_ls = new DebugLSIO
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -246,7 +247,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_st.io // let the module have name in waveform
   })
   val dtlb_prefetch = VecInit(Seq.fill(1){
-    val tlb_prefetch = Module(new TLBNonBlock(1, 2, sttlbParams))
+    val tlb_prefetch = Module(new TLBNonBlock(1, 2, pftlbParams))
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
@@ -295,6 +296,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + exuParameters.StuCnt)).orR)
   }
 
+  for (i <- 0 until exuParameters.LduCnt) {
+    io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
+  }
+  for (i <- 0 until exuParameters.StuCnt) {
+    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
+  }
 
   // pmp
   val pmp = Module(new PMP())
@@ -328,8 +335,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    loadUnits(i).io.rsIdx := DontCare
-    loadUnits(i).io.isFirstIssue := DontCare
+    loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx // DontCare
+    loadUnits(i).io.isFirstIssue := true.B
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access

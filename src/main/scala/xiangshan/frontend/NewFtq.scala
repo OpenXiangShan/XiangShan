@@ -1029,7 +1029,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** to bpu ****************************
   // ****************************************************************
 
-  io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
+  io.toBpu.redirect := Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
@@ -1073,6 +1073,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   val commit_state = RegNext(commitStateQueue(commPtr.value))
   val can_commit_cfi = WireInit(cfiIndex_vec(commPtr.value))
+  when (canCommit) {
+    commitStateQueue(commPtr.value).map({s => s := c_invalid})
+  }
   //
   //when (commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited) {
   //  can_commit_cfi.valid := false.B

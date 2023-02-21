@@ -213,6 +213,19 @@ case class XSCoreParameters
     outsideRecvFlush = true,
     saveLevel = true
   ),
+  pftlbParameters: TLBParameters = TLBParameters(
+    name = "pftlb",
+    normalNSets = 64,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 16,
+    normalAsVictim = true,
+    outReplace = false,
+    partialStaticPMP = true,
+    outsideRecvFlush = true,
+    saveLevel = true
+  ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
@@ -422,6 +435,7 @@ trait HasXSParameter {
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
+  val pftlbParams = coreParams.pftlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
