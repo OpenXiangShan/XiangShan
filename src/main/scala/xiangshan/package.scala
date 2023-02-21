@@ -77,13 +77,15 @@ package object xiangshan {
     def ldu          = "b01100".U
     def stu          = "b01101".U
     def mou          = "b01111".U // for amo, lr, sc, fence
+
     def vipu         = "b10000".U
     def vfpu         = "b11000".U
     def vldu         = "b11100".U
     def vstu         = "b11101".U
-    def X            = BitPat("b00000")
+    def vppu         = "b11001".U // for Permutation Unit
+    def X            = BitPat("b00000") // TODO: It may be a potential bug
 
-    def num = 18
+    def num = 19
 
     def apply() = UInt(log2Up(num).W)
 
@@ -101,7 +103,6 @@ package object xiangshan {
     def isSvinvalBegin(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && !flush
     def isSvinval(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.sfence && !flush
     def isSvinvalEnd(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && flush
-    def isVpu(fuType: UInt) = fuType(4)
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
     def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1) || fuType(2) && fuType(1) && fuType(0)
@@ -623,6 +624,7 @@ package object xiangshan {
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
   def vipuGen(p: Parameters) = new VIPU()(p)
+  def vppuGen(p: Parameters) = new VPPU()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -831,11 +833,22 @@ package object xiangshan {
     fastImplemented = true, //TODO: check
   )
 
+  val vppuCfg = FuConfig(
+    name = "vppu",
+    fuGen = vppuGen,
+    fuSel = (uop: MicroOp) => FuType.vppu === uop.ctrl.fuType,
+    fuType = FuType.vppu,
+    numIntSrc = 0, numFpSrc = 1, writeIntRf = false, writeFpRf = false, writeFflags = false,
+    numVecSrc = 1, writeVecRf = true,
+    fastUopOut = false, // TODO: check
+    fastImplemented = true, //TODO: check
+  )
+
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg), Int.MaxValue, 0)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",
