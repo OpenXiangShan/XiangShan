@@ -700,10 +700,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // read src1~3 location
   cs.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
   cs.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
-  cs.lsrc(2) := Mux1H(Seq(
-    !FuType.isVecExu(cs.fuType)  -> ctrl_flow.instr(RS3_MSB, RS3_LSB),
-    FuType.isVecExu(cs.fuType) -> ctrl_flow.instr(RD_MSB, RD_LSB),
-  ))
+  cs.lsrc(2) := Mux(FuType.isVecExu(cs.fuType), ctrl_flow.instr(RD_MSB, RD_LSB), ctrl_flow.instr(RS3_MSB, RS3_LSB))
   // read dest location
   cs.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
 

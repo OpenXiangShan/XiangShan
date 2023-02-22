@@ -19,94 +19,87 @@
 package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3._
+import chisel3.{Mux, _}
 import chisel3.util._
 import utils._
 import utility._
 import yunsuan.vector.VectorFloatAdder
-import yunsuan.{OpType, VectorElementFormat, VfpuType}
-import xiangshan.{FuType, MicroOp, MulDivExeUnitCfg, SrcType, XSCoreParamsKey}
+import yunsuan.VfpuType
+import xiangshan.{SrcType, XSCoreParamsKey}
 import xiangshan.backend.fu.fpu.FPUSubModule
 
-import scala.collection.Seq
-
 class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN){
+  val Latency = 2
   val AdderWidth = XLEN
   val NumAdder = VLEN / XLEN
   XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VfpuType.dummy, "VFPU OpType not supported")
   XSError(io.in.valid && (io.in.bits.uop.ctrl.vconfig.vtype.vsew === 0.U), "8 bits not supported in FToVFPU")
   override val dataModule = null // Only use IO, not dataModule
 
-  val uop = io.in.bits.uop
-  val ctrl = uop.ctrl
+// rename signal
+  val ctrl = io.in.bits.uop.ctrl
   val vtype = ctrl.vconfig.vtype
   val src1Type = io.in.bits.uop.ctrl.srcType
 
-  val pipe_valid = RegInit(VecInit(Seq.fill(2)(false.B)))
-  val pipe_ready = WireInit(VecInit(Seq.fill(2)(true.B)))
-
-  when(pipe_valid(0) & pipe_ready(1)){pipe_valid(0) := false.B}
-  when(io.in.valid & pipe_ready(0)){pipe_valid(0) := true.B}
-  when(pipe_valid(1) & io.out.ready) {pipe_valid(1) := false.B}
-  when(pipe_valid(0) & pipe_ready(1)) {pipe_valid(1) := true.B}
-
-  pipe_ready(1) := !pipe_valid(1) || io.out.ready
-  pipe_ready(0) := !pipe_valid(0) || pipe_ready(1)
-
-  val uopReg = Seq.fill(2)(Reg(new MicroOp))
-  val v0 = Seq.fill(2)(Reg(UInt(16.W)))
-  val pipe0Hs = io.in.valid && pipe_ready(0)
-  val pipe1Hs = pipe_valid(0) && pipe_ready(1)
-  uopReg(0) := DataHoldBypass(io.in.bits.uop, pipe0Hs)
-  uopReg(1) := Mux(pipe1Hs, uopReg(0), uopReg(1))
-
-  v0(0) := DataHoldBypass(Fill(8, 1.U(1.W)), pipe0Hs)
-  v0(1) := Mux(pipe1Hs,v0(0), v0(1))
-  val vmask = v0(1)
-
-  val src1 = Mux(src1Type(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0)))
-  val src2 = Mux(src1Type(1) === SrcType.vp, io.in.bits.src(1), VecExtractor(vtype.vsew, io.in.bits.src(1)))
-
-  val adder = Seq.fill(NumAdder)(Module(new VectorFloatAdder()))
-
-  for(i <- 0 until NumAdder) {
-    adder(i).io.fp_a := DataHoldBypass(src1(AdderWidth*(i+1)-1, AdderWidth*i), pipe0Hs)
-    adder(i).io.fp_b := DataHoldBypass(src2(AdderWidth*(i+1)-1, AdderWidth*i), pipe0Hs)
-    adder(i).io.is_vec := DataHoldBypass(true.B, pipe0Hs) // If you can enter, it must be vector
-    adder(i).io.round_mode := DataHoldBypass(rm, pipe0Hs)
-    val fp_format0 = DataHoldBypass(vtype.vsew(1,0), pipe0Hs)
-    adder(i).io.fp_format := Mux(fp_format0.orR,fp_format0,3.U(2.W))
-    adder(i).io.opb_widening := DataHoldBypass(false.B, pipe0Hs) // TODO
-    adder(i).io.res_widening := DataHoldBypass(false.B, pipe0Hs) // TODO
-    adder(i).io.op_code := DataHoldBypass(ctrl.fuOpType, pipe0Hs)
+// reg input signal
+  val uopReg0 = Reg(io.in.bits.uop.cloneType)
+  val valid0 = Seq.fill(Latency)(RegInit(false.B))
+  val inHs = io.in.fire()
+  when(inHs){
+    uopReg0 := io.in.bits.uop
+  }
+  valid0.zipWithIndex.foreach{
+    case (valid, idx) =>
+      val _valid = if (idx == 0) Mux(inHs, true.B,false.B) else valid0(idx-1)
+      valid := _valid
   }
 
-  val adder_result = RegEnable(Mux1H(Seq(
-    (vtype.vsew === 1.U) -> VecInit(adder.map(_.io.fp_f16_result)).asUInt(),
-    (vtype.vsew === 2.U) -> VecInit(adder.map(_.io.fp_f32_result)).asUInt(),
-    (vtype.vsew === 3.U) -> VecInit(adder.map(_.io.fp_f64_result)).asUInt(),
-  )), pipe1Hs)
+  val vmask = Fill(8, 1.U(1.W)) // TODO:
 
+// connect the input port of VectorFloatAdder
+  val adder = Seq.fill(NumAdder)(Module(new VectorFloatAdder()))
+  val src1 = Mux(src1Type(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0)))
+  val src2 = Mux(src1Type(1) === SrcType.vp, io.in.bits.src(1), VecExtractor(vtype.vsew, io.in.bits.src(1)))
+  for(i <- 0 until NumAdder) {
+    adder(i).io.fp_a := Mux(inHs, src1(AdderWidth*(i+1)-1, AdderWidth*i), 0.U)
+    adder(i).io.fp_b := Mux(inHs, src2(AdderWidth*(i+1)-1, AdderWidth*i), 0.U)
+    adder(i).io.is_vec := true.B // If you can enter, it must be vector
+    adder(i).io.round_mode := rm
+    adder(i).io.fp_format := Mux(inHs, vtype.vsew(1,0), 3.U(2.W))
+    adder(i).io.opb_widening := false.B // TODO
+    adder(i).io.res_widening := false.B // TODO
+    adder(i).io.op_code := Mux(inHs, ctrl.fuOpType, VfpuType.dummy)
+  }
+
+// generate the output : s1_fflags_result s1_adder_result 
   val fflagsResult = VecInit(adder.map(_.io.fflags)).asUInt()
   val fflags16vl = fflagsGen(vmask, fflagsResult, List.range(0,8))
   val fflags32vl = fflagsGen(vmask, fflagsResult, List(0,1,4,5))
   val fflags64vl = fflagsGen(vmask, fflagsResult, List(0,4))
-
-  val s0_sew = uopReg(0).asTypeOf(uop.cloneType).ctrl.vconfig.vtype.vsew
-  val s0_vl = uopReg(0).ctrl.vconfig.vl
-  val fflags_result = RegEnable(LookupTree(s0_sew(1, 0), List(
+  val s0_sew = uopReg0.ctrl.vconfig.vtype.vsew
+  val s0_vl = uopReg0.ctrl.vconfig.vl
+  val s0_fflags_result = LookupTree(s0_sew(1, 0), List(
     "b01".U -> Mux(s0_vl.orR, fflags16vl(s0_vl-1.U),0.U(5.W)),
     "b10".U -> Mux(s0_vl.orR, fflags32vl(s0_vl-1.U),0.U(5.W)),
     "b11".U -> Mux(s0_vl.orR, fflags64vl(s0_vl-1.U),0.U(5.W)),
-  )), pipe1Hs)
+  ))
+  val s1_fflags_result = RegEnable(s0_fflags_result, valid0(Latency-2))
 
-  fflags := fflags_result
+  val s0_adder_result = LookupTree(s0_sew(1, 0), List(
+    "b01".U -> VecInit(adder.map(_.io.fp_f16_result)).asUInt(),
+    "b10".U -> VecInit(adder.map(_.io.fp_f32_result)).asUInt(),
+    "b11".U -> VecInit(adder.map(_.io.fp_f64_result)).asUInt(),
+  ))
+  val s1_adder_result = RegEnable(s0_adder_result, valid0(Latency-2))
 
-  io.out.bits.data := adder_result
-  io.out.bits.uop := uopReg(1)
+// connect the output port
+  fflags := s1_fflags_result
 
-  io.out.valid := pipe_valid(1)
-  io.in.ready := pipe_ready(0)
+  io.out.bits.data := s1_adder_result
+  io.out.bits.uop := uopReg0
+
+  io.out.valid := valid0(Latency-1)
+  io.in.ready := !(valid0.foldLeft(false.B)(_|_)) && io.out.ready
 }
 
 object fflagsGen{
