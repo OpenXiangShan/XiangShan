@@ -302,7 +302,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   exuBlocks.foreach(b => {
-    b.io.scheExtra.lcommit := ctrlBlock.io.robio.lsq.lcommit
+    b.io.scheExtra.lcommit := memBlock.io.lqDeq
     b.io.scheExtra.scommit := memBlock.io.sqDeq
     b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
     b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
@@ -321,6 +321,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
   ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
+  ctrlBlock.io.lqDeq <> memBlock.io.lqDeq
   ctrlBlock.io.sqDeq := memBlock.io.sqDeq
   ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt

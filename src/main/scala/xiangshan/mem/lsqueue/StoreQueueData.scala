@@ -202,8 +202,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   // forwarding
   // Compare ringBufferTail (deqPtr) and forward.sqIdx, we have two cases:
   // (1) if they have the same flag, we need to check range(tail, sqIdx)
-  // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
-  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
+  // (2) if they have different flags, we need to check range(tail, LoadQueueFlagSize) and range(0, sqIdx)
+  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueFlagSize))
   // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
   // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
