@@ -575,7 +575,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val enq0            = io.enq.req(0)
   val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.andR && canEnqueue(0)
   val enq0IsVsetFlush = enq0IsVset && enq0.bits.ctrl.flushPipe
-  val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVpu(req.bits.ctrl.fuType) && fire}
+  val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVecExu(req.bits.ctrl.fuType) && fire}
   // for vs_idle
   val firstVInstrIdle = PriorityMux(enqIsVInstrVec.zip(io.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(io.enq.req(0).cloneType)))
   // for vs_waitVinstr

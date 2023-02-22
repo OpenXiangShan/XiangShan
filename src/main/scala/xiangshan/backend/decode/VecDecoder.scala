@@ -9,7 +9,7 @@ import freechips.rocketchip.rocket.Instructions._
 import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import yunsuan.{VfpuType, VipuType}
+import yunsuan.{VfpuType, VipuType, VppuType}
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -376,8 +376,8 @@ object VecDecoder extends DecodeConstants {
 
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fadd , F, T, F),
+    VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fsub, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
     VFWADD_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -479,8 +479,8 @@ object VecDecoder extends DecodeConstants {
 
   val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fadd , F, T, F),
+    VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fsub, F, T, F),
     VFRSUB_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
@@ -537,11 +537,10 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// src2=SrcType.X
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// vs2=0
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VppuType.f2s  , F, T, F),// vs2=0 // vs3 = vd
 
     // 16.3.3. Vector Slide1up
-    // vslide1up.vx vd, vs2, rs1, vm # vd[0]=x[rs1], vd[i+1] = vs2[i]
-    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// vd[0]=f[rs1], vd[i+1] = vs2[i]
+    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.X , FuType.vppu, VppuType.vslide1up, F, T, F),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 
     // 16.3.4. Vector Slide1down Instruction
     // vslide1down.vx vd, vs2, rs1, vm # vd[i] = vs2[i+1], vd[vl-1]=x[rs1]

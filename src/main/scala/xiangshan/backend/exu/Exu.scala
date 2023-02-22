@@ -243,7 +243,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
 
   val readFpFu = config.fuConfigs
     .zip(fuInReady.zip(fuSel))
-    .filter(_._1.numFpSrc > 0)
+    .filter(x => (x._1.numFpSrc > 0 || x._1.numVecSrc > 0))
     .map(_._2)
 
   def inReady(s: Seq[(Bool, Bool)]): Bool = {

@@ -45,7 +45,7 @@ abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val fflags = io.out.fflags
 }
 
-abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
+abstract class FPUSubModule(len: Int = 64)(implicit p: Parameters) extends FunctionUnit(len: Int)
   with HasUIntToSIntHelper
 {
   val rm = IO(Input(UInt(3.W)))
