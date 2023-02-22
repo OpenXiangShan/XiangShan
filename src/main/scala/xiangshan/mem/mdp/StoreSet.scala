@@ -310,6 +310,146 @@ class SSIT(implicit p: Parameters) extends XSModule {
 }
 
 
+//  Correction Table
+class CorrectTableQueryReq(implicit p: Parameters) extends XSBundle {
+  val addr = UInt(MemPredPCWidth.W)
+}
+
+class CorrectTableQueryResp(implicit p: Parameters) extends XSBundle {
+  val strict = Bool()
+}
+
+class CorrectTableQueryIO(implicit p: Parameters) extends XSBundle {
+  val req = Output(new CorrectTableQueryReq)
+  val resp = Input(new CorrectTableQueryResp)
+}
+
+class CorrectTableUpdate(implicit p: Parameters) extends XSBundle {
+  val addr = UInt(MemPredPCWidth.W)
+  val strict = Bool()
+  val violation = Bool()
+}
+
+
+class CorrectTable(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    //  issue
+    val issue = Vec(LoadPipelineWidth, Flipped(new CorrectTableQueryIO))
+    //  update
+    val update = Vec(LoadPipelineWidth + 1, Flipped(Valid(new CorrectTableUpdate)))
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+  })
+
+  val CT_ISSUE_READ_PORT = LoadPipelineWidth
+  val CT_UPDATE_READ_PORT = LoadPipelineWidth
+  val CT_READ_PORT_NUM = CT_ISSUE_READ_PORT
+  val CT_WRITE_PORT_NUM = CT_UPDATE_READ_PORT
+  val CT_UPDATE_READ_PORT_BASE = 0
+  val CT_UPDATE_VIO_PORT = LoadPipelineWidth
+
+  val table = Module(new SyncDataModuleTemplate(
+    UInt(2.W),
+    SSITSize,
+    CT_READ_PORT_NUM,
+    CT_WRITE_PORT_NUM
+  ))
+
+  // TODO: use SRAM or not ?
+  (0 until CT_WRITE_PORT_NUM).map(i => {
+    table.io.wen(i) := false.B 
+    table.io.waddr(i) := DontCare
+    table.io.wdata(i) := DontCare
+  })
+
+
+  //  Flush correction table
+  val resetCounter = RegInit(0.U(ResetTimeMax2Pow.W))
+  resetCounter := resetCounter + 1.U
+ 
+  val resetStepCounter = RegInit(0.U(log2Up(SSITSize + 1).W)) 
+  val s_idle::s_flush::Nil = Enum(2)
+  val state = RegInit(s_flush)
+
+  switch (state) {
+    is (s_idle) {
+      when (resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+        state := s_flush 
+        resetCounter := 0.U
+      }
+    }
+    is (s_flush) {
+      when (resetStepCounter === (SSITSize-1).U) {
+        state := s_idle
+        resetStepCounter := 0.U
+      } .otherwise {
+        resetStepCounter := resetStepCounter + 1.U
+      }
+    }
+  }
+  XSPerfAccumulate("ct_reset_timeout", state === s_flush && resetCounter === 0.U)
+
+  //  Read 
+  for (i <- 0 until LoadPipelineWidth) {
+    table.io.raddr(i) := io.issue(i).req.addr
+
+    val pred = table.io.rdata(i)
+    io.issue(i).resp.strict := pred(1)
+  }
+
+  //  Update correction table
+  def update_corection_table(port: Int, pc: UInt, valid: Bool, pred: UInt) = {
+    table.io.wen(port) := true.B  
+    table.io.waddr(port) := pc 
+    table.io.wdata(port) := pred
+  }
+
+  val updateVec = Wire(Vec(CT_UPDATE_READ_PORT, Valid(new CorrectTableUpdate)))
+  for (i <- 0 until CT_UPDATE_READ_PORT) {
+    if (i == 0) {
+      updateVec(i) := Mux(io.update(CT_UPDATE_VIO_PORT).valid, io.update(CT_UPDATE_VIO_PORT), io.update(i))
+    } else {
+      updateVec(i) := io.update(i)
+    }
+  }
+
+  val s1_mempred_update_req_valids = RegNext(VecInit(updateVec.map(_.valid)))
+  val s2_mempred_update_req_valids = RegNext(s1_mempred_update_req_valids)
+
+  for ((update, i) <- updateVec.zipWithIndex) {
+    val s1_mempred_update_req_valid = s1_mempred_update_req_valids(i)
+    val s1_mempred_update_req = RegEnable(update.bits, update.valid)
+
+    when (update.valid) {
+      table.io.raddr(CT_UPDATE_READ_PORT_BASE + i) := update.bits.addr
+    }
+
+    //  Update state 1: get old pred
+    val s1_oldPred = table.io.rdata(CT_UPDATE_READ_PORT_BASE + i)
+
+    //  Update state 2: write new pred
+    val s2_mempred_update_req_valid = s2_mempred_update_req_valids(i)
+    val s2_mempred_update_req = RegEnable(s1_mempred_update_req, s1_mempred_update_req_valid)
+    val s2_oldPred = RegEnable(s1_oldPred, s1_mempred_update_req_valid)
+    val s2_mempred_newpred = Mux(s2_mempred_update_req.violation, 3.U(2.W), 
+                              Mux(s2_mempred_update_req.strict, s2_oldPred + (s2_oldPred =/= 3.U), s2_oldPred - (s2_oldPred =/= 0.U)))
+
+    update_corection_table(
+      port = i, 
+      pc = s2_mempred_update_req.addr, 
+      valid = s2_mempred_update_req_valid,
+      pred = s2_mempred_newpred
+    )
+
+    //  Make SyncDataModuleTemplate happy
+    (0 until i).map(k => {
+      when (s2_mempred_update_req_valids(i) && s2_mempred_update_req_valids(k) && table.io.waddr(i) === table.io.waddr(k)) {
+        table.io.wen(k) := false.B
+      }
+    })
+  }   
+  // end
+}
+
 // Last Fetched Store Table Entry
 class LFSTEntry(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
