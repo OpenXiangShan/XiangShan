@@ -85,10 +85,13 @@ def run_test(test_info, numa, run_mode):
     cmd = cmd + cs
 
   if run_mode:
+    os.system(f"mkdir -p {wave_home}\n")
+    os.system(f"mkdir -p {perf_home}\n")
     for c in cmd:
       f_c = set_env + " " + c
       print(f"[CMD] {f_c}", flush=True)
       os.system(f_c)
+
   else:
     if (sh_path is None):
       print("sh_path is None")
@@ -160,7 +163,7 @@ if __name__ == "__main__":
   print("set_env: ", set_env)
   print("sh_path", sh_path)
 
-  input("Press Enter to continue")
+  input("Press Enter to continue\n")
 
   ci_tests = parse_yaml(github_yaml)["jobs"]
 
