@@ -151,7 +151,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
 
   override def millSourcePath = os.pwd
 
-  override def forkArgs = Seq("-Xmx128G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx100G", "-Xss256m")
 
   override def ivyDeps = super.ivyDeps() ++ Seq(ivys.chiseltest)
 
