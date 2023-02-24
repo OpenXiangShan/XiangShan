@@ -393,7 +393,7 @@ object VecDecoder extends DecodeConstants {
     VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.fmacc, F, T, F),
     VFNMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFMSAC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -498,7 +498,7 @@ object VecDecoder extends DecodeConstants {
     VFWMUL_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.fmacc, F, T, F),
     VFNMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFMSAC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),

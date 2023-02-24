@@ -23,9 +23,9 @@ import chisel3.{Mux, _}
 import chisel3.util._
 import utils._
 import utility._
-import yunsuan.vector.VectorFloatAdder
+import yunsuan.vector.{VectorFloatAdder,VectorFloatFMA}
 import yunsuan.VfpuType
-import xiangshan.{SrcType, XSCoreParamsKey, XSModule, FuOpType}
+import xiangshan.{FuOpType, SrcType, XSBundle, XSCoreParamsKey, XSModule}
 import xiangshan.backend.fu.fpu.FPUSubModule
 
 class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN){
@@ -63,15 +63,120 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfalu.io.ready_out.s0_sew := s0_uopReg.ctrl.vconfig.vtype.vsew(1, 0)
   vfalu.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
+//  connect the input port of vfmacc
+  val vfmacc = Module(new VfmaccWrapper()(p))
+  vfmacc.io.in.bits.src <> in.src
+  vfmacc.io.in.bits.srcType <> in.uop.ctrl.srcType
+  vfmacc.io.in.bits.vmask := Fill(8, 1.U(1.W))
+  vfmacc.io.in.bits.vl := in.uop.ctrl.vconfig.vl
+  vfmacc.io.in.bits.round_mode := rm
+  vfmacc.io.in.bits.fp_format := vtype.vsew(1, 0)
+  vfmacc.io.in.bits.opb_widening := DontCare // TODO
+  vfmacc.io.in.bits.res_widening := false.B // TODO
+  vfmacc.io.in.bits.op_code := DontCare
+  vfmacc.io.ready_out.s0_mask := s0_maskReg
+  vfmacc.io.ready_out.s0_sew := s0_uopReg.ctrl.vconfig.vtype.vsew(1, 0)
+  vfmacc.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
+
 // connect the output port
-  fflags := vfalu.io.out.bits.fflags
-  io.out.bits.data := vfalu.io.out.bits.result
+  fflags := LookupTree(s0_uopReg.ctrl.fuOpType, List(
+    VfpuType.fadd  -> vfalu.io.out.bits.fflags,
+    VfpuType.fsub  -> vfalu.io.out.bits.fflags,
+    VfpuType.fmacc -> vfmacc.io.out.bits.fflags,
+  ))
+  io.out.bits.data := LookupTree(s0_uopReg.ctrl.fuOpType, List(
+    VfpuType.fadd -> vfalu.io.out.bits.result,
+    VfpuType.fsub -> vfalu.io.out.bits.result,
+    VfpuType.fmacc -> vfmacc.io.out.bits.result,
+  ))
   io.out.bits.uop := s0_uopReg
   // valid/ready
-  vfalu.io.in.valid := io.in.valid
-  io.out.valid := vfalu.io.out.valid
+  vfalu.io.in.valid := io.in.valid && VfpuType.isVfalu(in.uop.ctrl.fuOpType)
+  vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fmacc
+  io.out.valid := vfalu.io.out.valid || vfmacc.io.out.valid
   vfalu.io.out.ready := io.out.ready
-  io.in.ready := vfalu.io.in.ready
+  vfmacc.io.out.ready := io.out.ready
+  io.in.ready := vfalu.io.in.ready && vfmacc.io.in.ready
+}
+
+class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
+  val in = Flipped(DecoupledIO(Output(new Bundle {
+    val src = Vec(3, Input(UInt(VLEN.W)))
+    val srcType = Vec(4, SrcType())
+    val vmask = UInt((VLEN / 16).W)
+    val vl = UInt(8.W)
+
+    val round_mode = UInt(3.W)
+    val fp_format = UInt(2.W) // vsew
+    val opb_widening = Bool()
+    val res_widening = Bool()
+    val op_code = FuOpType()
+  })))
+
+  val ready_out = Input(new Bundle {
+    val s0_mask = UInt((VLEN / 16).W)
+    val s0_sew = UInt(2.W)
+    val s0_vl = UInt(8.W)
+  })
+
+  val out = DecoupledIO(Output(new Bundle {
+    val result = UInt(128.W)
+    val fflags = UInt(5.W)
+  }))
+}
+
+class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
+  val Latency = 3
+  val AdderWidth = XLEN
+  val NumAdder = VLEN / XLEN
+
+  val io = IO(new VFPUWraaperBundle)
+
+  val in = io.in.bits
+  val out = io.out.bits
+  val inHs = io.in.fire()
+
+  val validPipe = Seq.fill(Latency)(RegInit(false.B))
+  validPipe.zipWithIndex.foreach {
+    case (valid, idx) =>
+      val _valid = if (idx == 0) Mux(inHs, true.B, false.B) else validPipe(idx - 1)
+      valid := _valid
+  }
+  val s0_mask = io.ready_out.s0_mask
+  val s0_sew = io.ready_out.s0_sew
+  val s0_vl = io.ready_out.s0_vl
+
+  val vfmacc = Seq.fill(NumAdder)(Module(new VectorFloatFMA()))
+  val src1 = Mux(in.srcType(0) === SrcType.vp, in.src(0), VecExtractor(in.fp_format, in.src(0)))
+  val src2 = Mux(in.srcType(1) === SrcType.vp, in.src(1), VecExtractor(in.fp_format, in.src(1)))
+  val src3 = Mux(in.srcType(2) === SrcType.vp, in.src(2), VecExtractor(in.fp_format, in.src(2)))
+  for (i <- 0 until NumAdder) {
+    vfmacc(i).io.fp_a := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfmacc(i).io.fp_b := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfmacc(i).io.fp_c := Mux(inHs, src3(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfmacc(i).io.is_vec := true.B // If you can enter, it must be vector
+    vfmacc(i).io.round_mode := in.round_mode
+    vfmacc(i).io.fp_format := Mux(inHs, in.fp_format, 3.U(2.W))
+    vfmacc(i).io.res_widening := in.res_widening // TODO
+  }
+
+  // output signal generation
+  val s2_fflagsVec = VecInit(vfmacc.map(_.io.fflags)).asUInt()
+  val s2_fflags16vl = fflagsGen(s0_mask, s2_fflagsVec, List.range(0, 8))
+  val s2_fflags32vl = fflagsGen(s0_mask, s2_fflagsVec, List(0, 1, 4, 5))
+  val s2_fflags64vl = fflagsGen(s0_mask, s2_fflagsVec, List(0, 4))
+  val s2_fflags = LookupTree(s0_sew(1, 0), List(
+    "b01".U -> Mux(s0_vl.orR, s2_fflags16vl(s0_vl - 1.U), 0.U(5.W)),
+    "b10".U -> Mux(s0_vl.orR, s2_fflags32vl(s0_vl - 1.U), 0.U(5.W)),
+    "b11".U -> Mux(s0_vl.orR, s2_fflags64vl(s0_vl - 1.U), 0.U(5.W)),
+  ))
+  out.fflags := s2_fflags
+
+  val s2_result = VecInit(vfmacc.map(_.io.fp_result)).asUInt()
+  out.result := s2_result
+
+  io.in.ready := !(validPipe.foldLeft(false.B)(_ | _)) && io.out.ready
+  io.out.valid := validPipe(Latency - 1)
 }
 
 class VfaluWrapper(implicit p: Parameters)  extends XSModule{
@@ -79,31 +184,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
   val AdderWidth = XLEN
   val NumAdder = VLEN / XLEN
 
-  val io = IO(new Bundle{
-    val in = Flipped(DecoupledIO(Output(new Bundle{
-      val src = Vec(3, Input(UInt(VLEN.W)))
-      val srcType = Vec(4, SrcType())
-      val vmask = UInt((VLEN/16).W)
-      val vl = UInt(8.W)
-
-      val round_mode = UInt(3.W)
-      val fp_format = UInt(2.W) // vsew
-      val opb_widening  = Bool()
-      val res_widening  = Bool()
-      val op_code       = FuOpType()
-    })))
-
-    val ready_out = Input(new Bundle {
-      val s0_mask = UInt((VLEN / 16).W)
-      val s0_sew = UInt(2.W)
-      val s0_vl = UInt(8.W)
-    })
-
-    val out = DecoupledIO(Output(new Bundle{
-      val result = UInt(128.W)
-      val fflags = UInt(5.W)
-    }))
-  })
+  val io = IO(new VFPUWraaperBundle)
 
   val in = io.in.bits
   val out = io.out.bits
