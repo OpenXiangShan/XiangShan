@@ -23,7 +23,7 @@ import chisel3.{Mux, _}
 import chisel3.util._
 import utils._
 import utility._
-import yunsuan.vector.{VectorFloatAdder,VectorFloatFMA}
+import yunsuan.vector.{VectorFloatAdder,VectorFloatFMA,VectorFloatDivider}
 import yunsuan.VfpuType
 import xiangshan.{FuOpType, SrcType, XSBundle, XSCoreParamsKey, XSModule}
 import xiangshan.backend.fu.fpu.FPUSubModule
@@ -52,8 +52,6 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   val vfalu = Module(new VfaluWrapper()(p))
   vfalu.io.in.bits.src <> in.src
   vfalu.io.in.bits.srcType <> in.uop.ctrl.srcType
-  vfalu.io.in.bits.vmask := Fill(8, 1.U(1.W))
-  vfalu.io.in.bits.vl := in.uop.ctrl.vconfig.vl
   vfalu.io.in.bits.round_mode := rm
   vfalu.io.in.bits.fp_format := vtype.vsew(1,0)
   vfalu.io.in.bits.opb_widening := false.B // TODO
@@ -67,8 +65,6 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   val vfmacc = Module(new VfmaccWrapper()(p))
   vfmacc.io.in.bits.src <> in.src
   vfmacc.io.in.bits.srcType <> in.uop.ctrl.srcType
-  vfmacc.io.in.bits.vmask := Fill(8, 1.U(1.W))
-  vfmacc.io.in.bits.vl := in.uop.ctrl.vconfig.vl
   vfmacc.io.in.bits.round_mode := rm
   vfmacc.io.in.bits.fp_format := vtype.vsew(1, 0)
   vfmacc.io.in.bits.opb_widening := DontCare // TODO
@@ -78,33 +74,48 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfmacc.io.ready_out.s0_sew := s0_uopReg.ctrl.vconfig.vtype.vsew(1, 0)
   vfmacc.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
+  //  connect the input port of vfdiv
+  val vfdiv = Module(new VfdivWrapper()(p))
+  vfdiv.io.in.bits.src <> in.src
+  vfdiv.io.in.bits.srcType <> in.uop.ctrl.srcType
+  vfdiv.io.in.bits.round_mode := rm
+  vfdiv.io.in.bits.fp_format := vtype.vsew(1, 0)
+  vfdiv.io.in.bits.opb_widening := DontCare // TODO
+  vfdiv.io.in.bits.res_widening := DontCare // TODO
+  vfdiv.io.in.bits.op_code := DontCare
+  vfdiv.io.ready_out.s0_mask := s0_maskReg
+  vfdiv.io.ready_out.s0_sew := s0_uopReg.ctrl.vconfig.vtype.vsew(1, 0)
+  vfdiv.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
+
 // connect the output port
   fflags := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd  -> vfalu.io.out.bits.fflags,
     VfpuType.fsub  -> vfalu.io.out.bits.fflags,
     VfpuType.fmacc -> vfmacc.io.out.bits.fflags,
+    VfpuType.fdiv  -> vfdiv.io.out.bits.fflags,
   ))
   io.out.bits.data := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd -> vfalu.io.out.bits.result,
     VfpuType.fsub -> vfalu.io.out.bits.result,
     VfpuType.fmacc -> vfmacc.io.out.bits.result,
+    VfpuType.fdiv -> vfdiv.io.out.bits.result,
   ))
   io.out.bits.uop := s0_uopReg
   // valid/ready
   vfalu.io.in.valid := io.in.valid && VfpuType.isVfalu(in.uop.ctrl.fuOpType)
   vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fmacc
-  io.out.valid := vfalu.io.out.valid || vfmacc.io.out.valid
+  vfdiv.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fdiv
+  io.out.valid := vfalu.io.out.valid || vfmacc.io.out.valid || vfdiv.io.out.valid
   vfalu.io.out.ready := io.out.ready
   vfmacc.io.out.ready := io.out.ready
-  io.in.ready := vfalu.io.in.ready && vfmacc.io.in.ready
+  vfdiv.io.out.ready := io.out.ready
+  io.in.ready := vfalu.io.in.ready && vfmacc.io.in.ready && vfdiv.io.in.ready
 }
 
 class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
   val in = Flipped(DecoupledIO(Output(new Bundle {
     val src = Vec(3, Input(UInt(VLEN.W)))
     val srcType = Vec(4, SrcType())
-    val vmask = UInt((VLEN / 16).W)
-    val vl = UInt(8.W)
 
     val round_mode = UInt(3.W)
     val fp_format = UInt(2.W) // vsew
@@ -123,6 +134,53 @@ class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
     val result = UInt(128.W)
     val fflags = UInt(5.W)
   }))
+}
+
+class VfdivWrapper(implicit p: Parameters)  extends XSModule{
+  val Latency = List(5, 7, 12)
+  val AdderWidth = XLEN
+  val NumAdder = VLEN / XLEN
+
+  val io = IO(new VFPUWraaperBundle)
+
+  val in = io.in.bits
+  val out = io.out.bits
+  val inHs = io.in.fire()
+
+  val s0_mask = io.ready_out.s0_mask
+  val s0_sew = io.ready_out.s0_sew
+  val s0_vl = io.ready_out.s0_vl
+
+  val vfdiv = Seq.fill(NumAdder)(Module(new VectorFloatDivider()))
+  val src1 = Mux(in.srcType(0) === SrcType.vp, in.src(0), VecExtractor(in.fp_format, in.src(0)))
+  val src2 = Mux(in.srcType(1) === SrcType.vp, in.src(1), VecExtractor(in.fp_format, in.src(1)))
+  for (i <- 0 until NumAdder) {
+    vfdiv(i).io.opa_i := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfdiv(i).io.opb_i := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfdiv(i).io.is_vec_i := true.B // If you can enter, it must be vector
+    vfdiv(i).io.rm_i := in.round_mode
+    vfdiv(i).io.fp_format_i := Mux(inHs, in.fp_format, 3.U(2.W))
+    vfdiv(i).io.start_valid_i := io.in.valid
+    vfdiv(i).io.finish_ready_i := io.out.ready
+    vfdiv(i).io.flush_i := false.B  // TODO
+  }
+
+  val s4_fflagsVec = VecInit(vfdiv.map(_.io.fflags_o)).asUInt()
+  val s4_fflags16vl = fflagsGen(s0_mask, s4_fflagsVec, List.range(0, 8))
+  val s4_fflags32vl = fflagsGen(s0_mask, s4_fflagsVec, List(0, 1, 4, 5))
+  val s4_fflags64vl = fflagsGen(s0_mask, s4_fflagsVec, List(0, 4))
+  val s4_fflags = LookupTree(s0_sew(1, 0), List(
+    "b01".U -> Mux(s0_vl.orR, s4_fflags16vl(s0_vl - 1.U), 0.U(5.W)),
+    "b10".U -> Mux(s0_vl.orR, s4_fflags32vl(s0_vl - 1.U), 0.U(5.W)),
+    "b11".U -> Mux(s0_vl.orR, s4_fflags64vl(s0_vl - 1.U), 0.U(5.W)),
+  ))
+  out.fflags := s4_fflags
+
+  val s4_result = VecInit(vfdiv.map(_.io.fpdiv_res_o)).asUInt()
+  out.result := s4_result
+
+  io.in.ready := VecInit(vfdiv.map(_.io.start_ready_o)).asUInt().andR()
+  io.out.valid := VecInit(vfdiv.map(_.io.finish_valid_o)).asUInt().andR()
 }
 
 class VfmaccWrapper(implicit p: Parameters)  extends XSModule{

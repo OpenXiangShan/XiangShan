@@ -387,7 +387,7 @@ object VecDecoder extends DecodeConstants {
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
     VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fdiv , F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
     VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -491,7 +491,7 @@ object VecDecoder extends DecodeConstants {
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
     VFMUL_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fdiv , F, T, F),
     VFRDIV_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
