@@ -289,10 +289,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
-  when (io.replay.map(_.fire).reduce(_|_)) {
+  val lastReplay = RegNext(io.replay.map(_.fire).reduce(_|_))
+  when (lastReplay && io.replay.map(_.fire).reduce(_|_)) {
     coldCounter := coldCounter + 1.U
   } .elsewhen (coldCounter >= 8.U) {
     coldCounter := coldCounter + 1.U
+  } .otherwise {
+    coldCounter := 0.U
   }
 
   /**
