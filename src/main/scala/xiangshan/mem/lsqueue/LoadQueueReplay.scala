@@ -205,7 +205,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
-    when (blockByCacheMiss(i) && creditUpdate(i) === 0.U) { blockByCacheMiss(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
     when (blockByOthers(i) && creditUpdate(i) === 0.U) { blockByOthers(i) := false.B }
 
@@ -265,14 +264,14 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val hasBankConflictVec = VecInit(s2_selectIndexV.zip(s2_selectIndex).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
   val hasBankConflict = hasBankConflictVec.asUInt.orR
   val allBankConflict = hasBankConflictVec.asUInt.andR
-
+  val coldCounter = RegInit(0.U(4.W))
   for (i <- 0 until LoadPipelineWidth) {
     val replayIdx = s2_selectIndex(i)
     val cancelReplay = replayCancelMask(replayIdx)
     // In order to avoid deadlock, replay one inst which blocked by bank conflict
     val bankConflictReplay = Mux(hasBankConflict && !allBankConflict, cause(replayIdx)(LoadReplayCauses.bankConflict), true.B)
 
-    io.replay(i).valid := s2_selectIndexV(i) && !cancelReplay && bankConflictReplay
+    io.replay(i).valid := s2_selectIndexV(i) && !cancelReplay && bankConflictReplay && coldCounter >= 0.U && coldCounter < 8.U
     io.replay(i).bits := DontCare
     io.replay(i).bits.uop := uop(replayIdx)
     io.replay(i).bits.vaddr := vaddrModule.io.rdata(i)
@@ -286,9 +285,14 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     when (io.replay(i).fire) {
       allocated(replayIdx) := false.B
-
       XSError(!allocated(replayIdx), s"why replay invalid entry ${replayIdx} ?\n")
     }
+  }
+
+  when (io.replay.map(_.fire).reduce(_|_)) {
+    coldCounter := coldCounter + 1.U
+  } .elsewhen (coldCounter >= 8.U) {
+    coldCounter := coldCounter + 1.U
   }
 
   /**
@@ -363,8 +367,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         replayCarryReg(enqIdx) := replayInfo.replayCarry
         missMSHRId(enqIdx) := replayInfo.missMSHRId
         blockByCacheMiss(enqIdx) := replayInfo.cause(LoadReplayCauses.dcacheMiss) && !replayInfo.canForwardFullData && //  dcache miss
-                                    !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) && // no refill in this cycle
-                                    creditUpdate(enqIdx) =/= 0.U //  credit is not zero
+                                    !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) // no refill in this cycle
       } .otherwise {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := Mux(blockPtrOthers(enqIdx) === 3.U(2.W), blockPtrOthers(enqIdx), blockPtrOthers(enqIdx) + 1.U(2.W)) 
