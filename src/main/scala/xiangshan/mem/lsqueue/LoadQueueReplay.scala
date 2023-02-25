@@ -293,7 +293,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   /**
    * Enqueue
    */
-  val EnqueueThreshold = LoadPipelineWidth * 3
+  val EnqueueThreshold = LoadPipelineWidth * 5
   val issueThreshold = LoadPipelineWidth * 5
   val enqIdxOH = SelectFirstN(~allocated.asUInt, LoadPipelineWidth, canEnqueueVec.asUInt)
   val lqFull = (LoadQueueReplaySize.U - PopCount(allocated)) <= EnqueueThreshold.U
