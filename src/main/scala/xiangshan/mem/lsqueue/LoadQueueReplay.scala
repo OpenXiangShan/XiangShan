@@ -242,7 +242,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val loadReplaySelMask = loadReplaySelVec.asUInt & ~deqOrCancelMask
   // make chisel happy
   val loadReplayDeqMask = Wire(UInt(LoadQueueReplaySize.W))
-  loadReplayDeqMask := Mux(oldestDeqMask.orR, oldestDeqMask, loadReplayDeqMask)
+  loadReplayDeqMask := Mux(oldestDeqMask.orR, oldestDeqMask, loadReplaySelMask)
   val s0_deqMask = loadReplayDeqMask
 
   // stage 1 generate select index
