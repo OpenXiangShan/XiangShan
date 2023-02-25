@@ -205,7 +205,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
-    when (blockByCacheMiss(i) && createTable(i) === 0.U) { blockByCacheMiss(i) := false.B }
+    when (blockByCacheMiss(i) && creditUpdate(i) === 0.U) { blockByCacheMiss(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
     when (blockByOthers(i) && creditUpdate(i) === 0.U) { blockByOthers(i) := false.B }
 
