@@ -89,7 +89,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
+class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LqWriteBundle)
@@ -124,6 +124,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   s0_replayCarry.real_way_en := 0.U
   io.s0_sqIdx := s0_sqIdx
 
+  val s0_replayShouldWait = io.in.valid && isAfter(io.replay.bits.uop.robIdx, io.in.bits.uop.robIdx) && !io.lqReplayFull 
   // load flow select/gen
   //
   // src0: load replayed by LSQ (io.replay)
@@ -134,7 +135,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // src5: hardware prefetch from prefetchor (high confidence) (io.prefetch)
 
   // load flow source valid
-  val lfsrc0_loadReplay_valid = io.replay.valid
+  val lfsrc0_loadReplay_valid = io.replay.valid && !s0_replayShouldWait
   val lfsrc1_highconfhwPrefetch_valid = io.prefetch_in.valid && io.prefetch_in.bits.confidence > 0.U
   val lfsrc2_intloadFirstIssue_valid = io.in.valid // int flow first issue or software prefetch
   val lfsrc3_vecloadFirstIssue_valid = WireInit(false.B) // TODO
@@ -306,6 +307,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
+
   // accept load flow if dcache ready (dtlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
   io.out.valid := s0_valid && io.dcacheReq.ready && !io.s0_kill && (!s0_fromRs || s0_fromPreFetch || (s0_fromRs && !io.lqReplayFull))
@@ -331,7 +333,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // load flow source ready
   // always accept load flow from load replay queue
   // io.replay has highest priority
-  io.replay.ready := (io.out.ready && io.dcacheReq.ready && lfsrc_loadReplay_ready)
+  io.replay.ready := (io.out.ready && io.dcacheReq.ready && lfsrc_loadReplay_ready && !s0_replayShouldWait)
 
   // accept load flow from rs when:
   // 1) there is no lsq-replayed load
@@ -728,7 +730,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.out.bits.replayInfo.cause(LoadReplayCauses.schedError) := (io.in.bits.replayInfo.cause(LoadReplayCauses.schedError) || s2_schedError) && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.waitStore) := s2_wait_store && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
-  io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := Mux(fullForward, false.B, io.out.bits.miss) && !s2_mmio 
+  io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss && !s2_mmio 
   if (EnableFastForward) {
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || fullForward)
   }else {

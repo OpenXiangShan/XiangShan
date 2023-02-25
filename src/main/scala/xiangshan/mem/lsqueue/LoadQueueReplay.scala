@@ -37,9 +37,12 @@ object LoadReplayCauses {
   // from replay causes vector
 
   /* 
-   * *****************************
-   * * Don't change the priority *
-   * *****************************
+   * Warning:
+   * ************************************************************
+   * * Don't change the priority. If the priority is changed,   *
+   * * deadlock may occur. If you really need to change or      *
+   * * add priority, please ensure that no deadlock will occur. *
+   * ************************************************************
    * 
    */
 
@@ -115,20 +118,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   /**
    * used for re-select control
    */
-  def getRemBits(input: UInt)(rem: Int): UInt = {
-    VecInit((0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => { input(LoadPipelineWidth * i + rem) })).asUInt
-  }
-
-  def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
-    val length = mask.length
-    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
-    val highBitsUint = Cat(highBits.reverse)
-    PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
-  }
-
-  def toVec(a: UInt): Vec[Bool] = {
-    VecInit(a.asBools)
-  }
 
   val credit = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(ReSelectLen.W))))
   //  Ptrs to control which cycle to choose
@@ -140,6 +129,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   blockCyclesTlb := io.tlbReplayDelayCycleCtrl
   val blockCyclesCache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val blockCyclesOthers = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val blockCounter = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(5.W))))
   val selBlocked = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))  
   //  Data forward block  
   val blockSqIdx = Reg(Vec(LoadQueueReplaySize, new SqPtr))
@@ -215,79 +205,70 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
-    when (blockByCacheMiss(i) && creditUpdate(i) === 0.U) { blockByCacheMiss(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
     when (blockByOthers(i) && creditUpdate(i) === 0.U) { blockByOthers(i) := false.B }
+
   })  
 
   //  Replay is splitted into 2 stages
-  val deqMask = allocated.asUInt  
-  //  Stage 1: select 2 entries and read their vaddr 
-  val s0_blockLoadMask = WireInit(VecInit((0 until LoadQueueReplaySize).map(x => false.B)))
-  val s1_blockLoadMask = RegNext(s0_blockLoadMask)
-  val s2_blockLoadMask = RegNext(s1_blockLoadMask)  
-
-  val loadReplaySel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueReplaySize).W))) // index selected last cycle
-  val loadReplaySelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
+  val oldestMask = Wire(Vec(LoadQueueReplaySize, Bool()))
+  val oldestMaskUInt = oldestMask.asUInt
+  val deqMask = Mux(oldestMaskUInt.orR, oldestMaskUInt, allocated.asUInt) // replay oldest inst
   val loadReplaySelVec = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = s1_blockLoadMask(i) || s2_blockLoadMask(i) || selBlocked(i) ||
-                  blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByOthers(i)
+    val blocked = selBlocked(i) || blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByOthers(i)
+    // s1_blockLoadMask(i) || s2_blockLoadMask(i) || 
     allocated(i) && cause(i).orR && !blocked
   })).asUInt // use uint instead vec to reduce verilog lines
-  val remReplayDeqMask = Seq.tabulate(LoadPipelineWidth)(getRemBits(deqMask)(_))
-  // generate lastCycleSelect mask
-  val remReplayFireMask = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(UIntToOH(loadReplaySel(rem)))(rem))
-  val loadReplayRemSelVecFire = Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadReplaySelVec)(rem) & ~remReplayFireMask(rem))
-  val loadReplayRemSelVecNotFire = Seq.tabulate(LoadPipelineWidth)(getRemBits(loadReplaySelVec)(_))
-  val replayRemFire = Seq.tabulate(LoadPipelineWidth)(rem => WireInit(false.B))
-  val loadReplayRemSel = Seq.tabulate(LoadPipelineWidth)(rem => Mux(
-    replayRemFire(rem),
-    getFirstOne(toVec(loadReplayRemSelVecFire(rem)), remReplayDeqMask(rem)),
-    getFirstOne(toVec(loadReplayRemSelVecNotFire(rem)), remReplayDeqMask(rem))
-  ))
-  val loadReplaySelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueReplaySize).W)))
-  val loadReplaySelVGen = Wire(Vec(LoadPipelineWidth, Bool())) 
-  (0 until LoadPipelineWidth).foreach(port => {
-    loadReplaySelGen(port) := (
-      if (LoadPipelineWidth > 1) Cat(loadReplayRemSel(port), port.U(log2Ceil(LoadPipelineWidth).W))
-      else loadReplayRemSel(port)
-    )
-    loadReplaySelVGen(port) := Mux(replayRemFire(port), loadReplayRemSelVecFire(port).asUInt.orR, loadReplayRemSelVecNotFire(port).asUInt.orR)
+  // check oldest inst
+  (0 until LoadQueueReplaySize).map(i => {
+    oldestMask(i) := loadReplaySelVec(i) && blockCounter(i) === 16.U
   })
-  (0 until LoadPipelineWidth).map(i => {
-    loadReplaySel(i) := RegNext(loadReplaySelGen(i))
-    loadReplaySelV(i) := RegNext(loadReplaySelVGen(i), init = false.B)
-  })  
+
+  // update block counter
+  (0 until LoadQueueReplaySize).map(i => {
+    blockCounter(i) := Mux(blockCounter(i) =/= 16.U && loadReplaySelVec(i) && !oldestMaskUInt.orR, blockCounter(i) + 1.U, blockCounter(i))
+  })
+
+  //
+  val replayCancelMask = Wire(Vec(LoadQueueReplaySize, Bool()))
+  (0 until LoadQueueReplaySize).map(i => {
+    replayCancelMask(i) := allocated(i) && uop(i).robIdx.needFlush(io.redirect)
+  })
+  val replaySelMask = Wire(UInt(LoadQueueReplaySize.W))
+  // stage 0 generate select mask
+  // if replay queue has oldest inst, replay first
+  // make chisel happy
+  val loadReplayDeqMask = Wire(UInt(LoadQueueReplaySize.W))
+  loadReplayDeqMask := Mux(oldestMaskUInt.orR, oldestMaskUInt, loadReplaySelVec.asUInt) & ~(replaySelMask | replayCancelMask.asUInt)
+  val s0_deqMask = loadReplayDeqMask
+
+  // stage 1 generate select index
+  // make chisel happy
+  val s1_selectMask = Wire(UInt(LoadQueueReplaySize.W)) 
+  s1_selectMask := RegNext(s0_deqMask) & ~(replaySelMask | replayCancelMask.asUInt)
+  val s1_selectIndexOH = SelectFirstN(s1_selectMask, LoadPipelineWidth, Fill(LoadPipelineWidth, true.B))
+  val s1_selectIndex = s1_selectIndexOH.map(OHToUInt(_))
+
+  // stage 2 replay now
+  val s2_selectIndexV = s1_selectIndexOH.map(idx => RegNext(idx =/= 0.U))
+  val s2_selectIndex = s1_selectIndex.map(idx => RegNext(idx))
+  replaySelMask := s1_selectIndexOH.zipWithIndex.map(x => Fill(LoadQueueReplaySize, io.replay(x._2).fire) & RegNext(x._1)).reduce(_|_)
+
   (0 until LoadPipelineWidth).map(w => {
-    vaddrModule.io.raddr(w) := loadReplaySelGen(w)
+    vaddrModule.io.raddr(w) := s1_selectIndex(w)
   })  
 
-  // stage2: replay to load pipeline (if no load in S0)
-  (0 until LoadPipelineWidth).map(i => {
-    when (replayRemFire(i)) {
-      s0_blockLoadMask(loadReplaySel(i)) := true.B
-    }
-  })
-  //  init
-  (0 until LoadPipelineWidth).map(i => {
-    replayRemFire(i) := false.B
-  })    
-
-
-  val hasBankConflictVec = VecInit(loadReplaySelV.zip(loadReplaySel).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
+  val hasBankConflictVec = VecInit(s2_selectIndexV.zip(s2_selectIndex).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
   val hasBankConflict = hasBankConflictVec.asUInt.orR
   val allBankConflict = hasBankConflictVec.asUInt.andR
 
   for (i <- 0 until LoadPipelineWidth) {
-    val replayIdx = loadReplaySel(i)
-    val cancelReplay = uop(replayIdx).robIdx.needFlush(RegNext(io.redirect))
+    val replayIdx = s2_selectIndex(i)
+    val cancelReplay = replayCancelMask(replayIdx)
     // In order to avoid deadlock, replay one inst which blocked by bank conflict
     val bankConflictReplay = Mux(hasBankConflict && !allBankConflict, cause(replayIdx)(LoadReplayCauses.bankConflict), true.B)
 
-    cancelReplay.suggestName(s"cancelRepaly_{$i}")
-    dontTouch(cancelReplay)
-
-    io.replay(i).valid := loadReplaySelV(i) && !cancelReplay && bankConflictReplay
+    io.replay(i).valid := s2_selectIndexV(i) && !cancelReplay && bankConflictReplay
     io.replay(i).bits := DontCare
     io.replay(i).bits.uop := uop(replayIdx)
     io.replay(i).bits.vaddr := vaddrModule.io.rdata(i)
@@ -300,7 +281,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.rawAllocated := flags(replayIdx).rawAllocated
 
     when (io.replay(i).fire) {
-      replayRemFire(i) := true.B
+      // replayRemFire(i) := true.B
       allocated(replayIdx) := false.B
 
       XSError(!allocated(replayIdx), s"why replay invalid entry ${replayIdx} ?\n")
@@ -310,7 +291,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   /**
    * Enqueue
    */
-  val EnqueueThreshold = LoadPipelineWidth * 5
+  val EnqueueThreshold = LoadPipelineWidth * 3
+  val issueThreshold = LoadPipelineWidth * 5
   val enqIdxOH = SelectFirstN(~allocated.asUInt, LoadPipelineWidth, canEnqueueVec.asUInt)
   val lqFull = (LoadQueueReplaySize.U - PopCount(allocated)) <= EnqueueThreshold.U
 
@@ -388,6 +370,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // fill replay flags
       flags(enqIdx).rarAllocated := enq.bits.rarAllocated
       flags(enqIdx).rawAllocated := enq.bits.rawAllocated
+
+      // reset block counter
+      blockCounter(enqIdx) := 0.U // start count
     }
   }
 

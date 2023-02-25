@@ -44,7 +44,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
     val ldIssuePtr = Output(new LqPtr)
     val lqFull = Output(Bool())
     val lqEmpty = Output(Bool())
-    val lqDeq = Output(UInt(log2Up(LoadPipelineWidth + 1).W))
+    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueFlagSize+1).W))   
   })
 
@@ -145,11 +145,11 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   enqPtrExt := enqPtrExtNext
 
   // update dequeue ptr
-  val DeqPtrMoveStride = LoadPipelineWidth
-  require(DeqPtrMoveStride >= 2, "DeqPtrMoveStride must be greater or equal to 2!")
+  val DeqPtrMoveStride = CommitWidth
+  require(DeqPtrMoveStride == CommitWidth, "DeqPtrMoveStride must be equal to CommitWidth!")
   val deqLookupVec = VecInit((0 until DeqPtrMoveStride).map(deqPtrExt + _.U))
   val deqLookup = VecInit(deqLookupVec.map(ptr => allocated(ptr.value) && datavalid(ptr.value) && addrvalid(ptr.value)  && writebacked(ptr.value) && ptr =/= enqPtrExt(0)))
-  val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => io.redirect.valid && needCancel(ptr.value)))
+  val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W)) 
   deqCountMask := deqLookup.asUInt & ~deqInSameRedirectCycle.asUInt
@@ -159,9 +159,10 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   // update deqPtrExt
   // cycle 1: generate deqPtrExtNext
   // cycle 2: update deqPtrExt
-  val deqPtrUpdateEna = lastCommitCount =/= 0.U
+  val deqPtrUpdateEna = lastCommitCount =/= 0.U 
   deqPtrExtNext := deqPtrExt + lastCommitCount
   deqPtrExt := RegEnable(next = deqPtrExtNext, init = 0.U.asTypeOf(new LqPtr), enable = deqPtrUpdateEna)
+
   io.lqDeq := RegNext(lastCommitCount)
   io.lqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
 
@@ -202,7 +203,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
     *
     * When load commited, mark it as !allocated and move deqPtrExt forward.
     */
-  (0 until CommitWidth).map(i => {
+  (0 until DeqPtrMoveStride).map(i => {
     when (commitCount > i.U) {
       allocated((deqPtrExt+i.U).value) := false.B
       XSError(!allocated((deqPtrExt+i.U).value), s"why commit invalid entry $i?\n")
@@ -320,6 +321,11 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
         )
       }
     }
+
+
+    // to ROB, indicate that it's mmio instruction.
+    io.rob.isMMIO(i) := RegNext(io.loadIn(i).valid && io.loadIn(i).bits.mmio)
+    io.rob.uop(i) := RegNext(io.loadIn(i).bits.uop)
   }
 
   // Read vaddr for mem exception

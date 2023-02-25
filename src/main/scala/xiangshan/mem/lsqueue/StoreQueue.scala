@@ -152,6 +152,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val commitCount = RegNext(io.rob.scommit)
 
+  // store can be committed by ROB
+  io.rob.isMMIO := DontCare
+  io.rob.uop := DontCare
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)

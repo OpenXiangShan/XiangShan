@@ -124,7 +124,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val exceptionAddr = new ExceptionAddrIO
     val lqFlagFull = Output(Bool())
-    val lqDeq = Output(UInt(log2Up(LoadPipelineWidth + 1).W))
+    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueFlagSize+1).W))
     val lqReplayFull = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W))) 

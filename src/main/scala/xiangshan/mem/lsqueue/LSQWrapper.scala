@@ -103,9 +103,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val lqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize+1).W))
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueFlagSize+1).W))
-    val exceptionAddr = new ExceptionAddrIO
-    val lqDeq = Output(UInt(log2Up(LoadPipelineWidth + 1).W))
+    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val exceptionAddr = new ExceptionAddrIO
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
@@ -252,7 +252,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     // to dispatch
     val enq = new LsqEnqIO
     // from `memBlock.io.lqDeq
-    val lcommit = Input(UInt(log2Up(LoadPipelineWidth + 1).W))
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     // from `memBlock.io.sqDeq`
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     // from/tp lsq
