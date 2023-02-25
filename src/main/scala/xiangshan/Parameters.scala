@@ -133,7 +133,7 @@ case class XSCoreParameters
   LoadQueueRARSize: Int = 48,
   LoadQueueRAWSize: Int = 32, // LoadQueueRAWSize must be power of 2
   LoadQueueReplaySize: Int = 50, // LoadQueueReplaySize > LoadQueueFlagSize - Load_RS size
-  LoadQueueNWriteBanks: Int = 8,
+  LoadQueueNWriteBanks: Int = 2,
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8,
   VlsQueueSize: Int = 8,

@@ -237,26 +237,29 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val replaySelMask = Wire(UInt(LoadQueueReplaySize.W))
   // stage 0 generate select mask
   // if replay queue has oldest inst, replay first
+  val deqOrCancelMask = replaySelMask | replayCancelMask.asUInt
+  val oldestDeqMask = oldestMaskUInt & ~deqOrCancelMask
+  val loadReplaySelMask = loadReplaySelVec.asUInt & ~deqOrCancelMask
   // make chisel happy
   val loadReplayDeqMask = Wire(UInt(LoadQueueReplaySize.W))
-  loadReplayDeqMask := Mux(oldestMaskUInt.orR, oldestMaskUInt, loadReplaySelVec.asUInt) & ~(replaySelMask | replayCancelMask.asUInt)
+  loadReplayDeqMask := Mux(oldestDeqMask.orR, oldestDeqMask, loadReplayDeqMask)
   val s0_deqMask = loadReplayDeqMask
 
   // stage 1 generate select index
   // make chisel happy
   val s1_selectMask = Wire(UInt(LoadQueueReplaySize.W)) 
-  s1_selectMask := RegNext(s0_deqMask) & ~(replaySelMask | replayCancelMask.asUInt)
+  s1_selectMask := RegNext(s0_deqMask) & ~deqOrCancelMask
   val s1_selectIndexOH = SelectFirstN(s1_selectMask, LoadPipelineWidth, Fill(LoadPipelineWidth, true.B))
   val s1_selectIndex = s1_selectIndexOH.map(OHToUInt(_))
+
+  (0 until LoadPipelineWidth).map(w => {
+    vaddrModule.io.raddr(w) := s1_selectIndex(w)
+  })  
 
   // stage 2 replay now
   val s2_selectIndexV = s1_selectIndexOH.map(idx => RegNext(idx =/= 0.U))
   val s2_selectIndex = s1_selectIndex.map(idx => RegNext(idx))
   replaySelMask := s1_selectIndexOH.zipWithIndex.map(x => Fill(LoadQueueReplaySize, io.replay(x._2).fire) & RegNext(x._1)).reduce(_|_)
-
-  (0 until LoadPipelineWidth).map(w => {
-    vaddrModule.io.raddr(w) := s1_selectIndex(w)
-  })  
 
   val hasBankConflictVec = VecInit(s2_selectIndexV.zip(s2_selectIndex).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
   val hasBankConflict = hasBankConflictVec.asUInt.orR
@@ -281,7 +284,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.rawAllocated := flags(replayIdx).rawAllocated
 
     when (io.replay(i).fire) {
-      // replayRemFire(i) := true.B
       allocated(replayIdx) := false.B
 
       XSError(!allocated(replayIdx), s"why replay invalid entry ${replayIdx} ?\n")
