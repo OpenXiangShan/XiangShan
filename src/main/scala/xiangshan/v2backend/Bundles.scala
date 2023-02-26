@@ -9,6 +9,7 @@ import xiangshan._
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.frontend._
 import xiangshan.v2backend.issue.IssueQueueJumpBundle
+import xiangshan.mem.{LqPtr, SqPtr}
 
 object Bundles {
   // vector inst need vs1, vs2, v0, vd, vl&vtype, 5 psrcs
@@ -70,6 +71,8 @@ object Bundles {
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
+    val lqIdx           = new LqPtr
+    val sqIdx           = new SqPtr
     val eliminatedMove  = Bool()
     val debugInfo       = new PerfDebugInfo
     val storeSetHit     = Bool() // inst has been allocated an store set

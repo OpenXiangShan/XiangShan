@@ -13,14 +13,35 @@ object Dispatch2IqMain extends App {
     val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val config: Parameters = new BaseConfig(1)
 
-    implicit val schdBlockParams : SchdBlockParams = SchdBlockParams.dummyIntParams()
-    val d2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(schdBlockParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
+    implicit val intSchdBlockParams : SchdBlockParams = SchdBlockParams.dummyIntParams()
+    implicit val vfSchdBlockParams : SchdBlockParams = SchdBlockParams.dummyVFParams()
+    implicit val memSchdBlockParams : SchdBlockParams = SchdBlockParams.dummyMemParams()
+    val intD2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(intSchdBlockParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
 
     Generator.execute(
       firrtlOpts,
-      d2iq.module,
+      intD2iq.module,
       firrtlComplier
     )
+
+    // implicit val memSchdBlockParams : SchdBlockParams = SchdBlockParams.dummyMemParams()
+    // val memD2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(memSchdBlockParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
+
+    // Generator.execute(
+    //   firrtlOpts,
+    //   MemD2iq.module,
+    //   firrtlComplier
+    // )
+
+
+    // implicit val vfSchdBlockParams : SchdBlockParams = SchdBlockParams.dummyVFParams()
+    // val vfD2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(vfSchdBlockParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
+
+    // Generator.execute(
+    //   firrtlOpts,
+    //   vfD2iq.module,
+    //   firrtlComplier
+    // )
   }
 
 }

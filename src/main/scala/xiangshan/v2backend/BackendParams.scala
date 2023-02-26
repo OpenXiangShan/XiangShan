@@ -31,17 +31,95 @@ object SchdBlockParams {
     val pregBits = log2Up(numPregs)
     val rfDataWidth = 64
     var params = SchdBlockParams(Seq(
+//      IssueBlockParams(Seq(
+//        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
+//        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
+//      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+//      IssueBlockParams(Seq(
+//        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg)),
+//        ExeUnitParams(Seq(AluCfg, DivCfg)),
+//      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
         ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg)),
-      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
         ExeUnitParams(Seq(AluCfg, DivCfg)),
-      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
         ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg))
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+    ),
+      numPregs = numPregs,
+      numRfReadWrite = Some((numRfRead, numRfWrite)),
+      numDeqOutside = numDeqOutside,
+      schdType = schdType,
+      rfDataWidth = rfDataWidth,
+      numUopIn = numUopIn
+    )
+    params
+  }
+
+  def dummyMemParams(numDeqOutside: Int = 0): SchdBlockParams = {
+    implicit val schdType = MemScheduler()
+    val numUopIn = 6
+    val numRfRead = 6
+    val numRfWrite = 2
+    val numPregs = 160
+    val pregBits = log2Up(numPregs)
+    val rfDataWidth = 64
+    var params = SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(LduCfg)),
+        ExeUnitParams(Seq(LduCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StaCfg, MouCfg)),
+        ExeUnitParams(Seq(StaCfg, MouCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StdCfg, MoudCfg)),
+        ExeUnitParams(Seq(StdCfg, MoudCfg))
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+    ),
+      numPregs = numPregs,
+      numRfReadWrite = Some((numRfRead, numRfWrite)),
+      numDeqOutside = numDeqOutside,
+      schdType = schdType,
+      rfDataWidth = rfDataWidth,
+      numUopIn = numUopIn
+    )
+    params
+  }
+
+  def dummyVFParams(numDeqOutside: Int = 0): SchdBlockParams = {
+    implicit val schdType = VfScheduler()
+    val numUopIn = 6
+    val numRfRead = 14
+    val numRfWrite = 2
+    val numPregs = 160
+    val pregBits = log2Up(numPregs)
+    val rfDataWidth = 64
+    var params = SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(FmacCfg)),
+        ExeUnitParams(Seq(FmacCfg)),
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(FmacCfg)),
+        ExeUnitParams(Seq(FmacCfg))
+      ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(F2iCfg, F2fCfg, FDivSqrtCfg)),
+        ExeUnitParams(Seq(F2iCfg, F2fCfg, FDivSqrtCfg)),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
