@@ -48,7 +48,8 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
     adder(i).io.in_1 := src2(AdderWidth*(i+1)-1, AdderWidth*i)
     adder(i).io.int_format := vtype.vsew // TODO
     adder(i).io.op_code := ctrl.fuOpType
-    adder(i).io.carry_or_borrow_in := DontCare
+    adder(i).io.carry_or_borrow_in := DontCare // TODO
+    adder(i).io.uop_index := DontCare // TODO
   }
   val adder_result = VecInit(adder.map(_.io.out)).asUInt
 
