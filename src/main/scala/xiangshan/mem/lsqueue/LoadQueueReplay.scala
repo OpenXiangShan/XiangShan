@@ -266,14 +266,14 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val hasBankConflictVec = VecInit(s2_selectIndexV.zip(s2_selectIndex).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
   val hasBankConflict = hasBankConflictVec.asUInt.orR
   val allBankConflict = hasBankConflictVec.asUInt.andR
-  val coldCounter = RegInit(0.U(4.W))
+  val coldCounter = RegInit(0.U(3.W))
   for (i <- 0 until LoadPipelineWidth) {
     val replayIdx = s2_selectIndex(i)
     val cancelReplay = replayCancelMask(replayIdx)
     // In order to avoid deadlock, replay one inst which blocked by bank conflict
     val bankConflictReplay = Mux(hasBankConflict && !allBankConflict, cause(replayIdx)(LoadReplayCauses.bankConflict), true.B)
 
-    io.replay(i).valid := s2_selectIndexV(i) && !cancelReplay && bankConflictReplay && coldCounter >= 0.U && coldCounter < 8.U
+    io.replay(i).valid := s2_selectIndexV(i) && !cancelReplay && bankConflictReplay && coldCounter >= 0.U && coldCounter < 4.U
     io.replay(i).bits := DontCare
     io.replay(i).bits.uop := uop(replayIdx)
     io.replay(i).bits.vaddr := vaddrModule.io.rdata(i)
@@ -296,7 +296,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val lastReplay = RegNext(io.replay.map(_.fire).reduce(_|_))
   when (lastReplay && io.replay.map(_.fire).reduce(_|_)) {
     coldCounter := coldCounter + 1.U
-  } .elsewhen (coldCounter >= 8.U) {
+  } .elsewhen (coldCounter >= 4.U) {
     coldCounter := coldCounter + 1.U
   } .otherwise {
     coldCounter := 0.U

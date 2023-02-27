@@ -142,6 +142,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     query.bits.canAccept := RegNext(Mux(needEnqueue(w), canEnqVec(w), true.B))
     query.bits.allocated := RegNext(canEnqVec(w))
     query.bits.replayFromFetch := RegNext(false.B)
+    query.bits.index := RegNext(OHToUInt(enqIdxOH(w)))
   }
 
 

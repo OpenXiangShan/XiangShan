@@ -447,12 +447,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
     // check if vaddr forward mismatched
     io.forward(i).matchInvalid := vaddrMatchFailed
+
     // data invalid sq index
     // check whether false fail
     // check flag
     val s2_differentFlag = RegNext(differentFlag)
     val s2_enqPtrExt = RegNext(enqPtrExt(0))
     val s2_deqPtrExt = RegNext(deqPtrExt(0))
+
     // data invalid sq index
     // make chisel happy
     val dataInvalidMaskRegWire = Wire(UInt(StoreQueueSize.W))
