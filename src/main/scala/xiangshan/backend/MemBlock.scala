@@ -108,8 +108,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(2.W))
     // add nohype control about mem_offset
-    val memOffset = Input(UInt(64.W))
-    val memMask = Input(UInt(64.W))
+    val memOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
+    val ioOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -213,8 +213,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb.zip(sfence_dup.take(2)).foreach{ case (d,s) => d.sfence := s }
   dtlb.zip(tlbcsr_dup.take(2)).foreach{ case (d,c) => d.csr := c }
   // add nohype control about mem_offset to dtlb
-  dtlb.foreach(_.memOffset := io.memOffset)
-  dtlb.foreach(_.memMask := io.memMask)
+  if (coreParams.LvnaEnable) {
+    dtlb.foreach(_.memOffset := io.memOffset.get)
+    dtlb.foreach(_.ioOffset := io.ioOffset.get)
+  }
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)

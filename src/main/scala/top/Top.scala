@@ -83,6 +83,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
+    if (LvnaEnable && i > 0) {
+      core_with_l2(i).clint_int_sink := misc.alter_clints.get(i-1).intnode
+    }
     core_with_l2(i).plic_int_sink :*= misc.plic.intnode
     core_with_l2(i).debug_int_sink := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
@@ -168,9 +171,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
       io.riscv_halt(i) := core.module.io.cpu_halt
-      // provide io for nohype control from control plane to xscore
-      core.module.io.memOffset := misc.module.memBases(i)
-      core.module.io.memMask := misc.module.memMasks(i)
+    }
+    if (LvnaEnable) {
+      for ((core, i) <- core_with_l2.zipWithIndex) {
+        core.module.lvnaIO.get.memOffset := misc.module.cp2coresIO.get.memOffsets(i)
+        core.module.lvnaIO.get.ioOffset := misc.module.cp2coresIO.get.ioOffsets(i)
+      }
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){

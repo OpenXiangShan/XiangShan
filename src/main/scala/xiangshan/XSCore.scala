@@ -134,7 +134,9 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
-  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val clint_int_sink = 
+    if (coreParams.LvnaEnable && coreParams.HartId != 0) IntSinkNode(IntSinkPortSimple(2, 2))
+    else IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
@@ -235,7 +237,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
-  with HasXSDts
+  // with HasXSDts
 {
   lazy val module = new XSCoreImp(this)
 }
@@ -249,12 +251,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
-    // add nohype control to frontend and memBlock from control plane
-    val memOffset = Input(UInt(64.W))
-    val memMask = Input(UInt(64.W))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+
+  val lvnaIO = if (LvnaEnable) Some(IO(new Bundle {
+      val memOffset = Flipped(ValidIO(UInt(64.W)))
+      val ioOffset = Flipped(ValidIO(UInt(64.W)))
+  }))
+  else
+    None
 
   val frontend = outer.frontend.module
   val ctrlBlock = outer.ctrlBlock.module
@@ -270,10 +276,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
   // add nohype control to frontend and memBlock from control plane
-  frontend.io.memOffset  := io.memOffset
-  frontend.io.memMask  := io.memMask
-  memBlock.io.memOffset  := io.memOffset
-  memBlock.io.memMask  := io.memMask
+  if (LvnaEnable) {
+    val memOffreg = RegEnable(lvnaIO.get.memOffset.bits, 0.U(64.W), lvnaIO.get.memOffset.fire)
+    val ioOffreg = RegEnable(lvnaIO.get.ioOffset.bits, 0.U(64.W), lvnaIO.get.ioOffset.fire)
+    frontend.io.memOffset.get := memOffreg
+    frontend.io.ioOffset.get  := ioOffreg
+    memBlock.io.memOffset.get  := memOffreg
+    memBlock.io.ioOffset.get  := ioOffreg
+    ptw.io.memOffset := memOffreg
+    ptw.io.ioOffset := ioOffreg
+  }
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
@@ -400,8 +412,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
-  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  if (coreParams.LvnaEnable && coreParams.HartId != 0){
+    csrioIn.externalInterrupt.msip := 
+      outer.clint_int_sink.in.head._1(0) || outer.clint_int_sink.in.last._1(0)
+    csrioIn.externalInterrupt.mtip :=
+      outer.clint_int_sink.in.head._1(1) || outer.clint_int_sink.in.last._1(1)
+  }
+  else {
+    csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+    csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  }
   csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
   csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)

@@ -22,6 +22,7 @@ import device._
 import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import difftest._
+import system.SoCParamsKey
 
 class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
 
@@ -29,6 +30,9 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
+  val socParams = p(SoCParamsKey)
+  val uart1 = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L + socParams.NohypeDevOffset, 0xf))))
+
   // val vga = LazyModule(new AXI4VGA(
   //   sim = false,
   //   fbAddress = Seq(AddressSet(0x50000000L, 0x3fffffL)),
@@ -40,6 +44,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   val axiBus = AXI4Xbar()
 
   uart.node := axiBus
+  uart1.node := axiBus
   // vga.node :*= axiBus
   flash.node := axiBus
   sd.node := axiBus
@@ -54,9 +59,11 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle() {
       val uart = new UARTIO
+      val uart1 = new UARTIO
       val interrupt = new IntrGenIO
     })
     io.uart <> uart.module.io.extra.get
+    io.uart1 <> uart1.module.io.extra.get
     io.interrupt <> intrGen.module.io.extra.get
   }
 

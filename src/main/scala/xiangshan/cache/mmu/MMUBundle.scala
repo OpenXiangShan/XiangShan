@@ -452,9 +452,9 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
-  // add nohype control about mem_offset, mem_mask
-  val memOffset = Input(UInt(64.W))
-  val memMask = Input(UInt(64.W))
+  // add nohype control
+  val memOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
+  val ioOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
 }
 
 class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
@@ -739,6 +739,9 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
     val distribute_csr = Flipped(new DistributedCSRIO)
     val prefercache = Input(Bool())
   }
+  // add nohype control
+  val memOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
+  val ioOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

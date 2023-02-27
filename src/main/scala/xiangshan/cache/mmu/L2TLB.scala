@@ -29,6 +29,7 @@ import freechips.rocketchip.tilelink._
 import huancun.{PreferCacheKey, PreferCacheField}
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
+import device.lvna.NohypeMapper
 
 class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -237,7 +238,16 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val memRead =  edge.Get(
     fromSource = mem_arb.io.out.bits.id,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = blockBytes_align(mem_arb.io.out.bits.addr),
+    toAddress  = if (coreParams.LvnaEnable) {
+      val ptw_mapper = Module(new NohypeMapper(PAddrBits))
+      ptw_mapper.io.memOffset := io.memOffset
+      ptw_mapper.io.ioOffset := io.ioOffset
+      ptw_mapper.io.inAddr := mem_arb.io.out.bits.addr
+      blockBytes_align(ptw_mapper.io.outAddr)
+    }
+    else {
+      blockBytes_align(mem_arb.io.out.bits.addr)
+    },
     lgSize     = log2Up(l2tlbParams.blockBytes).U
   )._2
   mem.a.bits := memRead

@@ -58,8 +58,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
       }
     }
     // add nohype control about mem_offset
-    val memOffset = Input(UInt(64.W))
-    val memMask = Input(UInt(64.W))
+    val memOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
+    val ioOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
   })
 
   //decouped-frontend modules
@@ -126,7 +126,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     itlbParams,
     // add nohype control about mem_offset to itlb
     memOffset = io.memOffset,
-    memMask = io.memMask
+    ioOffset = io.ioOffset
   )
 
   icache.io.prefetch <> ftq.io.toPrefetch

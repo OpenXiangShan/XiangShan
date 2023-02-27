@@ -32,6 +32,7 @@ import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
+import xiangshan.mem.prefetch.SMSParams
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -186,6 +187,13 @@ class MinimalConfig(n: Int = 1) extends Config(
   })
 )
 
+class PerfetchMinimalConfig(n: Int) extends Config((site, here, up) => {
+  case XSTileKey =>
+    up(XSTileKey).map(_.copy(
+      prefetcher = Some(SMSParams())  
+    ))
+})
+
 // Non-synthesizable MinimalConfig, for fast simulation only
 class MinimalSimConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
@@ -321,9 +329,48 @@ class DefaultConfig(n: Int = 1) extends Config(
 // * L1 cache included
 // * L2 cache NOT included, very small
 // * L3 cache NOT included
+class WithNohypeOffsetDevices extends Config((site, here, up) => {
+  case XSTileKey =>
+    val upParams = up(XSTileKey)
+    upParams.map(p => p.copy(
+      
+    ))
+  case SoCParamsKey =>
+    val socParams = up(SoCParamsKey)
+    val upL3Params = Some(
+      socParams.L3CacheParamsOpt.get.copy(
+        ctrl = None
+    ))
+    socParams.copy(
+      NohypeDevOffset = 0x3000000,
+      L3CacheParamsOpt = upL3Params
+    )
+})
+
+class WithLvNA extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    up(SoCParamsKey).copy(
+      LvnaEnable = true,
+    )
+  case XSTileKey =>
+    val upParams = up(XSTileKey)
+    upParams.map(p => p.copy(
+      LvnaEnable = true,
+    ))
+})
 class LabeledConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
     ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
     ++ new WithNKBL1D(64)
     ++ new BaseConfig(n)
+)
+class NohypeSimConfig(n: Int = 1) extends Config(
+  new WithNohypeOffsetDevices
+    ++ new WithLvNA
+    ++ new WithNKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(64)
+    ++ new PerfetchMinimalConfig(n)
+    ++ new MinimalConfig(n)
+    // ++ new BaseConfig(n)
 )

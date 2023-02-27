@@ -236,6 +236,9 @@ case class XSCoreParameters
     prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
+  //lvna paramters
+  LvnaEnable: Boolean = false,
+  
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only
 ){

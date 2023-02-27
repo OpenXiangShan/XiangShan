@@ -2,7 +2,7 @@ package xiangshan
 
 import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, DecoupledIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
@@ -134,10 +134,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
-      l2.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L2!")
-        recv := core.memBlock.pf_sender_opt.get
-      })
+      if (l2.pf_recv_node.isDefined && core.memBlock.pf_sender_opt.isDefined){
+        l2.pf_recv_node.map(recv => {
+          println("Connecting L1 prefetcher to L2!")
+          recv := core.memBlock.pf_sender_opt.get
+        })
+      }
     case None =>
   }
 
@@ -148,10 +150,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val cpu_halt = Output(Bool())
-      // add nohype control to frontend and memBlock from control plane
-      val memOffset = Input(UInt(64.W))
-      val memMask = Input(UInt(64.W))
     })
+
+    val lvnaIO = if (LvnaEnable) Some(IO(new Bundle {
+      val memOffset = Flipped(ValidIO(UInt(64.W)))
+      val ioOffset = Flipped(ValidIO(UInt(64.W)))
+    }))
+    else
+      None
 
     dontTouch(io.hartId)
 
@@ -160,8 +166,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.hartId := io.hartId
     io.cpu_halt := core.module.io.cpu_halt
     // nohype control
-    core.module.io.memOffset := io.memOffset
-    core.module.io.memMask := io.memMask
+    if (LvnaEnable) {
+      core.module.lvnaIO.get.memOffset := lvnaIO.get.memOffset
+      core.module.lvnaIO.get.ioOffset := lvnaIO.get.ioOffset
+    }
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }
