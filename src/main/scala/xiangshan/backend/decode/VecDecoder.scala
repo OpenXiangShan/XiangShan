@@ -164,7 +164,7 @@ object VecDecoder extends DecodeConstants {
   val opivx: Array[(BitPat, XSDecodeBase)] = Array(
     VADD_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.add, T, F, F),
     VSUB_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.sub, T, F, F),
-    VRSUB_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
+    VRSUB_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.rsub, T, F, F),
 
     VMINU_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
     VMIN_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
@@ -220,7 +220,7 @@ object VecDecoder extends DecodeConstants {
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
     VADD_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.add,   T, F, F, SelImm.IMM_OPIVIS),
-    VRSUB_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
+    VRSUB_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.rsub, T, F, F, SelImm.IMM_OPIVIS),
 
     VAND_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
     VOR_VI        -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
