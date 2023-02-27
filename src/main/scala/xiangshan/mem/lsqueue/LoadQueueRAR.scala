@@ -139,7 +139,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     dontTouch(ldLdViolationMask)
     ldLdViolationMask.suggestName("ldLdViolationMask_"+w)
     query.resp.bits.replayFromFetch := ldLdViolationMask.orR || RegNext(ldLdViolation(w))
-    query.resp.bits.index := RegNext(OHToUInt(enqIdxOH(w)))
+    query.resp.bits.index := RegNext(Mux(io.query(w).req.bits.allocated, io.query(w).req.bits.index, OHToUInt(enqIdxOH(w))))
   }
 
   (0 until LoadPipelineWidth).map(w => {
