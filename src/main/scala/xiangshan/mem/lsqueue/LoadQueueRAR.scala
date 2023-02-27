@@ -39,15 +39,18 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   })
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
   //  LoadQueueRAR field
-  //  +-------+-------+-------+----------+
-  //  | Valid |  Uop  | PAddr | Released |
-  //  +-------+-------+-------+----------+
+  //  +-------+-------+-------+----------+-----------+---------+
+  //  | Valid |  Uop  | PAddr | Released | Datavalid |  Miss   |
+  //  +-------+-------+-------+----------+-----------+---------+
   //  
   //  Field descriptions:
   //  Allocated   : entry is valid.
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released. 
+  //  Datavalid   : data valid
+  //  Miss        : DCache miss
+  //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new MicroOp))
   val paddrModule = Module(new LqPAddrModule(
@@ -60,6 +63,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  val datavalid = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  val miss = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
 
   //  LoadQueueRAR enqueue
   val freeNums = LoadQueueRARSize.U - PopCount(allocated)
@@ -102,7 +107,15 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) || 
         release1Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)        
+      datavalid(enqIdx) := enq.bits.datavalid
+      miss(enqIdx) := enq.bits.miss
     }
+
+    when (enq.valid && enq.bits.allocated && enq.bits.uop.robIdx === uop(enq.bits.index).robIdx) {
+      datavalid(enq.bits.index) := enq.bits.datavalid
+      miss(enq.bits.index) := enq.bits.miss
+    }
+    // TODO: RAW violation needs update datavalid and miss
   }
 
   //  LoadQueueRAR Query
@@ -122,7 +135,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
                     RegNext(paddrModule.io.violationMmask(w).asUInt) &
                       RegNext(robIdxMask.asUInt)    
     //  Released
-    val ldLdViolationMask = WireInit(RegNext(released.asUInt) & matchMask)
+    val ldLdViolationMask = WireInit(matchMask & RegNext(released.asUInt & (datavalid.asUInt | miss.asUInt)))
     dontTouch(ldLdViolationMask)
     ldLdViolationMask.suggestName("ldLdViolationMask_"+w)
     query.resp.bits.replayFromFetch := ldLdViolationMask.orR || RegNext(ldLdViolation(w))

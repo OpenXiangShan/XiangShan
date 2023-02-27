@@ -597,17 +597,28 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.correctTableUpdate.bits.violation := s2_schedError
 
   // ld-ld violation require
-  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception
+  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
   io.loadLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.loadLoadViolationQueryReq.bits.mask := s2_mask
   io.loadLoadViolationQueryReq.bits.paddr := s2_paddr
+  if (EnableFastForward) {
+    io.loadLoadViolationQueryReq.bits.datavalid := !io.out.bits.miss && !io.s2_dcache_require_replay
+    io.loadLoadViolationQueryReq.bits.miss := io.out.bits.miss && !io.s2_dcache_require_replay && !io.dataForwarded
+  } else {
+    io.loadLoadViolationQueryReq.bits.datavalid := !io.out.bits.miss 
+    io.loadLoadViolationQueryReq.bits.miss := io.out.bits.miss && !io.dataForwarded
+  }
+  io.loadLoadViolationQueryReq.bits.index := io.in.bits.rarIndex
   io.loadLoadViolationQueryReq.bits.allocated := io.in.bits.rarAllocated
 
   // st-ld violation require
-  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception
+  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
   io.storeLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.storeLoadViolationQueryReq.bits.mask := s2_mask
   io.storeLoadViolationQueryReq.bits.paddr := s2_paddr
+  io.storeLoadViolationQueryReq.bits.datavalid := io.loadLoadViolationQueryReq.bits.datavalid
+  io.storeLoadViolationQueryReq.bits.miss := io.loadLoadViolationQueryReq.bits.miss
+  io.storeLoadViolationQueryReq.bits.index := io.in.bits.rawIndex
   io.storeLoadViolationQueryReq.bits.allocated := io.in.bits.rawAllocated
 
   // merge forward result
@@ -970,7 +981,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.sbuffer.schedWait := DontCare // useless 
   load_s2.io.dataInvalidSqIdx <> io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
   load_s2.io.addrInvalidSqIdx <> io.lsq.forward.addrInvalidSqIdx // provide addrInvalidSqIdx to make wakeup faster
-  load_s2.io.dataInvalidSqIdx := io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
   load_s2.io.csrCtrl <> io.csrCtrl
   load_s2.io.reExecuteQuery := io.reExecuteQuery
   load_s2.io.correctTableQueryResp <> io.correctTableQuery.resp
@@ -998,6 +1008,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // val forward_D_or_mshr_valid = forward_result_valid && (forward_D || forward_mshr)
   // val s2_dcache_hit = io.dcache.s2_hit || forward_D_or_mshr_valid // dcache hit dup in lsu side
 
+  // never fast wakeup
   io.fastUop.valid := false.B  
   io.fastUop.bits := RegNext(load_s1.io.out.bits.uop)
 
@@ -1057,7 +1068,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val rarAllocated = !s3_loadOutBits.rarAllocated && io.lsq.loadLoadViolationQuery.resp.bits.allocated
   val rawAllocated = !s3_loadOutBits.rawAllocated && io.lsq.storeLoadViolationQuery.resp.bits.allocated
   io.lsq.loadIn.bits.rarAllocated := s3_loadOutBits.rarAllocated || rarAllocated
+  io.lsq.loadIn.bits.rarIndex := io.lsq.loadLoadViolationQuery.resp.bits.index
   io.lsq.loadIn.bits.rawAllocated := s3_loadOutBits.rawAllocated || rawAllocated
+  io.lsq.loadIn.bits.rawIndex := io.lsq.storeLoadViolationQuery.resp.bits.index
 
   val s3_forwardFail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid)
   val s3_ldld_replayFromFetch = 

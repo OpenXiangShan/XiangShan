@@ -88,7 +88,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For rar/raw check
   val rarAllocated = Bool()
+  val rarIndex = UInt(log2Up(LoadQueueRARSize).W)
   val rawAllocated = Bool()
+  val rawIndex = UInt(log2Up(LoadQueueRAWSize).W)
   val canAccept = Bool()
 }
 
@@ -116,7 +118,9 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     dcacheRequireReplay := input.dcacheRequireReplay
     canAccept := input.canAccept
     rarAllocated := input.rarAllocated
+    rarIndex := input.rarIndex
     rawAllocated := input.rawAllocated
+    rawIndex := input.rawIndex
 
     meta_prefetch := DontCare
     meta_access := DontCare
@@ -161,7 +165,9 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     dcacheRequireReplay := input.dcacheRequireReplay
     canAccept := input.canAccept
     rarAllocated := input.rarAllocated
+    rarIndex := input.rarIndex
     rawAllocated := input.rawAllocated
+    rawIndex := input.rawIndex
 
     replayInfo := DontCare
     lqDataWenDup := DontCare
@@ -222,12 +228,16 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // If it happens, a replay from rs is needed.
 
 class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+  val index = UInt()
   val allocated = Bool()
+  val datavalid = Bool()
+  val miss = Bool()
   val mask = UInt(8.W)
   val paddr = UInt(PAddrBits.W)
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
+  val index = UInt()
   val canAccept = Bool()
   val allocated = Bool()
   val replayFromFetch = Bool()

@@ -46,15 +46,16 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   println("LoadQueueRAWSize: size " + LoadQueueRAWSize)
   //  LoadQueueRAW field
-  //  +-------+--------+-------+-------+
-  //  | Valid |  uop   |PAddr  | mask  |
-  //  +-------+--------+-------+-------+
+  //  +-------+--------+-------+-------+-----------+
+  //  | Valid |  uop   |PAddr  | Mask  | Datavalid |
+  //  +-------+--------+-------+-------+-----------+
   //
   //  Field descriptions:
   //  Allocated   : entry has been allocated already
   //  MicroOp     : inst's microOp
   //  PAddr       : physical address.
   //  Mask        : data mask
+  //  Datavalid   : data valid
   //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRAWSize, new MicroOp))
@@ -76,6 +77,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
+  val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
   //  LoadQueueRAW enqueue
   val freeNums = LoadQueueRAWSize.U - PopCount(allocated)
@@ -116,6 +118,22 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info 
       uop(enqIdx) := enq.bits.uop
+      datavalid(enqIdx) := false.B
+    }
+
+    // update datavalid
+    val lastEnqValid = RegNext(enq.valid && enq.bits.allocated && uop(enq.bits.index).robIdx === enq.bits.uop.robIdx|| canEnqVec(w))
+    val lastEnqBits = RegNext(enq.bits)
+    val lastEnqIndex = Wire(UInt(log2Up(LoadQueueRAWSize).W))
+    lastEnqIndex := Mux(lastEnqBits.allocated, lastEnqBits.index, RegNext(OHToUInt(enqIdxOH(w))))
+    val schedError = VecInit((0 until StorePipelineWidth).map(i => 
+      io.storeIn(i).valid &&
+      isAfter(lastEnqBits.uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
+      (lastEnqBits.paddr(PAddrBits-1,3) === io.storeIn(i).bits.paddr(PAddrBits-1, 3)) &&
+      (lastEnqBits.mask & io.storeIn(i).bits.mask).orR)).asUInt.orR
+    
+    when (lastEnqValid) {
+      datavalid(lastEnqIndex) := lastEnqBits.datavalid && !lastEnqBits.miss && !schedError
     }
   }
 
@@ -125,6 +143,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     query.bits.allocated := RegNext(canEnqVec(w))
     query.bits.replayFromFetch := RegNext(false.B)
   }
+
 
   //  LoadQueueRAW deallocate
   for (i <- 0 until LoadQueueRAWSize) {
@@ -200,7 +219,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt)
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx)
+      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j)
     })))
     val lqViolationVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)

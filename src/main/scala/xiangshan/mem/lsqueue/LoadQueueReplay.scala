@@ -110,8 +110,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   class QueueAllocateFlags extends Bundle {
     // rar queue has been allocated already
     val rarAllocated = Bool()
+    val rarIndex = UInt(log2Up(LoadQueueRARSize).W)
     // raw queue has been allocated already
     val rawAllocated = Bool()
+    val rawIndex = UInt(log2Up(LoadQueueRAWSize).W)
   }
   val flags = Reg(Vec(LoadQueueReplaySize, new QueueAllocateFlags))
 
@@ -205,6 +207,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
+    when (blockByCacheMiss(i) && creditUpdate(i) === 0.U) { blockByCacheMiss(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
     when (blockByOthers(i) && creditUpdate(i) === 0.U) { blockByOthers(i) := false.B }
 
@@ -216,7 +219,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val deqMask = Mux(oldestMaskUInt.orR, oldestMaskUInt, allocated.asUInt) // replay oldest inst
   val loadReplaySelVec = VecInit((0 until LoadQueueReplaySize).map(i => {
     val blocked = selBlocked(i) || blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByOthers(i)
-    // s1_blockLoadMask(i) || s2_blockLoadMask(i) || 
     allocated(i) && cause(i).orR && !blocked
   })).asUInt // use uint instead vec to reduce verilog lines
   // check oldest inst
@@ -281,7 +283,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.mshrid := missMSHRId(replayIdx)
     io.replay(i).bits.forward_tlDchannel := trueCacheMissReplay(replayIdx)
     io.replay(i).bits.rarAllocated := flags(replayIdx).rarAllocated
+    io.replay(i).bits.rarIndex := flags(replayIdx).rarIndex
     io.replay(i).bits.rawAllocated := flags(replayIdx).rawAllocated
+    io.replay(i).bits.rawIndex := flags(replayIdx).rawIndex
 
     when (io.replay(i).fire) {
       allocated(replayIdx) := false.B
@@ -378,10 +382,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // fill replay flags
       flags(enqIdx).rarAllocated := enq.bits.rarAllocated
+      flags(enqIdx).rarIndex := enq.bits.rarIndex
       flags(enqIdx).rawAllocated := enq.bits.rawAllocated
+      flags(enqIdx).rawIndex := enq.bits.rawIndex
 
       // reset block counter
-      blockCounter(enqIdx) := 0.U // start count
+      blockCounter(enqIdx) := 0.U // reset count
     }
   }
 
