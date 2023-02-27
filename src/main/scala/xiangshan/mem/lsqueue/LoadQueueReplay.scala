@@ -214,23 +214,20 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })  
 
   //  Replay is splitted into 2 stages
-  val pri8Mask = Wire(Vec(LoadQueueReplaySize, Bool()))
-  val pri8MaskUInt = pri8Mask.asUInt
-  val pri4Mask = Wire(Vec(LoadQueueReplaySize, Bool()))
-  val pri4MaskUInt = pri4Mask.asUInt
+  val oldestMask = Wire(Vec(LoadQueueReplaySize, Bool()))
+  val oldestMaskUInt = oldestMask.asUInt
   val loadReplaySelVec = VecInit((0 until LoadQueueReplaySize).map(i => {
     val blocked = selBlocked(i) || blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByOthers(i)
     allocated(i) && !blocked
   })).asUInt // use uint instead vec to reduce verilog lines
   // check oldest inst
   (0 until LoadQueueReplaySize).map(i => {
-    pri8Mask(i) := loadReplaySelVec(i) && blockCounter(i) <= 8.U && blockCounter(i) > 4.U
-    pri4Mask(i) := loadReplaySelVec(i) && blockCounter(i) <= 4.U
+    oldestMask(i) := loadReplaySelVec(i) && blockCounter(i) <= 16.U
   })
 
   // update block counter
   (0 until LoadQueueReplaySize).map(i => {
-    blockCounter(i) := Mux(blockCounter(i) =/= 8.U && loadReplaySelVec(i), blockCounter(i) + 1.U, blockCounter(i))
+    blockCounter(i) := Mux(blockCounter(i) =/= 16.U && loadReplaySelVec(i) && !oldestMaskUInt.orR, blockCounter(i) + 1.U, blockCounter(i))
   })
 
   //
@@ -242,10 +239,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // stage 0 generate select mask
   // if replay queue has oldest inst, replay first
   val deqOrCancelMask = replaySelMask | replayCancelMask.asUInt
-  val oldestDeqMask = Mux(pri8MaskUInt.orR, pri8MaskUInt, pri4MaskUInt) & ~deqOrCancelMask
+  val oldestDeqMask = oldestMaskUInt & ~deqOrCancelMask
+  replaySelMask := loadReplaySelVec.asUInt & ~deqOrCancelMask
   // make chisel happy
   val loadReplayDeqMask = Wire(UInt(LoadQueueReplaySize.W))
-  loadReplayDeqMask := oldestDeqMask
+  loadReplayDeqMask := Mux(oldestMaskUInt.orR, oldestMaskUInt, replaySelMask)
   val s0_deqMask = loadReplayDeqMask
 
   // stage 1 generate select index
@@ -290,10 +288,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     when (io.replay(i).fire) {
       allocated(replayIdx) := false.B
-      XSError(!allocated(replayIdx), s"why replay invalid entry ${replayIdx} ?\n")
+      XSError(!allocated(replayIdx), s"why replay an invalid entry ${replayIdx} ?\n")
     }
   }
 
+  // update cold counter
   val lastReplay = RegNext(io.replay.map(_.fire).reduce(_|_))
   when (lastReplay && io.replay.map(_.fire).reduce(_|_)) {
     coldCounter := coldCounter + 1.U
@@ -317,7 +316,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     when (canEnqueueVec(w)) {
       assert(!allocated(enqIdx), s"Can not accept more load, check robIdx: ${enq.bits.uop.robIdx}!")
-      assert(!hasExceptions(w), s"exception, can not be replay, check robIdx: ${enq.bits.uop.robIdx}!")
+      assert(!hasExceptions(w), s"Exception, can not be replay, check robIdx: ${enq.bits.uop.robIdx}!")
       //  Allocate new entry
       allocated(enqIdx) := true.B
       uop(enqIdx) := enq.bits.uop
@@ -376,7 +375,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         replayCarryReg(enqIdx) := replayInfo.replayCarry
         missMSHRId(enqIdx) := replayInfo.missMSHRId
         blockByCacheMiss(enqIdx) := replayInfo.cause(LoadReplayCauses.dcacheMiss) && !replayInfo.canForwardFullData && //  dcache miss
-                                    !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) // no refill in this cycle
+                                    !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) &&// no refill in this cycle
+                                    creditUpdate(enqIdx) =/= 0.U //  credit is not zero
       } .otherwise {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := Mux(blockPtrOthers(enqIdx) === 3.U(2.W), blockPtrOthers(enqIdx), blockPtrOthers(enqIdx) + 1.U(2.W)) 
