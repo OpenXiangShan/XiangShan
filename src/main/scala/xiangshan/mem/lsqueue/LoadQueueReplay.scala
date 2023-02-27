@@ -240,11 +240,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // if replay queue has oldest inst, replay first
   val deqOrCancelMask = replaySelMask | replayCancelMask.asUInt
   val oldestDeqMask = oldestMaskUInt & ~deqOrCancelMask
-  replaySelMask := loadReplaySelVec.asUInt & ~deqOrCancelMask
   // make chisel happy
   val loadReplayDeqMask = Wire(UInt(LoadQueueReplaySize.W))
-  loadReplayDeqMask := Mux(oldestMaskUInt.orR, oldestMaskUInt, replaySelMask)
-  val s0_deqMask = loadReplayDeqMask
+  loadReplayDeqMask := loadReplaySelVec.asUInt & ~deqOrCancelMask
+  val s0_deqMask = Mux(oldestMaskUInt.orR, oldestMaskUInt, loadReplayDeqMask)
 
   // stage 1 generate select index
   // make chisel happy
