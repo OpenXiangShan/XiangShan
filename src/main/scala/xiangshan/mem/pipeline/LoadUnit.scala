@@ -327,8 +327,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise{
     io.out.bits.uop.debugInfo.tlbFirstReqTime := s0_uop.debugInfo.tlbFirstReqTime
   }
-  io.out.bits.rarAllocated := Mux(s0_isFirstIssue, false.B, io.replay.bits.rarAllocated)
-  io.out.bits.rawAllocated := Mux(s0_isFirstIssue, false.B, io.replay.bits.rawAllocated)
+  io.out.bits.rarAllocated := lfsrc_loadReplay_select && io.replay.bits.rarAllocated
+  io.out.bits.rarIndex := io.replay.bits.rarIndex
+  io.out.bits.rawAllocated := lfsrc_loadReplay_select && io.replay.bits.rawAllocated
+  io.out.bits.rawIndex := io.replay.bits.rawIndex
 
   // load flow source ready
   // always accept load flow from load replay queue
@@ -824,6 +826,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val loadFastMatch = Input(Bool())
     val loadFastImm = Input(UInt(12.W))
 
+    // rs feedback
+    // val feedbackFast = ValidIO(new RSFeedback) // stage 1
+    // val feedbackSlow = ValidIO(new RSFeedback) // stage 3
+
     // load ecc
     val s3_delayedLoadError = Output(Bool()) // load ecc error
     // Note that io.s3_delayed_load_error and io.lsq.s3_delayed_load_error is different
@@ -879,6 +885,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s1.io.csrCtrl <> io.csrCtrl
   load_s1.io.reExecuteQuery := io.reExecuteQuery
   load_s1.io.correctTableQueryReq <> io.correctTableQuery.req
+
+  // LoadQueueRepaly has no enough space.
+  // io.feedbackFast := RegNext(load_s0.io.rsFeedback)
 
   // when S0 has opportunity to try pointerchasing, make sure it truely goes to S1
   // which is S0's out is ready and dcache is ready
@@ -1068,9 +1077,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val rarAllocated = !s3_loadOutBits.rarAllocated && io.lsq.loadLoadViolationQuery.resp.bits.allocated
   val rawAllocated = !s3_loadOutBits.rawAllocated && io.lsq.storeLoadViolationQuery.resp.bits.allocated
   io.lsq.loadIn.bits.rarAllocated := s3_loadOutBits.rarAllocated || rarAllocated
-  io.lsq.loadIn.bits.rarIndex := io.lsq.loadLoadViolationQuery.resp.bits.index
+  io.lsq.loadIn.bits.rarIndex := Mux(s3_loadOutBits.rarAllocated, s3_loadOutBits.rarIndex, io.lsq.loadLoadViolationQuery.resp.bits.index)
   io.lsq.loadIn.bits.rawAllocated := s3_loadOutBits.rawAllocated || rawAllocated
-  io.lsq.loadIn.bits.rawIndex := io.lsq.storeLoadViolationQuery.resp.bits.index
+  io.lsq.loadIn.bits.rawIndex := Mux(s3_loadOutBits.rawAllocated, s3_loadOutBits.rawIndex, io.lsq.storeLoadViolationQuery.resp.bits.index)
 
   val s3_forwardFail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid)
   val s3_ldld_replayFromFetch = 

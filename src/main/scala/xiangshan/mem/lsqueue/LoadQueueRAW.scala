@@ -118,11 +118,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info 
       uop(enqIdx) := enq.bits.uop
-      datavalid(enqIdx) := false.B
+      datavalid(enqIdx) := enq.bits.datavalid
     }
 
     // update datavalid
-    val lastEnqValid = RegNext(enq.valid && enq.bits.allocated && uop(enq.bits.index).robIdx === enq.bits.uop.robIdx|| canEnqVec(w))
+    val lastEnqValid = RegNext(enq.valid && enq.bits.allocated && uop(enq.bits.index).robIdx === enq.bits.uop.robIdx || canEnqVec(w))
     val lastEnqBits = RegNext(enq.bits)
     val lastEnqIndex = Wire(UInt(log2Up(LoadQueueRAWSize).W))
     lastEnqIndex := Mux(lastEnqBits.allocated, lastEnqBits.index, RegNext(OHToUInt(enqIdxOH(w))))
@@ -133,7 +133,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       (lastEnqBits.mask & io.storeIn(i).bits.mask).orR)).asUInt.orR
     
     when (lastEnqValid) {
-      datavalid(lastEnqIndex) := lastEnqBits.datavalid && !lastEnqBits.miss && !schedError
+      datavalid(lastEnqIndex) := lastEnqBits.datavalid && !schedError
     }
   }
 
