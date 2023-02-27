@@ -222,7 +222,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })).asUInt // use uint instead vec to reduce verilog lines
   // check oldest inst
   (0 until LoadQueueReplaySize).map(i => {
-    oldestMask(i) := loadReplaySelVec(i) && blockCounter(i) <= 16.U
+    oldestMask(i) := loadReplaySelVec(i) && blockCounter(i) === 16.U
   })
 
   // update block counter
