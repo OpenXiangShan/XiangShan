@@ -91,6 +91,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   val datavalid = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // non-mmio data is valid
   val pending = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // inst is an mmio inst
   val writebacked = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // inst writebacked
+  val exception = WireInit(VecInit(uop.map(u => ExceptionNO.selectByFu(u.cf.exceptionVec, lduCfg).asUInt.orR)))
 
   /**
    * used for debug
@@ -170,7 +171,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   // update ldIssuePtr
   val IssPtrMoveStride = CommitWidth  
   val issLookupVec = VecInit((0 until IssPtrMoveStride).map(issPtrExt + _.U))
-  val issLookup = VecInit(issLookupVec.map(ptr => allocated(ptr.value) && (pending(ptr.value) || datavalid(ptr.value) && addrvalid(ptr.value)) && ptr =/= enqPtrExt(0)))
+  val issLookup = VecInit(issLookupVec.map(ptr => allocated(ptr.value) && (pending(ptr.value) || exception(ptr.value) || datavalid(ptr.value) && addrvalid(ptr.value)) && ptr =/= enqPtrExt(0)))
   val issInSameRedirectCycle = VecInit(issLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val issCountMask = Wire(UInt(IssPtrMoveStride.W))
@@ -179,13 +180,13 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   val lastIssCount = RegNext(issCount)
 
   val issPtrExtNext = Wire(new LqPtr)
-  val issPtrEna = lastCycleRedirect.valid || lastIssCount =/= 0.U
+  val issPtrExtEna = lastCycleRedirect.valid || lastIssCount =/= 0.U
   when (lastCycleRedirect.valid) {
     issPtrExtNext := Mux(isAfter(enqPtrExtNext(0), issPtrExt), issPtrExt, enqPtrExtNext(0))
   } .otherwise {
     issPtrExtNext := issPtrExt + lastIssCount
   }
-  issPtrExt := RegEnable(next = issPtrExtNext, init = 0.U.asTypeOf(new LqPtr), enable = issPtrEna)
+  issPtrExt := RegEnable(next = issPtrExtNext, init = 0.U.asTypeOf(new LqPtr), enable = issPtrExtEna)
   io.ldIssuePtr := issPtrExt
 
   /**
@@ -202,6 +203,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
       allocated(index) := true.B
       uop(index) := io.enq.req(i).bits
       uop(index).lqIdx := lqIdx
+      uop(index).cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
 
       // init
       addrvalid(index) := false.B 
@@ -276,9 +278,11 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
       addrvalid(loadWbIndex) := !io.loadIn(i).bits.tlbMiss
       if (EnableFastForward) {
         datavalid(loadWbIndex) := !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access 
+                                  !io.loadIn(i).bits.miss && // dcache miss
                                   !io.loadIn(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
       } else {
-        datavalid(loadWbIndex) := !io.loadIn(i).bits.mmio // mmio data is not valid until we finished uncache access
+        datavalid(loadWbIndex) := !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
+                                  !io.loadIn(i).bits.miss 
       }
       pending(loadWbIndex) := io.loadIn(i).bits.mmio 
       writebacked(loadWbIndex) := !io.loadIn(i).bits.mmio && !hasExceptions && !needRepay
