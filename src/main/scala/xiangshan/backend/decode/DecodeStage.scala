@@ -117,6 +117,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val decoderComp = Module(new DecodeUnitComp(10))
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
+  val debug_globalCounter = RegInit(0.U(XLEN.W))
   val vconfigGen = Module(new VConfigGen)
 
   val isComplex = Wire(Vec(DecodeWidth - 1, Bool()))
@@ -161,6 +162,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   for (i <- 0 until DecodeWidth) {
 
+    io.out(i).bits.ctrl.debug_globalID := debug_globalCounter + PopCount((0 until i+1).map(io.out(_).fire))
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.ctrl.lsrc(0)
     io.intRat(i)(1).addr := io.out(i).bits.ctrl.lsrc(1)
