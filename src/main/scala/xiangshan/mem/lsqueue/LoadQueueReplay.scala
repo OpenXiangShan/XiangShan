@@ -66,6 +66,19 @@ object LoadReplayCauses {
   val allCauses         = 8
 }
 
+class LrqPtr(implicit p: Parameters) extends CircularQueuePtr[LrqPtr](
+  p => p(XSCoreParamsKey).LoadQueueReplaySize
+){
+}
+
+object LrqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LrqPtr = {
+    val ptr = Wire(new LrqPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
 class LoadQueueReplay(implicit p: Parameters) extends XSModule 
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
@@ -213,7 +226,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   })  
 
-  //  Replay is splitted into 2 stages
+  //  Replay is splitted into 3 stages
   val oldestMask = Wire(Vec(LoadQueueReplaySize, Bool()))
   val oldestMaskUInt = oldestMask.asUInt
   val loadReplaySelVec = VecInit((0 until LoadQueueReplaySize).map(i => {
