@@ -20,6 +20,7 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
 import utils._
 import utility._
 import yunsuan.vector.VectorIntAdder
@@ -34,6 +35,7 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   val uop = io.in.bits.uop
   val ctrl = uop.ctrl
   val vtype = ctrl.vconfig.vtype
+  val v0 = ~0.U(8.W) // TODO
 
   // TODO: mv VecImmExtractor from exe stage to read rf stage(or forward stage).
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
@@ -42,6 +44,7 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   val _src2 = io.in.bits.src(1)
   val src1 = Mux(VipuType.needReverse(ctrl.fuOpType), _src2, _src1)
   val src2 = Mux(VipuType.needReverse(ctrl.fuOpType), _src1, _src2)
+  val carryIn = Mux(ctrl.fuOpType === VipuType.madc0, 0.U(8.W), v0)
 
   val AdderWidth = XLEN
   val NumAdder = VLEN / XLEN
@@ -51,12 +54,18 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
     adder(i).io.in_1 := src2(AdderWidth*(i+1)-1, AdderWidth*i)
     adder(i).io.int_format := vtype.vsew // TODO
     adder(i).io.op_code := ctrl.fuOpType
-    adder(i).io.carry_or_borrow_in := DontCare // TODO
+    adder(i).io.carry_or_borrow_in := carryIn // TODO
     adder(i).io.uop_index := DontCare // TODO
   }
   val adder_result = VecInit(adder.map(_.io.out)).asUInt
+  val adder_carry = LookupTree(vtype.vsew(1,0), List(
+      "b00".U -> Cat(~0.U((VLEN-16).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(7,0))).asUInt),
+      "b01".U -> Cat(~0.U((VLEN-8).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(3,0))).asUInt),
+      "b10".U -> Cat(~0.U((VLEN-4).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(1,0))).asUInt),
+      "b11".U -> Cat(~0.U((VLEN-2).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(0))).asUInt),
+    ))
 
-  io.out.bits.data := adder_result
+  io.out.bits.data := Mux(VipuType.outIsCarry(ctrl.fuOpType), adder_carry, adder_result)
   io.out.bits.uop := io.in.bits.uop
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
