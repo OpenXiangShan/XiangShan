@@ -117,7 +117,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   val deqPtrExt = Wire(new LqPtr)
   val deqPtrExtNext = Wire(new LqPtr)
   val deqPtr = deqPtrExt.value 
-  val issPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val issPtrExt = Wire(new LqPtr) 
 
   /**
    * update pointer
@@ -178,11 +178,14 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   val issCount = PopCount(PriorityEncoderOH(~issCountMask) - 1.U)
   val lastIssCount = RegNext(issCount)
 
+  val issPtrExtNext = Wire(new LqPtr)
+  val issPtrEna = lastCycleRedirect.valid || lastIssCount =/= 0.U
   when (lastCycleRedirect.valid) {
-    issPtrExt := Mux(isAfter(enqPtrExtNext(0), issPtrExt), issPtrExt, enqPtrExtNext(0))
+    issPtrExtNext := Mux(isAfter(enqPtrExtNext(0), issPtrExt), issPtrExt, enqPtrExtNext(0))
   } .otherwise {
-    issPtrExt := issPtrExt + issCount
+    issPtrExtNext := issPtrExt + lastIssCount
   }
+  issPtrExt := RegEnable(next = issPtrExtNext, init = 0.U.asTypeOf(new LqPtr), enable = issPtrEna)
   io.ldIssuePtr := issPtrExt
 
   /**
