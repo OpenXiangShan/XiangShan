@@ -195,6 +195,16 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     tagArray
   }
 
+  val read_set_idx_next = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire)
+  val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(idxBits.W))))
+  val valid_metas = Wire(Vec(PortNumber, Vec(nWays, Bool())))
+  // valid read
+  (0 until PortNumber).foreach( i =>
+    (0 until nWays).foreach( way =>
+      valid_metas(i)(way) := valid_array(way)(read_set_idx_next(i))
+    ))
+  io.readResp.entryValid := valid_metas
+
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
   //Parity Decode
@@ -212,8 +222,13 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-  val wayNum   = OHToUInt(io.write.bits.waymask)
-  val validPtr = Cat(io.write.bits.virIdx, wayNum)
+//  val wayNum   = OHToUInt(io.write.bits.waymask)
+//  val validPtr = Cat(io.write.bits.virIdx, wayNum)
+  // valid write
+  val way_num = OHToUInt(io.write.bits.waymask)
+  when (io.write.valid) {
+    valid_array(way_num).bitSet(io.write.bits.virIdx, true.B)
+  }
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){

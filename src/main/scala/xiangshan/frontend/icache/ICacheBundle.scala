@@ -43,6 +43,7 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
   val errors     = Vec(2, Vec(nWays ,Bool() ))
+  val entryValid = Vec(2, Vec(nWays, Bool()))
 
   def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
   def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
