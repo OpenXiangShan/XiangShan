@@ -556,6 +556,18 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
+  object UopDivType {
+    def SCA_SIM = "b000".U
+    def DIR = "b001".U
+    def VEC_LMUL = "b010".U
+    def VEC_MV_LMUL = "b011".U
+    def dummy = "b111".U
+
+    def X = BitPat("b000")
+
+    def apply() = UInt(3.W)
+  }
+
   object ExceptionNO {
     def instrAddrMisaligned = 0
     def instrAccessFault    = 1

@@ -23,83 +23,83 @@ abstract class VecDecode extends XSDecodeBase {
   }
 }
 
-case class OPIVV(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
+case class OPIVV(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, uopDivType: BitPat = UopDivType.VEC_LMUL) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVX(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
+case class OPIVX(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, uopDivType: BitPat = UopDivType.VEC_MV_LMUL) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat) extends XSDecodeBase {
+case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat, uopDivType: BitPat = UopDivType.VEC_LMUL) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm,
+    XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm, uopDivType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, xWen, F, vWen, mWen, F, F, F, F).generate()
+    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, uopDivType, SelImm.X, xWen, F, vWen, mWen, F, F, F, F).generate()
   }
 }
 
-case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
+    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = xWen, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVV(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPFVV(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
+    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVF(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPFVF(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
+    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat) extends XSDecodeBase {
+case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat, uopDivType: BitPat = UopDivType.DIR) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp
-    XSDecode(src1, src2, SrcType.X, FuType.alu, fuOp, selImm,
+    XSDecode(src1, src2, SrcType.X, FuType.alu, fuOp, selImm, uopDivType,
       xWen = T, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = flushPipe).generate()
   }
 }
 
 case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false, ff: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends XSDecodeBase {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vldu
     val src1 = SrcType.xp
     val src3 = SrcType.X
-    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = F, vWen = T, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
 case class VST(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false) extends XSDecodeBase {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vstu
     val src1 = SrcType.xp
     val src3 = SrcType.vp
-    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopDivType,
       xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
