@@ -159,6 +159,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** SRAM request */
   //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
+  // TODO: it seems like 0,1,2,3 -> dataArray(data); 3 -> dataArray(code); 0 -> metaArray; 4 -> itlb
   val ftq_req_to_data_doubleline  = s0_double_line.init
   val ftq_req_to_data_vset_idx    = s0_req_vsetIdx.init
   val ftq_req_to_data_valid       = fromFtq.bits.readValid.init
