@@ -212,14 +212,20 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
+    val freePIQEntry          =  Output(UInt(log2Ceil(nPrefetchEntries).W))
 
+    val fencei = Input(Bool())
 
+    val piq_write_ipbuffer = ValidIO(new IPFBufferWrite)
+
+    val to_main_pipe = Vec(nPrefetchEntries, new PIQToMainPipe)
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
 
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  PortNumber))
   val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  PortNumber))
+  val ipf_write_arb  = Module(new Arbiter(new IPFBufferWrite,  nPrefetchEntries))
 
   io.mem_grant.ready := true.B
 
@@ -259,15 +265,19 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   }
 
   val alloc = Wire(UInt(log2Ceil(nPrefetchEntries).W))
+  val toMainPipe = io.to_main_pipe.map(_.info)
 
   val prefEntries = (PortNumber until PortNumber + nPrefetchEntries) map { i =>
-    val prefetchEntry = Module(new IPrefetchEntry(edge, PortNumber))
+    val prefetchEntry = Module(new PIQEntry(edge, i))
 
-    prefetchEntry.io.mem_hint_ack.valid := false.B
-    prefetchEntry.io.mem_hint_ack.bits := DontCare
+    prefetchEntry.io.mem_grant.valid := false.B
+    prefetchEntry.io.mem_grant.bits := DontCare
+    prefetchEntry.io.fencei := io.fencei
 
-    when(io.mem_grant.bits.source === PortNumber.U) {
-      prefetchEntry.io.mem_hint_ack <> io.mem_grant
+    ipf_write_arb.io.in(i - PortNumber) <> prefetchEntry.io.piq_write_ipbuffer
+
+    when(io.mem_grant.bits.source === i.U) {
+      prefetchEntry.io.mem_grant <> io.mem_grant
     }
 
     prefetchEntry.io.req.valid := io.prefetch_req.valid && ((i-PortNumber).U === alloc)
@@ -280,11 +290,19 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   alloc := PriorityEncoder(prefEntries.map(_.io.req.ready))
   io.prefetch_req.ready := ParallelOR(prefEntries.map(_.io.req.ready))
-  val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_hint)
+  io.freePIQEntry := PriorityEncoder(prefEntries.map(_.io.req.ready))
+  (0 until nPrefetchEntries).foreach(i => toMainPipe(i) <> prefEntries(i).io.prefetch_entry_data)
+  val tl_a_chanel = entries.map(_.io.mem_acquire) ++ prefEntries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, tl_a_chanel:_*)
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
+
+  io.piq_write_ipbuffer.valid := ipf_write_arb.io.out.valid
+  io.piq_write_ipbuffer.bits  := ipf_write_arb.io.out.bits
+  ipf_write_arb.io.out.ready := true.B
+
+  XSPerfAccumulate("refill_ipf_num", io.piq_write_ipbuffer.fire)
 
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)

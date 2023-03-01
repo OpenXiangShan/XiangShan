@@ -238,6 +238,7 @@ case class XSCoreParameters
     nMissEntries = 2,
     nProbeEntries = 2,
     nPrefetchEntries = 2,
+    nPrefBufferEntries = 64,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(

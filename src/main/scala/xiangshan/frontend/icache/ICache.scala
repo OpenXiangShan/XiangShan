@@ -43,6 +43,7 @@ case class ICacheParameters(
     nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 4,
+    nPrefBufferEntries: Int = 8,
     hasPrefetch: Boolean = false,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
@@ -87,6 +88,8 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def pWay = nWays/partWayNum
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
+  def nIPFBufferSize   = cacheParams.nPrefBufferEntries
+  def maxIPFMoveConf   = 1 // temporary use small value to cause more "move" operation
 
   def getBits(num: Int) = log2Ceil(num).W
 
@@ -101,6 +104,14 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
     Mux(valid, data, RegEnable(data, valid))
+  }
+
+  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
+    val bit = RegInit(false.B)
+    when(flush)                   { bit := false.B  }
+      .elsewhen(valid && !release)  { bit := true.B   }
+      .elsewhen(release)            { bit := false.B  }
+    bit || valid
   }
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
@@ -513,26 +524,47 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println("  hasPrefetch: "         + cacheParams.hasPrefetch)
   if(cacheParams.hasPrefetch){
     println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
+    println("  nPrefetchBufferEntries: " + cacheParams.nPrefBufferEntries)
   }
 
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray      = Module(new ICacheMetaArray)
+  val metaArrayCopy = Module(new ICacheMetaArray)
+  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
   val dataArray      = Module(new ICacheDataArray)
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
-  val prefetchPipe    = Module(new IPrefetchPipe)
+  val prefetchPipe = Module(new IPrefetchPipe)
+  val ipfBuffer  = Module(new PrefetchBuffer)
 
-  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
+  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  1))
   val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  1))
-  val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  1))
+  val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
+  val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
+
+  mainPipe.io.PIQ <> missUnit.io.to_main_pipe
+  ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
+  meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
+  data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
+  mainPipe.io.IPFBufMove <> ipfBuffer.io.replace
+  ipfBuffer.io.filter_read <> prefetchPipe.io.IPFBufferRead
+  mainPipe.io.IPFPipe <> prefetchPipe.io.fromMainPipe
+  mainPipe.io.mainPipeMissInfo <> ipfBuffer.io.mainpipe_missinfo
+
+  ipfBuffer.io.fencei := false.B
+  missUnit.io.fencei := false.B
+
+  ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
   meta_read_arb.io.in(0)      <> mainPipe.io.metaArray.toIMeta
-  meta_read_arb.io.in(1)                <> prefetchPipe.io.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
+  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
+  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
 
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
-  prefetchPipe.io.fromIMeta             <> metaArray.io.readResp
+  prefetchPipe.io.fromIMeta             <> metaArrayCopy.io.readResp
+  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayMoveFilterCopy.io.readResp
 
   data_read_arb.io.in(0)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
@@ -542,14 +574,19 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.perfInfo := mainPipe.io.perfInfo
 
   meta_write_arb.io.in(0)     <> missUnit.io.meta_write
+  data_write_arb.io.in(0)     <> missUnit.io.data_write
 
-  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
-  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
-  meta_write_arb.io.out.ready := true.B
+  metaArray.io.write <> meta_write_arb.io.out
+  metaArrayCopy.io.write <> meta_write_arb.io.out
+  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
+//  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
+//  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
+//  meta_write_arb.io.out.ready := true.B
 
-  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
-  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
-  missUnit.io.data_write.ready := true.B
+  dataArray.io.write <> data_write_arb.io.out
+//  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
+//  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
+//  missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
 
@@ -589,6 +626,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
   missUnit.io.hartId       := io.hartId
   prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
+  prefetchPipe.io.fencei := false.B
+  prefetchPipe.io.freePIQEntry := missUnit.io.freePIQEntry
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -622,6 +661,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  // TODO : metaArrayCopy & metaArrayMoveFilterCopy cache op may has bug
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
