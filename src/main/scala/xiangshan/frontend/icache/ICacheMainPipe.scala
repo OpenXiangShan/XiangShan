@@ -294,7 +294,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
   val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(s0_fire))
 
-//  val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
 
   when(s1_valid){
     assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
@@ -612,7 +611,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMSHR(i).bits.paddr    := s2_req_paddr(i)
     toMSHR(i).bits.vaddr    := s2_req_vaddr(i)
     toMSHR(i).bits.waymask  := s2_waymask(i)
-//    toMSHR(i).bits.coh      := s2_victim_coh(i)
 
 
     when(toMSHR(i).fire() && missStateQueue(i) === m_invalid){
