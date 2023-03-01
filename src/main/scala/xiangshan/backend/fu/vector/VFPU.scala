@@ -39,17 +39,45 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   val vtype = ctrl.vconfig.vtype
   val src1Type = io.in.bits.uop.ctrl.srcType
 
+// def some signal
+  val fflagsReg = RegInit(0.U(5.W))
+  val fflagsWire = WireInit(0.U(5.W))
+  val dataReg = Reg(io.out.bits.data.cloneType)
+  val dataWire = Wire(dataReg.cloneType)
+  val s_idle :: s_compute :: s_finish :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  val vfalu = Module(new VfaluWrapper()(p))
+  val vfmacc = Module(new VfmaccWrapper()(p))
+  val vfdiv = Module(new VfdivWrapper()(p))
+  val outValid = vfalu.io.out.valid || vfmacc.io.out.valid || vfdiv.io.out.valid
+  val outFire = vfalu.io.out.fire() || vfmacc.io.out.fire() || vfdiv.io.out.fire()
+
 // reg input signal
   val s0_uopReg = Reg(io.in.bits.uop.cloneType)
   val s0_maskReg = Reg(UInt(8.W))
   val inHs = io.in.fire()
-  when(inHs){
+  when(inHs && state===s_idle){
     s0_uopReg := io.in.bits.uop
     s0_maskReg := Fill(8, 1.U(1.W))
   }
 
+// fsm
+  switch (state) {
+    is (s_idle) {
+      state := Mux(inHs, s_compute, s_idle)
+    }
+    is (s_compute) {
+      state := Mux(outValid, Mux(outFire, s_idle, s_finish),
+                             s_compute)
+    }
+    is (s_finish) {
+      state := Mux(io.out.fire(), s_idle, s_finish)
+    }
+  }
+  fflagsReg := Mux(outValid, fflagsWire, fflagsReg)
+  dataReg := Mux(outValid, dataWire, dataReg)
+
 // connect the input port of vfalu
-  val vfalu = Module(new VfaluWrapper()(p))
   vfalu.io.in.bits.src <> in.src
   vfalu.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfalu.io.in.bits.round_mode := rm
@@ -62,7 +90,6 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfalu.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
 //  connect the input port of vfmacc
-  val vfmacc = Module(new VfmaccWrapper()(p))
   vfmacc.io.in.bits.src <> in.src
   vfmacc.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfmacc.io.in.bits.round_mode := rm
@@ -75,7 +102,6 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfmacc.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
   //  connect the input port of vfdiv
-  val vfdiv = Module(new VfdivWrapper()(p))
   vfdiv.io.in.bits.src <> in.src
   vfdiv.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfdiv.io.in.bits.round_mode := rm
@@ -88,28 +114,30 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfdiv.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
 // connect the output port
-  fflags := LookupTree(s0_uopReg.ctrl.fuOpType, List(
+  fflagsWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd  -> vfalu.io.out.bits.fflags,
     VfpuType.fsub  -> vfalu.io.out.bits.fflags,
     VfpuType.fmacc -> vfmacc.io.out.bits.fflags,
     VfpuType.fdiv  -> vfdiv.io.out.bits.fflags,
   ))
-  io.out.bits.data := LookupTree(s0_uopReg.ctrl.fuOpType, List(
+  fflags := Mux(state === s_compute && outFire, fflagsWire, fflagsReg)
+  dataWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd -> vfalu.io.out.bits.result,
     VfpuType.fsub -> vfalu.io.out.bits.result,
     VfpuType.fmacc -> vfmacc.io.out.bits.result,
     VfpuType.fdiv -> vfdiv.io.out.bits.result,
   ))
+  io.out.bits.data := Mux(state === s_compute && outFire, dataWire, dataReg)
   io.out.bits.uop := s0_uopReg
   // valid/ready
-  vfalu.io.in.valid := io.in.valid && VfpuType.isVfalu(in.uop.ctrl.fuOpType)
-  vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fmacc
-  vfdiv.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fdiv
-  io.out.valid := vfalu.io.out.valid || vfmacc.io.out.valid || vfdiv.io.out.valid
+  vfalu.io.in.valid := io.in.valid && VfpuType.isVfalu(in.uop.ctrl.fuOpType) && state === s_idle
+  vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fmacc && state === s_idle
+  vfdiv.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fdiv && state === s_idle
+  io.out.valid := state === s_compute && outValid || state === s_finish
   vfalu.io.out.ready := io.out.ready
   vfmacc.io.out.ready := io.out.ready
   vfdiv.io.out.ready := io.out.ready
-  io.in.ready := vfalu.io.in.ready && vfmacc.io.in.ready && vfdiv.io.in.ready
+  io.in.ready := state === s_idle
 }
 
 class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
