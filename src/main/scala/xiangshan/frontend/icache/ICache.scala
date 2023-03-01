@@ -81,10 +81,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
   val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
 
-  def ReplacePipeKey = 0
-  def MainPipeKey = 1
+//  def ReplacePipeKey = 0
+//  def MainPipeKey = 1
   def PortNumber = 2
-  def ProbeKey   = 3
+//  def ProbeKey   = 3
 
   def partWayNum = 4
   def pWay = nWays/partWayNum
@@ -120,15 +120,15 @@ abstract class ICacheArray(implicit p: Parameters) extends XSModule
   with HasICacheParameters
 
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
-  val coh = new ClientMetadata
+//  val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
 }
 
 object ICacheMetadata {
-  def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
-    val meta = Wire(new L1Metadata)
+  def apply(tag: Bits/*, coh: ClientMetadata*/)(implicit p: Parameters) = {
+    val meta = Wire(new ICacheMetadata)
     meta.tag := tag
-    meta.coh := coh
+//    meta.coh := coh
     meta
   }
 }
@@ -136,7 +136,7 @@ object ICacheMetadata {
 
 class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 {
-  def onReset = ICacheMetadata(0.U, ClientMetadata.onReset)
+  def onReset = ICacheMetadata(0.U/*, ClientMetadata.onReset*/)
   val metaBits = onReset.getWidth
   val metaEntryBits = cacheParams.tagCode.width(metaBits)
 
@@ -196,7 +196,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   }
 
   val read_set_idx_next = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire)
-  val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(idxBits.W))))
+  val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
   val valid_metas = Wire(Vec(PortNumber, Vec(nWays, Bool())))
   // valid read
   (0 until PortNumber).foreach( i =>
@@ -204,6 +204,13 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       valid_metas(i)(way) := valid_array(way)(read_set_idx_next(i))
     ))
   io.readResp.entryValid := valid_metas
+//  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire)
+//  val validArray = RegInit(0.U((nSets * nWays).W))
+//  val validMetas = VecInit((0 until 2).map{ bank =>
+//    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
+//    validMeta
+//  })
+//  io.readResp.entryValid := validMetas.asTypeOf(Vec(2, Vec(nWays, Bool())))
 
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
@@ -220,15 +227,20 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   //Parity Encode
   val write = io.write.bits
-  write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
+  write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag/*, coh = write.coh*/).asUInt)
 
 //  val wayNum   = OHToUInt(io.write.bits.waymask)
 //  val validPtr = Cat(io.write.bits.virIdx, wayNum)
+//  when (io.write.valid) {
+//    validArray := validArray.bitSet(validPtr, true.B)
+//  }
   // valid write
   val way_num = OHToUInt(io.write.bits.waymask)
   when (io.write.valid) {
-    valid_array(way_num).bitSet(io.write.bits.virIdx, true.B)
+    valid_array(way_num) := valid_array(way_num).bitSet(io.write.bits.virIdx, true.B)
   }
+
+  XSPerfAccumulate("meta_refill_num", io.write.valid)
 
   io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
@@ -514,37 +526,37 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val dataArray      = Module(new ICacheDataArray)
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
-  val releaseUnit    = Module(new ReleaseUnit(edge))
-  val replacePipe     = Module(new ICacheReplacePipe)
-  val probeQueue     = Module(new ICacheProbeQueue(edge))
+//  val releaseUnit    = Module(new ReleaseUnit(edge))
+//  val replacePipe     = Module(new ICacheReplacePipe)
+//  val probeQueue     = Module(new ICacheProbeQueue(edge))
   val prefetchPipe    = Module(new IPrefetchPipe)
 
-  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  3))
-  val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  2))
-  val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
-  val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
+  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  2))
+  val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  1))
+  val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  1))
+//  val replace_req_arb = Module(new Arbiter(new ReplacePipeReq, 2))
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
 
-  meta_read_arb.io.in(ReplacePipeKey)   <> replacePipe.io.meta_read
-  meta_read_arb.io.in(MainPipeKey)      <> mainPipe.io.metaArray.toIMeta
-  meta_read_arb.io.in(2)                <> prefetchPipe.io.toIMeta
+//  meta_read_arb.io.in(ReplacePipeKey)   <> replacePipe.io.meta_read
+  meta_read_arb.io.in(0)      <> mainPipe.io.metaArray.toIMeta
+  meta_read_arb.io.in(1)                <> prefetchPipe.io.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
 
-  replacePipe.io.meta_response          <> metaArray.io.readResp
+//  replacePipe.io.meta_response          <> metaArray.io.readResp
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
   prefetchPipe.io.fromIMeta             <> metaArray.io.readResp
 
-  data_read_arb.io.in(ReplacePipeKey) <> replacePipe.io.data_read
-  data_read_arb.io.in(MainPipeKey)    <> mainPipe.io.dataArray.toIData
+//  data_read_arb.io.in(ReplacePipeKey) <> replacePipe.io.data_read
+  data_read_arb.io.in(0)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
-  replacePipe.io.data_response        <> dataArray.io.readResp
+//  replacePipe.io.data_response        <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
 
-  meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
-  meta_write_arb.io.in(MainPipeKey)     <> missUnit.io.meta_write
+//  meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
+  meta_write_arb.io.in(0)     <> missUnit.io.meta_write
 
   //metaArray.io.write <> meta_write_arb.io.out
   //dataArray.io.write <> missUnit.io.data_write
@@ -558,7 +570,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
-  replacePipe.io.csr_parity_enable := io.csr_parity_enable
+//  replacePipe.io.csr_parity_enable := io.csr_parity_enable
 
   if(cacheParams.hasPrefetch){
     prefetchPipe.io.fromFtq <> io.prefetch
@@ -617,83 +629,84 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e.bits  := DontCare
 
   bus.a <> missUnit.io.mem_acquire
-  bus.e <> missUnit.io.mem_finish
+//  bus.e <> missUnit.io.mem_finish
 
-  releaseUnit.io.req <>  replacePipe.io.release_req
-  replacePipe.io.release_finish := releaseUnit.io.finish
-  bus.c <> releaseUnit.io.mem_release
+//  releaseUnit.io.req <>  replacePipe.io.release_req
+//  replacePipe.io.release_finish := releaseUnit.io.finish
+//  bus.c <> releaseUnit.io.mem_release
 
   // connect bus d
   missUnit.io.mem_grant.valid := false.B
   missUnit.io.mem_grant.bits  := DontCare
 
-  releaseUnit.io.mem_grant.valid := false.B
-  releaseUnit.io.mem_grant.bits  := DontCare
+//  releaseUnit.io.mem_grant.valid := false.B
+//  releaseUnit.io.mem_grant.bits  := DontCare
 
   //Probe through bus b
-  probeQueue.io.mem_probe    <> bus.b
+//  probeQueue.io.mem_probe    <> bus.b
 
   //Parity error port
-  val errors = mainPipe.io.errors ++ Seq(replacePipe.io.error)
+  val errors = mainPipe.io.errors // ++ Seq(replacePipe.io.error)
   io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
 
 
   /** Block set-conflict request */
- val probeReqValid = probeQueue.io.pipe_req.valid
- val probeReqVidx  = probeQueue.io.pipe_req.bits.vidx
+// val probeReqValid = probeQueue.io.pipe_req.valid
+// val probeReqVidx  = probeQueue.io.pipe_req.bits.vidx
 
-  val hasVictim = VecInit(missUnit.io.victimInfor.map(_.valid))
-  val victimSetSeq = VecInit(missUnit.io.victimInfor.map(_.vidx))
+//  val hasVictim = VecInit(missUnit.io.victimInfor.map(_.valid))
+//  val victimSetSeq = VecInit(missUnit.io.victimInfor.map(_.vidx))
 
-  val probeShouldBlock = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && probeReqValid && idx === probeReqVidx }).reduce(_||_)
+//  val probeShouldBlock = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && probeReqValid && idx === probeReqVidx }).reduce(_||_)
 
- val releaseReqValid = missUnit.io.release_req.valid
- val releaseReqVidx  = missUnit.io.release_req.bits.vidx
+// val releaseReqValid = missUnit.io.release_req.valid
+// val releaseReqVidx  = missUnit.io.release_req.bits.vidx
 
-  val hasConflict = VecInit(Seq(
-        replacePipe.io.status.r0_set.valid,
-        replacePipe.io.status.r1_set.valid,
-        replacePipe.io.status.r2_set.valid,
-        replacePipe.io.status.r3_set.valid
-  ))
+//  val hasConflict = VecInit(Seq(
+//        replacePipe.io.status.r0_set.valid,
+//        replacePipe.io.status.r1_set.valid,
+//        replacePipe.io.status.r2_set.valid,
+//        replacePipe.io.status.r3_set.valid
+//  ))
 
-  val conflictIdx = VecInit(Seq(
-        replacePipe.io.status.r0_set.bits,
-        replacePipe.io.status.r1_set.bits,
-        replacePipe.io.status.r2_set.bits,
-        replacePipe.io.status.r3_set.bits
-  ))
+//  val conflictIdx = VecInit(Seq(
+//        replacePipe.io.status.r0_set.bits,
+//        replacePipe.io.status.r1_set.bits,
+//        replacePipe.io.status.r2_set.bits,
+//        replacePipe.io.status.r3_set.bits
+//  ))
 
-  val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)
+//  val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)
 
-  replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
-  replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
-  replace_req_arb.io.in(MainPipeKey)   <> missUnit.io.release_req
-  replace_req_arb.io.in(MainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
-  replacePipe.io.pipe_req               <> replace_req_arb.io.out
+//  replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
+//  replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
+//  replace_req_arb.io.in(MainPipeKey)   <> missUnit.io.release_req
+//  replace_req_arb.io.in(MainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
+//  replacePipe.io.pipe_req               <> replace_req_arb.io.out
 
-  when(releaseShouldBlock){
-    missUnit.io.release_req.ready := false.B
-  }
+//  when(releaseShouldBlock){
+//    missUnit.io.release_req.ready := false.B
+//  }
 
-  when(probeShouldBlock){
-    probeQueue.io.pipe_req.ready := false.B
-  }
+//  when(probeShouldBlock){
+//    probeQueue.io.pipe_req.ready := false.B
+//  }
 
 
-  missUnit.io.release_resp <> replacePipe.io.pipe_resp
+//  missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
   
   mainPipe.io.fetch.req <> io.fetch.req //&& !fetchShouldBlock(i)
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B
-  when ( bus.d.bits.opcode === TLMessages.AccessAckData /* TLMessages.GrantData */) {
-    missUnit.io.mem_grant <> bus.d
-  } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
-    releaseUnit.io.mem_grant <> bus.d
-  } .otherwise {
-    assert (!bus.d.fire())
-  }
+  missUnit.io.mem_grant <> bus.d
+//  when ( bus.d.bits.opcode === TLMessages.AccessAckData /* TLMessages.GrantData */) {
+//    missUnit.io.mem_grant <> bus.d
+//  } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
+//    releaseUnit.io.mem_grant <> bus.d
+//  } .otherwise {
+//    assert (!bus.d.fire())
+//  }
 
   val perfEvents = Seq(
     ("icache_miss_cnt  ", false.B),
