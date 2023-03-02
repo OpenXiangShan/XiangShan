@@ -841,7 +841,7 @@ package object xiangshan {
     fuSel = (uop: MicroOp) => FuType.vipu === uop.ctrl.fuType,
     fuType = FuType.vipu,
     numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false,
-    numVecSrc = 2, writeVecRf = true,
+    numVecSrc = 4, writeVecRf = true,
     fastUopOut = false, // TODO: check
     fastImplemented = true, //TODO: check
   )
@@ -863,7 +863,7 @@ package object xiangshan {
     fuSel = (uop: MicroOp) => FuType.vfpu === uop.ctrl.fuType,
     fuType = FuType.vfpu,
     numIntSrc = 0, numFpSrc = 1, writeIntRf = false, writeFpRf = false, writeFflags = true,
-    numVecSrc = 2, writeVecRf = true,
+    numVecSrc = 3, writeVecRf = true,
     fastUopOut = false, // TODO: check
     fastImplemented = true, //TODO: check
     // latency = CertainLatency(2)

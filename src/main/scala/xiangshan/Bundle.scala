@@ -353,7 +353,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
 class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
   val dataWidth = if (isVpu) VLEN else XLEN
 
-  val src = Vec(3, UInt(dataWidth.W))
+  val src = Vec(4, UInt(dataWidth.W))
 }
 
 class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {

@@ -211,7 +211,12 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   extra <> DontCare
 
   readIntRf_asyn <> rs.flatMap(_.readIntRf_asyn)
-  readFpRf_asyn <> rs.flatMap(_.readFpRf_asyn)
+  println(s">>> readFpRf_asyn is ${readFpRf_asyn}")
+  println(s"<<< readFprs.flatMap(_.readFpRf_asyn) is ${rs.flatMap(_.readFpRf_asyn)}")
+  println(s">>> readFpRf_asyn.length is  ${readFpRf_asyn.length}")
+  readFpRf_asyn := DontCare
+  rs.flatMap(_.readFpRf_asyn).map(_.data := DontCare)
+  readFpRf_asyn <> rs.flatMap(_.readFpRf_asyn).take(readFpRf_asyn.length)
 
   rs.foreach(_.io.redirect := RegNextWithEnable(io.redirect))
   io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
@@ -275,7 +280,7 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   val io = IO(new ReservationStationIO(params)(p))
   val extra = IO(new RSExtraIO(params))
   val numIntRfPorts = params.exuCfg.get.fuConfigs.map(_.numIntSrc).max
-  val numFpRfPorts = params.exuCfg.get.fuConfigs.map(_.numFpSrc).max
+  val numFpRfPorts = params.exuCfg.get.fuConfigs.map(x => x.numFpSrc + x.numVecSrc).max
   val readIntRf_asyn = IO(Vec((params.numDeq) * numIntRfPorts, Flipped(new RfReadPort(params.dataBits, IntPregIdxWidth))))
   val readFpRf_asyn = IO(Vec((params.numDeq) * numFpRfPorts, Flipped(new RfReadPort(params.dataBits, VfPregIdxWidth))))
   // DontCare here
@@ -708,6 +713,9 @@ class BaseReservationStation(params: RSParams)(implicit p: Parameters) extends R
   dataSelect.io.slowData := dataArrayMultiWrite.map(_.data)
   for (i <- 0 until params.numDeq) {
     for (j <- 0 until params.numSrc) {
+      // println(s">>> params.numSrc is ${params.numSrc} ")
+      // println(s">>> s1_out(i).bits is ${s1_out(i).bits.src.length} ")
+      // println(s">>> dataSelect.io.deqData is ${dataSelect.io.deqData(i).length} ")
       s1_out(i).bits.src(j) := dataSelect.io.deqData(i)(j)
     }
   }
