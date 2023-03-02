@@ -497,7 +497,10 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // ICache
   val icache_parity_enable = Output(Bool())
   // Labeled XiangShan
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+  val lvna = if (p(XSCoreParamsKey).LvnaEnable)
+    Some(new LvNACSRIO())
+  else
+    None
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
@@ -525,6 +528,13 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
+}
+
+class LvNACSRIO(implicit p: Parameters) extends XSBundle {
+  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+  val nohypeMemOffset = Output(UInt(64.W))
+  val nohypeIoOffset = Output(UInt(64.W))
+  val nohypeModeSel = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {

@@ -275,17 +275,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
-  // add nohype control to frontend and memBlock from control plane
-  if (LvnaEnable) {
-    val memOffreg = RegEnable(lvnaIO.get.memOffset.bits, 0.U(64.W), lvnaIO.get.memOffset.fire)
-    val ioOffreg = RegEnable(lvnaIO.get.ioOffset.bits, 0.U(64.W), lvnaIO.get.ioOffset.fire)
-    frontend.io.memOffset.get := memOffreg
-    frontend.io.ioOffset.get  := ioOffreg
-    memBlock.io.memOffset.get  := memOffreg
-    memBlock.io.ioOffset.get  := ioOffreg
-    ptw.io.memOffset := memOffreg
-    ptw.io.ioOffset := ioOffreg
-  }
 
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
@@ -308,6 +297,23 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
   val csrioIn = csrFenceMod.io.fuExtra.csrio.get
   val fenceio = csrFenceMod.io.fuExtra.fenceio.get
+
+  // add nohype control to frontend and memBlock from control plane
+  if (LvnaEnable) {
+    val memOffreg = RegEnable(lvnaIO.get.memOffset.bits, 0.U(64.W), lvnaIO.get.memOffset.fire)
+    val ioOffreg = RegEnable(lvnaIO.get.ioOffset.bits, 0.U(64.W), lvnaIO.get.ioOffset.fire)
+    val csrMemOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeMemOffset)
+    val csrIoOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeIoOffset)
+    val nohypeMode = WireInit(csrioIn.customCtrl.lvna.get.nohypeModeSel)
+    val memOff = Mux(nohypeMode, csrMemOff, memOffreg)
+    val ioOff = Mux(nohypeMode, csrIoOff, ioOffreg)
+    frontend.io.memOffset.get := memOff
+    frontend.io.ioOffset.get  := ioOff
+    memBlock.io.memOffset.get  := memOff
+    memBlock.io.ioOffset.get  := ioOff
+    ptw.io.memOffset := memOff
+    ptw.io.ioOffset := ioOff
+  }
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> fenceio.sfence

@@ -413,7 +413,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // sdsid: Differentiated Services ID
   val sdsid = RegInit(UInt(XLEN.W), 0.U)
-  csrio.customCtrl.dsid := sdsid
+
+  // nohype configs:
+  // modesel == True use CSR offset, otherwise use controlplane offset
+  val nohypeMemOffset = RegInit(UInt(64.W), 0.U)
+  val nohypeIoOffset = RegInit(UInt(64.W), 0.U)
+  val nohypeModeSel = RegInit(true.B)
+  if (coreParams.LvnaEnable) {
+    csrio.customCtrl.lvna.get.dsid := sdsid
+    csrio.customCtrl.lvna.get.nohypeMemOffset := nohypeMemOffset
+    csrio.customCtrl.lvna.get.nohypeIoOffset := nohypeIoOffset
+    csrio.customCtrl.lvna.get.nohypeModeSel := nohypeModeSel
+  }
 
   // slvpredctl: load violation predict settings
   // Default reset period: 2^16
@@ -668,6 +679,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val lvnaopMapping = Map(
     MaskedRegMap(Rhartid, rhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Vhartid, vhartid),
+    MaskedRegMap(NohypeMemOff, nohypeMemOffset),
+    MaskedRegMap(NohypeIoOff, nohypeIoOffset),
+    MaskedRegMap(NohypeModeSel, nohypeModeSel),
   )
 
   val mapping = basicPrivMapping ++
