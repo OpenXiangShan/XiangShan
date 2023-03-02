@@ -8,8 +8,8 @@ jobs:
   build:
     runs-on: bosc
     continue-on-error: false
-    # At most 10 hours to finish (before 9:33 UTC+8).
-    timeout-minutes: 600
+    # At most 12 hours to finish (before 11:33 UTC+8).
+    timeout-minutes: 720
     # Build + 8 checkpoints * 1-hour timeout
     name: Nightly Regression - Checkpoints
     steps:

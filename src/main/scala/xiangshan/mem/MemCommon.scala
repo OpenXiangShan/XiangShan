@@ -110,6 +110,14 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
 
   val forward_tlDchannel = Bool()
+  val dcacheRequireReplay = Bool()
+
+  // For rar/raw check
+  val rarAllocated = Bool()
+  val rarIndex = UInt(log2Up(LoadQueueRARSize).W)
+  val rawAllocated = Bool()
+  val rawIndex = UInt(log2Up(LoadQueueRAWSize).W)
+  val canAccept = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -133,6 +141,13 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    dcacheRequireReplay := input.dcacheRequireReplay
+    canAccept := input.canAccept
+    rarAllocated := input.rarAllocated
+    rarIndex := input.rarIndex
+    rawAllocated := input.rawAllocated
+    rawIndex := input.rawIndex
+
     meta_prefetch := DontCare
     meta_access := DontCare
     forward_tlDchannel := DontCare
@@ -144,9 +159,12 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  // load inst replay informations
+  val replayInfo = new LoadToLsqReplayIO
   // queue entry data, except flag bits, will be updated if writeQueue is true,
   // valid bit in LqWriteBundle will be ignored
-  val lq_data_wen_dup = Vec(6, Bool()) // dirty reg dup
+  val lqDataWenDup = Vec(6, Bool()) // dirty reg dup
+
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
@@ -170,8 +188,15 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel
     replayCarry := input.replayCarry
+    dcacheRequireReplay := input.dcacheRequireReplay
+    canAccept := input.canAccept
+    rarAllocated := input.rarAllocated
+    rarIndex := input.rarIndex
+    rawAllocated := input.rawAllocated
+    rawIndex := input.rawIndex
 
-    lq_data_wen_dup := DontCare
+    replayInfo := DontCare
+    lqDataWenDup := DontCare
   }
 }
 
@@ -199,6 +224,9 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
   // should be raised to flush SQ and committed sbuffer.
   val matchInvalid = Input(Bool()) // resp to load_s2
+
+  // mdp strict dependency
+  val schedWait = Input(Bool())
 }
 
 // LoadForwardQueryIO used in load pipeline
@@ -213,7 +241,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
-  val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
+  val dataInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
+  val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
 }
 
 // Query load queue for ld-ld violation
@@ -225,15 +254,23 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // If it happens, a replay from rs is needed.
 
 class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+  val index = UInt()
+  val allocated = Bool()
+  val datavalid = Bool()
+  val miss = Bool()
+  val mask = UInt(8.W)
   val paddr = UInt(PAddrBits.W)
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
-  val have_violation = Bool()
+  val index = UInt()
+  val canAccept = Bool()
+  val allocated = Bool()
+  val replayFromFetch = Bool()
 }
 
 class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
-  val req = Decoupled(new LoadViolationQueryReq)
+  val req = Valid(new LoadViolationQueryReq)
   val resp = Flipped(Valid(new LoadViolationQueryResp))
 }
 

@@ -130,8 +130,11 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  LoadQueueNWriteBanks: Int = 8,
+  LoadQueueFlagSize: Int = 80,
+  LoadQueueRARSize: Int = 48,
+  LoadQueueRAWSize: Int = 32, // LoadQueueRAWSize must be power of 2
+  LoadQueueReplaySize: Int = 50, // LoadQueueReplaySize > LoadQueueFlagSize - Load_RS size
+  LoadQueueNWriteBanks: Int = 2,
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8,
   VlsQueueSize: Int = 8,
@@ -199,6 +202,19 @@ case class XSCoreParameters
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
+    normalNSets = 64,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 16,
+    normalAsVictim = true,
+    outReplace = false,
+    partialStaticPMP = true,
+    outsideRecvFlush = true,
+    saveLevel = true
+  ),
+  pftlbParameters: TLBParameters = TLBParameters(
+    name = "pftlb",
     normalNSets = 64,
     normalNWays = 1,
     normalAssociative = "sa",
@@ -380,7 +396,10 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueFlagSize = coreParams.LoadQueueFlagSize
+  val LoadQueueRARSize = coreParams.LoadQueueRARSize
+  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
@@ -415,6 +434,7 @@ trait HasXSParameter {
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
+  val pftlbParams = coreParams.pftlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters

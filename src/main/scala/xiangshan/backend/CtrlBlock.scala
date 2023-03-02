@@ -211,8 +211,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
     val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Input(Bool()))
     val enqLsq = Flipped(new LsqEnqIO)
-    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val lqCancelCnt = Input(UInt(log2Up(LoadQueueFlagSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
@@ -518,7 +519,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val lsqCtrl = Module(new LsqEnqCtrl)
       lsqCtrl.io.redirect <> redirectForExu
       lsqCtrl.io.enq <> dp2.enqLsq.get
-      lsqCtrl.io.lcommit := rob.io.lsq.lcommit
+      lsqCtrl.io.lcommit := io.lqDeq
       lsqCtrl.io.scommit := io.sqDeq
       lsqCtrl.io.lqCancelCnt := io.lqCancelCnt
       lsqCtrl.io.sqCancelCnt := io.sqCancelCnt
