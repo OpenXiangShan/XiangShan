@@ -35,7 +35,6 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   val uop = io.in.bits.uop
   val ctrl = uop.ctrl
   val vtype = ctrl.vconfig.vtype
-  val v0 = ~0.U(8.W) // TODO
 
   // TODO: mv VecImmExtractor from exe stage to read rf stage(or forward stage).
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
@@ -44,7 +43,9 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   val _src2 = io.in.bits.src(1)
   val src1 = Mux(VipuType.needReverse(ctrl.fuOpType), _src2, _src1)
   val src2 = Mux(VipuType.needReverse(ctrl.fuOpType), _src1, _src2)
-  val carryIn = Mux(ctrl.fuOpType === VipuType.madc0, 0.U(8.W), v0)
+  val src4 = io.in.bits.src(3)
+  val mask = src4(7,0) // TODO 
+  val carryIn = Mux(ctrl.fuOpType === VipuType.madc0, 0.U(8.W), mask)
 
   val AdderWidth = XLEN
   val NumAdder = VLEN / XLEN

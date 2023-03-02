@@ -142,7 +142,7 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
 
 class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
   val in = Flipped(DecoupledIO(Output(new Bundle {
-    val src = Vec(3, Input(UInt(VLEN.W)))
+    val src = Vec(4, Input(UInt(VLEN.W)))
     val srcType = Vec(4, SrcType())
 
     val round_mode = UInt(3.W)

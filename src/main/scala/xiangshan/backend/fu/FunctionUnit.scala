@@ -87,7 +87,7 @@ class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
 }
 
 class FunctionUnitInput(val len: Int)(implicit p: Parameters) extends XSBundle {
-  val src = Vec(3, UInt(len.W))
+  val src = Vec(4, UInt(len.W))
   val uop = new MicroOp
 }
 
