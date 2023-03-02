@@ -45,10 +45,10 @@ trait HasL1CacheParameters extends HasXSParameter
 
   def idxBits = log2Up(cacheParams.nSets)
   def wayBits = log2Up(nWays)
-  def blockOffBits = log2Up(cacheParams.blockBytes)
+  def blockOffBits = log2Up(cacheParams.blockBytes)//6
   def refillOffBits = log2Up(l1BusDataWidth / 8)
 
-  def untagBits = blockOffBits + idxBits
+  def untagBits = blockOffBits + idxBits  //6+8
   // 4K page
   def pgIdxBits = 12
   def pgUntagBits = untagBits min pgIdxBits
@@ -76,9 +76,9 @@ trait HasL1CacheParameters extends HasXSParameter
   def blockWords = blockBytes / wordBytes
   def refillWords = refillBytes / wordBytes
 
-  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
+  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt() //paddr >>12
   def get_tag(addr: UInt) = get_phy_tag(addr)
-  def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
+  def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)//(12,6)
   def get_untag(addr: UInt) = addr(pgUntagBits-1, 0)
   def get_block(addr: UInt) = addr >> blockOffBits
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
