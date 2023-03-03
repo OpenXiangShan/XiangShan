@@ -346,7 +346,7 @@ object VecDecoder extends DecodeConstants {
     VMULH_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMULHSU_VX     -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VMULHU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VMV_S_X        -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+    VMV_S_X        -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F, UopDivType.VEC_MV),
 
     VNMSAC_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VNMSUB_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),

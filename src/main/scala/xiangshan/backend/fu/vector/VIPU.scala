@@ -25,7 +25,7 @@ import utils._
 import utility._
 import yunsuan.vector.VectorIntAdder
 import yunsuan.{VipuType, VectorElementFormat}
-import xiangshan.{SrcType, SelImm}
+import xiangshan.{SrcType, SelImm, UopDivType}
 import xiangshan.backend.fu.FunctionUnit
 import xiangshan.XSCoreParamsKey
 
@@ -39,7 +39,7 @@ class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN)
   // TODO: mv VecImmExtractor from exe stage to read rf stage(or forward stage).
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
 
-  val _src1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, io.in.bits.src(0))
+  val _src1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
   val _src2 = io.in.bits.src(1)
   val src1 = Mux(VipuType.needReverse(ctrl.fuOpType), _src2, _src1)
   val src2 = Mux(VipuType.needReverse(ctrl.fuOpType), _src1, _src2)
