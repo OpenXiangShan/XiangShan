@@ -91,7 +91,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   val datavalid = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // non-mmio data is valid
   val pending = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // inst is an mmio inst
   val writebacked = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B))) // inst writebacked
-  val exception = WireInit(VecInit(uop.map(u => ExceptionNO.selectByFu(u.cf.exceptionVec, lduCfg).asUInt.orR)))
+  val issued = RegInit(VecInit(List.fill(LoadQueueFlagSize)(false.B)))
 
   /**
    * used for debug
@@ -171,11 +171,11 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
   // update ldIssuePtr
   val IssPtrMoveStride = CommitWidth  
   val issLookupVec = VecInit((0 until IssPtrMoveStride).map(issPtrExt + _.U))
-  val issLookup = VecInit(issLookupVec.map(ptr => allocated(ptr.value) && (pending(ptr.value) || exception(ptr.value) || datavalid(ptr.value) && addrvalid(ptr.value)) && ptr =/= enqPtrExt(0)))
+  val issLookup = VecInit(issLookupVec.map(ptr => allocated(ptr.value) && issued(ptr.value) && ptr =/= enqPtrExt(0)))
   val issInSameRedirectCycle = VecInit(issLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val issCountMask = Wire(UInt(IssPtrMoveStride.W))
-  issCountMask := issLookupVec.asUInt & ~issInSameRedirectCycle.asUInt
+  issCountMask := issLookup.asUInt & ~issInSameRedirectCycle.asUInt
   val issCount = PopCount(PriorityEncoderOH(~issCountMask) - 1.U)
   val lastIssCount = RegNext(issCount)
 
@@ -187,7 +187,9 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
     issPtrExtNext := issPtrExt + lastIssCount
   }
   issPtrExt := RegEnable(next = issPtrExtNext, init = 0.U.asTypeOf(new LqPtr), enable = issPtrExtEna)
-  io.ldIssuePtr := issPtrExt
+  io.ldIssuePtr := deqPtrExt 
+
+
 
   /**
    * Enqueue at dispatch
@@ -210,6 +212,7 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
       datavalid(index) := false.B 
       pending(index) := false.B
       writebacked(index) := false.B
+      issued(index) := false.B
 
       debug_mmio(index) := false.B
       debug_paddr(index) := 0.U
@@ -232,11 +235,21 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
     }
   })
 
+  /**
+    * Load issue
+    */
+  (0 until IssPtrMoveStride).map(i => {
+    when (issCount > i.U) {
+      issued((issPtrExt+i.U).value) := false.B
+    }
+  })
+
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
   for (i <- 0 until LoadQueueFlagSize) {
     when (needCancel(i)) {
       allocated(i) := false.B
+      issued(i) := false.B
     }
   }
 
@@ -272,68 +285,74 @@ class LoadQueueFlag(implicit p: Parameters) extends XSModule
     //   flag bits in lq needs to be updated accurately     
     when (io.loadIn(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.loadIn(i).bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
-      val needRepay = io.loadIn(i).bits.replayInfo.needReplay()
+      val needReplay = io.loadIn(i).bits.replayInfo.needReplay()
+      val datavalidVal = 
+          if (EnableFastForward) {
+            !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access 
+            !io.loadIn(i).bits.miss && // dcache miss
+            !io.loadIn(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
+          } else {
+            !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
+            !io.loadIn(i).bits.miss 
+          }
+      issued(loadWbIndex) := io.loadIn(i).bits.mmio || hasExceptions || 
+                            !needReplay && !io.loadIn(i).bits.tlbMiss && datavalidVal
 
+      when (!needReplay) {
       // update control flag
-      addrvalid(loadWbIndex) := !io.loadIn(i).bits.tlbMiss
-      if (EnableFastForward) {
-        datavalid(loadWbIndex) := !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access 
-                                  !io.loadIn(i).bits.miss && // dcache miss
-                                  !io.loadIn(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
-      } else {
-        datavalid(loadWbIndex) := !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
-                                  !io.loadIn(i).bits.miss 
+        addrvalid(loadWbIndex) := !io.loadIn(i).bits.tlbMiss
+        datavalid(loadWbIndex) := datavalidVal
+        pending(loadWbIndex) := io.loadIn(i).bits.mmio 
+        writebacked(loadWbIndex) := !io.loadIn(i).bits.mmio && !hasExceptions
+
+        // 
+        when (io.loadIn(i).bits.lqDataWenDup(1)) {
+          uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest 
+        }
+        when (io.loadIn(i).bits.lqDataWenDup(2)) {
+          uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
+        }
+        when (io.loadIn(i).bits.lqDataWenDup(3)) {
+          uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
+        }
+        when (io.loadIn(i).bits.lqDataWenDup(4)) {
+          uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
+        }
+        when (io.loadIn(i).bits.lqDataWenDup(5)) {
+          vaddrTriggerResultModule.io.wen(i) := true.B
+          vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
+          vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
+        }
+
+        uop(loadWbIndex).debugInfo := io.loadIn(i).bits.replayInfo.debug
+
+        vaddrModule.io.wen(i) := true.B
+        vaddrModule.io.waddr(i) := loadWbIndex
+        vaddrModule.io.wdata(i) := io.loadIn(i).bits.vaddr
+
+        paddrModule.io.wen(i) := true.B 
+        paddrModule.io.waddr(i) := loadWbIndex 
+        paddrModule.io.wdata(i) := io.loadIn(i).bits.paddr
+
+        maskModule.io.wen(i) := true.B 
+        maskModule.io.waddr(i) := loadWbIndex
+        maskModule.io.wdata(i) := io.loadIn(i).bits.mask
+
+        //  Debug info
+        debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio 
+        debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
+
+        XSInfo(io.loadIn(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+          io.loadIn(i).bits.uop.lqIdx.asUInt,
+          io.loadIn(i).bits.uop.cf.pc,
+          io.loadIn(i).bits.vaddr,
+          io.loadIn(i).bits.paddr,
+          io.loadIn(i).bits.mask,
+          io.loadIn(i).bits.forwardData.asUInt,
+          io.loadIn(i).bits.forwardMask.asUInt,
+          io.loadIn(i).bits.mmio
+        )    
       }
-      pending(loadWbIndex) := io.loadIn(i).bits.mmio 
-      writebacked(loadWbIndex) := !io.loadIn(i).bits.mmio && !hasExceptions && !needRepay
-
-      // 
-      when (io.loadIn(i).bits.lqDataWenDup(1)) {
-        uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest 
-      }
-      when (io.loadIn(i).bits.lqDataWenDup(2)) {
-        uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
-      }
-      when (io.loadIn(i).bits.lqDataWenDup(3)) {
-        uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
-      }
-      when (io.loadIn(i).bits.lqDataWenDup(4)) {
-        uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
-      }
-      when (io.loadIn(i).bits.lqDataWenDup(5)) {
-        vaddrTriggerResultModule.io.wen(i) := true.B
-        vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
-        vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
-      }
-
-      uop(loadWbIndex).debugInfo := io.loadIn(i).bits.replayInfo.debug
-
-      vaddrModule.io.wen(i) := true.B 
-      vaddrModule.io.waddr(i) := loadWbIndex
-      vaddrModule.io.wdata(i) := io.loadIn(i).bits.vaddr
-
-      paddrModule.io.wen(i) := true.B 
-      paddrModule.io.waddr(i) := loadWbIndex 
-      paddrModule.io.wdata(i) := io.loadIn(i).bits.paddr
-
-      maskModule.io.wen(i) := true.B 
-      maskModule.io.waddr(i) := loadWbIndex
-      maskModule.io.wdata(i) := io.loadIn(i).bits.mask
-
-      //  Debug info
-      debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio 
-      debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
-
-      XSInfo(io.loadIn(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
-        io.loadIn(i).bits.uop.lqIdx.asUInt,
-        io.loadIn(i).bits.uop.cf.pc,
-        io.loadIn(i).bits.vaddr,
-        io.loadIn(i).bits.paddr,
-        io.loadIn(i).bits.mask,
-        io.loadIn(i).bits.forwardData.asUInt,
-        io.loadIn(i).bits.forwardMask.asUInt,
-        io.loadIn(i).bits.mmio
-      )    
     }
     // to ROB, indicate that it's mmio instruction.
     io.rob.isMMIO(i) := RegNext(io.loadIn(i).valid && io.loadIn(i).bits.mmio)

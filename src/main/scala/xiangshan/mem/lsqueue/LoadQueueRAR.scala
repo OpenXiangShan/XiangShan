@@ -123,7 +123,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
     ldLdViolation(w) := false.B
-    paddrModule.io.violationMdata(w) := query.req.bits.paddr
+    paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
 
     query.resp.valid := RegNext(query.req.valid)
     query.resp.bits.canAccept := RegNext(Mux(needEnqueue(w), canEnqVec(w), true.B))
@@ -132,7 +132,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     // Generate real violation mask
     val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
     val matchMask = allocatedUInt &
-                    RegNext(paddrModule.io.violationMmask(w).asUInt) &
+                    RegNext(paddrModule.io.releaseViolationMmask(w).asUInt) &
                       RegNext(robIdxMask.asUInt)    
     //  Released
     val ldLdViolationMask = WireInit(matchMask & RegNext(released.asUInt & (datavalid.asUInt | miss.asUInt)))

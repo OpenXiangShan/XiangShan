@@ -260,7 +260,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
   io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss
-  io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.in.valid)
+  io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.out.valid)
 
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq

@@ -200,6 +200,7 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val matchInvalid = Input(Bool()) // resp to load_s2
 
   // mdp strict dependency
+  val addrInvalid = Input(Bool())
   val schedWait = Input(Bool())
 }
 

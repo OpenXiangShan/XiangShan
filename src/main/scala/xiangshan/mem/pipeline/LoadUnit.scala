@@ -561,16 +561,16 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
-  val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception
+  val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception && !s2_tlb_miss
   val s2_cache_miss = io.dcacheResp.bits.miss && !forward_D_or_mshr_valid
   val s2_cache_replay = io.dcacheResp.bits.replay && !forward_D_or_mshr_valid
   val s2_cache_tag_error = io.dcacheResp.bits.tag_error
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
-  val s2_wait_store = io.correctTableQueryResp.strict && 
+  val s2_wait_store = io.correctTableQueryResp.strict &&
                       io.in.bits.isFirstIssue && 
                       io.in.bits.uop.cf.loadWaitBit && 
                       !isAfter(io.in.bits.uop.cf.waitForRobIdx, io.in.bits.uop.robIdx) &&
-                      !s2_is_prefetch
+                      !s2_is_prefetch 
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
 
 
@@ -593,13 +593,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                               !s2_tlb_miss 
 
   // update mdp
-  io.correctTableUpdate.valid := io.in.valid && io.in.bits.isFirstIssue && io.in.bits.uop.cf.loadWaitStrict && !s2_is_prefetch && !s2_tlb_miss
+  io.correctTableUpdate.valid := io.in.valid && io.in.bits.isFirstIssue && io.in.bits.uop.cf.loadWaitStrict && !s2_is_prefetch && !s2_tlb_miss && (!io.lsq.addrInvalid || s2_schedError)
   io.correctTableUpdate.bits.addr := io.in.bits.uop.cf.foldpc
   io.correctTableUpdate.bits.strict := io.lsq.schedWait
-  io.correctTableUpdate.bits.violation := s2_schedError
+  io.correctTableUpdate.bits.violation := false.B
 
   // ld-ld violation require
-  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
+  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_is_prefetch && !s2_exception && !s2_mmio
   io.loadLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.loadLoadViolationQueryReq.bits.mask := s2_mask
   io.loadLoadViolationQueryReq.bits.paddr := s2_paddr
@@ -614,11 +614,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.loadLoadViolationQueryReq.bits.allocated := io.in.bits.rarAllocated
 
   // st-ld violation require
-  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
+  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio && !io.in.bits.replayInfo.cause(LoadReplayCauses.schedError)
   io.storeLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.storeLoadViolationQueryReq.bits.mask := s2_mask
   io.storeLoadViolationQueryReq.bits.paddr := s2_paddr
-  io.storeLoadViolationQueryReq.bits.datavalid := io.loadLoadViolationQueryReq.bits.datavalid
+  io.storeLoadViolationQueryReq.bits.datavalid := io.loadLoadViolationQueryReq.bits.datavalid && !s2_wait_store
   io.storeLoadViolationQueryReq.bits.miss := io.loadLoadViolationQueryReq.bits.miss
   io.storeLoadViolationQueryReq.bits.index := io.in.bits.rawIndex
   io.storeLoadViolationQueryReq.bits.allocated := io.in.bits.rawAllocated
@@ -744,9 +744,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   // * dcache replay
   // * forward data invalid
   // * dcache miss
+  io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
   io.out.bits.replayInfo.cause(LoadReplayCauses.schedError) := (io.in.bits.replayInfo.cause(LoadReplayCauses.schedError) || s2_schedError) && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.waitStore) := s2_wait_store && !s2_is_prefetch
-  io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
   io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss && !s2_mmio 
   if (EnableFastForward) {
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || fullForward)
@@ -982,12 +982,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.lsq.dataInvalid <> io.lsq.forward.dataInvalid
   load_s2.io.lsq.matchInvalid <> io.lsq.forward.matchInvalid
   load_s2.io.lsq.schedWait <> io.lsq.forward.schedWait
+  load_s2.io.lsq.addrInvalid <> io.lsq.forward.addrInvalid
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.sbuffer.forwardMaskFast <> io.sbuffer.forwardMaskFast // should not be used in load_s2
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.sbuffer.schedWait := DontCare // useless 
+  load_s2.io.sbuffer.addrInvalid := DontCare
   load_s2.io.dataInvalidSqIdx <> io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
   load_s2.io.addrInvalidSqIdx <> io.lsq.forward.addrInvalidSqIdx // provide addrInvalidSqIdx to make wakeup faster
   load_s2.io.csrCtrl <> io.csrCtrl
@@ -1046,7 +1048,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Load queue will be updated at s2 for both hit/miss int/fp load
   val s3_loadOutBits = RegEnable(load_s2.io.out.bits, s2_loadOutValid)
   val s3_loadOutValid = RegNext(s2_loadOutValid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.lsq.loadIn.valid := s3_loadOutValid 
+  io.lsq.loadIn.valid := s3_loadOutValid
   io.lsq.loadIn.bits := s3_loadOutBits
 
   // DANGEROUS: Don't change sequence here
@@ -1103,10 +1105,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_replayInst = s3_forwardFail || s3_ldld_replayFromFetch
   val s3_replayCause = Wire(Vec(LoadReplayCauses.allCauses, Bool()))
   //  FIXME: too ulgly
-  s3_replayCause(LoadReplayCauses.rejectEnq   ) := !io.lsq.loadIn.bits.canAccept && !s3_isPrefetch
-  s3_replayCause(LoadReplayCauses.schedError  ) := (s3_replayInfo.schedError || s3_schedError) && !s3_isPrefetch
-  s3_replayCause(LoadReplayCauses.waitStore   ) := s3_replayInfo.waitStore && !s3_isPrefetch
   s3_replayCause(LoadReplayCauses.tlbMiss     ) := s3_replayInfo.tlbMiss
+  s3_replayCause(LoadReplayCauses.waitStore   ) := s3_replayInfo.waitStore && !s3_isPrefetch
+  s3_replayCause(LoadReplayCauses.schedError  ) := (s3_replayInfo.schedError || s3_schedError) && !s3_isPrefetch
+  s3_replayCause(LoadReplayCauses.rejectEnq   ) := !io.lsq.loadIn.bits.canAccept && !s3_isPrefetch
   s3_replayCause(LoadReplayCauses.bankConflict) := s3_replayInfo.bankConflict
   s3_replayCause(LoadReplayCauses.forwardFail ) := s3_replayInfo.forwardFail && !s3_ldld_replayFromFetch
   s3_replayCause(LoadReplayCauses.dcacheReplay) := s3_replayInfo.dcacheReplay

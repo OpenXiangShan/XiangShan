@@ -234,7 +234,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   require(IssuePtrMoveStride >= 2)
 
   val addrReadyLookupVec = (0 until IssuePtrMoveStride).map(addrReadyPtrExt + _.U)
-  val addrReadyLookup = addrReadyLookupVec.map(ptr => allocated(ptr.value) && addrvalid(ptr.value) && ptr =/= enqPtrExt(0))
+  val addrReadyLookup = addrReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || addrvalid(ptr.value)) && ptr =/= enqPtrExt(0))
   val nextAddrReadyPtr = addrReadyPtrExt + PriorityEncoder(VecInit(addrReadyLookup.map(!_) :+ true.B))
   addrReadyPtrExt := nextAddrReadyPtr
 
@@ -251,7 +251,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
-  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) && datavalid(ptr.value) && ptr =/= enqPtrExt(0))
+  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value)) && ptr =/= enqPtrExt(0))
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
@@ -480,12 +480,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // check whether false dependency
     io.forward(i).schedWait := (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) & RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt) & 
       robMatchVec.asUInt
     ) =/= 0.U
-
+    io.forward(i).addrInvalid := (
+      RegNext(needForward) & RegNext(addrValidVec.asUInt) & robMatchVec.asUInt
+    ) === 0.U
   }
 
   /**

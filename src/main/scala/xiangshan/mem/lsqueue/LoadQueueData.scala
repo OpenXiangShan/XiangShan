@@ -42,6 +42,9 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
     // refill cam: hit if addr is in the same cacheline
     val releaseMdata = Input(Vec(numCamPort, gen)) 
     val releaseMmask = Output(Vec(numCamPort, Vec(numEntries, Bool())))  // cam result mask
+    // release violation cam: hit if addr is in the same cacheline
+    val releaseViolationMdata = Input(Vec(numCamPort, gen))
+    val releaseViolationMmask = Output(Vec(numCamPort, Vec(numEntries, Bool()))) // cam result mask result
   })
 
   require(isPow2(numWBank), "write bank must be a power of two!")
@@ -124,13 +127,23 @@ class LqPAddrModule[ T <: UInt](
   with HasDCacheParameters
 {
   // content addressed match
+  // word aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+    }
+  }
+
+  // content addressed match
+  // cacheline aligned
+  for (i <- 0 until numCamPort) {
+    for (j <- 0 until numEntries) {
+      io.releaseViolationMmask(i)(j) := io.releaseViolationMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
     }
   }
  
-    // content addressed match
+  // content addressed match
+  // cacheline aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
       io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
@@ -152,7 +165,7 @@ class LqVAddrModule[T <: UInt](
   // content addressed match
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, 0) === data(j)(VAddrBits-1, 0)
+      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, 3) === data(j)(VAddrBits-1, 3)
     }
   }
  
@@ -179,6 +192,14 @@ class LqMaskModule[T <: UInt](
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
       io.violationMmask(i)(j) := (io.violationMdata(i) & data(j)).orR
+    }
+  }
+
+  // content addressed match
+  // cacheline aligned
+  for (i <- 0 until numCamPort) {
+    for (j <- 0 until numEntries) {
+      io.releaseViolationMmask(i)(j) := (io.releaseViolationMdata(i) & data(j)).orR
     }
   }
 

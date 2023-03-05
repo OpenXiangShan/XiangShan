@@ -130,9 +130,9 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   LoadQueueFlagSize: Int = 80,
-  LoadQueueRARSize: Int = 48,
-  LoadQueueRAWSize: Int = 32, // LoadQueueRAWSize must be power of 2
-  LoadQueueReplaySize: Int = 50, // LoadQueueReplaySize > LoadQueueFlagSize - Load_RS size
+  LoadQueueRARSize: Int = 80,
+  LoadQueueRAWSize: Int = 128, // LoadQueueRAWSize must be power of 2
+  LoadQueueReplaySize: Int = 80, // LoadQueueReplaySize > LoadQueueFlagSize - Load_RS size
   LoadQueueNWriteBanks: Int = 2,
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8,
