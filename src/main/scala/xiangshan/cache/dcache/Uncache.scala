@@ -252,7 +252,18 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     entry.io.resp.ready := false.B
     when (i.U === deqPtr.value) {
-      io.lsq.resp <> entry.io.resp
+      // io.lsq.resp <> entry.io.resp
+      io.lsq.resp.valid := entry.io.resp.valid
+      io.lsq.resp.bits.data := entry.io.resp.bits.data
+      io.lsq.resp.bits.data_delayed := DontCare
+      io.lsq.resp.bits.id := entry.io.resp.bits.id
+      io.lsq.resp.bits.miss := entry.io.resp.bits.miss
+      io.lsq.resp.bits.replay := entry.io.resp.bits.replay
+      io.lsq.resp.bits.tag_error := entry.io.resp.bits.tag_error
+      io.lsq.resp.bits.error := entry.io.resp.bits.error
+      io.lsq.resp.bits.replayCarry := entry.io.resp.bits.replayCarry
+      io.lsq.resp.bits.mshr_id := entry.io.resp.bits.mshr_id
+      entry.io.resp.ready := io.lsq.resp.ready
     }
 
   }

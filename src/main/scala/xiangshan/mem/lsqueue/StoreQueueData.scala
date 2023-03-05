@@ -42,6 +42,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     val wdata = Input(Vec(numWrite, UInt(dataWidth.W))) // wdata: store addr
     val wlineflag = Input(Vec(numWrite, Bool())) // wdata: line op flag
     // forward addr cam
+    val forwardLine = Input(Vec(numForward, Bool()))
     val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W))) // addr
     val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool()))) // cam result mask
     // debug
@@ -74,7 +75,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
       val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
      //val hit128bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheVWordOffset) === data(j)(DCacheLineOffset-1, DCacheVWordOffset)
       val hit64bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
-      io.forwardMmask(i)(j) := linehit && (hit64bit || lineflag(j))//TODO:when have 128 control logic,need modify this
+      io.forwardMmask(i)(j) := Mux(io.forwardLine(i), linehit, linehit && (hit64bit || lineflag(j))) //TODO:when have 128 control logic,need modify this
     }
   }
 

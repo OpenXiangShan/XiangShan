@@ -104,11 +104,13 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.data_write.bits.way_en := io.req_dup_for_data_w(0).bits.way_en
   io.data_write.bits.wmask := refill_w_req.wmask
   io.data_write.bits.data := refill_w_req.data
+  io.data_write.bits.rlineflag := DontCare
 
   io.data_write_dup.zipWithIndex.foreach { case (w, bank) =>
     w.valid := io.req_dup_for_data_w(bank).valid
     w.bits.addr := io.req_dup_for_data_w(bank).bits.paddrWithVirtualAlias
     w.bits.way_en := io.req_dup_for_data_w(bank).bits.way_en
+    w.bits.rlineflag := DontCare
   }
 
   io.meta_write.valid := io.req_dup_for_meta_w.valid

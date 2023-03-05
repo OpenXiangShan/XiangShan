@@ -409,8 +409,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataModule.io.needForward(i)(0) := canForward1 & vaddrModule.io.forwardMmask(i).asUInt & ~tosbuffer.asUInt
     dataModule.io.needForward(i)(1) := canForward2 & vaddrModule.io.forwardMmask(i).asUInt & ~tosbuffer.asUInt
 
+    vaddrModule.io.forwardLine(i) := io.forward(i).rlineflag
     vaddrModule.io.forwardMdata(i) := io.forward(i).vaddr
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
+    paddrModule.io.forwardLine(i) := io.forward(i).rlineflag
 
     // vaddr cam result does not equal to paddr cam result
     // replay needed

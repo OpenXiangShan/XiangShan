@@ -189,6 +189,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val sbufferLineForwardMask = Vec(LoadPipelineWidth, Output(Vec(DCacheLineBytes, Bool())))
+    val sbufferLineForwardData = Vec(LoadPipelineWidth, Output(Vec(DCacheLineBytes, UInt(8.W))))
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -747,18 +749,30 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid
     )
+    val cacheline_mask_candidate_reg = RegEnable(
+      VecInit(mask.asUInt), 
+      forward.valid
+    )
     val forward_data_candidate_reg = RegEnable(
       VecInit(data.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid
     )
+    val cacheline_data_candidate_reg = RegEnable(
+      VecInit(data.asUInt),
+      forward.valid 
+    )
 
     val selectedValidMask = Mux1H(valid_tag_match_reg, forward_mask_candidate_reg)
     val selectedValidData = Mux1H(valid_tag_match_reg, forward_data_candidate_reg)
+    val selectedLineValidMask = Mux1H(valid_tag_match_reg, cacheline_mask_candidate_reg)
+    val selectedLineValidData = Mux1H(valid_tag_match_reg, cacheline_data_candidate_reg)
     selectedValidMask.suggestName("selectedValidMask_"+i)
     selectedValidData.suggestName("selectedValidData_"+i)
 
     val selectedInflightMask = Mux1H(inflight_tag_match_reg, forward_mask_candidate_reg)
     val selectedInflightData = Mux1H(inflight_tag_match_reg, forward_data_candidate_reg)
+    val selectedLineInflightMask = Mux1H(inflight_tag_match_reg, cacheline_mask_candidate_reg)
+    val selectedLineInflightData = Mux1H(inflight_tag_match_reg, cacheline_data_candidate_reg)
     selectedInflightMask.suggestName("selectedInflightMask_"+i)
     selectedInflightData.suggestName("selectedInflightData_"+i)
 
@@ -784,8 +798,23 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
       forward.forwardMaskFast(j) := selectedInflightMaskFast(j) || selectedValidMaskFast(j)
     }
+
+    for (j <- 0 until CacheLineBytes) {
+      io.sbufferLineForwardMask(i)(j) := false.B
+      io.sbufferLineForwardData(i)(j) := DontCare
+      when (selectedLineInflightMask(j)) {
+        io.sbufferLineForwardMask(i)(j) := true.B
+        io.sbufferLineForwardData(i)(j) := selectedLineInflightData(8*(j+1)-1, 8*j)
+      }
+      when (selectedLineValidMask(j)) {
+        io.sbufferLineForwardMask(i)(j) := true.B 
+        io.sbufferLineForwardData(i)(j) := selectedLineValidData(8*(j+1)-1, 8*j)
+      }
+    }
+
     forward.schedWait := DontCare
     forward.addrInvalid := DontCare
+
   }
 
   for (i <- 0 until StoreBufferSize) {
