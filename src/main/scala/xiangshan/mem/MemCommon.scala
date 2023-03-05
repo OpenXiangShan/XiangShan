@@ -99,6 +99,10 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val isHWPrefetch = Bool()
   def isSWPrefetch = isPrefetch && !isHWPrefetch
 
+  // Vector instruction
+  val isVec = Bool()
+  val Vecvlflowidx = UInt(5.W)
+
   // For debug usage
   val isFirstIssue = Bool()
 
@@ -140,6 +144,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     forwardData := input.forwardData
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
+    isVec := input.isVec
+    Vecvlflowidx := input.Vecvlflowidx
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
     canAccept := input.canAccept
@@ -183,6 +189,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     forwardData := input.forwardData
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
+    isVec := input.isVec
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
@@ -246,7 +253,7 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 }
 
 // Query load queue for ld-ld violation
-// 
+//
 // Req should be send in load_s1
 // Resp will be generated 1 cycle later
 //
@@ -275,10 +282,10 @@ class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {
-  //  robIdx: Requestor's (a store instruction) rob index for match logic. 
+  //  robIdx: Requestor's (a store instruction) rob index for match logic.
   val robIdx = new RobPtr
 
-  //  paddr: requestor's (a store instruction) physical address for match logic. 
+  //  paddr: requestor's (a store instruction) physical address for match logic.
   val paddr = UInt(PAddrBits.W)
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
@@ -296,15 +303,15 @@ class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
 class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   // old dcache: optimize data sram read fanout
   // val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
-  // val bank_oh = UInt(DCacheBanks.W)  
-  
+  // val bank_oh = UInt(DCacheBanks.W)
+
   // new dcache
   val respDcacheData = UInt(VLEN.W)
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(4.W) // for data selection
-  
+
   // forward tilelink D channel
   val forward_D = Input(Bool())
   val forwardData_D = Input(Vec(VLEN/8, UInt(8.W)))
@@ -314,7 +321,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   val forwardData_mshr = Input(Vec(VLEN/8, UInt(8.W)))
 
   val forward_result_valid = Input(Bool())
-  
+
   def dcacheData(): UInt = {
     // old dcache
     // val dcache_data = Mux1H(bank_oh, bankedDcacheData)

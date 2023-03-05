@@ -77,15 +77,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val rsfeedback = Vec(exuParameters.StuCnt, new MemRSFeedbackIO)
     val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
-    val int2vlsu = Flipped(new Int2VLSUIO)
-    val vec2vlsu = Flipped(new Vec2VLSUIO)
+    val VecloadRegIn = Vec(2, Flipped(Decoupled(new VecOperand())))
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
+    val Vecwriteback = DecoupledIO(new ExuOutput)
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
-    val vlsu2vec = new VLSU2VecIO
-    val vlsu2int = new VLSU2IntIO
-    val vlsu2ctrl = new VLSU2CtrlIO
     // prefetch to l1 req
     val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
@@ -225,9 +222,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     fuzzer.io.req.ready := l1_pf_req.ready
   }
 
+  val vlflowqueue = Module(new VlflowQueue)
+  val vluopqueue= Module(new VluopQueue)
+
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrapper)
-  val vlsq    = Module(new DummyVectorLsq)
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer) // out of date now
@@ -339,8 +338,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.isFirstIssue := true.B
-    // get input form dispatch
+    // get input from dispatch
     loadUnits(i).io.loadIn <> io.issue(i)
+    // vector input from VlFlowQueue
+    loadUnits(i).io.VecloadIn <> vlflowqueue.io.loadPipeOut(i)
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
     // forward
@@ -360,8 +361,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // mdp
     loadUnits(i).io.correctTableQuery <> correctTable.io.issue(i)
-    loadUnits(i).io.correctTableUpdate <> correctTable.io.update(i) 
-    // st-ld violation query 
+    loadUnits(i).io.correctTableUpdate <> correctTable.io.update(i)
+    // st-ld violation query
     for (s <- 0 until StorePipelineWidth) {
       loadUnits(i).io.reExecuteQuery(s) := storeUnits(s).io.reExecuteQuery
     }
@@ -568,11 +569,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // Vector Load/Store Queue
-  vlsq.io.int2vlsu <> io.int2vlsu
-  vlsq.io.vec2vlsu <> io.vec2vlsu
-  vlsq.io.vlsu2vec <> io.vlsu2vec
-  vlsq.io.vlsu2int <> io.vlsu2int
-  vlsq.io.vlsu2ctrl <> io.vlsu2ctrl
+  vlflowqueue.io.loadRegIn <> io.VecloadRegIn
+  vluopqueue.io.loadRegIn <> io.VecloadRegIn
+  vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
+  vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
+  vluopqueue.io.loadWriteback <> io.Vecwriteback
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
