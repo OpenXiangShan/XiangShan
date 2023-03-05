@@ -130,7 +130,7 @@ class LqPAddrModule[ T <: UInt](
   // word aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 4) === data(j)(PAddrBits-1, 4)
     }
   }
 
@@ -165,7 +165,7 @@ class LqVAddrModule[T <: UInt](
   // content addressed match
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, 3) === data(j)(VAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, 4) === data(j)(VAddrBits-1, 4)
     }
   }
  
