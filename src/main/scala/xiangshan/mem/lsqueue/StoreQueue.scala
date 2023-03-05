@@ -481,12 +481,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // check whether false dependency
     io.forward(i).schedWait := (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) & RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt) & 
       robMatchVec.asUInt
     ) =/= 0.U
-
+    io.forward(i).addrInvalid := (
+      RegNext(needForward) & RegNext(addrValidVec.asUInt) & robMatchVec.asUInt
+    ) === 0.U
   }
 
   /**

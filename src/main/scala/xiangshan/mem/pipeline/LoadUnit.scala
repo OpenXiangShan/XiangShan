@@ -49,10 +49,10 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle with HasDCacheP
   val debug = Output(new PerfDebugInfo)
 
   //
-  def rejectEnq     = cause(LoadReplayCauses.rejectEnq)
-  def schedError    = cause(LoadReplayCauses.schedError)
-  def waitStore     = cause(LoadReplayCauses.waitStore)
   def tlbMiss       = cause(LoadReplayCauses.tlbMiss)
+  def waitStore     = cause(LoadReplayCauses.waitStore)
+  def schedError    = cause(LoadReplayCauses.schedError)
+  def rejectEnq     = cause(LoadReplayCauses.rejectEnq)
   def dcacheMiss    = cause(LoadReplayCauses.dcacheMiss)
   def bankConflict  = cause(LoadReplayCauses.bankConflict)
   def dcacheReplay  = cause(LoadReplayCauses.dcacheReplay)
@@ -637,7 +637,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.correctTableUpdate.bits.violation := s2_schedError
 
   // ld-ld violation require
-  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
+  io.loadLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_is_prefetch && !s2_exception && !s2_mmio
   io.loadLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.loadLoadViolationQueryReq.bits.mask := s2_mask
   io.loadLoadViolationQueryReq.bits.paddr := s2_paddr
@@ -645,18 +645,18 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
     io.loadLoadViolationQueryReq.bits.datavalid := !io.out.bits.miss && !io.s2_dcache_require_replay
     io.loadLoadViolationQueryReq.bits.miss := io.out.bits.miss && !io.s2_dcache_require_replay && !io.dataForwarded
   } else {
-    io.loadLoadViolationQueryReq.bits.datavalid := !io.out.bits.miss
+    io.loadLoadViolationQueryReq.bits.datavalid := !io.out.bits.miss 
     io.loadLoadViolationQueryReq.bits.miss := io.out.bits.miss && !io.dataForwarded
   }
   io.loadLoadViolationQueryReq.bits.index := io.in.bits.rarIndex
   io.loadLoadViolationQueryReq.bits.allocated := io.in.bits.rarAllocated
 
   // st-ld violation require
-  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio
+  io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio && !io.in.bits.replayInfo.cause(LoadReplayCauses.schedError)
   io.storeLoadViolationQueryReq.bits.uop := io.in.bits.uop
   io.storeLoadViolationQueryReq.bits.mask := s2_mask
   io.storeLoadViolationQueryReq.bits.paddr := s2_paddr
-  io.storeLoadViolationQueryReq.bits.datavalid := io.loadLoadViolationQueryReq.bits.datavalid
+  io.storeLoadViolationQueryReq.bits.datavalid := io.loadLoadViolationQueryReq.bits.datavalid && !s2_wait_store
   io.storeLoadViolationQueryReq.bits.miss := io.loadLoadViolationQueryReq.bits.miss
   io.storeLoadViolationQueryReq.bits.index := io.in.bits.rawIndex
   io.storeLoadViolationQueryReq.bits.allocated := io.in.bits.rawAllocated
@@ -803,14 +803,14 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   // * dcache replay
   // * forward data invalid
   // * dcache miss
+  io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
   io.out.bits.replayInfo.cause(LoadReplayCauses.schedError) := (io.in.bits.replayInfo.cause(LoadReplayCauses.schedError) || s2_schedError) && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.waitStore) := s2_wait_store && !s2_is_prefetch
-  io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
-  io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss && !s2_mmio
+  io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss && !s2_mmio 
   if (EnableFastForward) {
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || fullForward)
   }else {
-    io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || io.dataForwarded)
+    io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || io.dataForwarded) 
   }
   io.out.bits.replayInfo.cause(LoadReplayCauses.forwardFail) := s2_data_invalid && !s2_is_prefetch
   io.out.bits.replayInfo.canForwardFullData := io.dataForwarded
@@ -1044,12 +1044,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.lsq.dataInvalid <> io.lsq.forward.dataInvalid
   load_s2.io.lsq.matchInvalid <> io.lsq.forward.matchInvalid
   load_s2.io.lsq.schedWait <> io.lsq.forward.schedWait
+  load_s2.io.lsq.addrInvalid <> io.lsq.forward.addrInvalid
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.sbuffer.forwardMaskFast <> io.sbuffer.forwardMaskFast // should not be used in load_s2
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.sbuffer.schedWait := DontCare // useless
+  load_s2.io.sbuffer.addrInvalid := DontCare // useless
   load_s2.io.dataInvalidSqIdx <> io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
   load_s2.io.addrInvalidSqIdx <> io.lsq.forward.addrInvalidSqIdx // provide addrInvalidSqIdx to make wakeup faster
   load_s2.io.csrCtrl <> io.csrCtrl

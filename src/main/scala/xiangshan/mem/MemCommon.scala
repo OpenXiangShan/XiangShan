@@ -234,6 +234,7 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
 
   // mdp strict dependency
   val schedWait = Input(Bool())
+  val addrInvalid = Input(Bool())
 }
 
 // LoadForwardQueryIO used in load pipeline

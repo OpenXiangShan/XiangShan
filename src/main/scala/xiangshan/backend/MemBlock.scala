@@ -230,7 +230,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer) // out of date now
-  io.stIssuePtr := DontCare // lsq.io.issuePtrExt
+  io.stIssuePtr := lsq.io.issuePtrExt
 
   dcache.io.hartId := io.hartId
   lsq.io.hartId := io.hartId

@@ -346,6 +346,7 @@ class CorrectTable(implicit p: Parameters) extends XSModule {
   val CT_WRITE_PORT_NUM = CT_UPDATE_READ_PORT
   val CT_UPDATE_READ_PORT_BASE = 0
   val CT_UPDATE_VIO_PORT = LoadPipelineWidth
+  val CT_MISC_WRITE_PORT = 0
 
   val table = Module(new SyncDataModuleTemplate(
     UInt(2.W),
@@ -384,6 +385,10 @@ class CorrectTable(implicit p: Parameters) extends XSModule {
       } .otherwise {
         resetStepCounter := resetStepCounter + 1.U
       }
+
+      table.io.wen(CT_MISC_WRITE_PORT) := true.B
+      table.io.waddr(CT_MISC_WRITE_PORT) := resetStepCounter
+      table.io.wdata(CT_MISC_WRITE_PORT) := 0.U
     }
   }
   XSPerfAccumulate("ct_reset_timeout", state === s_flush && resetCounter === 0.U)
