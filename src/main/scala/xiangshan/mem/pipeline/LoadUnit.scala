@@ -294,7 +294,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     }
   }.elsewhen(lfsrc_vecloadFirstIssue_select) {
     s0_vaddr := io.vec_in.bits.vaddr
-    s0_mask := 0.U // TODO: Mask of cacheline?
+    s0_mask := Fill(DCacheLineBytes, 1.U(1.W)) // TODO: Mask of cacheline?
     s0_uop := io.vec_in.bits.uop
     s0_isFirstIssue := io.isFirstIssue
     s0_sqIdx := io.vec_in.bits.uop.sqIdx // TODO: Should allocate when dispatch?
@@ -478,7 +478,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   // st-ld violation query
   val s1_schedError = VecInit((0 until StorePipelineWidth).map(w => io.reExecuteQuery(w).valid &&
                           isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) && 
-                          Mux(!io.in.bits.readCacheLine, (s1_paddr_dup_lsu(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s1_mask & io.reExecuteQuery(w).bits.mask).orR),
+                          Mux(!io.in.bits.rlineflag, (s1_paddr_dup_lsu(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s1_mask & io.reExecuteQuery(w).bits.mask).orR),
                           s1_paddr_dup_lsu(PAddrBits-1, DCacheLineOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheLineOffset)) 
                         )).asUInt.orR && !s1_tlb_miss
   //  mdp read
@@ -640,7 +640,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   //  4. Data contains.
   val s2_schedError = VecInit((0 until StorePipelineWidth).map(w => io.reExecuteQuery(w).valid &&
                               isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
-                              Mux(!io.in.bits.readCacheLine, (s2_paddr(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s2_mask & io.reExecuteQuery(w).bits.mask).orR),
+                              Mux(!io.in.bits.rlineflag, (s2_paddr(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s2_mask & io.reExecuteQuery(w).bits.mask).orR),
                               s2_paddr(PAddrBits-1, DCacheLineOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheLineOffset))
                               )).asUInt.orR && !s2_tlb_miss 
 
@@ -764,8 +764,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   // s2_loadDataFromDcache.forwardData_mshr := io.forwardData_mshr
   // s2_loadDataFromDcache.forward_result_valid := io.forward_result_valid
   // io.loadDataFromDcache := RegEnable(s2_loadDataFromDcache, io.in.valid)
-  io.loadDataFromDcache.bankAddr := RegEnable(s2_paddr(DCacheSetOffset-1, DCacheBankOffset + 1), io.in.valid)
-  io.loadDataFromDcache.respDcacheData := io.dcacheResp.bits.cacheline_delayed.asUInt
+  io.loadDataFromDcache.bankAddr := RegEnable(s2_paddr(DCacheSetOffset-1, DCacheBankOffset + log2Up(VLEN/XLEN)), io.in.valid) 
+  io.loadDataFromDcache.respDcacheData := io.dcacheResp.bits.data_delayed.asUInt
   io.loadDataFromDcache.forwardMask := RegEnable(forwardMask, io.in.valid)
   io.loadDataFromDcache.forwardData := RegEnable(forwardData, io.in.valid)
   //io.loadDataFromDcache.forwardMask := RegEnable(LoadforwardMask, io.in.valid)
