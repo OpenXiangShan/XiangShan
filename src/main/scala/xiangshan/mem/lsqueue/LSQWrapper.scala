@@ -19,14 +19,13 @@ package xiangshan.mem
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
 import utility._
+import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbRequestIO}
-import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache._
+import xiangshan.mem._
+import xiangshan.v2backend.Bundles.{DynInst, MemExuOutput}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -47,9 +46,9 @@ class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
 
 class LsqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(exuParameters.LsExuCnt, Input(UInt(2.W)))
-  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(exuParameters.LsExuCnt, Output(new LSIdx))
+  val needAlloc = Vec(backendParams.LsExuCnt, Input(UInt(2.W)))
+  val req = Vec(backendParams.LsExuCnt, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(backendParams.LsExuCnt, Output(new LSIdx))
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
@@ -66,17 +65,17 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val s2_load_data_forwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
     val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput)) // writeback int load
     val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val uncacheOutstanding = Input(Bool())
-    val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
+    val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
     val rob = Flipped(new RobLsqIO)
@@ -287,7 +286,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   }
 
 
-  val maxAllocate = Seq(exuParameters.LduCnt, exuParameters.StuCnt).max
+  val maxAllocate = Seq(backendParams.LduCnt, backendParams.StuCnt).max
   val ldCanAccept = lqCounter >= loadEnqNumber +& maxAllocate.U
   val sqCanAccept = sqCounter >= storeEnqNumber +& maxAllocate.U
   // It is possible that t3_update and enq are true at the same clock cycle.

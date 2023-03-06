@@ -5,13 +5,14 @@ import chisel3._
 import chisel3.util._
 import utility.SelectOne
 import xiangshan.XSModule
+import xiangshan.v2backend.IssueBlockParams
 
-class EnqPolicyIO(implicit p: IssueQueueParams) extends Bundle {
+class EnqPolicyIO(implicit p: IssueBlockParams) extends Bundle {
   val valid = Input(UInt(p.numEntries.W))
   val enqSelOHVec = Vec(p.numEnq, ValidIO(UInt(p.numEntries.W)))
 }
 
-class EnqPolicy(implicit p: Parameters, iqP: IssueQueueParams) extends XSModule {
+class EnqPolicy(implicit p: Parameters, iqP: IssueBlockParams) extends XSModule {
   val io = IO(new EnqPolicyIO)
 
   val emptyVec = io.valid.asBools.map(!_)

@@ -19,10 +19,11 @@ package xiangshan.mem
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
 import utility._
+import utils._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class VlsqPtr(implicit p: Parameters) extends CircularQueuePtr[VlsqPtr](
   p => p(XSCoreParamsKey).VlsQueueSize
@@ -41,7 +42,7 @@ object VlsqPtr {
 // Intblock to VLSU IO
 class Int2VLSUIO(implicit p: Parameters) extends XSBundle {
   // base addr and stride from int block
-  val in = Vec(LoadPipelineWidth, Decoupled(new ExuInput)) // base addr and stride from int block
+  val in = Vec(LoadPipelineWidth, Decoupled(new MemExuInput)) // base addr and stride from int block
   // For now, load RS only support 1 src operand,
   // therefore only VL* unit-stride inst is supported
 }
@@ -61,7 +62,7 @@ class VLSU2VecIO(implicit p: Parameters) extends XSBundle {
 class VLSU2IntIO(implicit p: Parameters) extends XSBundle {
   // commit vector load and store
   // data field in ExuOutput is not used here
-  val out = Vec(VecMemInstWbWidth, Decoupled(new ExuOutput))
+  val out = Vec(VecMemInstWbWidth, Decoupled(new MemExuOutput))
 }
 
 // VLSU to Ctrlblock IO
@@ -112,7 +113,7 @@ class VecMemCtrl(implicit p: Parameters) extends XSBundle {
 }
 
 // Extended micro-op for vector load/store
-class VecMicroOp(implicit p: Parameters) extends MicroOp {
+class VecMicroOp(implicit p: Parameters) extends DynInst {
   val vecmemCtrl = new VecMemCtrl
 }
 
@@ -125,7 +126,7 @@ class VecLoadResult(implicit p: Parameters) extends XSBundle {
 // Vector load store queue enqueue IO
 class VlsqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
+  val needAlloc = Vec(backendParams.LsExuCnt, Input(Bool()))
   val req = Vec(VecMemDispatchWidth, Flipped(ValidIO(new VecMicroOp)))
   val resp = Vec(VecMemDispatchWidth, Output(new VlsqPtr))
 }

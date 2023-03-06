@@ -23,85 +23,85 @@ import xiangshan._
 import utils._
 import utility._
 
-class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle {
-    // select for enqueue
-    val validVec = Input(UInt(params.numEntries.W))
-    val allocate = Vec(params.numEnq, ValidIO(UInt(params.numEntries.W)))
-    // select for issue
-    val request = Input(UInt(params.numEntries.W))
-    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
-    // for load balance usage
-    val balance = if (params.needBalance && params.numDeq == 2) {
-      Some(new Bundle {
-        val tick = Input(Bool())
-        val out = Output(Bool())
-      })
-    } else None
-  })
-
-  val enqPolicy = if (params.numEnq > 2) "oddeven" else if (params.numEnq == 2) "center" else "circ"
-  val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  val allocate = SelectOne(enqPolicy, emptyVec, params.numEnq)
-  for (i <- 0 until params.numEnq) {
-    val sel = allocate.getNthOH(i + 1)
-    io.allocate(i).valid := sel._1
-    io.allocate(i).bits := sel._2.asUInt
-
-    XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
-      p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
-    XSDebug(io.allocate(i).fire, p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
-  }
-
-  val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
-  val request = io.request.asBools
-  val select = SelectOne(deqPolicy, request, params.numDeq)
-  val selected = (0 until params.numDeq).map(i => select.getNthOH(i + 1))
-  for ((sel, i) <- selected.zipWithIndex) {
-    io.grant(i).valid := sel._1
-    io.grant(i).bits := sel._2.asUInt
-
-    XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
-      p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
-    XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
-  }
-
-  if (io.balance.isDefined) {
-    val balance = RegInit(false.B)
-    when (io.balance.get.tick) {
-      balance := !balance
-    }
-    io.balance.get.out := balance
-    for ((sel, i) <- selected.reverse.zipWithIndex) {
-      when (balance) {
-        io.grant(i).valid := sel._1
-        io.grant(i).bits := sel._2.asUInt
-      }
-    }
-  }
-}
-
-class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle {
-    val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
-    val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
-    val canOverride = Vec(params.numDeq, Input(Bool()))
-    val isOverrided = Vec(params.numDeq, Output(Bool()))
-  })
-
-  val oldestMatchVec = VecInit(io.in.map(i => i.valid && (i.bits & io.oldest.bits).asUInt.orR))
-  io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
-    // When the oldest is not matched with io.in(i), we always select the oldest.
-    // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.
-    val oldestMatchIn = if (params.numDeq > 1) {
-      VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
-    } else false.B
-    val isOverrided = canDo && io.oldest.valid && !oldestMatchIn
-    XSPerfAccumulate(s"oldest_override_$i", isOverrided)
-    XSPerfAccumulate(s"oldest_same_as_selected_$i", oldestMatchIn)
-    isOverrided
-  }
-}
+//class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
+//  val io = IO(new Bundle {
+//    // select for enqueue
+//    val validVec = Input(UInt(params.numEntries.W))
+//    val allocate = Vec(params.numEnq, ValidIO(UInt(params.numEntries.W)))
+//    // select for issue
+//    val request = Input(UInt(params.numEntries.W))
+//    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
+//    // for load balance usage
+//    val balance = if (params.needBalance && params.numDeq == 2) {
+//      Some(new Bundle {
+//        val tick = Input(Bool())
+//        val out = Output(Bool())
+//      })
+//    } else None
+//  })
+//
+//  val enqPolicy = if (params.numEnq > 2) "oddeven" else if (params.numEnq == 2) "center" else "circ"
+//  val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
+//  val allocate = SelectOne(enqPolicy, emptyVec, params.numEnq)
+//  for (i <- 0 until params.numEnq) {
+//    val sel = allocate.getNthOH(i + 1)
+//    io.allocate(i).valid := sel._1
+//    io.allocate(i).bits := sel._2.asUInt
+//
+//    XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
+//      p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
+//    XSDebug(io.allocate(i).fire, p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
+//  }
+//
+//  val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
+//  val request = io.request.asBools
+//  val select = SelectOne(deqPolicy, request, params.numDeq)
+//  val selected = (0 until params.numDeq).map(i => select.getNthOH(i + 1))
+//  for ((sel, i) <- selected.zipWithIndex) {
+//    io.grant(i).valid := sel._1
+//    io.grant(i).bits := sel._2.asUInt
+//
+//    XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
+//      p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
+//    XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
+//  }
+//
+//  if (io.balance.isDefined) {
+//    val balance = RegInit(false.B)
+//    when (io.balance.get.tick) {
+//      balance := !balance
+//    }
+//    io.balance.get.out := balance
+//    for ((sel, i) <- selected.reverse.zipWithIndex) {
+//      when (balance) {
+//        io.grant(i).valid := sel._1
+//        io.grant(i).bits := sel._2.asUInt
+//      }
+//    }
+//  }
+//}
+//
+//class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {
+//  val io = IO(new Bundle {
+//    val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
+//    val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
+//    val canOverride = Vec(params.numDeq, Input(Bool()))
+//    val isOverrided = Vec(params.numDeq, Output(Bool()))
+//  })
+//
+//  val oldestMatchVec = VecInit(io.in.map(i => i.valid && (i.bits & io.oldest.bits).asUInt.orR))
+//  io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
+//    // When the oldest is not matched with io.in(i), we always select the oldest.
+//    // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.
+//    val oldestMatchIn = if (params.numDeq > 1) {
+//      VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
+//    } else false.B
+//    val isOverrided = canDo && io.oldest.valid && !oldestMatchIn
+//    XSPerfAccumulate(s"oldest_override_$i", isOverrided)
+//    XSPerfAccumulate(s"oldest_same_as_selected_$i", oldestMatchIn)
+//    isOverrided
+//  }
+//}
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {

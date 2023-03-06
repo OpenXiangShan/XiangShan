@@ -20,18 +20,18 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
-import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
-import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utility.{BinaryArbiter, TLEdgeBuffer}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
-import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
-import top.BusPerfMonitor
-import xiangshan.backend.fu.PMAConst
 import huancun._
 import huancun.debug.TLLogger
+import top.BusPerfMonitor
+import utility.TLEdgeBuffer
+import xiangshan.backend.fu.PMAConst
+import xiangshan.{DebugOptionsKey, XSTileKey}
 
 case object SoCParamsKey extends Field[SoCParameters]
 

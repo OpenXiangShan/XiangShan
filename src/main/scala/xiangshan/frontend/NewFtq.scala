@@ -39,9 +39,10 @@ class FtqDebugBundle extends Bundle {
   val predStage = UInt(2.W)
 }
 
-class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
-  p => p(XSCoreParamsKey).FtqSize
+class FtqPtr(entries: Int) extends CircularQueuePtr[FtqPtr](
+  entries
 ){
+  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).FtqSize)
 }
 
 object FtqPtr {
@@ -197,7 +198,6 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle with HasCircularQue
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {
-  def numRedirectPcRead = exuParameters.JmpCnt + exuParameters.AluCnt + 1
   def isLoadReplay(r: Valid[Redirect]) = r.bits.flushItself()
 }
 

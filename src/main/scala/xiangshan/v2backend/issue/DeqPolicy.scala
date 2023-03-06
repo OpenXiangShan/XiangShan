@@ -5,13 +5,14 @@ import chisel3._
 import chisel3.util._
 import utility.SelectOne
 import xiangshan.XSModule
+import xiangshan.v2backend.IssueBlockParams
 
-class DeqPolicyIO(implicit p: IssueQueueParams) extends Bundle {
+class DeqPolicyIO(implicit p: IssueBlockParams) extends Bundle {
   val request = Input(UInt(p.numEntries.W))
   val deqSelOHVec = Vec(p.numDeq, ValidIO(UInt(p.numEntries.W)))
 }
 
-class DeqPolicy(implicit p: Parameters, iqP: IssueQueueParams) extends XSModule {
+class DeqPolicy(implicit p: Parameters, iqP: IssueBlockParams) extends XSModule {
   val io = IO(new DeqPolicyIO)
 
   private val requestVec = VecInit(io.request.asBools)

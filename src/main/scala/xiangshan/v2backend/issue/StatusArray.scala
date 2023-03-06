@@ -8,12 +8,13 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.SqPtr
 import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
 import xiangshan._
+import xiangshan.v2backend.IssueBlockParams
 
-class StatusEntry(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
-  val srcState = Vec(params.numSrc, SrcState())
+class StatusEntry(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
+  val srcState = Vec(params.numRegSrcMax, SrcState())
 
-  val psrc = Vec(params.numSrc, UInt(params.pregBits.W))
-  val srcType = Vec(params.numSrc, SrcType())
+  val psrc = Vec(params.numRegSrcMax, UInt(params.pregBits.W))
+  val srcType = Vec(params.numRegSrcMax, SrcType())
   val robIdx = new RobPtr
   val ready = Bool()
   val issued = Bool()           // for predict issue
@@ -28,25 +29,25 @@ class StatusEntry(implicit p:Parameters, params: IssueQueueParams) extends Bundl
   }
 }
 
-class StatusArrayEnqBundle(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
+class StatusArrayEnqBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val addrOH = UInt(params.numEntries.W)
   val data = new StatusEntry()
 }
 
-class StatusArrayDeqRespBundle(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
+class StatusArrayDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val addrOH = UInt(params.numEntries.W)
   val success = Bool()
   val respType = RSFeedbackType()   // update credit if needs replay
   val dataInvalidSqIdx = new SqPtr
 }
 
-class StatusArrayDeqBundle(implicit p:Parameters, params: IssueQueueParams) extends Bundle {
+class StatusArrayDeqBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val isFirstIssue = Output(Bool())
   val deqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
   val resp = Flipped(ValidIO(new StatusArrayDeqRespBundle))
 }
 
-class StatusArrayIO(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+class StatusArrayIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   // status
   val valid = Output(UInt(params.numEntries.W))
@@ -55,13 +56,13 @@ class StatusArrayIO(implicit p: Parameters, params: IssueQueueParams) extends XS
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
   // wakeup
-  val wakeup = Vec(params.numAllWakeup, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
+  val wakeup = Vec(params.numAllWakeUp, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregBits))))
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)
   val rsFeedback = Output(Vec(5, Bool()))
 }
 
-class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XSModule {
+class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new StatusArrayIO)
 
   val validVec = RegInit(VecInit(Seq.fill(params.numEntries)(false.B)))
@@ -71,12 +72,13 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   val statusNextVec = Wire(Vec(params.numEntries, new StatusEntry()))
 
   val enqStatusVec = Wire(Vec(params.numEntries, ValidIO(new StatusEntry)))
-  val srcWakeUpVec = Wire(Vec(params.numEntries, Vec(params.numSrc, Bool())))
+  val srcWakeUpVec = Wire(Vec(params.numEntries, Vec(params.numRegSrcMax, Bool())))
   val deqRespVec = Wire(Vec(params.numEntries, ValidIO(new StatusArrayDeqRespBundle)))
   val flushedVec = Wire(Vec(params.numEntries, Bool()))
   val clearVec = Wire(Vec(params.numEntries, Bool()))
   val deqSelVec = Wire(Vec(params.numEntries, Bool()))
 
+  dontTouch(deqRespVec)
   // Reg
   validVec := validNextVec
   statusVec := statusNextVec
@@ -92,7 +94,7 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   validNextVec.zipWithIndex.foreach { case (validNext, i) =>
     when (enqStatusVec(i).valid) {
       validNext := true.B
-    }.elsewhen(clearVec(i)) {
+    }.elsewhen(clearVec(i)) { // include rob flush
       validNext := false.B
     }.otherwise {
       validNext := validVec(i)
@@ -121,7 +123,8 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
 
   srcWakeUpVec.zipWithIndex.foreach { case (wakeups: Vec[Bool], i) =>
     // wakeupVec(i)(j): the ith psrc woken up by the jth bundle
-    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map((bundle: ValidIO[IssueQueueWakeUpBundle]) => bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
+    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map((bundle: ValidIO[IssueQueueWakeUpBundle]) =>
+      bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
     wakeups := wakeupVec.map(VecInit(_).asUInt.orR)
   }
 
@@ -157,10 +160,11 @@ class StatusArray()(implicit p: Parameters, params: IssueQueueParams) extends XS
   io.clear := clearVec.asUInt
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback)
   io.deq.foreach(_.isFirstIssue := Mux1H(deqSelVec, statusVec.map(!_.firstIssue)))
+  dontTouch(io.deq)
 }
 
 object StatusArray {
-  def apply(implicit p: Parameters, iqParams: IssueQueueParams): StatusArray = {
+  def apply(implicit p: Parameters, iqParams: IssueBlockParams): StatusArray = {
     new StatusArray()
   }
 }

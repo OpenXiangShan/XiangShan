@@ -2,16 +2,37 @@ package xiangshan.v2backend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.{Cat, log2Up}
+import chisel3.util.{Cat, ValidIO, log2Up}
 import xiangshan.backend.regfile.Regfile
+import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
 
 class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extends Bundle {
   val addr: UInt = Input(UInt(addrWidth.W))
   val data: UInt = Output(UInt(rfReadDataCfg.dataWidth.W))
 
-  def readInt: Boolean = rfReadDataCfg == IntData
-  def readFp : Boolean = rfReadDataCfg == FpData
-  def readVec: Boolean = rfReadDataCfg == VecData
+  def readInt: Boolean = rfReadDataCfg.isInstanceOf[IntData]
+  def readFp : Boolean = rfReadDataCfg.isInstanceOf[FpData]
+  def readVec: Boolean = rfReadDataCfg.isInstanceOf[VecData]
+}
+
+class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {
+  val wen = Input(Bool())
+  val addr = Input(UInt(addrWidth.W))
+  val data = Input(UInt(rfWriteDataCfg.dataWidth.W))
+
+  def writeInt: Boolean = rfWriteDataCfg.isInstanceOf[IntData]
+  def writeFp : Boolean = rfWriteDataCfg.isInstanceOf[FpData]
+  def writeVec: Boolean = rfWriteDataCfg.isInstanceOf[VecData]
+
+  def toWakeUpBundle: ValidIO[IssueQueueWakeUpBundle] = {
+    val wakeup = Wire(ValidIO(new IssueQueueWakeUpBundle(addrWidth)))
+    wakeup.bits.pdest := this.addr
+    wakeup.bits.rfWen := (if (writeInt) this.wen else false.B)
+    wakeup.bits.fpWen := (if (writeFp) this.wen else false.B)
+    wakeup.bits.vecWen := (if(writeVec) this.wen else false.B)
+    wakeup.valid := this.wen
+    wakeup
+  }
 }
 
 object RegFile {

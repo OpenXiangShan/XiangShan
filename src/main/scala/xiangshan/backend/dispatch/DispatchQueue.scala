@@ -23,6 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.v2backend.Bundles.DynInst
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
@@ -31,12 +32,12 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
     // input: need to allocate new entries (for address computing)
     val needAlloc = Vec(enqnum, Input(Bool()))
     // input: actually do the allocation (for write enable)
-    val req = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
+    val req = Vec(enqnum, Flipped(ValidIO(new DynInst)))
   }
-  val deq = Vec(deqnum, DecoupledIO(new MicroOp))
+  val deq = Vec(deqnum, DecoupledIO(new DynInst))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
-  val deqNext = Vec(deqnum, Output(new MicroOp))  // deqNext >> deq
+  val deqNext = Vec(deqnum, Output(new DynInst))  // deqNext >> deq
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -47,7 +48,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, 2 * deqnum, enqnum))
+  val dataModule = Module(new SyncDataModuleTemplate(new DynInst, size, 2 * deqnum, enqnum))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
@@ -204,22 +205,21 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   /**
    * Part 3: set output valid and data bits
    */
-  val deqData = Reg(Vec(deqnum, new MicroOp))
+  val deqData = Reg(Vec(deqnum, new DynInst))
   // How to pipeline the data read:
   // T: get the required read data
   for (i <- 0 until deqnum) {
     io.deq(i).bits := deqData(i)
     // Some bits have bad timing in Dispatch but will not be used at Dispatch2
     // They will use the slow path from data module
-    io.deq(i).bits.cf := dataModule.io.rdata(i).cf
-    io.deq(i).bits.ctrl.fpu := dataModule.io.rdata(i).ctrl.fpu
+    io.deq(i).bits.fpu := dataModule.io.rdata(i).fpu
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := Mux1H(headPtrOHVec(i), stateEntries) === s_valid && !lastCycleMisprediction
   }
   // T-1: select data from the following (deqnum + 1 + numEnq) sources with priority
   // For data(i): (1) current output (deqnum - i); (2) next-step data (i + 1)
   // For the next-step data(i): (1) enqueue data (enqnum); (2) data from storage (1)
-  val nextStepData = Wire(Vec(2 * deqnum, new MicroOp))
+  val nextStepData = Wire(Vec(2 * deqnum, new DynInst))
   val ptrMatch = new QPtrMatchMatrix(headPtr, tailPtr)
   for (i <- 0 until 2 * deqnum) {
     val enqMatchVec = VecInit(ptrMatch(i))

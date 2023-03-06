@@ -22,6 +22,7 @@ import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, publi
 import chisel3.util._
 import fudian.FDIV
 import utility.MaskExpand
+import xiangshan.v2backend.FuConfig
 
 import scala.collection.mutable
 
@@ -86,18 +87,18 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
 }
 
-class FDivSqrt(implicit p: Parameters) extends FPUSubModule {
+class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
 
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  val kill_r = !io.in.ready && uopReg.robIdx.needFlush(io.redirectIn)
+  val robIdxReg = RegEnable(io.in.bits.robIdx, io.in.fire)
+  val kill_r = !io.in.ready && robIdxReg.needFlush(io.flush)
 
   override val dataModule = Module(new FDivSqrtDataModule)
   connectDataModule
   dataModule.in_valid := io.in.valid
   dataModule.out_ready := io.out.ready
-  dataModule.kill_w := io.in.bits.uop.robIdx.needFlush(io.redirectIn)
+  dataModule.kill_w := io.in.bits.robIdx.needFlush(io.flush)
   dataModule.kill_r := kill_r
   io.in.ready := dataModule.in_ready
   io.out.valid := dataModule.out_valid
-  io.out.bits.uop := uopReg
+  connectCtrlSingal
 }

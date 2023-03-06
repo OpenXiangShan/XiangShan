@@ -19,17 +19,18 @@ package xiangshan
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.exu._
-import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.DCacheParameters
-import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
-import xiangshan.frontend.icache.ICacheParameters
-import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import freechips.rocketchip.diplomacy.AddressSet
-import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import system.SoCParamsKey
+import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.exu._
+import xiangshan.cache.DCacheParameters
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import xiangshan.cache.prefetch._
+import xiangshan.frontend._
+import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.v2backend._
+
 import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -141,21 +142,31 @@ case class XSCoreParameters
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16,
-    IntDqDeqWidth = 4,
-    FpDqDeqWidth = 4,
-    LsDqDeqWidth = 4
+    IntDqDeqWidth = 6,
+    FpDqDeqWidth = 6,
+    LsDqDeqWidth = 6,
   ),
-  exuParameters: ExuParameters = ExuParameters(
-    JmpCnt = 1,
-    AluCnt = 4,
-    MulCnt = 0,
-    MduCnt = 2,
-    FmacCnt = 4,
-    FmiscCnt = 2,
-    FmiscDivSqrtCnt = 0,
-    LduCnt = 2,
-    StuCnt = 2
+  intPreg: PregParams = IntPregParams(
+    numEntries = 160,
+    numRead = 14,
+    numWrite = 8,
   ),
+  vfPreg: VfPregParams = VfPregParams(
+    numEntries = 160,
+    numRead = 14,
+    numWrite = 8,
+  ),
+//  exuParameters: ExuParameters = ExuParameters(
+//    JmpCnt = 1,
+//    AluCnt = 4,
+//    MulCnt = 0,
+//    MduCnt = 2,
+//    FmacCnt = 4,
+//    FmiscCnt = 2,
+//    FmiscDivSqrtCnt = 0,
+//    LduCnt = 2,
+//    StuCnt = 2
+//  ),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -251,17 +262,95 @@ case class XSCoreParameters
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
-  val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
+  def intSchdParams = {
+    implicit val schdType: SchedulerType = IntScheduler()
+    val pregBits = intPreg.addrWidth
+    val numRfRead = intPreg.numRead
+    val numRfWrite = intPreg.numWrite
+    SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 2, 0))),
+        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 3, 0))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0))),
+        ExeUnitParams(Seq(BrhCfg), Seq()),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(I2fCfg), Seq(VecWB(port = 6, Int.MaxValue))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
+    ),
+      numPregs = intPreg.numEntries,
+      numRfReadWrite = Some((numRfRead, numRfWrite)),
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = intPreg.dataCfg.dataWidth,
+      numUopIn = dpParams.IntDqDeqWidth,
+    )
+  }
+  def vfSchdParams = {
+    implicit val schdType: SchedulerType = VfScheduler()
+    val pregBits = vfPreg.addrWidth
+    val numRfRead = vfPreg.numRead
+    val numRfWrite = vfPreg.numWrite
+    SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 1, 0))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 2, 0))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 3, 0))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+    ),
+      numPregs = vfPreg.numEntries,
+      numRfReadWrite = Some((numRfRead, numRfWrite)),
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = vfPreg.dataCfg.dataWidth,
+      numUopIn = dpParams.FpDqDeqWidth,
+    )
+  }
+  def memSchdParams = {
+    implicit val schdType: SchedulerType = MemScheduler()
+    val pregBits = vfPreg.addrWidth max intPreg.addrWidth
+    val rfDataWidth = 64
 
-  val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg)
+    SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(5, 0), VecWB(4, 0))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(5, 0))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StaCfg), WBSeq()),
+        ExeUnitParams(Seq(StaCfg), WBSeq()),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(StdCfg), WBSeq()),
+        ExeUnitParams(Seq(StdCfg), WBSeq()),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+    ),
+      numPregs = 0,
+      numRfReadWrite = None,
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = rfDataWidth,
+      numUopIn = dpParams.LsDqDeqWidth,
+    )
+  }
 
-  val fpExuConfigs =
-    Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
-      Seq.fill(exuParameters.FmiscCnt)(FmiscExeUnitCfg)
-
-  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
+  def backendParams: BackendParams = BackendParams(Map(
+    IntScheduler() -> intSchdParams,
+    VfScheduler() -> vfSchdParams,
+    MemScheduler() -> memSchdParams,
+  ), Seq(
+    intPreg,
+    vfPreg,
+  ))
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -389,12 +478,14 @@ trait HasXSParameter {
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
-  val exuParameters = coreParams.exuParameters
-  val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
-  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
-  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
-  val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
-  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
+
+  def backendParams: BackendParams = coreParams.backendParams
+//  val exuParameters = coreParams.exuParameters
+//  val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
+//  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
+//  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
+//  val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
+//  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
@@ -422,10 +513,10 @@ trait HasXSParameter {
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
-  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
-              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
-              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2
+//  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
+//              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
+//              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
+//              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -456,14 +547,14 @@ trait HasXSParameter {
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
 
-  val loadExuConfigs = coreParams.loadExuConfigs
-  val storeExuConfigs = coreParams.storeExuConfigs
-
-  val intExuConfigs = coreParams.intExuConfigs
-
-  val fpExuConfigs = coreParams.fpExuConfigs
-
-  val exuConfigs = coreParams.exuConfigs
+//  val loadExuConfigs = coreParams.loadExuConfigs
+//  val storeExuConfigs = coreParams.storeExuConfigs
+//
+//  val intExuConfigs = coreParams.intExuConfigs
+//
+//  val fpExuConfigs = coreParams.fpExuConfigs
+//
+//  val exuConfigs = coreParams.exuConfigs
 
   val PCntIncrStep: Int = 6
   val numPCntHc: Int = 25

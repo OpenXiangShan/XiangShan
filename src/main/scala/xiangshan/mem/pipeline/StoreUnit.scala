@@ -25,12 +25,14 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.v2backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.v2backend.{StaCfg}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
 class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val in = Flipped(Decoupled(new ExuInput))
+    val in = Flipped(Decoupled(new MemExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
@@ -39,7 +41,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
 
   // send req to dtlb
   // val saddr = io.in.bits.src(0) + SignExt(io.in.bits.uop.ctrl.imm(11,0), VAddrBits)
-  val imm12 = WireInit(io.in.bits.uop.ctrl.imm(11,0))
+  val imm12 = WireInit(io.in.bits.uop.imm(11,0))
   val saddr_lo = io.in.bits.src(0)(11,0) + Cat(0.U(1.W), imm12)
   val saddr_hi = Mux(saddr_lo(12),
     Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12), io.in.bits.src(0)(VAddrBits-1, 12)+1.U),
@@ -50,10 +52,10 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.cmd := TlbCmd.write
-  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
+  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
-  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlbReq.bits.debug.pc := io.in.bits.uop.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   io.out.bits := DontCare
@@ -65,21 +67,21 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx
-  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.fuOpType(1,0))
   io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
+  io.out.bits.wlineflag := io.in.bits.uop.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
   // exception check
-  val addrAligned = LookupTree(io.in.bits.uop.ctrl.fuOpType(1,0), List(
+  val addrAligned = LookupTree(io.in.bits.uop.fuOpType(1,0), List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (io.out.bits.vaddr(0) === 0.U),   //h
     "b10".U   -> (io.out.bits.vaddr(1,0) === 0.U), //w
     "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
 
-  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+  io.out.bits.uop.exceptionVec(storeAddrMisaligned) := !addrAligned
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -103,14 +105,14 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   })
 
   // mmio cbo decoder
-  val is_mmio_cbo = io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_clean ||
-    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
-    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_inval
+  val is_mmio_cbo = io.in.bits.uop.fuOpType === LSUOpType.cbo_clean ||
+    io.in.bits.uop.fuOpType === LSUOpType.cbo_flush ||
+    io.in.bits.uop.fuOpType === LSUOpType.cbo_inval
 
   val s1_paddr = io.dtlbResp.bits.paddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mmio = is_mmio_cbo
-  val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
+  val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.exceptionVec, StaCfg).asUInt.orR
 
   io.in.ready := true.B
 
@@ -144,8 +146,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.miss := false.B
   io.out.bits.mmio := s1_mmio
   io.out.bits.atomic := s1_mmio
-  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
-  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
+  io.out.bits.uop.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
+  io.out.bits.uop.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
 
   io.lsq.valid := io.in.valid
   io.lsq.bits := io.out.bits
@@ -176,21 +178,21 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     pmp.mmio := io.static_pm.bits
   }
 
-  val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
+  val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.exceptionVec, StaCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || pmp.mmio
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.atomic := io.in.bits.atomic || pmp.atomic
-  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
+  io.out.bits.uop.exceptionVec(storeAccessFault) := io.in.bits.uop.exceptionVec(storeAccessFault) || pmp.st
   io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
-    val stout = DecoupledIO(new ExuOutput) // writeback store
+    val stout = DecoupledIO(new MemExuOutput) // writeback store
   })
 
   io.in.ready := true.B
@@ -198,19 +200,15 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
   io.stout.valid := io.in.valid
   io.stout.bits.uop := io.in.bits.uop
   io.stout.bits.data := DontCare
-  io.stout.bits.redirectValid := false.B
-  io.stout.bits.redirect := DontCare
   io.stout.bits.debug.isMMIO := io.in.bits.mmio
   io.stout.bits.debug.paddr := io.in.bits.paddr
   io.stout.bits.debug.vaddr := io.in.bits.vaddr
   io.stout.bits.debug.isPerfCnt := false.B
-  io.stout.bits.fflags := DontCare
-
 }
 
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val stin = Flipped(Decoupled(new ExuInput))
+    val stin = Flipped(Decoupled(new MemExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
@@ -219,11 +217,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
     val lsq_replenish = Output(new LsPipelineBundle())
-    val stout = DecoupledIO(new ExuOutput) // writeback store
+    val stout = DecoupledIO(new MemExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val storeMaskOut = Valid(new StoreMaskBundle)
     val reExecuteQuery = Valid(new LoadReExecuteQueryIO) 
-    val issue = Valid(new ExuInput)
+    val issue = Valid(new MemExuInput)
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -264,9 +262,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
-      p"$name" + p" pc ${Hexadecimal(pipeline.uop.cf.pc)} " +
+      p"$name" + p" pc ${Hexadecimal(pipeline.uop.pc)} " +
         p"addr ${Hexadecimal(pipeline.vaddr)} -> ${Hexadecimal(pipeline.paddr)} " +
-        p"op ${Binary(pipeline.uop.ctrl.fuOpType)} " +
+        p"op ${Binary(pipeline.uop.fuOpType)} " +
         p"data ${Hexadecimal(pipeline.data)} " +
         p"mask ${Hexadecimal(pipeline.mask)}\n"
     )

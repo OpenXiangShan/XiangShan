@@ -23,10 +23,11 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import difftest._
 import device.RAMHelper
+import xiangshan.v2backend.Bundles.{DynInst, MemExuOutput}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -45,9 +46,9 @@ object SqPtr {
 class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
-  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
-  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(exuParameters.LsExuCnt, Output(new SqPtr))
+  val needAlloc = Vec(backendParams.LsExuCnt, Input(Bool()))
+  val req = Vec(backendParams.LsExuCnt, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(backendParams.LsExuCnt, Output(new SqPtr))
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
@@ -68,11 +69,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
-    val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
+    val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
@@ -89,7 +90,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   println("StoreQueue: size:" + StoreQueueSize)
 
   // data modules
-  val uop = Reg(Vec(StoreQueueSize, new MicroOp))
+  val uop = Reg(Vec(StoreQueueSize, new DynInst))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
   val dataModule = Module(new SQDataModule(
     numEntries = StoreQueueSize,
@@ -284,11 +285,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       // mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
-      uop(stWbIndex).ctrl := io.storeIn(i).bits.uop.ctrl
+      uop(stWbIndex) := io.storeIn(i).bits.uop
       uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
       XSInfo("store addr write to sq idx %d pc 0x%x miss:%d vaddr %x paddr %x mmio %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
-        io.storeIn(i).bits.uop.cf.pc,
+        io.storeIn(i).bits.uop.pc,
         io.storeIn(i).bits.miss,
         io.storeIn(i).bits.vaddr,
         io.storeIn(i).bits.paddr,
@@ -320,9 +321,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when (io.storeDataIn(i).fire()) {
       // send data write req to data module
       dataModule.io.data.waddr(i) := stWbIndex
-      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero,
+      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.fuOpType === LSUOpType.cbo_zero,
         0.U,
-        genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
+        genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.fuOpType(1,0))
       )
       dataModule.io.data.wen(i) := true.B
 
@@ -330,7 +331,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       XSInfo("store data write to sq idx %d pc 0x%x data %x -> %x\n",
         io.storeDataIn(i).bits.uop.sqIdx.value,
-        io.storeDataIn(i).bits.uop.cf.pc,
+        io.storeDataIn(i).bits.uop.pc,
         io.storeDataIn(i).bits.data,
         dataModule.io.data.wdata(i)
       )
@@ -402,7 +403,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
       XSInfo("vaddrMatchFailed: pc %x pmask %x vmask %x\n",
-        RegNext(io.forward(i).uop.cf.pc),
+        RegNext(io.forward(i).uop.pc),
         RegNext(needForward & paddrModule.io.forwardMmask(i).asUInt),
         RegNext(needForward & vaddrModule.io.forwardMmask(i).asUInt)
       );
@@ -487,7 +488,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cbo_mmio_addr = paddrModule.io.rdata(0) >> 2 << 2 // clear lowest 2 bits for op
   val cbo_mmio_op = 0.U //TODO
   val cbo_mmio_data = cbo_mmio_addr | cbo_mmio_op
-  when(RegNext(LSUOpType.isCbo(uop(deqPtr).ctrl.fuOpType))){
+  when(RegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType))){
     io.uncache.req.bits.addr := DontCare // TODO
     io.uncache.req.bits.data := paddrModule.io.rdata(0)
     io.uncache.req.bits.mask := DontCare // TODO
@@ -498,12 +499,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.replayCarry := DontCare
   io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
 
-  when(io.uncache.req.fire()){
+  when(io.uncache.req.fire){
     // mmio store should not be committed until uncache req is sent
     pending(deqPtr) := false.B
 
     XSDebug(
-      p"uncache req: pc ${Hexadecimal(uop(deqPtr).cf.pc)} " +
+      p"uncache req: pc ${Hexadecimal(uop(deqPtr).pc)} " +
       p"addr ${Hexadecimal(io.uncache.req.bits.addr)} " +
       p"data ${Hexadecimal(io.uncache.req.bits.data)} " +
       p"op ${Hexadecimal(io.uncache.req.bits.cmd)} " +
@@ -519,12 +520,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
-  io.mmioStout.bits.redirectValid := false.B
-  io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
-  io.mmioStout.bits.fflags := DontCare
   io.mmioStout.bits.debug.vaddr := DontCare
   // Remove MMIO inst from store queue after MMIO request is being sent
   // That inst will be traced by uncache state machine
@@ -716,7 +714,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   for (i <- 0 until StoreQueueSize) {
     XSDebug(i + ": pc %x va %x pa %x data %x ",
-      uop(i).cf.pc,
+      uop(i).pc,
       debug_vaddr(i),
       debug_paddr(i),
       debug_data(i)

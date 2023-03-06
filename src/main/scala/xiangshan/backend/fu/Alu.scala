@@ -355,33 +355,3 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   io.result := aluRes
 }
-
-class Alu(implicit p: Parameters) extends FUWithRedirect {
-
-  val uop = io.in.bits.uop
-
-  val dataModule = Module(new AluDataModule)
-  val bru = Module(new Branch()(p))
-  val vset = Module(new Vset()(p))
-
-  bru.io.in <> io.in
-  bru.io.in.bits.uop <> io.in.bits.uop
-  bru.io.redirectIn <> io.redirectIn
-  bru.io.out.ready := io.out.ready
-
-  vset.io.in <> io.in
-  vset.io.in.bits.uop <> io.in.bits.uop
-  vset.io.redirectIn <> io.redirectIn
-  vset.io.out.ready := io.out.ready
-
-  dataModule.io.src := io.in.bits.src.take(2)
-  dataModule.io.func := io.in.bits.uop.ctrl.fuOpType
-
-  redirectOutValid := bru.redirectOutValid
-  redirectOut <> bru.redirectOut
-
-  io.in.ready := io.out.ready
-  io.out.valid := io.in.valid
-  io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := Mux(vset.io.out.valid, vset.io.out.bits.data, dataModule.io.result)  
-}

@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.v2backend.Bundles.DynInst
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -339,7 +340,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val redirect = Input(Valid(new Redirect))
     val dispatch = Flipped(new DispatchLFSTIO)
     // when store issued, mark store as invalid
-    val storeIssue = Vec(exuParameters.StuCnt, Flipped(Valid(new ExuInput)))
+    val storeIssue = Vec(backendParams.StuCnt, Flipped(Valid(new DynInst)))
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
@@ -383,11 +384,11 @@ class LFST(implicit p: Parameters) extends XSModule {
   }
 
   // when store is issued, mark it as invalid
-  (0 until exuParameters.StuCnt).map(i => {
+  (0 until backendParams.StuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.cf.storeSetHit && io.storeIssue(i).bits.uop.robIdx.value === robIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
-        validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){
+        validVec(io.storeIssue(i).bits.ssid)(j) := false.B
       }
     })
   })

@@ -19,8 +19,8 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utility.ParallelMux
+import xiangshan._
 
 class VsetModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -63,27 +63,25 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   io.res := Mux(io.func === ALUOpType.vsetvli2 || io.func === ALUOpType.vsetvl2 || io.func === ALUOpType.vsetivli2, vl, vconfig)
 }
 
-class Vset(implicit p: Parameters) extends FUWithRedirect {
-
-  val uop = io.in.bits.uop
-
-  // vset
-
-  val isVset = ALUOpType.isVset(io.in.bits.uop.ctrl.fuOpType)
-  val dataModule = Module(new VsetModule)
-
-  dataModule.io.lsrc0NotZero := uop.ctrl.imm(15) // lsrc(0) Not Zero
-  dataModule.io.ldest := uop.ctrl.ldest
-  dataModule.io.src0 := io.in.bits.src(0)
-  dataModule.io.src1 := io.in.bits.src(1)
-  dataModule.io.func := io.in.bits.uop.ctrl.fuOpType
-  dataModule.io.vconfig := uop.ctrl.vconfig
-
-  redirectOutValid := false.B
-  redirectOut := DontCare
-
-  io.in.ready := io.out.ready
-  io.out.valid := io.in.valid && isVset
-  io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := dataModule.io.res
-}
+//class Vset(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
+//
+//  val uop = io.in.bits
+//
+//  // vset
+//
+//  val isVset = ALUOpType.isVset(io.in.bits.fuOpType)
+//  val dataModule = Module(new VsetModule)
+//
+//  dataModule.io.lsrc0NotZero := uop.imm(15) // lsrc(0) Not Zero
+//  dataModule.io.ldest := uop.ldest
+//  dataModule.io.src0 := io.in.bits.src(0)
+//  dataModule.io.src1 := io.in.bits.src(1)
+//  dataModule.io.func := io.in.bits.fuOpType
+//  dataModule.io.vconfig := uop.vconfig
+//
+//  io.in.ready := io.out.ready
+//  io.out.valid := io.in.valid && isVset
+//  io.out.bits.robIdx <> io.in.bits.robIdx
+//  io.out.bits.pc := io.in.bits.pc
+//  io.out.bits.data := dataModule.io.res
+//}

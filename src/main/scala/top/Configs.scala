@@ -16,23 +16,22 @@
 
 package top
 
+import chipsalliance.rocketchip.config._
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
-import utility._
-import system._
-import chipsalliance.rocketchip.config._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import xiangshan.frontend.icache.ICacheParameters
+import device.{EnableJtag, XSDebugModuleParams}
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
+import system._
+import utility._
+import utils._
+import huancun._
+import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import device.{EnableJtag, XSDebugModuleParams}
-import huancun._
+import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.v2backend.{IntPregParams, VfPregParams}
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -81,16 +80,15 @@ class MinimalConfig(n: Int = 1) extends Config(
           FpDqDeqWidth = 4,
           LsDqDeqWidth = 4
         ),
-        exuParameters = ExuParameters(
-          JmpCnt = 1,
-          AluCnt = 2,
-          MulCnt = 0,
-          MduCnt = 1,
-          FmacCnt = 1,
-          FmiscCnt = 1,
-          FmiscDivSqrtCnt = 0,
-          LduCnt = 2,
-          StuCnt = 2
+        intPreg = IntPregParams(
+          numEntries = 128,
+          numRead = 14,
+          numWrite = 8,
+        ),
+        vfPreg = VfPregParams(
+          numEntries = 128,
+          numRead = 14,
+          numWrite = 8,
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache

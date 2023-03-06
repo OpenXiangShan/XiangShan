@@ -1,24 +1,20 @@
 package xiangshan.v2backend.dispatch
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import freechips.rocketchip.diplomacy.LazyModule
-import top.{ArgParser, BaseConfig, Generator}
-import xiangshan.{XSCoreParameters, XSCoreParamsKey}
-import xiangshan.v2backend.{SchdBlockParams}
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import top.{ArgParser, Generator, XSTop}
 
 
 object Dispatch2IqMain extends App {
   override def main(args: Array[String]): Unit = {
-    val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
-    val config: Parameters = new BaseConfig(1)
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
 
-    implicit val schdBlockParams : SchdBlockParams = SchdBlockParams.dummyIntParams()
-    val d2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(schdBlockParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
+//    val d2iq: Dispatch2Iq = LazyModule(new Dispatch2Iq(schdBlockParams)(config2)))
 
     Generator.execute(
       firrtlOpts,
-      d2iq.module,
+      soc.core_with_l2(0).core.backend.intScheduler.get.dispatch2Iq.module,
       firrtlComplier
     )
   }

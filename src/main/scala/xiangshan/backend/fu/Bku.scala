@@ -23,9 +23,8 @@ import utility.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, ZeroExt}
 import utils.{XSDebug, XSError}
 import xiangshan._
 import xiangshan.backend.fu.util._
-
-
-
+import xiangshan.v2backend.fu.{FuncUnit, HasPipelineReg}
+import xiangshan.v2backend.FuConfig
 
 class CountModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -321,14 +320,14 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(4), hashModule.io.out, blockCipherModule.io.out)
 }
 
-class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
+class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasPipelineReg {
 
   override def latency = 2
 
   val (src1, src2, func) = (
     io.in.bits.src(0),
     io.in.bits.src(1),
-    io.in.bits.uop.ctrl.fuOpType
+    io.in.bits.fuOpType
   )
 
   val countModule = Module(new CountModule)
@@ -356,10 +355,11 @@ class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
 
 
   // CountModule, ClmulModule, MiscModule, and CryptoModule have a latency of 1 cycle
-  val funcReg = uopVec(1).ctrl.fuOpType
+  val funcReg = RegEnable(func, io.in.fire)
   val result = Mux(funcReg(5), cryptoModule.io.out,
                   Mux(funcReg(3), countModule.io.out,
                       Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
 
   io.out.bits.data := RegEnable(result, regEnable(2))
+  connectCtrlSingal
 }

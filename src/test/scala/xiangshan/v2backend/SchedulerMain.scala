@@ -10,7 +10,7 @@ object SchedulerMain extends App {
     val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val config: Parameters = new BaseConfig(1)
 
-    val schdParams = SchdBlockParams.dummyIntParams()
+    val schdParams = SchdBlockParams.dummyIntParams()(config)
     val schd = LazyModule(new Scheduler(schdParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
 
     Generator.execute(

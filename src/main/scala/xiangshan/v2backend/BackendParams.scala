@@ -16,13 +16,149 @@
 
 package xiangshan.v2backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput}
+import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, WriteBackBundle}
+import xiangshan.v2backend.exu._
 import xiangshan.v2backend.issue.IssueQueueParams
 
+abstract class PregParams {
+  val numEntries: Int
+  val numRead: Int
+  val numWrite: Int
+  val dataCfg: DataConfig
+  def addrWidth = log2Up(numEntries)
+}
+
+case class IntPregParams(
+  numEntries: Int,
+  numRead   : Int,
+  numWrite  : Int,
+) extends PregParams {
+  override val dataCfg: DataConfig = IntData()
+}
+
+case class VfPregParams(
+  numEntries: Int,
+  numRead   : Int,
+  numWrite  : Int,
+) extends PregParams {
+  override val dataCfg: DataConfig = VecData()
+}
+
+case class WbArbiterParams(
+  wbCfgs: Seq[WriteBackConfig],
+  pregParams: PregParams,
+) {
+
+  def numIn = wbCfgs.length
+
+  def numOut = pregParams.numWrite
+
+  def dataWidth = pregParams.dataCfg.dataWidth
+
+  def addrWidth = log2Up(pregParams.numEntries)
+
+  def genInput(implicit p: Parameters) = {
+    MixedVec(wbCfgs.map(x => DecoupledIO(new WriteBackBundle(x))))
+  }
+
+  def genOutput(implicit p: Parameters): MixedVec[ValidIO[WriteBackBundle]] = {
+    Output(MixedVec(Seq.tabulate(numOut) {
+      x => ValidIO(new WriteBackBundle(
+        wbCfgs.head.dataCfg match {
+          case IntData() => IntWB(port = x)
+          case FpData() => FpWB(port = x)
+          case VecData() => VecWB(port = x)
+        }
+      ))
+    }))
+  }
+}
+
+object BackendParams {
+  def dummyParams()(implicit p: Parameters): BackendParams = {
+    new BackendParams(Map(
+      IntScheduler() -> SchdBlockParams.dummyIntParams(),
+      VfScheduler() -> SchdBlockParams.dummyVfParams(),
+      MemScheduler() -> SchdBlockParams.dummyMemParams(),
+    ), Seq(
+      IntPregParams(160, 14, 8),
+      VfPregParams(160, 14, 8),
+    ))
+  }
+}
+
+case class BackendParams(
+  schdParams : Map[SchedulerType, SchdBlockParams],
+  pregParams : Seq[PregParams],
+) {
+  def intSchdParams = schdParams.get(IntScheduler())
+  def vfSchdParams = schdParams.get(VfScheduler())
+  def memSchdParams = schdParams.get(MemScheduler())
+  def allSchdParams: Seq[SchdBlockParams] =
+    (Seq(intSchdParams) :+ vfSchdParams :+ memSchdParams)
+    .filter(_.nonEmpty)
+    .map(_.get)
+  def allIssueParams: Seq[IssueBlockParams] =
+    allSchdParams.map(_.issueBlockParams).flatten
+  def allExuParams: Seq[ExeUnitParams] =
+    allIssueParams.map(_.exuBlockParams).flatten
+
+  def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
+  def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
+
+  def AluCnt = allSchdParams.map(_.AluCnt).sum
+  def StuCnt = allSchdParams.map(_.StuCnt).sum
+  def LduCnt = allSchdParams.map(_.LduCnt).sum
+  def LsExuCnt = StuCnt + LduCnt
+  def JmpCnt = allSchdParams.map(_.JmpCnt).sum
+  def BrhCnt = allSchdParams.map(_.BrhCnt).sum
+  def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
+
+  def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
+
+  def numIntWb = intPregParams.numWrite
+  def numVfWb = vfPregParams.numWrite
+  def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
+  def numExu = allSchdParams.map(_.numExu).sum
+
+  def numException = allExuParams.count(_.exceptionOut.nonEmpty)
+
+  def numRedirect = allSchdParams.map(_.numRedirect).sum
+
+  def genIntWriteBackBundle(implicit p: Parameters) = {
+    // Todo: limit write port
+    Seq.tabulate(numIntWb)(x => new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))
+  }
+
+  def genVfWriteBackBundle(implicit p: Parameters) = {
+    // Todo: limit write port
+    Seq.tabulate(numVfWb)(x => new RfWritePortWithConfig(VecData(), intPregParams.addrWidth))
+  }
+
+  def genWriteBackBundles(implicit p: Parameters): Seq[RfWritePortWithConfig] = {
+    genIntWriteBackBundle ++ genVfWriteBackBundle
+  }
+
+  def genWrite2CtrlBundles(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
+    MixedVec(allSchdParams.map(_.genExuOutputValidBundle.flatten).reduce(_ ++ _))
+  }
+
+  def getIntWbArbiterParams: WbArbiterParams = {
+    val intWbCfgs: Seq[WriteBackConfig] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(_.writeInt))
+    WbArbiterParams(intWbCfgs, intPregParams)
+  }
+
+  def getVfWbArbiterParams: WbArbiterParams = {
+    val vfWbCfgs = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVec || x.writeFp))
+    WbArbiterParams(vfWbCfgs, vfPregParams)
+  }
+}
+
 object SchdBlockParams {
-  def dummyIntParams(numDeqOutside: Int = 0): SchdBlockParams = {
+  def dummyIntParams(numDeqOutside: Int = 0)(implicit p: Parameters): SchdBlockParams = {
     implicit val schdType: IntScheduler = IntScheduler()
     val numUopIn = 6
     val numRfRead = 14
@@ -36,7 +172,7 @@ object SchdBlockParams {
         ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg), Seq(IntWB(port = 2, 0), VfWB(port = 7, Int.MaxValue))),
+        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg), Seq(IntWB(port = 2, 0), VecWB(port = 0, Int.MaxValue))),
         ExeUnitParams(Seq(AluCfg, DivCfg), Seq(IntWB(port = 3, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
@@ -54,7 +190,7 @@ object SchdBlockParams {
     params
   }
 
-  def dummyVfParams(numDeqOutside: Int = 0): SchdBlockParams = {
+  def dummyVfParams(numDeqOutside: Int = 0)(implicit p: Parameters): SchdBlockParams = {
     implicit val schdType: SchedulerType = VfScheduler()
     val numUopIn = 6
     val numRfRead = 12
@@ -65,12 +201,12 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VipuCfg), Seq(VfWB(port = 0, 0))),
-        ExeUnitParams(Seq(VipuCfg), Seq(VfWB(port = 0, 0))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VfWB(port = 0, 0))),
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg), Seq(IntWB(port = 5, Int.MaxValue), VfWB(port = 0, 0))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg), Seq(IntWB(port = 5, Int.MaxValue), VecWB(port = 0, 0))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -83,7 +219,7 @@ object SchdBlockParams {
     params
   }
 
-  def dummyMemParams(): SchdBlockParams = {
+  def dummyMemParams()(implicit p: Parameters): SchdBlockParams = {
     implicit val schdType: SchedulerType = MemScheduler()
     val numUopIn = 6
     val numPregs = 160
@@ -92,8 +228,8 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VfWB(6, 0))),
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(7, 0), VfWB(7, 0))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(6, 0))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(7, 0), VecWB(7, 0))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(StaCfg), WBSeq()),
@@ -137,7 +273,7 @@ case class SchdBlockParams(
 
   def FmacCnt     :Int = issueBlockParams.map(_.FmacCnt).sum
   def FmiscCnt    :Int = issueBlockParams.map(_.FmiscCnt).sum
-  def fDivSqrtCnt :Int = issueBlockParams.map(_.fDivSqrtCnt).sum
+  def FDivSqrtCnt :Int = issueBlockParams.map(_.fDivSqrtCnt).sum
 
   def LduCnt      :Int = issueBlockParams.map(_.LduCnt).sum
   def StuCnt      :Int = issueBlockParams.map(_.StuCnt).sum
@@ -148,24 +284,56 @@ case class SchdBlockParams(
   def VlduCnt     :Int = issueBlockParams.map(_.VlduCnt).sum
   def VstuCnt     :Int = issueBlockParams.map(_.VstuCnt).sum
 
+  def numExu      : Int = issueBlockParams.map(_.exuBlockParams.count(!_.hasStdFu)).sum
+
+  def hasCSR = CsrCnt > 0
+  def hasFence = FenceCnt > 0
+
   def numWriteIntRf: Int = issueBlockParams.map(_.numWriteIntRf).sum
   def numWriteFpRf : Int = issueBlockParams.map(_.numWriteFpRf ).sum
   def numWriteVecRf: Int = issueBlockParams.map(_.numWriteVecRf).sum
+  def numWriteVfRf : Int = issueBlockParams.map(_.numWriteVfRf ).sum
+  def numNoDataWB  : Int = issueBlockParams.map(_.numNoDataWB).sum
+
+  def numPcReadPort = {
+    val bjIssueQueues = issueBlockParams.filter(x => (x.JmpCnt + x.BrhCnt + x.FenceCnt) > 0)
+    bjIssueQueues.map(x => x.numEnq).sum
+  }
+  def needSrcFrm: Boolean = issueBlockParams.map(_.needSrcFrm).reduce(_ || _)
+
+  def numRedirect: Int = issueBlockParams.map(_.numRedirect).sum
 
   def pregIdxWidth: Int = log2Up(numPregs)
 
   def numWakeupFromWB: Int = schdType match {
-    case IntScheduler() | VfScheduler() => numRfWrite
-    case MemScheduler() => 0 // Todo
+    case IntScheduler() | VfScheduler() => 8
+    case MemScheduler() => 16 // Todo
     case _ => 0
   }
 
   def numTotalIntRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).sum).sum
-  def numTotalIntRfWrite: Int = issueBlockParams.map(_.exuBlockParams.length).sum
+//  def numTotalVfRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.).sum).sum
 
   // Todo: 14R8W
   def numRfRead : Int = numTotalIntRfRead
-  def numRfWrite: Int = numTotalIntRfWrite
+  def numRfWrite: Int = numWriteIntRf
+
+  def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
+  }
+
+  def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genExuOutputValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuOutput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuOutputValidBundle))
+  }
+
+  // cfgs(issueIdx)(exuIdx)(set of exu's wb)
+  def getWbCfgs: Seq[Seq[Set[WriteBackConfig]]] = {
+    this.issueBlockParams.map(_.getWbCfgs)
+  }
 }
 
 case class IssueBlockParams(
@@ -186,6 +354,7 @@ case class IssueBlockParams(
   // top down
   val schdType       : SchedulerType,
 ) {
+  def numExu        : Int = exuBlockParams.length
   def numIntSrc     : Int = exuBlockParams.map(_.numIntSrc).max
   def numFpSrc      : Int = exuBlockParams.map(_.numFpSrc ).max
   def numVecSrc     : Int = exuBlockParams.map(_.numVecSrc).max
@@ -201,10 +370,15 @@ case class IssueBlockParams(
   def replayInst    : Boolean = exuBlockParams.map(_.replayInst).reduce(_ || _)
   def trigger       : Boolean = exuBlockParams.map(_.trigger).reduce(_ || _)
   def needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
+  def needPc        : Boolean = JmpCnt + BrhCnt + FenceCnt > 0
+  def needSrcFrm    : Boolean = exuBlockParams.map(_.needSrcFrm).reduce(_ || _)
+  def numPcReadPort : Int = (if (needPc) 1 else 0) * numEnq
 
   def numWriteIntRf : Int = exuBlockParams.count(_.writeIntRf)
   def numWriteFpRf  : Int = exuBlockParams.count(_.writeFpRf)
   def numWriteVecRf : Int = exuBlockParams.count(_.writeVecRf)
+  def numWriteVfRf  : Int = exuBlockParams.count(_.writeVfRf)
+  def numNoDataWB   : Int = exuBlockParams.count(_.hasNoDataWB)
 
   def numRegSrcMax  : Int = numIntSrc max numFpSrc max numVecSrc
   def dataBitsMax   : Int = if (numVecSrc > 0) VLEN else XLEN
@@ -225,8 +399,8 @@ case class IssueBlockParams(
   def FmiscCnt    :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmisc)).sum
   def fDivSqrtCnt :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
-  def LduCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.ldu)).sum
-  def StuCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.stu)).sum
+  def LduCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "ldu")).sum
+  def StuCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "sta")).sum
   def MouCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.mou)).sum
 
   def VipuCnt     :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
@@ -234,7 +408,10 @@ case class IssueBlockParams(
   def VlduCnt     :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
   def VstuCnt     :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
 
-  def getWbParams: Seq[Seq[WriteBackConfig]] = exuBlockParams.map(params => params.getWbParamsOuter)
+  def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
+
+  def numAllWakeUp = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
+//  def getWbParams: Seq[Seq[WriteBackConfig]] = exuBlockParams.map(params => params.getWbParamsOuter)
 
   def genIqParams: IssueQueueParams = {
     IssueQueueParams(
@@ -254,35 +431,68 @@ case class IssueBlockParams(
   }
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
+
+  // cfgs(exuIdx)(set of exu's wb)
+  def getWbCfgs: Seq[Set[WriteBackConfig]] = {
+    exuBlockParams.map(exu => exu.wbPortConfigs.toSet)
+  }
+
   def canAccept(fuType: UInt): Bool = {
     Cat(getFuCfgs.map(_.fuType.U === fuType)).orR
   }
+
+  def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
+  }
+
+  def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuOutputBundle)))
+  }
+
+  def genExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
+    MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuOutputBundle)))
+  }
+
+  def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
+    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
+  }
 }
 
-trait WBPortConfig {
-  val port: Int
-  val priority: Int
-}
-
-case class IntWB(
-  override val port    : Int,
-  override val priority: Int,
-) extends WBPortConfig
-
-case class VfWB(
-  override val port    : Int,
-  override val priority: Int,
-) extends WBPortConfig
+//trait WBPortConfig {
+//  val port: Int
+//  val priority: Int
+//}
+//
+//case class AnyWB(
+//  override val port    : Int,
+//) extends WBPortConfig {
+//  override val priority: Int = Int.MaxValue
+//}
+//
+//case class IntWB(
+//  override val port    : Int,
+//  override val priority: Int = Int.MaxValue,
+//) extends WBPortConfig
+//
+//case class FpWB(
+//  override val port    : Int,
+//  override val priority: Int = Int.MaxValue,
+//) extends WBPortConfig
+//
+//case class VfWB(
+//  override val port    : Int,
+//  override val priority: Int = Int.MaxValue,
+//) extends WBPortConfig
 
 object WBSeq {
-  def apply(elems: WBPortConfig*): Seq[WBPortConfig] = {
+  def apply(elems: WriteBackConfig*): Seq[WriteBackConfig] = {
     elems
   }
 }
 
 case class ExeUnitParams(
   fuConfigs: Seq[FuConfig],
-  wbPortConfigs: Seq[WBPortConfig],
+  wbPortConfigs: Seq[WriteBackConfig],
 )(implicit
   val schdType: SchedulerType,
 ) {
@@ -290,21 +500,44 @@ case class ExeUnitParams(
   val numFpSrc      : Int = fuConfigs.map(_.numFpSrc ).max
   val numVecSrc     : Int = fuConfigs.map(_.numVecSrc).max
   val numSrc        : Int = numIntSrc max numFpSrc max numVecSrc
-  val dataBits      : Int = fuConfigs.map(_.dataBits ).max
+  val dataBitsMax   : Int = fuConfigs.map(_.dataBits ).max
   val readIntRf     : Boolean = numIntSrc > 0
   val readFpRf      : Boolean = numFpSrc  > 0
   val readVecRf     : Boolean = numVecSrc > 0
   val writeIntRf    : Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf     : Boolean = fuConfigs.map(_.writeFpRf ).reduce(_ || _)
   val writeVecRf    : Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
+  val writeVfRf     : Boolean = writeFpRf || writeVecRf
   val writeFflags   : Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
+  val hasNoDataWB   : Boolean = fuConfigs.map(_.hasNoDataWB).reduce(_ || _)
   val hasRedirect   : Boolean = fuConfigs.map(_.hasRedirect).reduce(_ || _)
+  val hasPredecode  : Boolean = fuConfigs.map(_.hasPredecode).reduce(_ || _)
   val exceptionOut  : Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
   val hasLoadError  : Boolean = fuConfigs.map(_.hasLoadError).reduce(_ || _)
   val flushPipe     : Boolean = fuConfigs.map(_.flushPipe).reduce(_ ||_)
   val replayInst    : Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
   val trigger       : Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
+  val needPc        : Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
+  val needSrcFrm    : Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
+  val needFPUCtrl   : Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
+  val wbPregIdxWidth = if (wbPortConfigs.nonEmpty) wbPortConfigs.map(_.pregIdxWidth).max else 0
+
+  def hasCSR: Boolean = fuConfigs.map(_.isCsr).reduce(_ || _)
+
+  def hasFence: Boolean = fuConfigs.map(_.isFence).reduce(_ || _)
+
+  def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
+
+  def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
+
+  def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
+
+  def hasStoreFu = fuConfigs.map(_.fuType == FuType.stu).reduce(_ || _)
+
+  def hasStdFu = fuConfigs.map(x => x.fuType == FuType.stu && x.latency.latencyVal.nonEmpty).reduce(_ || _)
+
+  def immType: Set[UInt] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
 
   def getWBSource: SchedulerType = {
     schdType
@@ -324,23 +557,16 @@ case class ExeUnitParams(
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
 
-  def getWbParamsInner: Seq[Seq[WriteBackConfig]] = {
-    this.fuConfigs.map(cfg => {
-      val res = Seq()
-      if (cfg.writeIntRf) res :+ WriteBackConfig(getWBSource, IntWB(-1, 0))
-      if (cfg.writeFpRf)  res :+ WriteBackConfig(getWBSource, VfWB(-1, 0))
-      if (cfg.writeVecRf) res :+ WriteBackConfig(getWBSource, VfWB(-1, 0))
-      res
-    })
+  def getIntWBPort = {
+    wbPortConfigs.collectFirst {
+      case x: IntWB => x
+    }
   }
 
-  def getWbParamsOuter: Seq[WriteBackConfig] = {
-    val res = Seq()
-    if (writeIntRf)
-      res :+ WriteBackConfig(getWBSource, wbPortConfigs.filter(_.isInstanceOf[IntWB]).head)
-    if (writeFpRf || writeVecRf)
-      res :+ WriteBackConfig(getWBSource, wbPortConfigs.filter(_.isInstanceOf[VfWB]).head)
-    res
+  def getFpWBPort = {
+    wbPortConfigs.collectFirst {
+      case x: FpWB => x
+    }
   }
 
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
@@ -352,18 +578,17 @@ case class ExeUnitParams(
     exuSrcsCfgSet
   }
 
-  def genExuInputBundle: ExuInput = {
-    Output(new ExuInput(this))
+  def genExuModule(implicit p: Parameters): ExeUnit = {
+    new ExeUnit(this)
   }
 
-  def genExuOutputBundle: ExuOutput = {
-    Output(new ExuOutput(this))
+  def genExuInputBundle(implicit p: Parameters): ExuInput = {
+    new ExuInput(this)
   }
 
-  def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
-  def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
-  def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
-  def hasStoreFu = fuConfigs.map(_.fuType == FuType.stu).reduce(_ || _)
+  def genExuOutputBundle(implicit p: Parameters): ExuOutput = {
+    new ExuOutput(this)
+  }
 }
 
 

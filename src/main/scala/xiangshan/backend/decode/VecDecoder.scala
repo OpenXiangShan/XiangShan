@@ -1,14 +1,11 @@
 package xiangshan.backend.decode
 
-import chipsalliance.rocketchip.config.Parameters
-import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import freechips.rocketchip.util.uintToBitPat
 import freechips.rocketchip.rocket.Instructions._
-import utils._
-import xiangshan.ExceptionNO.illegalInstr
+import freechips.rocketchip.util.uintToBitPat
 import xiangshan._
+import xiangshan.v2backend.FuType
 import yunsuan.{VfpuType, VipuType}
 
 abstract class VecDecode extends XSDecodeBase {
@@ -23,35 +20,35 @@ abstract class VecDecode extends XSDecodeBase {
   }
 }
 
-case class OPIVV(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
+case class OPIVV(src3: BitPat, fu: Int, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVX(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
+case class OPIVX(src3: BitPat, fu: Int, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat) extends XSDecodeBase {
+case class OPIVI(src3: BitPat, fu: Int, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPMVV(vdRen: Boolean, fu: Int, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
     XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, xWen, F, vWen, mWen, F, F, F, F).generate()
   }
 }
 
-case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPMVX(vdRen: Boolean, fu: Int, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
     XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X,
@@ -59,14 +56,14 @@ case class OPMVX(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: 
   }
 }
 
-case class OPFVV(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPFVV(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVF(src1:BitPat, src3:BitPat, fu: BitPat, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
+case class OPFVF(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()

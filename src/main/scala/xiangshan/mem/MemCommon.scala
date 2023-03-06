@@ -20,13 +20,13 @@ package xiangshan.mem
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
 import utility._
+import utils._
+import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
-import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.v2backend.Bundles.{DynInst, MemExuInput}
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -50,7 +50,8 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
+class LsPipelineBundle(implicit val p: Parameters) extends Bundle with HasXSParameter with HasDCacheParameters{
+  val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
@@ -115,11 +116,11 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   }
 }
 
-class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
+class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
+  val uop = Output(new DynInst)
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  override val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
@@ -164,7 +165,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
 
-class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+class LoadViolationQueryReq(implicit p: Parameters) extends XSBundle { // provide lqIdx
+  val uop = new DynInst
   val paddr = UInt(PAddrBits.W)
 }
 
@@ -205,7 +207,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   val respDcacheData = UInt(XLEN.W)
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
   
   // forward tilelink D channel
@@ -239,7 +241,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 // Load writeback data from load queue (refill)
 class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
   val lqData = UInt(64.W) // load queue has merged data
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
 
   def mergedData(): UInt = {
@@ -249,8 +251,8 @@ class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
 
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
-  val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val staIssue = Vec(backendParams.StuCnt, ValidIO(new MemExuInput))
+  val stdIssue = Vec(backendParams.StuCnt, ValidIO(new MemExuInput))
 }
 
 object AddPipelineReg {

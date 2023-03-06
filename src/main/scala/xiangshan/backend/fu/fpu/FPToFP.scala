@@ -24,6 +24,7 @@ import chisel3._
 import chisel3.util._
 import fudian.{FCMP, FloatPoint}
 import xiangshan._
+import xiangshan.v2backend.{F2fCfg, FuConfig}
 
 class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 
@@ -119,9 +120,9 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
   fflags := RegEnable(mux.exc, regEnables(1))
 }
 
-class FPToFP(implicit p: Parameters) extends FPUPipelineModule {
+class FPToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
 
-  override def latency: Int = f2iCfg.latency.latencyVal.get
+  override def latency: Int = F2fCfg.latency.latencyVal.get
 
   override val dataModule = Module(new FPToFPDataModule(latency))
   connectDataModule

@@ -5,9 +5,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.v2backend.Bundles.{DynInst, ExuInput, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
+import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
-import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, XSBundle}
+import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, SrcState, SrcType, XSBundle}
 
 case class IssueQueueParams(
   val exuParams          : Seq[ExeUnitParams],
@@ -33,25 +33,20 @@ case class IssueQueueParams(
   def hasLoadStore = hasLoadFu || hasStoreFu
   def hasRedirectOut = hasBrhFu || hasJmpFu
   def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
-
-  def genIssueBundle: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(this.exuParams.map(x => DecoupledIO(new IssueQueueIssueBundle(x, pregBits, vaddrBits))))
-  }
-
-  def genExuInputBundle = MixedVec(this.exuParams.map(x => DecoupledIO(new ExuInput(x))))
 }
 
 object DummyIQParams {
-  def apply(): IssueQueueParams = {
-    SchdBlockParams.dummyIntParams().issueBlockParams(0).genIqParams
+  def apply()(implicit p: Parameters): IssueBlockParams = {
+    SchdBlockParams.dummyIntParams().issueBlockParams(0)
   }
 }
 
-class IssueQueue(params: IssueQueueParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   implicit val iqParams = params
 
   lazy val module = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
+    case VfScheduler() => new IssueQueueImp(this)
     case _ => new IssueQueueImp(this)
   }
 }
@@ -62,31 +57,35 @@ class IssueQueueStatusBundle(numEnq: Int) extends Bundle {
   val leftVec = Output(Vec(numEnq + 1, Bool()))
 }
 
-class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueQueueParams) extends StatusArrayDeqRespBundle
+class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends StatusArrayDeqRespBundle
 
-class IssueQueueIO()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
 
   val enq = Vec(params.numEnq, Flipped(DecoupledIO(new DynInst)))
 
-  val deq = params.genIssueBundle
+  val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-  val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle)))
+  val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
   // Todo: wake up bundle
 }
 
-class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: IssueQueueParams) extends LazyModuleImp(outer) with HasXSParameter{
+class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, val params: IssueBlockParams)
+  extends LazyModuleImp(wrapper)
+  with HasXSParameter {
 
-  require(params.exuParams.length <= 2, "IssueQueue has not supported more than 2 deq ports")
-  val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuParams.map(_.fuConfigs)
-  val allDeqFuCfgs  : Seq[FuConfig] = params.exuParams.flatMap(_.fuConfigs)
+  require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
+  val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
+  val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
-  val specialFuCfgs : Seq[Seq[FuConfig]] = params.exuParams.map(_.fuConfigs.filterNot(commonFuCfgs.contains))
-
+  val specialFuCfgs : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs.filterNot(commonFuCfgs.contains))
+  println(s"commonFuCfgs: ${commonFuCfgs.map(_.name)}")
+  println(s"specialFuCfgs: ${specialFuCfgs.map(_.map(_.name))}")
   lazy val io = IO(new IssueQueueIO())
+  dontTouch(io.deq)
 
   // Modules
   val statusArray   = Module(new StatusArray)
@@ -105,8 +104,8 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
   }
   val enqMask: UInt = enqOH.reduce(_ | _)
 
-  val enqImmValidVec = io.enq.map(enq => enq.valid && enq.bits.imm.valid)
-  val enqImmVec = VecInit(io.enq.map(_.bits.imm.bits))
+  val enqImmValidVec = io.enq.map(enq => enq.valid)
+  val enqImmVec = VecInit(io.enq.map(_.bits.imm))
 
   val mainDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
   val mainDeqSelOHVec = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
@@ -128,15 +127,24 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
   val clearVec = VecInit(statusArray.io.clear.asBools)
   val deqFirstIssueVec = VecInit(statusArray.io.deq.map(_.isFirstIssue))
 
+  val wakeupEnqSrcStateBypass = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
+  for (i <- io.enq.indices) {
+    for (j <- io.enq(i).bits.srcType.indices) {
+      wakeupEnqSrcStateBypass(i)(j) := Cat(
+        io.wakeup.map(x => x.valid && x.bits.wakeUp(Seq((io.enq(i).bits.psrc(j), io.enq(i).bits.srcType(j)))).head)
+      ).orR
+    }
+  }
+
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.flush  <> io.flush
     statusArrayIO.wakeup <> io.wakeup
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       enq.valid                 := enqSelValidVec(i)
       enq.bits.addrOH           := enqSelOHVec(i)
-      val numSrcMin = enq.bits.data.srcState.length.min(io.enq(i).bits.srcState.length)
-      for (j <- 0 until numSrcMin) {
-        enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j)
+      val numLSrc = io.enq(i).bits.srcType.size.min(enq.bits.data.srcType.size)
+      for (j <- 0 until numLSrc) {
+        enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j) | wakeupEnqSrcStateBypass(i)(j)
         enq.bits.data.psrc(j)     := io.enq(i).bits.psrc(j)
         enq.bits.data.srcType(j)  := io.enq(i).bits.srcType(j)
       }
@@ -149,7 +157,11 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
     statusArrayIO.deq.zipWithIndex.foreach { case (deq, i) =>
       deq.deqSelOH.valid  := finalDeqSelValidVec(i)
       deq.deqSelOH.bits   := finalDeqSelOHVec(i)
-      deq.resp            := deqRespVec(i)
+      deq.resp.valid      := io.deq(i).ready && io.deq(i).valid // Todo
+      deq.resp.bits.addrOH := io.deq(i).bits.addrOH
+      deq.resp.bits.success := io.deq(i).ready
+      deq.resp.bits.dataInvalidSqIdx := 0.U.asTypeOf(deq.resp.bits.dataInvalidSqIdx)
+      deq.resp.bits.respType := 0.U.asTypeOf(deq.resp.bits.respType)
     }
   }
 
@@ -161,7 +173,7 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
       w.data := enqImmVec(i)
     }
     immArrayIO.read.zipWithIndex.foreach { case (r, i) =>
-      r.addr := Mux(finalDeqSelValidVec(i), finalDeqSelOHVec(i), 0.U)
+      r.addr := finalDeqOH(i)
     }
   }
 
@@ -173,7 +185,7 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
       w.data := io.enq(i).bits
     }
     payloadArrayIO.read.zipWithIndex.foreach { case (r, i) =>
-      r.addr := finalDeqSelOHVec(i)
+      r.addr := finalDeqOH(i)
       payloadArrayRdata(i) := r.data
     }
   }
@@ -190,7 +202,7 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
 
   enqPolicy match { case ep =>
     ep.io.valid     := validVec.asUInt
-    enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid)
+    enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid).zip(enqValidVec).map { case(sel, enqValid) => enqValid && sel}
     enqSelOHVec     := ep.io.enqSelOHVec.map(oh => oh.bits)
   }
 
@@ -202,8 +214,7 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
 
   // if deq port can accept the uop
   protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    Cat(fuTypeRegVec.map(fuType =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR)).asUInt
+    Cat(fuTypeRegVec.map(fuType => Cat(fuCfgs.map(_.fuType.U === fuType)).orR).reverse).asUInt
   }
 
   protected val specialCanAcceptVec: Seq[IndexedSeq[Bool]] = specialFuCfgs.map { fuCfgs: Seq[FuConfig] =>
@@ -236,14 +247,23 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i)
+    deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.fuType   := payloadArrayRdata(i).fuType
     deq.bits.common.fuOpType := payloadArrayRdata(i).fuOpType
-    deq.bits.common.rfWen    := payloadArrayRdata(i).rfWen
-    deq.bits.common.fpWen    := payloadArrayRdata(i).fpWen
-    deq.bits.common.vecWen   := payloadArrayRdata(i).vecWen
+    deq.bits.common.rfWen.foreach(_ := payloadArrayRdata(i).rfWen)
+    deq.bits.common.fpWen.foreach(_ := payloadArrayRdata(i).fpWen)
+    deq.bits.common.vecWen.foreach(_ := payloadArrayRdata(i).vecWen)
+    deq.bits.common.flushPipe.foreach(_ := payloadArrayRdata(i).flushPipe)
+    deq.bits.common.pdest := payloadArrayRdata(i).pdest
+    deq.bits.common.robIdx := payloadArrayRdata(i).robIdx
+    deq.bits.common.imm := immArrayRdataVec(i)
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
       rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
     }
+    deq.bits.srcType.zip(payloadArrayRdata(i).srcType).foreach { case (sink, source) =>
+      sink := source
+    }
+    deq.bits.immType := payloadArrayRdata(i).selImm
   }
 
   // Todo: better counter implementation
@@ -254,23 +274,23 @@ class IssueQueueImp(outer: IssueQueue)(implicit p: Parameters, val params: Issue
   io.status.empty := !validVec.asUInt.orR
   io.status.leftVec(0) := io.status.full
   for (i <- 0 until params.numEnq) {
-    io.status.leftVec(i + 1) := validCnt === (i + 1).U
+    io.status.leftVec(i + 1) := validCnt === (params.numEntries - (i + 1)).U
   }
   io.statusNext.full := validCntNext === params.numEntries.U
   io.statusNext.empty := validCntNext === 0.U // always false now
   io.statusNext.leftVec(0) := io.statusNext.full
   for (i <- 0 until params.numEnq) {
-    io.statusNext.leftVec(i + 1) := validCntNext === (i + 1).U
+    io.statusNext.leftVec(i + 1) := validCntNext === (params.numEntries - (i + 1)).U
   }
-
+  io.enq.foreach(_.ready := !Cat(io.status.leftVec).orR) // Todo: more efficient implementation
 }
 
-class IssueQueueJumpBundle(vaddrBits: Int) extends Bundle {
-  val pc = Input(UInt(vaddrBits.W))
-  val target = Input(UInt(vaddrBits.W))
+class IssueQueueJumpBundle extends Bundle {
+  val pc = UInt(VAddrData().dataWidth.W)
+  val target = UInt(VAddrData().dataWidth.W)
 }
 
-class IssueQueueMemBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
+class IssueQueueMemBundle()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val feedback = Vec(params.numDeq, new MemRSFeedbackIO)
   val checkwait = new Bundle {
     val stIssuePtr = Input(new SqPtr)
@@ -279,44 +299,84 @@ class IssueQueueMemBundle()(implicit p: Parameters, params: IssueQueueParams) ex
   }
 }
 
-class IssueQueueLoadBundle()(implicit p: Parameters, params: IssueQueueParams) extends XSBundle {
-  val fastMatch = UInt(exuParameters.LduCnt.W)
+class IssueQueueLoadBundle()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+  val fastMatch = UInt(backendParams.LduCnt.W)
   val fastImm = UInt(12.W)
 }
 
-class IssueQueueIntIO()(implicit p: Parameters, params: IssueQueueParams) extends IssueQueueIO {
-  val jmp = if (params.hasJmpFu) Some(new IssueQueueJumpBundle(VAddrBits)) else None
+class IssueQueueIntIO()(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO {
+  val enqJmp = if(params.numPcReadPort > 0) Some(Input(Vec(params.numPcReadPort, new IssueQueueJumpBundle))) else None
 }
 
-class IssueQueueIntImp(outer: IssueQueue)(implicit p: Parameters, iqParams: IssueQueueParams)
-  extends IssueQueueImp(outer)
+class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
+  extends IssueQueueImp(wrapper)
 {
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueIntIO).suggestName("io")
+  val pcArray: Option[DataArray[UInt]] = if(params.needPc) Some(Module(
+    new DataArray(UInt(VAddrData().dataWidth.W), params.numDeq, params.numEnq, params.numEntries)
+  )) else None
+  val targetArray: Option[DataArray[UInt]] = if(params.needPc) Some(Module(
+    new DataArray(UInt(VAddrData().dataWidth.W), params.numDeq, params.numEnq, params.numEntries)
+  )) else None
 
-  val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
-  val targetMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
-  if (io.jmp.nonEmpty) {
-    val jmp = io.jmp.get
-    for (i <- 0 until params.numEntries) {
-      when(enqMask(i)) {
-        pcMem(i) := jmp.pc
-        targetMem(i) := jmp.target
-      }
+  if (pcArray.nonEmpty) {
+    val pcArrayIO = pcArray.get.io
+    pcArrayIO.read.zipWithIndex.foreach { case (r, i) =>
+      r.addr := finalDeqSelOHVec(i)
+    }
+    pcArrayIO.write.zipWithIndex.foreach { case (w, i) =>
+      w.en := enqSelValidVec(i)
+      w.addr := enqSelOHVec(i)
+      w.data := io.enqJmp.get(i).pc
     }
   }
 
-  val pcRead = Wire(Vec(params.numDeq, UInt(VAddrBits.W)))
-  val targetRead = Wire(Vec(params.numDeq, UInt(VAddrBits.W)))
-
-  for (i <- 0 until params.numDeq) {
-    pcRead(i) := Mux1H(finalDeqOH(i), pcMem)
-    targetRead(i) := Mux1H(finalDeqOH(i), targetMem)
+  if (targetArray.nonEmpty) {
+    val arrayIO = targetArray.get.io
+    arrayIO.read.zipWithIndex.foreach { case (r, i) =>
+      r.addr := finalDeqSelOHVec(i)
+    }
+    arrayIO.write.zipWithIndex.foreach { case (w, i) =>
+      w.en := enqSelValidVec(i)
+      w.addr := enqSelOHVec(i)
+      w.data := io.enqJmp.get(i).target
+    }
   }
-  io.deq.zipWithIndex.foreach{ case (deq, i) =>
+
+  io.deq.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.jmp.foreach((deqJmp: IssueQueueJumpBundle) => {
-      deqJmp.pc := pcRead(i)
-      deqJmp.target := targetRead(i)
-    }
-  )}
+      deqJmp.pc := pcArray.get.io.read(i).data
+      deqJmp.target := targetArray.get.io.read(i).data
+    })
+    deq.bits.common.preDecode.foreach(_ := payloadArrayRdata(i).preDecodeInfo)
+    deq.bits.common.ftqIdx.foreach(_ := payloadArrayRdata(i).ftqPtr)
+    deq.bits.common.ftqOffset.foreach(_ := payloadArrayRdata(i).ftqOffset)
+    deq.bits.common.predictInfo.foreach(x => {
+      x.target := targetArray.get.io.read(i).data
+      x.taken := payloadArrayRdata(i).pred_taken
+    })
+  }}
 }
+
+class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
+  extends IssueQueueImp(wrapper)
+{
+  private val numPSrc = 5 // Todo: imm
+  private val numLSrc = 3 // Todo: imm
+
+  statusArray.io match { case statusArrayIO: StatusArrayIO =>
+    statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
+      for (j <- 0 until numPSrc) {
+        enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j)
+        enq.bits.data.psrc(j)     := io.enq(i).bits.psrc(j)
+      }
+      for (j <- 0 until numLSrc) {
+        enq.bits.data.srcType(j) := io.enq(i).bits.srcType(j)
+      }
+      enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
+      enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
+    }
+  }
+}
+

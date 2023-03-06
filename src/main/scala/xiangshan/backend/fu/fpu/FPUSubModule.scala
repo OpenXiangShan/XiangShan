@@ -19,8 +19,10 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import utility.DataHoldBypass
+import xiangshan.v2backend.FuConfig
 import xiangshan.{FPUCtrlSignals, XSModule}
-import xiangshan.backend.fu.{FunctionUnit, HasPipelineReg}
+import xiangshan.v2backend.fu.{FuncUnit, HasPipelineReg}
 
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
@@ -45,18 +47,24 @@ abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val fflags = io.out.fflags
 }
 
-abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
+abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasUIntToSIntHelper
 {
-  val rm = IO(Input(UInt(3.W)))
+//  val rm = IO(Input(UInt(3.W)))
   val fflags = IO(Output(UInt(5.W)))
   val dataModule: FPUDataModule
   def connectDataModule = {
-    dataModule.io.in.src <> io.in.bits.src
-    dataModule.io.in.fpCtrl <> io.in.bits.uop.ctrl.fpu
-    dataModule.io.in.rm <> rm
+    for (i <- 0 until dataModule.io.in.src.length) {
+      dataModule.io.in.src(i) := (if (i < io.in.bits.src.length) io.in.bits.src(i) else 0.U)
+    }
+    io.in.bits.fpu.foreach(_ <> dataModule.io.in.fpCtrl)
+    dataModule.io.in.rm <> io.frm.get
     io.out.bits.data := dataModule.io.out.data
     fflags := dataModule.io.out.fflags
+    io.out.bits.fflags.get := fflags
+    io.out.bits.robIdx := RegEnable(io.in.bits.robIdx, io.in.fire)
+    io.out.bits.fpu.foreach(_ := io.in.bits.fpu.get)
+    io.out.bits.pdest := RegEnable(io.in.bits.pdest, io.in.fire)
   }
   def invert_sign(x: UInt, len: Int) = {
     Cat(
@@ -65,6 +73,6 @@ abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
   }
 }
 
-abstract class FPUPipelineModule(implicit p: Parameters)
-  extends FPUSubModule
+abstract class FPUPipelineModule(cfg: FuConfig)(implicit p: Parameters)
+  extends FPUSubModule(cfg)
   with HasPipelineReg

@@ -20,9 +20,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
-import utils._
 import utility._
+import utils._
 import xiangshan._
+import xiangshan.v2backend.Bundles.DecodedInst
+import xiangshan.v2backend.FuType
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {
@@ -471,7 +473,7 @@ class FusionDecodeReplace extends Bundle {
   val lsrc2 = Valid(UInt(6.W))
   val src2Type = Valid(SrcType())
 
-  def update(cs: CtrlSignals): Unit = {
+  def update(cs: DecodedInst): Unit = {
     when (fuType.valid) {
       cs.fuType := fuType.bits
     }
@@ -493,7 +495,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val in = Vec(DecodeWidth, Flipped(ValidIO(UInt(32.W))))
     val inReady = Vec(DecodeWidth - 1, Input(Bool())) // dropRight(1)
     // T1: decode result
-    val dec = Vec(DecodeWidth - 1, Input(new CtrlSignals)) // dropRight(1)
+    val dec = Vec(DecodeWidth - 1, Input(new DecodedInst)) // dropRight(1)
     // T1: whether an instruction fusion is found
     val out = Vec(DecodeWidth - 1, ValidIO(new FusionDecodeReplace)) // dropRight(1)
     val info = Vec(DecodeWidth - 1, new FusionDecodeInfo) // dropRight(1)
@@ -554,7 +556,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     }
     def connectByUIntFunc(
       field: FusionDecodeReplace => Valid[UInt],
-      csField: CtrlSignals => UInt,
+      csField: DecodedInst => UInt,
       replace: Seq[Option[UInt => UInt]]
     ): Unit = {
       field(out.bits).valid := false.B
@@ -574,7 +576,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       }
     }
     connectByInt((x: FusionDecodeReplace) => x.fuType, fusionList.map(_.fuType))
-    connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: CtrlSignals) => x.fuOpType, fusionList.map(_.fuOpType))
+    connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodedInst) => x.fuOpType, fusionList.map(_.fuOpType))
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR

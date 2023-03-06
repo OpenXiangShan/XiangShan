@@ -19,13 +19,14 @@ package xiangshan.backend.decode
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.Instructions
+import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
-import utils._
 import utility._
+import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.v2backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.v2backend.FuType
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -82,7 +83,7 @@ abstract class XSDecodeBase {
 
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
-  fu: BitPat, fuOp: BitPat, selImm: BitPat,
+  fu: Int, fuOp: BitPat, selImm: BitPat,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -93,13 +94,13 @@ case class XSDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, fu, fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, selImm)
+    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, selImm)
   }
 }
 
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
-  fu: BitPat, fuOp: BitPat, selImm: BitPat = SelImm.X,
+  fu: Int, fuOp: BitPat, selImm: BitPat = SelImm.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -193,14 +194,14 @@ object XDecode extends DecodeConstants {
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
     JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , xWen = T),
-    BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.beq   , SelImm.IMM_SB          ),
-    BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bne   , SelImm.IMM_SB          ),
-    BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bge   , SelImm.IMM_SB          ),
-    BGEU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bgeu  , SelImm.IMM_SB          ),
-    BLT     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.blt   , SelImm.IMM_SB          ),
-    BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bltu  , SelImm.IMM_SB          ),
+    BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
+    BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
+    BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
+    BGEU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bgeu  , SelImm.IMM_SB          ),
+    BLT     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.blt   , SelImm.IMM_SB          ),
+    BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bltu  , SelImm.IMM_SB          ),
 
-    // I-type, XSDecodeiate12 holds the CSR register.
+    // I-type, the immediate12 holds the CSR register.
     CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRC   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
@@ -629,9 +630,9 @@ case class Imm_LUI_LOAD() {
     val loadImm = load_imm(Imm_I().len - 1, 0)
     Cat(lui_imm(Imm_U().len - loadImm.getWidth - 1, 0), loadImm)
   }
-  def getLuiImm(uop: MicroOp): UInt = {
+  def getLuiImm(uop: DynInst): UInt = {
     val loadImmLen = Imm_I().len
-    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.ctrl.imm(ImmUnion.maxLen - 1, loadImmLen))
+    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.imm(ImmUnion.maxLen - 1, loadImmLen))
     Imm_U().do_toImm32(imm_u)
   }
 }
@@ -640,13 +641,13 @@ case class Imm_LUI_LOAD() {
  * IO bundle for the Decode unit
  */
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
-  val vconfig = Input(UInt(XLEN.W))
-  val deq = new Bundle {
-    val cf_ctrl = Output(new CfCtrl)
-    val isVset = Output(Bool())
+  val enq = new Bundle {
+    val ctrlFlow = Input(new StaticInst)
   }
-  val deq_isVset = new Bundle{ }
+//  val vconfig = Input(UInt(XLEN.W))
+  val deq = new Bundle {
+    val decodedInsts = Output(new DecodedInst)
+  }
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
@@ -656,10 +657,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
 class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitIO)
 
-  val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
-  val cf_ctrl = Wire(new CfCtrl)
-
-  ctrl_flow := io.enq.ctrl_flow
+  val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
 
   val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
     FpDecode.table ++
@@ -673,58 +671,54 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   require(decode_table.map(_._2.length == 13).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
-  val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
+  val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
   assert(luiTable.length == 1 && luiTable.head == LUI, "Conflicts: LUI is determined by FuType and SelImm in Dispatch")
 
   // output
-  cf_ctrl.cf := ctrl_flow
-  val cs: CtrlSignals = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
-  cs.singleStep := false.B
-  cs.replayInst := false.B
+  val decodedInst: DecodedInst = Wire(new DecodedInst()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
-  cs.fpu := fpDecoder.io.fpCtrl
+  decodedInst.fpu := fpDecoder.io.fpCtrl
 
-  // TODO: vec decode
-  cs.vecWen := DontCare
-  cs.srcType(3) := DontCare
-  cs.lsrc(3) := DontCare
-  cs.uopIdx := "b11111".U
+  decodedInst.connectStaticInst(io.enq.ctrlFlow)
+
+//  decodedInst.srcType(3) := DontCare
+//  decodedInst.lsrc(3) := DontCare
+  decodedInst.uopIdx := "b11111".U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
+  decodedInst.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
 
   // read src1~3 location
-  cs.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
-  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
-  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
+  decodedInst.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
+  decodedInst.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
+  decodedInst.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
   // read dest location
-  cs.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
+  decodedInst.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
 
   // fill in exception vector
-  cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
-  cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
+  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR
 
   when (!io.csrCtrl.svinval_enable) {
-    val base_ii = cs.selImm === SelImm.INVALID_INSTR
+    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR
     val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
     val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
     val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
     val svinval_ii = sinval || w_inval || inval_ir
-    cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
-    cs.flushPipe := false.B
+    decodedInst.exceptionVec(illegalInstr) := base_ii || svinval_ii
+    decodedInst.flushPipe := false.B
   }
 
   // fix frflags
   //                           fflags    zero csrrs rd    csr
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
-  when (cs.fuType === FuType.csr && isFrflags) {
-    cs.blockBackward := false.B
+  when (decodedInst.fuType === FuType.csr.U && isFrflags) {
+    decodedInst.blockBackward := false.B
   }
 
-  cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
+  decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {
       val minBits = x._2.minBitsFromInstr(ctrl_flow.instr)
       require(minBits.getWidth == x._2.len)
@@ -732,28 +726,29 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  cs.vconfig := 0.U(16.W)
-  when(FuType.isVpu(cs.fuType)){
-    cs.vconfig := io.vconfig
-  }
-  cf_ctrl.ctrl := cs
+//  decodedInst.vconfig := 0.U(16.W)
+//  when(FuType.isVpu(decodedInst.fuType)){
+//    decodedInst.vconfig := io.vconfig
+//  }
 
-  io.deq.cf_ctrl := cf_ctrl
+  decodedInst.isVset := FuType.isInt(decodedInst.fuType) && ALUOpType.isVset(decodedInst.fuOpType)
+  decodedInst.commitType := 0.U // Todo: remove it
+  io.deq.decodedInsts := decodedInst
 
-  io.deq.isVset := FuType.isIntExu(cs.fuType) && ALUOpType.isVset(cs.fuOpType)
+  decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
 
   //-------------------------------------------------------------
   // Debug Info
-  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
-    io.enq.ctrl_flow.instr, io.enq.ctrl_flow.pc, io.enq.ctrl_flow.exceptionVec.asUInt,
-    io.enq.ctrl_flow.crossPageIPFFix)
-  XSDebug("out: srcType(0)=%b srcType(1)=%b srcType(2)=%b lsrc(0)=%d lsrc(1)=%d lsrc(2)=%d ldest=%d fuType=%b fuOpType=%b\n",
-    io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
-    io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
-    io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d imm=%x\n",
-    io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
-    io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
-    io.deq.cf_ctrl.ctrl.imm)
-  XSDebug("out: excepVec=%b\n", io.deq.cf_ctrl.cf.exceptionVec.asUInt)
+//  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
+//    io.enq.ctrl_flow.instr, io.enq.ctrl_flow.pc, io.enq.ctrl_flow.exceptionVec.asUInt,
+//    io.enq.ctrl_flow.crossPageIPFFix)
+//  XSDebug("out: srcType(0)=%b srcType(1)=%b srcType(2)=%b lsrc(0)=%d lsrc(1)=%d lsrc(2)=%d ldest=%d fuType=%b fuOpType=%b\n",
+//    io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
+//    io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
+//    io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
+//  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d imm=%x\n",
+//    io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
+//    io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
+//    io.deq.cf_ctrl.ctrl.imm)
+//  XSDebug("out: excepVec=%b\n", io.deq.cf_ctrl.cf.exceptionVec.asUInt)
 }

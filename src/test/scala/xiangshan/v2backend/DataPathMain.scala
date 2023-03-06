@@ -9,17 +9,10 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 object DataPathMain extends App {
   override def main(args: Array[String]): Unit = {
     val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
-    val config: Parameters = new BaseConfig(1)
+    implicit val config: Parameters = new BaseConfig(1).alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
 
-    val intSchdParams = SchdBlockParams.dummyIntParams()
-    val vfSchdParams = SchdBlockParams.dummyVfParams()
-    val memSchdParams = SchdBlockParams.dummyMemParams()
-    val dataPathParams = DataPathParams(Map(
-      IntScheduler() -> intSchdParams,
-      VfScheduler() -> vfSchdParams,
-      MemScheduler() -> memSchdParams,
-    ))
-    val dataPath = LazyModule(new DataPath(dataPathParams)(config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })))
+    val backendParams = config(XSCoreParamsKey).backendParams
+    val dataPath = LazyModule(new DataPath(backendParams)(config))
 
     Generator.execute(
       firrtlOpts,

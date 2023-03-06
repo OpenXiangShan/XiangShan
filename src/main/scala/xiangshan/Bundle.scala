@@ -16,33 +16,19 @@
 
 package xiangshan
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import xiangshan.backend.rob.RobPtr
+import utility._
+import utils._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
-import xiangshan.frontend.RASEntry
-import xiangshan.frontend.BPUCtrl
-import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.CGHPtr
-import xiangshan.frontend.FtqRead
-import xiangshan.frontend.FtqToCtrlIO
-import utils._
-import utility._
-
-import scala.math.max
-import Chisel.experimental.chiselName
-import chipsalliance.rocketchip.config.Parameters
-import chisel3.util.BitPat.bitPatToUInt
-import xiangshan.backend.exu.ExuConfig
-import xiangshan.backend.fu.PMPEntry
-import xiangshan.frontend.Ftq_Redirect_SRAMEntry
-import xiangshan.frontend.AllFoldedHistories
-import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
+import xiangshan.v2backend.Bundles.DynInst
+import xiangshan.v2backend.FuType
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -194,9 +180,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
     this
   }
 
-  def isWFI: Bool = fuType === FuType.csr && fuOpType === CSROpType.wfi
+  def isWFI: Bool = fuType === FuType.csr.U && fuOpType === CSROpType.wfi
   def isSoftPrefetch: Bool = {
-    fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+    fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
 }
 
@@ -257,38 +243,38 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
-  // Assume only the LUI instruction is decoded with IMM_U in ALU.
-  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
-  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
-  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-    successor.map{ case (src, srcType) =>
-      val pdestMatch = pdest === src
-      // For state: no need to check whether src is x0/imm/pc because they are always ready.
-      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
-      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
-      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
-      val bothStateMatch = Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch)
-      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
-      // For data: types are matched and int pdest is not $zero.
-      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
-      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
-      (stateCond, dataCond)
-    }
-  }
-  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
-  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
-  }
-  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
+//  // Assume only the LUI instruction is decoded with IMM_U in ALU.
+//  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
+//  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
+//  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+//    successor.map{ case (src, srcType) =>
+//      val pdestMatch = pdest === src
+//      // For state: no need to check whether src is x0/imm/pc because they are always ready.
+//      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
+//      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
+//      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
+//      val bothStateMatch = Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch)
+//      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
+//      // For data: types are matched and int pdest is not $zero.
+//      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
+//      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
+//      (stateCond, dataCond)
+//    }
+//  }
+//  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
+//  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+//    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
+//  }
+//  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
-class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
-}
+//class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
+//  val uop = new MicroOp
+//}
 
-class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val flag = UInt(1.W)
-}
+//class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
+//  val flag = UInt(1.W)
+//}
 
 class Redirect(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
@@ -308,12 +294,6 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   // def isException() = RedirectLevel.isException(level)
 }
 
-class Dp1ToDp2IO(implicit p: Parameters) extends XSBundle {
-  val intDqToDp2 = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
-  val fpDqToDp2 = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp))
-  val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
-}
-
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
@@ -328,21 +308,21 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
-class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val dataWidth = if (isVpu) VLEN else XLEN
+//class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+//  val dataWidth = if (isVpu) VLEN else XLEN
+//
+//  val src = Vec(3, UInt(dataWidth.W))
+//}
 
-  val src = Vec(3, UInt(dataWidth.W))
-}
-
-class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val dataWidth = if (isVpu) VLEN else XLEN
-
-  val data = UInt(dataWidth.W)
-  val fflags = UInt(5.W)
-  val redirectValid = Bool()
-  val redirect = new Redirect
-  val debug = new DebugBundle
-}
+//class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+//  val dataWidth = if (isVpu) VLEN else XLEN
+//
+//  val data = UInt(dataWidth.W)
+//  val fflags = UInt(5.W)
+//  val redirectValid = Bool()
+//  val redirect = new Redirect
+//  val debug = new DebugBundle
+//}
 
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
@@ -353,7 +333,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
 }
 
 class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
-  val exception = Flipped(ValidIO(new MicroOp))
+  val exception = Flipped(ValidIO(new DynInst))
   val isInterrupt = Input(Bool())
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val trapTarget = Output(UInt(VAddrBits.W))
@@ -361,9 +341,9 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val isInterrupt = Bool()
-}
+//class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
+//  val isInterrupt = Bool()
+//}
 
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(6.W)
@@ -382,7 +362,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
 
   val uopIdx = UInt(5.W)
-  val vconfig = UInt(16.W)
+//  val vconfig = UInt(16.W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
