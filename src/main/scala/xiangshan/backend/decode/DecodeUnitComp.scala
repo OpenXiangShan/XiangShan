@@ -25,8 +25,9 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
+import xiangshan.backend.fu.fpu.FPU
 import freechips.rocketchip.rocket.Instructions._
-
+import yunsuan.VppuType
 import scala.collection.Seq
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -81,9 +82,10 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
   ))
   //number of uop
   val numOfUop = MuxLookup(typeOfDiv, 1.U, Array(
+    UopDivType.VEC_MV -> 2.U,
     UopDivType.DIR -> 2.U,
     UopDivType.VEC_LMUL -> lmul,
-    UopDivType.VEC_MV_LMUL -> (lmul + 1.U)
+    UopDivType.VEC_MV_LMUL -> (lmul + 2.U)
   ))
 
   //uop div up to maxNumOfUop
@@ -107,6 +109,96 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
         csBundle(i).ctrl.ldest := ctrl_flow.instr(11, 7) + i.U
         csBundle(i).ctrl.uopIdx := i.U
+      }
+      csBundle(numOfUop - 1.U).ctrl.uopIdx := "b11111".U
+    }
+    is(UopDivType.VEC_MV) {
+      /*
+      FMV.D.X
+       */
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := 33.U
+      csBundle(0).ctrl.uopIdx := 0.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.vecWen := false.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+      /*
+      vfmv.s.f
+       */
+      csBundle(1).ctrl.srcType(0) := SrcType.fp
+      csBundle(1).ctrl.srcType(1) := SrcType.vp
+      csBundle(1).ctrl.srcType(2) := SrcType.vp
+      csBundle(1).ctrl.lsrc(0) := 33.U
+      csBundle(1).ctrl.lsrc(1) := 0.U
+      csBundle(1).ctrl.lsrc(2) := ctrl_flow.instr(11, 7)
+      csBundle(1).ctrl.ldest := ctrl_flow.instr(11, 7)
+      csBundle(1).ctrl.uopIdx := "b11111".U
+      csBundle(1).ctrl.fuType := FuType.vppu
+      csBundle(1).ctrl.fuOpType := VppuType.f2s
+      csBundle(1).ctrl.rfWen := false.B
+      csBundle(1).ctrl.fpWen := false.B
+      csBundle(1).ctrl.vecWen := true.B
+    }
+    is(UopDivType.VEC_MV_LMUL) {
+      /*
+      FMV.D.X
+       */
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := 33.U
+      csBundle(0).ctrl.uopIdx := 0.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.vecWen := false.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+      /*
+      vfmv.s.f
+       */
+      csBundle(1).ctrl.srcType(0) := SrcType.fp
+      csBundle(1).ctrl.srcType(1) := SrcType.vp
+      csBundle(1).ctrl.srcType(2) := SrcType.vp
+      csBundle(1).ctrl.lsrc(0) := 33.U
+      csBundle(1).ctrl.lsrc(1) := 0.U
+      csBundle(1).ctrl.lsrc(2) := 33.U
+      csBundle(1).ctrl.ldest := 33.U
+      csBundle(1).ctrl.uopIdx := 1.U
+      csBundle(1).ctrl.fuType := FuType.vppu
+      csBundle(1).ctrl.fuOpType := VppuType.f2s
+      csBundle(1).ctrl.rfWen := false.B
+      csBundle(1).ctrl.fpWen := false.B
+      csBundle(1).ctrl.vecWen := true.B
+      /*
+      LMUL
+       */
+      for (i <- 0 until 8) {
+        csBundle(i + 2).ctrl.srcType(0) := SrcType.vp
+        csBundle(i + 2).ctrl.srcType(3) := 0.U
+        csBundle(i + 2).ctrl.lsrc(0) := 33.U
+        csBundle(i + 2).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
+        csBundle(i + 2).ctrl.ldest := ctrl_flow.instr(11, 7) + i.U
+        csBundle(i + 2).ctrl.uopIdx := (i + 2).U
       }
       csBundle(numOfUop - 1.U).ctrl.uopIdx := "b11111".U
     }

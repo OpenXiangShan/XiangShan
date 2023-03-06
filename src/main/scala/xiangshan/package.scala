@@ -557,15 +557,16 @@ package object xiangshan {
   }
 
   object UopDivType {
-    def SCA_SIM = "b000".U
-    def DIR = "b001".U
-    def VEC_LMUL = "b010".U
-    def VEC_MV_LMUL = "b011".U
-    def dummy = "b111".U
+    def SCA_SIM = "b00000".U
+    def DIR = "b00001".U
+    def VEC_LMUL = "b00010".U
+    def VEC_MV_LMUL = "b00011".U
+    def VEC_MV = "b00100".U
+    def dummy = "b11111".U
 
-    def X = BitPat("b000")
+    def X = BitPat("b00000")
 
-    def apply() = UInt(3.W)
+    def apply() = UInt(5.W)
   }
 
   object ExceptionNO {

@@ -26,7 +26,7 @@ import utility._
 
 class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
 
-  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 64).U(PhyRegIdxWidth.W) )))
+  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 68).U(PhyRegIdxWidth.W) )))
   val headPtr  = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
   val headPtrOHShift = CircularShift(headPtrOH)
