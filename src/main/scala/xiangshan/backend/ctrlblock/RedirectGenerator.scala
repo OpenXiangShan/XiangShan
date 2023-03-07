@@ -77,7 +77,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
 
   val s1_jumpTarget = RegEnable(jumpOut.bits.cfiUpdate.target, jumpOut.valid)
-  val s1_brhTarget = RegNext(oldestExuRedirect.bits.cfiUpdate.pc)
+  val s1_brhTarget = RegNext(oldestExuRedirect.bits.cfiUpdate.target)
   val s1_pd = RegNext(oldestExuPredecode)
   val s1_redirect_bits_reg = RegNext(oldestRedirect.bits)
   val s1_redirect_valid_reg = RegNext(oldestValid)

@@ -2,10 +2,12 @@ package xiangshan.v2backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
 import utility.SignExt
-import xiangshan.{RedirectLevel, XSModule}
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.BranchModule
 import xiangshan.v2backend.{FuConfig, IntData, VAddrData}
+import xiangshan.{RedirectLevel, XSModule}
 
 class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -13,7 +15,7 @@ class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(len.W))
   })
-  io.target := io.pc + SignExt(io.offset, len)
+  io.target := io.pc + SignExt(ImmUnion.B.toImm32(io.offset), len)
 }
 
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
@@ -30,7 +32,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
-  io.out.bits.data := SignExt(addModule.io.target, IntData().dataWidth)
+  io.out.bits.data := 0.U
 
   io.out.bits.redirect.get.valid := io.out.valid && dataModule.io.mispredict
   io.out.bits.redirect.get.bits := 0.U.asTypeOf(io.out.bits.redirect.get.bits)
@@ -41,5 +43,6 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.redirect.get.bits.cfiUpdate.isMisPred := dataModule.io.mispredict
   io.out.bits.redirect.get.bits.cfiUpdate.taken := dataModule.io.taken
   io.out.bits.redirect.get.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
+  io.out.bits.redirect.get.bits.cfiUpdate.target := addModule.io.target
   connectCtrlSingal
 }
