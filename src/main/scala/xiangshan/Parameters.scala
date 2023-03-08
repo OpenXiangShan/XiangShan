@@ -130,6 +130,9 @@ case class XSCoreParameters
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
+  IntLogicRegs: Int = 33,
+  FpLogicRegs: Int = 34,
+  VecLogicRegs: Int = 34,
   NRPhyRegs: Int = 192,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,
@@ -392,6 +395,9 @@ trait HasXSParameter {
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
+  val IntLogicRegs = coreParams.IntLogicRegs
+  val FpLogicRegs = coreParams.FpLogicRegs
+  val VecLogicRegs = coreParams.VecLogicRegs
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val IntPhyRegs = coreParams.IntPhyRegs

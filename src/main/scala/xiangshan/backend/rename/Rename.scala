@@ -56,7 +56,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
   val intRefCounter = Module(new RefCounter(NRPhyRegs))
-  val fpFreeList = Module(new StdFreeList(NRPhyRegs - 68))
+  val fpFreeList = Module(new StdFreeList(NRPhyRegs - FpLogicRegs - VecLogicRegs))
 
   intRefCounter.io.commit        <> io.robCommits
   intRefCounter.io.redirect      := io.redirect.valid
