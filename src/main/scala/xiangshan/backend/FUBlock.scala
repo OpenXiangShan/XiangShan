@@ -155,6 +155,7 @@ class VecFUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) 
   require(configs.filter(_._1.hasRedirect).map(_._2).sum == 0)
 
   val frm = Input(UInt(3.W))
+  val vxrm = Input(UInt(2.W))
 
   override def toString: String = {
     s"VecFUBlockExtraIO: " + configs.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _) + s" hasFrm"
@@ -171,6 +172,9 @@ class VecFUBlockImp(configVec: Seq[(ExuConfig, Int)], out: VecFUBlock)(implicit 
   for ((exu, i) <- exeUnits.zipWithIndex) {
     if (exu.frm.isDefined) {
       exu.frm.get := extraio.frm
+    }
+    if (exu.vxrm.isDefined){
+      exu.vxrm.get := extraio.vxrm
     }
   }
   println(extraio)

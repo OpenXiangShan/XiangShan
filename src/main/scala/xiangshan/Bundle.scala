@@ -186,6 +186,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val uopIdx = UInt(5.W)
   val vconfig = new VConfig
   val isMove = Bool()
+  val vm = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
