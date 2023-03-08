@@ -43,7 +43,7 @@ case class DCacheParameters
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
-  updateReplaceOn2ndmiss: Boolean = false,
+  updateReplaceOn2ndmiss: Boolean = true,
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
