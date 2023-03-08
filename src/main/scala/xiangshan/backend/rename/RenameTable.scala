@@ -61,9 +61,9 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   // speculative rename table
   // fp and vec share the same free list, so the first init value of vecRAT is 32
   val rename_table_init = reg_t match {
-    case Reg_I => VecInit.fill    (33)(0.U(PhyRegIdxWidth.W))
-    case Reg_F => VecInit.tabulate(34)(_.U(PhyRegIdxWidth.W))
-    case Reg_V => VecInit.tabulate(34)(x => (x + 34).U(PhyRegIdxWidth.W))
+    case Reg_I => VecInit.fill    (IntLogicRegs)(0.U(PhyRegIdxWidth.W))
+    case Reg_F => VecInit.tabulate(FpLogicRegs)(_.U(PhyRegIdxWidth.W))
+    case Reg_V => VecInit.tabulate(VecLogicRegs)(x => (x + FpLogicRegs).U(PhyRegIdxWidth.W))
   }
   val spec_table = RegInit(rename_table_init)
   val spec_table_next = WireInit(spec_table)
