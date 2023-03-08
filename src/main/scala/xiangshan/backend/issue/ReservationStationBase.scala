@@ -211,9 +211,9 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   extra <> DontCare
 
   readIntRf_asyn <> rs.flatMap(_.readIntRf_asyn)
-  println(s">>> readFpRf_asyn is ${readFpRf_asyn}")
-  println(s"<<< readFprs.flatMap(_.readFpRf_asyn) is ${rs.flatMap(_.readFpRf_asyn)}")
-  println(s">>> readFpRf_asyn.length is  ${readFpRf_asyn.length}")
+  // println(s">>> readFpRf_asyn is ${readFpRf_asyn}")
+  // println(s"<<< readFprs.flatMap(_.readFpRf_asyn) is ${rs.flatMap(_.readFpRf_asyn)}")
+  // println(s">>> readFpRf_asyn.length is  ${readFpRf_asyn.length}")
   readFpRf_asyn := DontCare
   rs.flatMap(_.readFpRf_asyn).map(_.data := DontCare)
   readFpRf_asyn <> rs.flatMap(_.readFpRf_asyn).take(readFpRf_asyn.length)

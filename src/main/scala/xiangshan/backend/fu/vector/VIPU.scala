@@ -24,52 +24,146 @@ import chisel3.util._
 import utils._
 import utility._
 import yunsuan.vector.VectorIntAdder
-import yunsuan.{VipuType, VectorElementFormat}
-import xiangshan.{SrcType, SelImm, UopDivType}
-import xiangshan.backend.fu.FunctionUnit
-import xiangshan.XSCoreParamsKey
+import yunsuan.vector.alu.{VAluOpcode, VIAlu}
+import yunsuan.{VectorElementFormat, VipuType}
+import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule}
 
-class VIPU(implicit p: Parameters) extends FunctionUnit(p(XSCoreParamsKey).VLEN) {
+import scala.collection.Seq
+
+class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN) {
   XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
 
-  val uop = io.in.bits.uop
-  val ctrl = uop.ctrl
+// extra io
+  val vxrm = IO(Input(UInt(2.W)))
+
+// def some signal
+  val dataReg = Reg(io.out.bits.data.cloneType)
+  val dataWire = Wire(dataReg.cloneType)
+  val s_idle :: s_compute :: s_finish :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  val vialu = Module(new VIAluWrapper)
+  val outValid = vialu.io.out.valid
+  val outFire = vialu.io.out.fire()
+
+// reg input signal
+  val s0_uopReg = Reg(io.in.bits.uop.cloneType)
+  val inHs = io.in.fire()
+  when(inHs && state === s_idle){
+    s0_uopReg := io.in.bits.uop
+  }
+  dataReg := Mux(outValid, dataWire, dataReg)
+
+// fsm
+  switch (state) {
+    is (s_idle) {
+      state := Mux(inHs, s_compute, s_idle)
+    }
+    is (s_compute) {
+      state := Mux(outValid, Mux(outFire, s_idle, s_finish),
+                             s_compute)
+    }
+    is (s_finish) {
+      state := Mux(io.out.fire(), s_idle, s_finish)
+    }
+  }
+
+// connect VIAlu
+  dataWire := vialu.io.out.bits.data
+  vialu.io.in.bits <> io.in.bits
+  vialu.io.redirectIn := DontCare  // TODO :
+  vialu.vxrm := vxrm
+  io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
+  io.out.bits.uop := s0_uopReg
+
+  vialu.io.in.valid := io.in.valid && state === s_idle
+  io.out.valid := state === s_compute && outValid || state === s_finish
+  vialu.io.out.ready := io.out.ready
+  io.in.ready := state === s_idle
+}
+
+class VIAluDecodeResultBundle extends Bundle {
+  val opcode = UInt(6.W)
+  val srcType = Vec(2, UInt(4.W))
+  val vdType = UInt(4.W)
+}
+
+class VIAluDecoder (implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle{
+    val in = Input(new Bundle{
+      val fuOpType = UInt(8.W)
+      val sew = UInt(2.W)
+    })
+    val out = Output(new VIAluDecodeResultBundle)
+  })
+
+//  val DecodeDefault = List(VAluOpcode.dummy,  VpuDataType.dummy, VpuDataType.dummy, VpuDataType.dummy)
+//  val DecodeTable = Array(
+//    BitPat("b" + Cat(VipuType.add, "b00".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s8, VpuDataType.s8, VpuDataType.s8),
+//    BitPat("b" + Cat(VipuType.add, "b01".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s16, VpuDataType.s16, VpuDataType.s16),
+//    BitPat("b" + Cat(VipuType.add, "b10".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s32, VpuDataType.s32, VpuDataType.s32),
+//    BitPat("b" + Cat(VipuType.add, "b11".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s64, VpuDataType.s64, VpuDataType.s64),
+//  )
+//  val opcode :: srcType1 :: srcType2 :: vdType :: Nil = ListLookup(Cat(io.in.fuOpType, io.in.sew), DecodeDefault, DecodeTable)
+
+
+  val out = LookupTree(io.in.fuOpType, List(
+    VipuType.add -> Cat(VAluOpcode.vadd, Cat(0.U(2.W), io.in.sew), Cat(0.U(2.W), io.in.sew), Cat(0.U(2.W), io.in.sew)).asUInt()
+  )).asTypeOf(new VIAluDecodeResultBundle)
+
+  io.out <> out
+}
+
+class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsKey).VLEN) {
+  XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
+
+// extra io
+  val vxrm = IO(Input(UInt(2.W)))
+
+// rename signal
+  val in = io.in.bits
+  val ctrl = in.uop.ctrl
   val vtype = ctrl.vconfig.vtype
 
-  // TODO: mv VecImmExtractor from exe stage to read rf stage(or forward stage).
+// generate src1 and src2
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-
   val _src1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
-  val _src2 = io.in.bits.src(1)
+  val _src2 = in.src(1)
   val src1 = Mux(VipuType.needReverse(ctrl.fuOpType), _src2, _src1)
   val src2 = Mux(VipuType.needReverse(ctrl.fuOpType), _src1, _src2)
-  val src4 = io.in.bits.src(3)
-  val mask = src4(7,0) // TODO 
-  val carryIn = Mux(ctrl.fuOpType === VipuType.madc0, 0.U(8.W), mask)
 
-  val AdderWidth = XLEN
-  val NumAdder = VLEN / XLEN
-  val adder = Seq.fill(NumAdder)(Module(new VectorIntAdder()))
-  for(i <- 0 until NumAdder) {
-    adder(i).io.in_0 := src1(AdderWidth*(i+1)-1, AdderWidth*i)
-    adder(i).io.in_1 := src2(AdderWidth*(i+1)-1, AdderWidth*i)
-    adder(i).io.int_format := vtype.vsew // TODO
-    adder(i).io.op_code := ctrl.fuOpType
-    adder(i).io.carry_or_borrow_in := carryIn // TODO
-    adder(i).io.uop_index := DontCare // TODO
-  }
-  val adder_result = VecInit(adder.map(_.io.out)).asUInt
-  val adder_carry = LookupTree(vtype.vsew(1,0), List(
-      "b00".U -> Cat(~0.U((VLEN-16).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(7,0))).asUInt),
-      "b01".U -> Cat(~0.U((VLEN-8).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(3,0))).asUInt),
-      "b10".U -> Cat(~0.U((VLEN-4).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(1,0))).asUInt),
-      "b11".U -> Cat(~0.U((VLEN-2).W), VecInit(adder.map(_.io.carry_or_borrow_or_compare_out(0))).asUInt),
-    ))
+// connect VIAlu
+  val decoder = Module(new VIAluDecoder)
+  val vialu = Module(new VIAlu)
+  decoder.io.in.fuOpType := in.uop.ctrl.fuType
+  decoder.io.in.sew := in.uop.ctrl.vconfig.vtype.vsew(1,0)
 
-  io.out.bits.data := Mux(VipuType.outIsCarry(ctrl.fuOpType), adder_carry, adder_result)
-  io.out.bits.uop := io.in.bits.uop
-  io.out.valid := io.in.valid
-  io.in.ready := io.out.ready
+  vialu.io.in.bits.opcode := decoder.io.out.opcode
+  vialu.io.in.bits.info.vm := in.uop.ctrl.vm
+  vialu.io.in.bits.info.ma := in.uop.ctrl.vconfig.vtype.vma
+  vialu.io.in.bits.info.ta := in.uop.ctrl.vconfig.vtype.vta
+  vialu.io.in.bits.info.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
+  vialu.io.in.bits.info.vl := in.uop.ctrl.vconfig.vl
+//  vialu.io.in.bits.info.vstart := 0.U // TODO :
+  vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
+  vialu.io.in.bits.info.vxrm := vxrm
+  vialu.io.in.bits.srcType(0) := decoder.io.out.srcType(0)
+  vialu.io.in.bits.srcType(1) := decoder.io.out.srcType(1)
+  vialu.io.in.bits.vdType := decoder.io.out.vdType
+  vialu.io.in.bits.vs1 := src1
+  vialu.io.in.bits.vs2 := src2
+  vialu.io.in.bits.old_vd := in.src(2)
+  vialu.io.in.bits.mask := in.src(3)
+
+  val vdOut = vialu.io.out.bits.vd
+  val vxsatOut = vialu.io.out.bits.vxsat
+
+  vialu.io.in.valid := io.in.valid
+
+// connect io
+  io.out.bits.data := vdOut
+  io.out.bits.uop := DontCare
+  io.out.valid := vialu.io.out.valid
+  io.in.ready := DontCare
 }
 
 object VecImmExtractor {
