@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.frontend.icache._
-import utils._
 import utility._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.backend.fu.util.HasCSRConst
@@ -33,7 +32,7 @@ trait CacheControlConst{
   def maxDataRowSupport = 8
 }
 
-abstract class CacheCtrlModule(implicit p: Parameters) extends XSModule with HasCSRConst with CacheControlConst
+abstract class CacheCtrlModule(implicit p: Parameters) extends XSModule with HasCSRConst with CacheControlConst with HasDCacheParameters
 
 object CacheInstrucion{
   def CacheOperation = List(
@@ -142,8 +141,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val io = IO(new Bundle {
     val csr = new L1CacheToCsrIO
     val cache = new L1CacheInnerOpIO
-    val cache_req_dup = Vec(11, Valid(new CacheCtrlReqInfo))
-    val cacheOp_req_bits_opCode_dup = Output(Vec(11, UInt(XLEN.W)))
+    val cache_req_dup = Vec(DCacheDupNum, Valid(new CacheCtrlReqInfo))
+    val cacheOp_req_bits_opCode_dup = Output(Vec(DCacheDupNum, UInt(XLEN.W)))
     val error = Flipped(new L1CacheErrorInfo)
   })
 
@@ -158,7 +157,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Translate CSR write to cache op
   val translated_cache_req = Reg(new CacheCtrlReqInfo)
-  val translated_cache_req_opCode_dup = Reg(Vec(11, UInt(XLEN.W)))
+  val translated_cache_req_opCode_dup = Reg(Vec(DCacheDupNum, UInt(XLEN.W)))
   println("Cache op decoder (" + decoder_name + "):")
   println("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {

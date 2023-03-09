@@ -181,7 +181,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
 
   val s1_fake_meta = Wire(new Meta)
-//  s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
+  // s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
   s1_fake_meta.coh := ClientMetadata.onReset
   val s1_fake_tag = get_tag(s1_paddr_dup_dcache)
 
@@ -321,7 +321,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // * report a miss if bank conflict is detected
   val real_miss = Wire(Bool())
   when (wpu.io.resp.valid){
-    real_miss := s2_real_way_en.orR
+    real_miss := !s2_real_way_en.orR
   }.otherwise{
     real_miss := !s2_hit_dup_lsu
   }
