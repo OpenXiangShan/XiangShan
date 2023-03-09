@@ -261,7 +261,7 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
   val s2_result = VecInit(vfmacc.map(_.io.fp_result)).asUInt()
   out.result := s2_result
 
-  io.in.ready := !(validPipe.foldLeft(false.B)(_ | _)) && io.out.ready
+  io.in.ready := true.B
   io.out.valid := validPipe(Latency - 1)
 }
 
@@ -323,7 +323,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
   val s1_result = RegEnable(s0_result, validPipe(Latency-2))
   out.result := s1_result
 
-  io.in.ready := !(validPipe.foldLeft(false.B)(_|_)) && io.out.ready
+  io.in.ready := true.B
   io.out.valid := validPipe(Latency-1)
 }
 

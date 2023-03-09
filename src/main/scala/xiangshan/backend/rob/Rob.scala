@@ -573,7 +573,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val firstVInstrRobIdx    = RegInit(0.U.asTypeOf(new RobPtr))
 
   val enq0            = io.enq.req(0)
-  val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.andR && canEnqueue(0)
+  val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.flags && canEnqueue(0)
   val enq0IsVsetFlush = enq0IsVset && enq0.bits.ctrl.flushPipe
   val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVecExu(req.bits.ctrl.fuType) && fire}
   // for vs_idle
@@ -838,7 +838,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   walkPtrVec := walkPtrVec_next
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val isLastUopVec = io.commits.info.map(_.uopIdx.andR)
+  val isLastUopVec = io.commits.info.map(_.uopIdx.flags)
   val commitCnt = PopCount(io.commits.commitValid.zip(isLastUopVec).map{case(isCommitValid, isLastUop) => isCommitValid && isLastUop})
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
@@ -1239,7 +1239,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.vecwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).vecWen)))
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
-      difftest.io.uopIdx   := RegNext(RegNext(RegNext(io.commits.info(i).uopIdx)))
+      difftest.io.uopIdx   := RegNext(RegNext(RegNext(io.commits.info(i).uopIdx.asUInt)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
@@ -1289,7 +1289,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.vecwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).vecWen)))
       difftest.io.wpdest  := RegNext(RegNext(RegNext(commitInfo.pdest)))
       difftest.io.wdest   := RegNext(RegNext(RegNext(commitInfo.ldest)))
-      difftest.io.uopIdx  := RegNext(RegNext(RegNext(commitInfo.uopIdx)))
+      difftest.io.uopIdx  := RegNext(RegNext(RegNext(commitInfo.uopIdx.asUInt)))
     }
   }
 

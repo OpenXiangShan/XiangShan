@@ -95,7 +95,8 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
   switch(typeOfDiv) {
     is(UopDivType.DIR) {
       when(isVset_u) {
-        csBundle(0).ctrl.uopIdx := 0.U
+        csBundle(0).ctrl.uopIdx.flags := false.B
+        csBundle(0).ctrl.uopIdx.value := 0.U
         csBundle(0).ctrl.flushPipe := false.B
         csBundle(0).ctrl.fuOpType := ALUOpType.vsetExchange(cf_ctrl_u.ctrl.fuOpType)
         csBundle(1).ctrl.ldest := 32.U
@@ -108,9 +109,10 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i).ctrl.lsrc(0) := ctrl_flow.instr(19, 15) + i.U
         csBundle(i).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
         csBundle(i).ctrl.ldest := ctrl_flow.instr(11, 7) + i.U
-        csBundle(i).ctrl.uopIdx := i.U
+        csBundle(i).ctrl.uopIdx.flags := false.B
+        csBundle(i).ctrl.uopIdx.value := i.U
       }
-      csBundle(numOfUop - 1.U).ctrl.uopIdx := "b11111".U
+      csBundle(numOfUop - 1.U).ctrl.uopIdx.flags := true.B
     }
     is(UopDivType.VEC_MV) {
       /*
@@ -120,7 +122,8 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.srcType(1) := SrcType.imm
       csBundle(0).ctrl.lsrc(1) := 0.U
       csBundle(0).ctrl.ldest := 33.U
-      csBundle(0).ctrl.uopIdx := 0.U
+      csBundle(0).ctrl.uopIdx.flags := false.B
+      csBundle(0).ctrl.uopIdx.value := 0.U
       csBundle(0).ctrl.fuType := FuType.i2f
       csBundle(0).ctrl.rfWen := false.B
       csBundle(0).ctrl.fpWen := true.B
@@ -144,7 +147,8 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(1).ctrl.lsrc(1) := 0.U
       csBundle(1).ctrl.lsrc(2) := ctrl_flow.instr(11, 7)
       csBundle(1).ctrl.ldest := ctrl_flow.instr(11, 7)
-      csBundle(1).ctrl.uopIdx := "b11111".U
+      csBundle(1).ctrl.uopIdx.flags := true.B
+      csBundle(1).ctrl.uopIdx.value := 1.U
       csBundle(1).ctrl.fuType := FuType.vppu
       csBundle(1).ctrl.fuOpType := VppuType.f2s
       csBundle(1).ctrl.rfWen := false.B
@@ -159,7 +163,8 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.srcType(1) := SrcType.imm
       csBundle(0).ctrl.lsrc(1) := 0.U
       csBundle(0).ctrl.ldest := 33.U
-      csBundle(0).ctrl.uopIdx := 0.U
+      csBundle(0).ctrl.uopIdx.flags := false.B
+      csBundle(0).ctrl.uopIdx.value := 0.U
       csBundle(0).ctrl.fuType := FuType.i2f
       csBundle(0).ctrl.rfWen := false.B
       csBundle(0).ctrl.fpWen := false.B
@@ -182,9 +187,10 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i + 1).ctrl.lsrc(0) := 33.U
         csBundle(i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
         csBundle(i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + i.U
-        csBundle(i + 1).ctrl.uopIdx := (i + 1).U
+        csBundle(i + 1).ctrl.uopIdx.flags := false.B
+        csBundle(i + 1).ctrl.uopIdx.value := (i + 1).U
       }
-      csBundle(numOfUop - 1.U).ctrl.uopIdx := "b11111".U
+      csBundle(numOfUop - 1.U).ctrl.uopIdx.flags := true.B
     }
   }
 

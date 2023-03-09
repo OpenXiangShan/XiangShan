@@ -343,7 +343,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for (i <- 0 until CommitWidth) {
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).uopIdx.andR && !rob.io.flushOut.valid
+    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).uopIdx.flags && !rob.io.flushOut.valid
     io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
