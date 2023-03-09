@@ -41,8 +41,8 @@ class VluopBundle(implicit p: Parameters) extends XSBundle {
   val rob_idx = UInt(log2Ceil(RobSize).W)
   val rob_inner_idx = UInt(3.W)
   //val rob_total_num = UInt(3.W) // Is it useful?
-  val wb_dest = UInt(PhyRegIdxWidth.W)
-  val flow_idx = UInt(log2Up(VlFlowSize).W)
+  val wb_dest = UInt(PhyRegIdxWidth.W)//TODO:vector PhyReg
+  val flow_idx = UInt(log2Up(VlFlowSize).W)//TODO:Maybe need more flow_idx?
   val flow_inner_idx = UInt(4.W)
   val flow_offset = UInt(6.W)
   val mask = UInt((CacheLineSize / 8).W)
@@ -77,7 +77,7 @@ class VluopQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadFlow2UopOut = Vec(LoadPipelineWidth, Flipped(Decoupled(new Flow2UopBuddle())))
   val loadPipeIn = Vec(exuParameters.LduCnt, Flipped(Decoupled(new VecExuOutput)))
   // TODO: Only one writeback port, Maybe is enough
-  val loadWriteback = DecoupledIO(new ExuOutput)
+  val loadWriteback = DecoupledIO(new ExuOutput)//TODO: Maybe need one new port (VExuOutput) or data widen ?
 }
 
 class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
@@ -87,6 +87,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   println("LoadUopQueue: size:" + VlUopSize)
 
   val VluopEntry = Reg(Vec(VlUopSize, new VluopBundle))
+  // Fixme
   val Vluop2robEntry = Reg(Vec(VlUopSize, new ExuOutput))
   // For example, an inst -> 4 uops,
   // When first uop comes, 4 entries are all valid and pre_allocated
@@ -99,12 +100,13 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   // When both data and pdest are readym, this entry is finished
   val finished = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
 
-  val data_buffer = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(0.U(CacheLineSize.W))))
+  val data_buffer = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(Fill(64,0.U(8.W)))))
   val flow_index_buffer = RegInit(VecInit(Seq.fill(2)(0.U(5.W))))
   val uop2rob_buffer = RegInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new ExuOutput))))
   val buffer_valid = RegInit(VecInit(Seq.fill(2)(false.B)))
 
   val enqPtr = RegInit(0.U.asTypeOf(new VluopPtr))
+  // TODO: Control writeback to rf
   val deqPtr = RegInit(0.U.asTypeOf(new VluopPtr))
 
   val enqnum = WireInit(0.U(5.W))
@@ -117,8 +119,12 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   }
 
   for (i <- 0 until 2) {
-    io.loadFlow2UopOut(i).ready := (distanceBetween(enqPtr, deqPtr) >= 16.U)
-    io.loadRegIn(i).ready := true.B // TODO: should always ready?
+    io.loadFlow2UopOut(i).ready := true.B // TODO: should always ready?
+    //TODO:enq conditions need to be modified
+    // (When it is not possible to accommodate new robIdx, let the backend judge that only the robIdx that have already been pre_allocated are sent)
+    //TODO:need Confirm with bankend:issue
+    //io.laodRegIn(i).robDeq :=  //TODO：检查rob是否一样来决定是否拉高
+    io.loadRegIn(i).ready := true.B // TODO: should always ready? or 根据已经分配的项判断
   }
   for (i <- 0 until exuParameters.LduCnt) {
     io.loadPipeIn(i).ready := true.B // TODO: should always ready?
@@ -129,17 +135,35 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
 
   // TODO: How to simplify these codes?
   //  And timing...?
+  val inUop = WireInit(Vec(2,0.U.asTypeOf(new VecOperand)))
+  val isPer = WireInit(Vec(2,false.B))
   when (enq_valid(0) || enq_valid(1)) {
-    when (enq_valid(0) && enq_valid(1)) {
-      enqPtr := enqPtr + io.loadRegIn(0).bits.total_num + io.loadRegIn(1).bits.total_num
-
+    when(enq_valid(0) && enq_valid(1) && io.loadRegIn(0).bits.uop.robIdx === io.loadRegIn(0).bits.uop.robIdx) {
+      enqPtr := enqPtr + io.loadRegIn(0).bits.total_num
       for (i <- 0 until 8) {
         when (i.U < io.loadRegIn(0).bits.total_num) {
-          VluopEntry(enqPtr.value + i.U).apply(io.loadRegIn(0).bits, is_pre = (i > 0), inner_idx = i)
+          inUop(0).uop.robIdx := io.loadRegIn(0).bits.uop.robIdx - io.loadRegIn(0).bits.inner_idx + i.U
+          isPer(0) := !(i.U === io.loadRegIn(0).bits.inner_idx || i.U === io.loadRegIn(1).bits.inner_idx)
+          VluopEntry(enqPtr.value + i.U).apply(inUop(0), is_pre = isPer(0), inner_idx = i)
           valid(enqPtr.value + i.U) := true.B
         }
-        if (i == 0) {
-          allocated(enqPtr.value) := true.B
+        if (i.U == io.loadRegIn(0).bits.inner_idx || i.U == io.loadRegIn(1).bits.inner_idx) {
+          allocated(enqPtr.value + i.U) := true.B
+        } else {
+          pre_allocated(enqPtr.value + i.U) := true.B
+        }
+      }
+    }.elsewhen( enq_valid(0) && enq_valid(1) && io.loadRegIn(0).bits.uop.robIdx =/= io.loadRegIn(0).bits.uop.robIdx){
+      enqPtr := enqPtr + io.loadRegIn(0).bits.total_num + io.loadRegIn(1).bits.total_num
+      for (i <- 0 until 8) {
+        when (i.U < io.loadRegIn(0).bits.total_num) {
+          inUop(0).uop.robIdx := io.loadRegIn(0).bits.uop.robIdx - io.loadRegIn(0).bits.inner_idx + i.U
+          isPer(0) := !(i.U === io.loadRegIn(0).bits.inner_idx)
+          VluopEntry(enqPtr.value + i.U).apply(inUop(0), isPer(0), inner_idx = i)
+          valid(enqPtr.value + i.U) := true.B
+        }
+        if (i.U == io.loadRegIn(0).bits.inner_idx) {
+          allocated(enqPtr.value + i.U) := true.B
         } else {
           pre_allocated(enqPtr.value + i.U) := true.B
         }
@@ -147,48 +171,50 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
 
       for (i <- 0 until 8) {
         when (i.U < io.loadRegIn(1).bits.total_num) {
-          VluopEntry(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U).apply(io.loadRegIn(1).bits, is_pre = (i > 0), inner_idx = i)
+          inUop(1).uop.robIdx := io.loadRegIn(1).bits.uop.robIdx - io.loadRegIn(1).bits.inner_idx + i.U
+          isPer(1) := !(i.U === io.loadRegIn(1).bits.inner_idx)
+          VluopEntry(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U).apply(inUop(1), isPer(1), inner_idx = i)
           valid(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U) := true.B
-          pre_allocated(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U) := true.B
         }
-        if (i == 0) {
-          allocated(enqPtr.value + io.loadRegIn(0).bits.total_num) := true.B
+        if (i == io.loadRegIn(1).bits.inner_idx) {
+          allocated(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U) := true.B
         } else {
           pre_allocated(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U) := true.B
         }
       }
-
     } .elsewhen (enq_valid(0)) {
       enqPtr := enqPtr + io.loadRegIn(0).bits.total_num
-
       for (i <- 0 until 8) {
         when (i.U < io.loadRegIn(0).bits.total_num) {
-          VluopEntry(enqPtr.value + i.U).apply(io.loadRegIn(0).bits, is_pre = (i > 0), inner_idx = i)
+          inUop(0).uop.robIdx := io.loadRegIn(0).bits.uop.robIdx - io.loadRegIn(0).bits.inner_idx + i.U
+          isPer(0) := !(i.U === io.loadRegIn(0).bits.inner_idx)
+          VluopEntry(enqPtr.value + i.U).apply(inUop(0), isPer(0), inner_idx = i)
           valid(enqPtr.value + i.U) := true.B
         }
-        if (i == 0) {
-          allocated(enqPtr.value) := true.B
+        if (i == io.loadRegIn(0).bits.inner_idx) {
+          allocated(enqPtr.value + i.U) := true.B
         } else {
           pre_allocated(enqPtr.value + i.U) := true.B
         }
       }
     } .elsewhen (enq_valid(1)) {
       enqPtr := enqPtr + io.loadRegIn(1).bits.total_num
-
       for (i <- 0 until 8) {
         when (i.U < io.loadRegIn(1).bits.total_num) {
-          VluopEntry(enqPtr.value + i.U).apply(io.loadRegIn(1).bits, is_pre = (i > 0), inner_idx = i)
+          inUop(1).uop.robIdx := io.loadRegIn(1).bits.uop.robIdx - io.loadRegIn(1).bits.inner_idx + i.U
+          isPer(1) := !(i.U === io.loadRegIn(1).bits.inner_idx)
+          VluopEntry(enqPtr.value + i.U).apply(inUop(1), isPer(1), inner_idx = i)
           valid(enqPtr.value + i.U) := true.B
         }
-        if (i == 0) {
-          allocated(enqPtr.value) := true.B
+        if (i == io.loadRegIn(1).bits.inner_idx) {
+          allocated(enqPtr.value + i.U) := true.B
         } else {
           pre_allocated(enqPtr.value + i.U) := true.B
         }
       }
     }
-  } .elsewhen (io.loadRegIn(0).fire || io.loadRegIn(1).fire) {
-    when (io.loadRegIn(0).fire) {
+  } .elsewhen (!enq_valid(0) && io.loadRegIn(0).fire || !enq_valid(1) &&io.loadRegIn(1).fire) {
+    when (!enq_valid(0) && io.loadRegIn(0).fire) {
       val debug_hit = WireInit(VecInit(Seq.fill(VlUopSize)(false.B))) // for debug
       for (i <- 0 until VlUopSize) {
         when (VluopEntry(i).rob_idx === io.loadRegIn(0).bits.uop.robIdx.value &&
@@ -207,7 +233,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
         assert(PopCount(debug_hit) <= 1.U, "VluopQueue Multi-Hit!")
       }
     }
-    when (io.loadRegIn(1).fire) {
+    when (!enq_valid(1) && io.loadRegIn(1).fire) {
       val debug_hit = WireInit(VecInit(Seq.fill(VlUopSize)(false.B))) // for debug
       for (i <- 0 until VlUopSize) {
         when (VluopEntry(i).rob_idx === io.loadRegIn(1).bits.uop.robIdx.value &&
@@ -229,7 +255,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   }
 
   val deq_index = deqPtr.value
-  when (valid(deq_index) && finished(deq_index)) {
+  when (valid(deq_index) && finished(deq_index)) {//TODO:need ergodic ?*********************
     io.loadWriteback.valid := true.B
     io.loadWriteback.bits := Vluop2robEntry(deq_index)
     io.loadWriteback.bits.data := VluopEntry(deq_index).data
@@ -243,7 +269,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   // TODO: What will happen when this robidx is not in uop queue?
   //  FlowQueue should first know that this robidx is in uop queue (at least one)
   //  then send request to Load Pipe
-  //  Otherwise should replay to uop queue
+  //  Otherwise should replay to uop queue(the flow queue can delay one cycle?)
   for (i <- 0 until 2) {
     when (io.loadFlow2UopOut(i).fire) {
       for (j <- 0 until VlUopSize) {
@@ -259,7 +285,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
       data_buffer(i) := io.loadPipeIn(i).bits.data
       flow_index_buffer(i) := io.loadPipeIn(i).bits.flow_index
       uop2rob_buffer(i) := io.loadPipeIn(i).bits
-      buffer_valid(i) := true.B
+      buffer_valid(i) := true.B//TODO: the data writeback need many cycle
     }
   }
 

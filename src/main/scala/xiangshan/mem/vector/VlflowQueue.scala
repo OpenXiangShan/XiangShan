@@ -53,7 +53,7 @@ class Flow2UopBuddle(implicit p: Parameters) extends XSBundle{
   val flow_index = Output(UInt(5.W)) // index of flow entry
   val flow_inner_index = Output(UInt(4.W)) // An uop can be split to 0 to 15
   val flow_offset = Output(UInt(6.W)) // Offset of vaddr
-  val flow_robIdx = Output(UInt(log2Ceil(RobSize).W))  //change width
+  val flow_robIdx = Output(UInt(log2Ceil(RobSize).W))  //change width TODO：Maybe need more flow_robIdx
 }
 
 class VlflowQueueIOBundle(implicit p: Parameters) extends XSBundle {

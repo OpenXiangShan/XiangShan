@@ -69,15 +69,11 @@ class VecExuOutput(implicit p: Parameters) extends ExuOutput {
 
 object VecGenMask {
   def apply(idx: UInt): UInt = {
-    LookupTree(idx, List(
-      "b000".U -> Cat(0.U(56.W), Fill(8, true.B)),
-      "b001".U -> Cat(0.U(48.W), Fill(8, true.B), 0.U(8.W)),
-      "b010".U -> Cat(0.U(40.W), Fill(8, true.B), 0.U(16.W)),
-      "b011".U -> Cat(0.U(32.W), Fill(8, true.B), 0.U(24.W)),
-      "b100".U -> Cat(0.U(24.W), Fill(8, true.B), 0.U(32.W)),
-      "b101".U -> Cat(0.U(16.W), Fill(8, true.B), 0.U(40.W)),
-      "b110".U -> Cat(0.U(8.W), Fill(8, true.B), 0.U(48.W)),
-      "b111".U -> Cat(Fill(8, true.B), 0.U(56.W))
+    LookupTree(idx(1,0), List(
+      "b000".U -> Cat(0.U(48.W), Fill(16, true.B)),
+      "b001".U -> Cat(0.U(32.W), Fill(16, true.B), 0.U(16.W)),
+      "b010".U -> Cat(0.U(16.W), Fill(16, true.B), 0.U(32.W)),
+      "b011".U -> Cat(Fill(16, true.B), 0.U(48.W))
     ))
   }
 }
@@ -85,19 +81,10 @@ object VecGenMask {
 // TODO: How to merge discrete data together in the future?
 object VecGenData{
   def apply(mask: UInt, data: UInt): UInt = {
-    val result = WireInit(VecInit(Seq.fill(512)(false.B)))
-    var j = 0
+    val result = WireInit(VecInit(Fill(64,0.U(8.W))))
     for (i <- 0 until 64) {
       when (mask(i)) {
-        result(j) := data(8 * i)
-        result(j + 1) := data(8 * i + 1)
-        result(j + 2) := data(8 * i + 2)
-        result(j + 3) := data(8 * i + 3)
-        result(j + 4) := data(8 * i + 4)
-        result(j + 5) := data(8 * i + 5)
-        result(j + 6) := data(8 * i + 6)
-        result(j + 7) := data(8 * i + 7)
-        j = j + 8
+        result(i) := data(i)
       }
     }
     result.asUInt(127, 0)

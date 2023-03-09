@@ -261,6 +261,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.replay.bits.uop
     s0_isFirstIssue := io.replay.bits.isFirstIssue
     s0_sqIdx := io.replay.bits.uop.sqIdx
+    isVec := false.B
     s0_replayCarry := io.replay.bits.replayCarry
     val replayUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.replay.bits.uop.ctrl.fuOpType))
     when (replayUopIsPrefetch) {
@@ -274,6 +275,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := DontCare
     s0_isFirstIssue := false.B
     s0_sqIdx := DontCare
+    isVec := false.B
     s0_replayCarry := DontCare
     s0_fromPreFetch := true.B
     // ctrl signal
@@ -288,6 +290,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_isFirstIssue := io.isFirstIssue
     s0_sqIdx := io.in.bits.uop.sqIdx
     s0_fromRs := true.B
+    isVec := false.B
     val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.ctrl.fuOpType))
     when (issueUopIsPrefetch) {
       isPrefetch := true.B
@@ -308,6 +311,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_rlineflag := true.B
   }.otherwise {
     if (EnableLoadToLoadForward) {
+      isVec := false.B
       s0_tryFastpath := lfsrc_l2lForward_select
       // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
       s0_vaddr := io.fastpath.data
@@ -409,7 +413,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class LoadUnit_S1(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper
+  with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LqWriteBundle))
     val s1_kill = Input(Bool())
@@ -463,7 +469,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.sbuffer.sqIdx := s1_uop.sqIdx
   io.sbuffer.mask := s1_mask
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
-  io.sbuffer.forwardLine := io.in.bits.rlineflag
+  io.sbuffer.rlineflag := io.in.bits.rlineflag
 
   io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_prefetch)
   io.lsq.vaddr := io.in.bits.vaddr
@@ -473,7 +479,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
-  io.lsq.forwardLine := io.in.bits.rlineflag
+  io.lsq.rlineflag := io.in.bits.rlineflag
 
   // st-ld violation query
   val s1_schedError = VecInit((0 until StorePipelineWidth).map(w => io.reExecuteQuery(w).valid &&
@@ -1179,7 +1185,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     //  4. Data contains.
     io.reExecuteQuery(w).valid &&
     isAfter(s3_loadOutBits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
-    Mux(!s3_loadOutBits.readCacheLine, (s3_loadOutBits.paddr(PAddrBits-1,4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4)) &&
+    Mux(!s3_loadOutBits.rlineflag, (s3_loadOutBits.paddr(PAddrBits-1,4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4)) &&
     (s3_loadOutBits.mask & io.reExecuteQuery(w).bits.mask).orR,
     s3_loadOutBits.paddr(PAddrBits-1, DCacheBankOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheBankOffset)))).asUInt.orR && !s3_loadOutBits.tlbMiss
 

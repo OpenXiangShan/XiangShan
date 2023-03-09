@@ -224,6 +224,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val vlflowqueue = Module(new VlflowQueue)
   val vluopqueue= Module(new VluopQueue)
+  val vlExcSignal = Module(new VlExcSignal)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrapper)
@@ -569,11 +570,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // Vector Load/Store Queue
-  vlflowqueue.io.loadRegIn <> io.VecloadRegIn
-  vluopqueue.io.loadRegIn <> io.VecloadRegIn
+  //vlflowqueue.io.loadRegIn <> io.VecloadRegIn
+  vlflowqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
+  //vluopqueue.io.loadRegIn <> io.VecloadRegIn
+  vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
   vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
-  vluopqueue.io.loadWriteback <> io.Vecwriteback
+  //vluopqueue.io.loadWriteback <> io.Vecwriteback
+  vluopqueue.io.loadWriteback <> vlExcSignal.io.vecwriteback
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
