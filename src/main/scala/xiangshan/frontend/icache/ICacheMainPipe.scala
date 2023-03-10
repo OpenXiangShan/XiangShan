@@ -780,7 +780,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
   (0 until 2).map {i =>
-    XSPerfAccumulate("port_" + i + "_only_hit_in_ipf", !s2_port_hit(i) && s2_prefetch_hit(i))
+    XSPerfAccumulate("port_" + i + "_only_hit_in_ipf", !s2_port_hit(i) && s2_prefetch_hit(i) && s2_fire)
   }
 
   /** s2 mainPipe miss info */

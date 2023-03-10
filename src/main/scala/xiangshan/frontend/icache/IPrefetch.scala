@@ -111,6 +111,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     val valid = Bool()
     val confidence = UInt(log2Ceil(maxIPFMoveConf + 1).W)
     val move = Bool()
+    val has_been_hit = Bool()
   }
 
   class IPFBufferEntryData(implicit p: Parameters) extends IPrefetchBundle
@@ -161,6 +162,15 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       Mux(r_moves1pipe_hit_s1(i), s1_move_data_cacheline,
         Mux(r_moves1pipe_hit_s2(i), s2_move_data_cacheline, s3_move_data_cacheline)))
   }
+
+  (0 until PortNumber).foreach { i =>
+    when(r_valid(i) && r_hit_oh(i).reduce(_ || _)) {
+      meta_buffer(r_buffer_hit_idx(i)).has_been_hit := true.B
+    }
+    XSPerfAccumulate("ipf_entry_first_hit_by_port_" + i, r_valid(i) && r_hit_oh(i).reduce(_ || _) &&
+      meta_buffer(r_buffer_hit_idx(i)).has_been_hit === false.B)
+  }
+
 
   /** move logic */
   val r_buffer_hit_s2     = RegNext(r_buffer_hit, init=0.U.asTypeOf(r_buffer_hit.cloneType))
@@ -361,6 +371,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     meta_buffer(curr_write_ptr).valid := true.B
     meta_buffer(curr_write_ptr).move  := false.B
     meta_buffer(curr_write_ptr).confidence := 0.U
+    meta_buffer(curr_write_ptr).has_been_hit := false.B
 
     data_buffer(curr_write_ptr).cachline := io.write.bits.data
 

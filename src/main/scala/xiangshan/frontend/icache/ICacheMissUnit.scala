@@ -252,14 +252,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     io.resp(i) <> entry.io.resp
     io.prefetch_check(i) <> entry.io.toPrefetch
 
-    XSPerfAccumulate(
-      "entryPenalty" + Integer.toString(i, 10),
-      BoolStopWatch(
-        start = entry.io.req.fire(),
-        stop = entry.io.resp.fire(),
-        startHighPriority = true)
-    )
-    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+//    XSPerfAccumulate(
+//      "entryPenalty" + Integer.toString(i, 10),
+//      BoolStopWatch(
+//        start = entry.io.req.fire(),
+//        stop = entry.io.resp.fire(),
+//        startHighPriority = true)
+//    )
+//    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
 
     entry
   }
