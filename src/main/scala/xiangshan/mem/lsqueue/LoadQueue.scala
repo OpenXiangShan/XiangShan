@@ -988,6 +988,7 @@ def detectRollback(i: Int) = {
   io.ldout(0).bits.debug.paddr := debug_paddr(deqPtr)
   io.ldout(0).bits.debug.vaddr := vaddrModule.io.rdata(1)
   io.ldout(0).bits.fflags := DontCare
+  io.ldout(0).bits.vxsat := DontCare
 
   io.ldout(0).valid := (uncacheState === s_wait) && !uncacheCommitFired
 

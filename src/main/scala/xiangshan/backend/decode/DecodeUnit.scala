@@ -695,7 +695,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   cs.srcType(3) := SrcType.vp
   cs.lsrc(3) := 0.U(5.W) // It is always 0
-  cs.uopIdx := "b11111".U
+  cs.uopIdx.flags := true.B
+  cs.uopIdx.value := 0.U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U

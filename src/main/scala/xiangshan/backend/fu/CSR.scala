@@ -84,6 +84,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vl = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
+  val set_vxsat = Output(Valid(UInt(1.W)))
 
   val dirty_vs = Output(Bool())
 }
@@ -684,11 +685,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
   def vxrm_rfn(rdata: UInt): UInt = rdata(2,1)
 
-  def vxsat_wfn(wdata: UInt): UInt = {
+  def vxsat_wfn(update: Boolean)(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    val vcsrNew = WireInit(vcsrOld)
     csrw_dirty_vs_state := true.B
-    vcsrOld.vxsat := wdata(0)
-    vcsrOld.asUInt
+    if (update) {
+      vcsrNew.vxsat := wdata(0) | vcsrOld.vxsat
+    } else {
+      vcsrNew.vxsat := wdata(0)
+    }
+    vcsrNew.asUInt
   }
   def vxsat_rfn(rdata: UInt): UInt = rdata(0)
 
@@ -703,7 +709,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val vcsrMapping = Map(
     MaskedRegMap(Vstart, vstart),
     MaskedRegMap(Vxrm, vcsr, wfn = vxrm_wfn, rfn = vxrm_rfn),
-    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
+    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn(false), rfn = vxsat_rfn),
     MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
     MaskedRegMap(Vl, vl),
     MaskedRegMap(Vtype, vtype),
@@ -929,6 +935,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   when (RegNext(csrio.fpu.fflags.valid)) {
     fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
+  }
+  when(RegNext(csrio.vpu.set_vxsat.valid)) {
+    vcsr := vxsat_wfn(update = true)(RegNext(csrio.vpu.set_vxsat.bits))
   }
   // set fs and sd in mstatus
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {

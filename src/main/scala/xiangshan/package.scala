@@ -841,7 +841,7 @@ package object xiangshan {
     fuGen = vipuGen,
     fuSel = (uop: MicroOp) => FuType.vipu === uop.ctrl.fuType,
     fuType = FuType.vipu,
-    numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false,
+    numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false, writeVxsat = true,
     numVecSrc = 4, writeVecRf = true,
     fastUopOut = false, // TODO: check
     fastImplemented = true, //TODO: check

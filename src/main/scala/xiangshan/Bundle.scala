@@ -150,6 +150,11 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val rm = UInt(3.W)
 }
 
+class UopIdx(implicit p: Parameters) extends XSBundle{
+  val flags = Bool()
+  val value = UInt(5.W)
+}
+
 class VType(implicit p: Parameters) extends XSBundle {
   val vma   = Bool()
   val vta   = Bool()
@@ -183,7 +188,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
-  val uopIdx = UInt(5.W)
+  val uopIdx = new UopIdx
   val vconfig = new VConfig
   val isMove = Bool()
   val vm = Bool()
@@ -362,6 +367,7 @@ class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundle
 
   val data = UInt(dataWidth.W)
   val fflags = UInt(5.W)
+  val vxsat = UInt(1.W)
   val redirectValid = Bool()
   val redirect = new Redirect
   val debug = new DebugBundle
@@ -405,7 +411,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val uopIdx = UInt(5.W)
+  val uopIdx = new UopIdx
   val vconfig = new VConfig
 }
 

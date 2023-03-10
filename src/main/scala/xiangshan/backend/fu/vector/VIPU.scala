@@ -35,6 +35,7 @@ class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN)
 
 // extra io
   val vxrm = IO(Input(UInt(2.W)))
+  val vxsat = IO(Output(UInt(1.W)))
 
 // def some signal
   val dataReg = Reg(io.out.bits.data.cloneType)
@@ -74,6 +75,7 @@ class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN)
   vialu.vxrm := vxrm
   io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
   io.out.bits.uop := s0_uopReg
+  vxsat := vialu.vxsat
 
   vialu.io.in.valid := io.in.valid && state === s_idle
   io.out.valid := state === s_compute && outValid || state === s_finish
@@ -105,9 +107,9 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
 //  )
 //  val opcode :: srcType1 :: srcType2 :: vdType :: Nil = ListLookup(Cat(io.in.fuOpType, io.in.sew), DecodeDefault, DecodeTable)
 
-
+// u 00 s 01 f 10 mask 1111
   val out = LookupTree(io.in.fuOpType, List(
-    VipuType.add -> Cat(VAluOpcode.vadd, Cat(0.U(2.W), io.in.sew), Cat(0.U(2.W), io.in.sew), Cat(0.U(2.W), io.in.sew)).asUInt()
+    VipuType.add -> Cat(VAluOpcode.vadd, Cat(1.U(2.W), io.in.sew), Cat(1.U(2.W), io.in.sew), Cat(1.U(2.W), io.in.sew)).asUInt()
   )).asTypeOf(new VIAluDecodeResultBundle)
 
   io.out <> out
@@ -118,6 +120,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 
 // extra io
   val vxrm = IO(Input(UInt(2.W)))
+  val vxsat = IO(Output(UInt(1.W)))
 
 // rename signal
   val in = io.in.bits
@@ -143,8 +146,8 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
   vialu.io.in.bits.info.ta := in.uop.ctrl.vconfig.vtype.vta
   vialu.io.in.bits.info.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
   vialu.io.in.bits.info.vl := in.uop.ctrl.vconfig.vl
-//  vialu.io.in.bits.info.vstart := 0.U // TODO :
-  vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
+  vialu.io.in.bits.info.vstart := 0.U // TODO :
+  vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx.value
   vialu.io.in.bits.info.vxrm := vxrm
   vialu.io.in.bits.srcType(0) := decoder.io.out.srcType(0)
   vialu.io.in.bits.srcType(1) := decoder.io.out.srcType(1)
@@ -162,6 +165,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 // connect io
   io.out.bits.data := vdOut
   io.out.bits.uop := DontCare
+  vxsat := vxsatOut
   io.out.valid := vialu.io.out.valid
   io.in.ready := DontCare
 }

@@ -1117,6 +1117,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   hitLoadOut.bits.debug.paddr := load_s2.io.out.bits.paddr
   hitLoadOut.bits.debug.vaddr := load_s2.io.out.bits.vaddr
   hitLoadOut.bits.fflags := DontCare
+  hitLoadOut.bits.vxsat := DontCare
 
   load_s2.io.out.ready := true.B
 

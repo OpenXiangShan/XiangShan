@@ -37,6 +37,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean], isVpu:
   class ExuCtrl extends Bundle{
     val uop = new MicroOp
     val fflags = UInt(5.W)
+    val vxsat = UInt(1.W)
     val redirectValid = Bool()
     val redirect = new Redirect
     val debug = new DebugBundle

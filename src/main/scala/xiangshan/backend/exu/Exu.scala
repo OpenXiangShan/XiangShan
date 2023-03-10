@@ -74,6 +74,7 @@ case class ExuConfig
   val writeVecRf = fuConfigs.map(_.writeVecRf).reduce(_ || _)
   val writeFpVecRf = writeFpRf || writeVecRf
   val writeFflags = fuConfigs.map(_.writeFflags).reduce(_ || _)
+  val writeVxsat = fuConfigs.map(_.writeVxsat).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
   val exceptionOut = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
@@ -273,6 +274,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
 
   def assignDontCares(out: ExuOutput) = {
     out.fflags := DontCare
+    out.vxsat := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B
     out.debug.isPerfCnt := false.B

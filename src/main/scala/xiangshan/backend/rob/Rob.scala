@@ -142,6 +142,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val wfiEvent   = Input(Bool())
 
   val fflags     = Output(Valid(UInt(5.W)))
+  val vxsat      = Output(Valid(UInt(1.W)))
   val dirty_fs   = Output(Bool())
   val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
@@ -410,6 +411,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val exeWbSel = outer.selWritebackSinks(_.exuConfigs.length)
   val fflagsWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.writeFflags)))
   val fflagsPorts = selectWb(fflagsWbSel, _.exists(_.writeFflags))
+  val vxsatWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.writeVxsat)))
+  val vxsatPorts = selectWb(vxsatWbSel, _.exists(_.writeVxsat))
   val exceptionWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.needExceptionGen)))
   val exceptionPorts = selectWb(exceptionWbSel, _.exists(_.needExceptionGen))
   val exuWbPorts = selectWb(exeWbSel, _.forall(_ != StdExeUnitCfg))
@@ -418,6 +421,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   println(s"exuPorts: ${exuWbPorts.map(_._1.map(_.name))}")
   println(s"stdPorts: ${stdWbPorts.map(_._1.map(_.name))}")
   println(s"fflags: ${fflagsPorts.map(_._1.map(_.name))}")
+  println(s"vxsat: ${vxsatPorts.map(_._1.map(_.name))}")
 
 
   val exuWriteback = exuWbPorts.map(_._2)
@@ -479,6 +483,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val exceptionGen = Module(new ExceptionGen)
   val exceptionDataRead = exceptionGen.io.state
   val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
+  val vxsatDataRead = Wire(Vec(CommitWidth, UInt(1.W)))
 
   io.robDeqPtr := deqPtr
 
@@ -573,7 +578,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val firstVInstrRobIdx    = RegInit(0.U.asTypeOf(new RobPtr))
 
   val enq0            = io.enq.req(0)
-  val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.andR && canEnqueue(0)
+  val enq0IsVset      = FuType.isIntExu(enq0.bits.ctrl.fuType) && ALUOpType.isVset(enq0.bits.ctrl.fuOpType) && enq0.bits.ctrl.uopIdx.flags && canEnqueue(0)
   val enq0IsVsetFlush = enq0IsVset && enq0.bits.ctrl.flushPipe
   val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVecExu(req.bits.ctrl.fuType) && fire}
   // for vs_idle
@@ -716,6 +721,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_|_)
+  val vxsat = Wire(Valid(UInt(1.W)))
+  vxsat.valid := io.commits.isCommit && VecInit(wflags).asUInt.orR
+  vxsat.bits := wflags.zip(vxsatDataRead).map({
+    case (w, f) => Mux(w, f, 0.U)
+  }).reduce(_|_)
   val dirty_fs = io.commits.isCommit && VecInit(fpWen).asUInt.orR
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
@@ -756,14 +766,15 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
 
     XSInfo(io.commits.isCommit && io.commits.commitValid(i),
-      "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x fflags: %b\n",
+      "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x fflags: %b vxsat: %b\n",
       debug_microOp(deqPtrVec(i).value).cf.pc,
       io.commits.info(i).rfWen,
       io.commits.info(i).ldest,
       io.commits.info(i).pdest,
       io.commits.info(i).old_pdest,
       debug_exuData(deqPtrVec(i).value),
-      fflagsDataRead(i)
+      fflagsDataRead(i),
+      vxsatDataRead(i)
     )
     XSInfo(state === s_walk && io.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
       debug_microOp(walkPtrVec(i).value).cf.pc,
@@ -776,9 +787,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
-  // sync fflags/dirty_fs to csr
+  // sync fflags/dirty_fs/vxsat to csr
   io.csr.fflags := RegNext(fflags)
   io.csr.dirty_fs := RegNext(dirty_fs)
+  io.csr.vxsat := RegNext(vxsat)
 
   // sync v csr to csr
 //  io.csr.vcsrFlag := RegNext(isVsetFlushPipe)
@@ -838,7 +850,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   walkPtrVec := walkPtrVec_next
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val isLastUopVec = io.commits.info.map(_.uopIdx.andR)
+  val isLastUopVec = io.commits.info.map(_.uopIdx.flags)
   val commitCnt = PopCount(io.commits.commitValid.zip(isLastUopVec).map{case(isCommitValid, isLastUop) => isCommitValid && isLastUop})
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
@@ -1058,6 +1070,18 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   fflagsDataModule.io.raddr := VecInit(deqPtrVec_next.map(_.value))
   fflagsDataRead := fflagsDataModule.io.rdata
 
+  val vxsat_wb = vxsatPorts.map(_._2)
+  val vxsatDataModule = Module(new SyncDataModuleTemplate(
+    UInt(1.W), RobSize, CommitWidth, vxsat_wb.size)
+  )
+  for(i <- vxsat_wb.indices){
+    vxsatDataModule.io.wen  (i) := vxsat_wb(i).valid
+    vxsatDataModule.io.waddr(i) := vxsat_wb(i).bits.uop.robIdx.value
+    vxsatDataModule.io.wdata(i) := vxsat_wb(i).bits.vxsat
+  }
+  vxsatDataModule.io.raddr := VecInit(deqPtrVec_next.map(_.value))
+  vxsatDataRead := vxsatDataModule.io.rdata
+
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
   val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
@@ -1239,7 +1263,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.vecwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).vecWen)))
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
-      difftest.io.uopIdx   := RegNext(RegNext(RegNext(io.commits.info(i).uopIdx)))
+      difftest.io.uopIdx   := RegNext(RegNext(RegNext(io.commits.info(i).uopIdx.asUInt)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
@@ -1289,7 +1313,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.vecwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).vecWen)))
       difftest.io.wpdest  := RegNext(RegNext(RegNext(commitInfo.pdest)))
       difftest.io.wdest   := RegNext(RegNext(RegNext(commitInfo.ldest)))
-      difftest.io.uopIdx  := RegNext(RegNext(RegNext(commitInfo.uopIdx)))
+      difftest.io.uopIdx  := RegNext(RegNext(RegNext(commitInfo.uopIdx.asUInt)))
     }
   }
 

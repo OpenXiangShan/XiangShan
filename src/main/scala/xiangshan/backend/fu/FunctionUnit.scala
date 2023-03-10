@@ -49,6 +49,7 @@ case class FuConfig
   writeFpRf: Boolean,
   writeVecRf: Boolean = false,
   writeFflags: Boolean = false,
+  writeVxsat: Boolean = false,
   hasRedirect: Boolean = false,
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
@@ -72,7 +73,8 @@ case class FuConfig
     (if(writeFpRf) "fp|" else "") +
     (if(writeVecRf) "vec|" else "") +
     (if(writeFflags) "fflags" else "") +
-    (if(!writeIntRf && !writeFpRf && !writeVecRf && !writeFflags) "none" else "") + ") " +
+    (if(writeVxsat) "vxsat" else "") +
+    (if(!writeIntRf && !writeFpRf && !writeVecRf && !writeFflags && !writeVxsat) "none" else "") + ") " +
     (if(hasRedirect) "hasRedirect " else "") +
     (if(latency.latencyVal.getOrElse(99) != 99) "latency " + latency.latencyVal.get+" " else "") +
     (if(fastUopOut) "hasFastUopOut " else "") +

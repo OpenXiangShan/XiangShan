@@ -449,6 +449,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
   csrioIn.fpu.frm <> vecExuBlock.extraio.fuExtra.frm
 
+  csrioIn.vpu.set_vxsat <> ctrlBlock.io.robio.toCSR.vxsat
   csrioIn.vpu.set_vstart.valid <> ctrlBlock.io.robio.toCSR.vcsrFlag
   csrioIn.vpu.set_vl.valid     <> ctrlBlock.io.robio.toCSR.vcsrFlag
   csrioIn.vpu.set_vtype.valid  <> ctrlBlock.io.robio.toCSR.vcsrFlag
