@@ -154,32 +154,32 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     val j = i % TagAccessPart
     val k = i / TagAccessPart
     if(TagStep * (k + 1) <= readPorts) {
-      for (i <- TagStep * k until TagStep * (k + 1)) {
+      for (idx <- TagStep * k until TagStep * (k + 1)) {
         j match {
-          case 0 => when(io.cacheOp.req.valid && isReadTag(io.cacheOp.req.bits.opCode)) {
-            array(i).io.read.valid := true.B
-            array(i).io.read.bits.idx := io.cacheOp.req.bits.index
-            array(i).io.read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+          case 0 => when(io.cacheOp_req_dup(i).valid && isReadTag(io.cacheOp_req_bits_opCode_dup(i))) {
+            array(idx).io.read.valid := true.B
+            array(idx).io.read.bits.idx := io.cacheOp.req.bits.index
+            array(idx).io.read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
             cacheOpShouldResp := true.B
           }
-          case 1 => when(io.cacheOp_req_dup(0).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(0))) {
-            array(i).io.ecc_read.valid := true.B
-            array(i).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
-            array(i).io.ecc_read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+          case 1 => when(io.cacheOp_req_dup(i).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(i))) {
+            array(idx).io.ecc_read.valid := true.B
+            array(idx).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
+            array(idx).io.ecc_read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
             cacheOpShouldResp := true.B
           }
-          case 2 => when(io.cacheOp_req_dup(1).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(1))) {
-            array(i).io.write.valid := true.B
-            array(i).io.write.bits.idx := io.cacheOp.req.bits.index
-            array(i).io.write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-            array(i).io.write.bits.tag := io.cacheOp.req.bits.write_tag_low
+          case 2 => when(io.cacheOp_req_dup(i).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(i))) {
+            array(idx).io.write.valid := true.B
+            array(idx).io.write.bits.idx := io.cacheOp.req.bits.index
+            array(idx).io.write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+            array(idx).io.write.bits.tag := io.cacheOp.req.bits.write_tag_low
             cacheOpShouldResp := true.B
           }
-          case 3 => when(io.cacheOp_req_dup(2).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(2))) {
-            array(i).io.ecc_write.valid := true.B
-            array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
-            array(i).io.ecc_write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-            array(i).io.ecc_write.bits.ecc := io.cacheOp.req.bits.write_tag_ecc
+          case 3 => when(io.cacheOp_req_dup(i).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(i))) {
+            array(idx).io.ecc_write.valid := true.B
+            array(idx).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
+            array(idx).io.ecc_write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+            array(idx).io.ecc_write.bits.ecc := io.cacheOp.req.bits.write_tag_ecc
             cacheOpShouldResp := true.B
           }
         }
