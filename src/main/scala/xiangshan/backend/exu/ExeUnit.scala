@@ -104,6 +104,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   if (vipuModules.nonEmpty) {
     vipuModules.map(_._1.asInstanceOf[VIPU]).foreach(mod => {
       mod.vxrm := csr_vxrm
+      io.out.bits.vxsat := mod.vxsat
     })
   }
   val fmaModules = functionUnits.filter(_.isInstanceOf[FMA]).map(_.asInstanceOf[FMA])

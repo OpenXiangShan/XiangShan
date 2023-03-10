@@ -367,6 +367,7 @@ class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundle
 
   val data = UInt(dataWidth.W)
   val fflags = UInt(5.W)
+  val vxsat = UInt(1.W)
   val redirectValid = Bool()
   val redirect = new Redirect
   val debug = new DebugBundle
