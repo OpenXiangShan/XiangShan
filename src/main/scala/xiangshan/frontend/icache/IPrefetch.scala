@@ -126,6 +126,12 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nIPFBufferSize)
   val data_buffer = InitQueue(new IPFBufferEntryData, size = nIPFBufferSize)
 
+  val meta_buffer_empty_oh = WireInit(VecInit(Seq.fill(nIPFBufferSize)(false.B)))
+  (0 until nIPFBufferSize).foreach { i =>
+    meta_buffer_empty_oh(i) := !meta_buffer(i).valid
+  }
+  XSPerfAccumulate("ipfbuffer_empty_entry_multi_cycle", PopCount(meta_buffer_empty_oh))
+
   /** filter read logic */
   val fr_vidx = io.filter_read.req.vSetIdx
   val fr_ptag = get_phy_tag(io.filter_read.req.paddr)
