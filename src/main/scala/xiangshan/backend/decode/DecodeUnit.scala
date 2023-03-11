@@ -693,10 +693,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl
 
+  // TODO: vec decode
+  // FIXME: only 3 src
   cs.srcType(3) := SrcType.vp
   cs.lsrc(3) := 0.U(5.W) // It is always 0
-  cs.uopIdx.flags := true.B
-  cs.uopIdx.value := 0.U
+  cs.uopIdx := 0.U
+  cs.firstUop := true.B
+  cs.lastUop := true.B
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U

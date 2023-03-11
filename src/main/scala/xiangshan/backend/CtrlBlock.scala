@@ -298,12 +298,13 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, flushRedirect.valid)
 
-  val isCommitWriteVconfigVec = rob.io.commits.commitValid.zip(rob.io.commits.info).map{case (valid, info) => valid && info.ldest === 32.U}.reverse
-  val isWalkWriteVconfigVec = rob.io.commits.walkValid.zip(rob.io.commits.info).map{case (valid, info) => valid && info.ldest === 32.U}.reverse
-  val pdestReverse = rob.io.commits.info.map(info => info.pdest).reverse
-  val commitSel = PriorityMux(isCommitWriteVconfigVec, pdestReverse)
-  val walkSel = PriorityMux(isWalkWriteVconfigVec, pdestReverse)
-  val vconfigAddr = Mux(rob.io.commits.isCommit, commitSel, walkSel)
+  val isCommitWriteVconfigVec = rob.io.diffCommits.commitValid.zip(rob.io.diffCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
+  val commitPdestReverse = rob.io.diffCommits.info.map(info => info.pdest).reverse
+  val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
+  val walkPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
+  val commitSel = PriorityMux(isCommitWriteVconfigVec, commitPdestReverse)
+  val walkSel = PriorityMux(isWalkWriteVconfigVec, walkPdestReverse)
+  val vconfigAddr = Mux(rob.io.diffCommits.isCommit, commitSel, walkSel)
   io.vconfigReadPort.addr := RegNext(vconfigAddr)
   decode.io.vconfig := io.vconfigReadPort.data(15, 0).asTypeOf(new VConfig)
   decode.io.isVsetFlushPipe := rob.io.isVsetFlushPipe
@@ -343,7 +344,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for (i <- 0 until CommitWidth) {
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).uopIdx.flags && !rob.io.flushOut.valid
+    val is_commit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !rob.io.flushOut.valid
     io.frontend.toFtq.rob_commits(i).valid := RegNext(is_commit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), is_commit)
   }
@@ -442,7 +443,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   lfst.io.dispatch <> dispatch.io.lfst
 
   rat.io.redirect := stage2Redirect.valid
-  rat.io.robCommits := rob.io.commits
+  rat.io.robCommits := rob.io.rabCommits
+  rat.io.diffCommits := rob.io.diffCommits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
@@ -499,11 +501,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   rename.io.redirect := stage2Redirect
-  rename.io.robCommits <> rob.io.commits
+  rename.io.robCommits <> rob.io.rabCommits
   rename.io.ssit <> ssit.io.rdata
-  rename.io.debug_int_rat <> rat.io.debug_int_rat
-  rename.io.debug_vconfig_rat <> rat.io.debug_vconfig_rat
-  rename.io.debug_fp_rat <> rat.io.debug_fp_rat
+  rename.io.debug_int_rat <> rat.io.debug_int_rat2
+  rename.io.debug_vconfig_rat <> rat.io.debug_vconfig_rat2
+  rename.io.debug_fp_rat <> rat.io.debug_fp_rat2
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
