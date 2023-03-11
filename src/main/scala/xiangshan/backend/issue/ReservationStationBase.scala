@@ -250,7 +250,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   // wakeup
   val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
   val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
-  val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
+  val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput(params.exuCfg.get.isVPU))))
   // perf counter
   val full = Output(Bool())
   // extra

@@ -150,11 +150,6 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val rm = UInt(3.W)
 }
 
-class UopIdx(implicit p: Parameters) extends XSBundle{
-  val flags = Bool()
-  val value = UInt(5.W)
-}
-
 class VType(implicit p: Parameters) extends XSBundle {
   val vma   = Bool()
   val vta   = Bool()
@@ -188,7 +183,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
-  val uopIdx = new UopIdx
+  val uopIdx = UInt(log2Up(MaxUopSize).W)
+  val firstUop = Bool()
+  val lastUop = Bool()
   val vconfig = new VConfig
   val isMove = Bool()
   val vm = Bool()
@@ -219,6 +216,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
+  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -411,7 +409,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val uopIdx = new UopIdx
+  val uopIdx = UInt(log2Up(MaxUopSize).W)
   val vconfig = new VConfig
 }
 
@@ -427,6 +425,32 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class DiffCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
+
+  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
+
+  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class RabCommitInfo(implicit p: Parameters) extends XSBundle {
+  val ldest = UInt(6.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+}
+
+class RabCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
+  val isWalk = Bool()
+  val walkValid = Vec(CommitWidth, Bool())
+  val info = Vec(CommitWidth, new RabCommitInfo)
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {

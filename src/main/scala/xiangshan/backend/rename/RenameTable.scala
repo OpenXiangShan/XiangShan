@@ -51,10 +51,16 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
     val readPorts = Vec(readPortsNum * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
+    val diffWritePorts = Vec(CommitWidth * MaxUopSize, Input(new RatWritePort))
     val debug_rdata = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_vconfig = reg_t match { // vconfig is implemented as int reg[32]
       case Reg_I => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _     => None
+    }
+    val debug_rdata2 = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_vconfig2 = reg_t match { // vconfig is implemented as int reg[32]
+      case Reg_I => Some(Output(UInt(PhyRegIdxWidth.W)))
+      case _ => None
     }
   })
 
@@ -70,6 +76,9 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   // arch state rename table
   val arch_table = RegInit(rename_table_init)
   val arch_table_next = WireDefault(arch_table)
+
+  val difftest_table = RegInit(rename_table_init)
+  val difftest_table_next = WireDefault(difftest_table)
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
@@ -107,10 +116,23 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   }
   arch_table := arch_table_next
 
-  io.debug_rdata := arch_table.take(32)
+  for (w <- io.diffWritePorts) {
+    when(w.wen) {
+      difftest_table_next(w.addr) := w.data
+    }
+  }
+  difftest_table := difftest_table_next
+
+  io.debug_rdata := difftest_table.take(32)
   io.debug_vconfig match {
     case None => Unit
-    case x    => x.get := arch_table.last
+    case x    => x.get := difftest_table.last
+  }
+
+  io.debug_rdata2 := arch_table.take(32)
+  io.debug_vconfig2 match {
+    case None => Unit
+    case x => x.get := arch_table.last
   }
 }
 
@@ -118,6 +140,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val robCommits = Input(new RobCommitIO)
+    val diffCommits = Input(new DiffCommitIO)
     val intReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     val fpReadPorts = Vec(RenameWidth, Vec(4, new RatReadPort))
@@ -126,9 +149,12 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_int_rat2 = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat2 = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W))
+    val debug_vconfig_rat2 = Output(UInt(PhyRegIdxWidth.W))
   })
 
   val intRat = Module(new RenameTable(Reg_I))
@@ -136,7 +162,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val vecRat = Module(new RenameTable(Reg_V))
 
   io.debug_int_rat := intRat.io.debug_rdata
+  io.debug_int_rat2 := intRat.io.debug_rdata2
   io.debug_vconfig_rat := intRat.io.debug_vconfig.get
+  io.debug_vconfig_rat2 := intRat.io.debug_vconfig2.get
   intRat.io.readPorts <> io.intReadPorts.flatten
   intRat.io.redirect := io.redirect
   val intDestValid = io.robCommits.info.map(_.rfWen)
@@ -159,9 +187,15 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
+  for ((diff, i) <- intRat.io.diffWritePorts.zipWithIndex) {
+    diff.wen := io.diffCommits.isCommit && io.diffCommits.commitValid(i) && io.diffCommits.info(i).rfWen
+    diff.addr := io.diffCommits.info(i).ldest
+    diff.data := io.diffCommits.info(i).pdest
+  }
 
   // debug read ports for difftest
   io.debug_fp_rat := fpRat.io.debug_rdata
+  io.debug_fp_rat2 := fpRat.io.debug_rdata2
   fpRat.io.readPorts <> io.fpReadPorts.flatten
   fpRat.io.redirect := io.redirect
   for ((arch, i) <- fpRat.io.archWritePorts.zipWithIndex) {
@@ -180,6 +214,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.addr := rename.addr
       spec.data := rename.data
     }
+  }
+  for ((diff, i) <- fpRat.io.diffWritePorts.zipWithIndex) {
+    diff.wen := io.diffCommits.isCommit && io.diffCommits.commitValid(i) && io.diffCommits.info(i).fpWen
+    diff.addr := io.diffCommits.info(i).ldest
+    diff.data := io.diffCommits.info(i).pdest
   }
 
   // debug read ports for difftest
@@ -204,6 +243,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.addr := rename.addr
       spec.data := rename.data
     }
+  }
+  for ((diff, i) <- vecRat.io.diffWritePorts.zipWithIndex) {
+    diff.wen  := io.diffCommits.isCommit && io.diffCommits.commitValid(i) && io.diffCommits.info(i).vecWen
+    diff.addr := io.diffCommits.info(i).ldest
+    diff.data := io.diffCommits.info(i).pdest
   }
 
 }

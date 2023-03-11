@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
-import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.{RobPtr}
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
 
@@ -100,7 +100,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter rob (from decode)
+  val validCount = PopCount(io.in.map(in => in.valid && in.bits.ctrl.lastUop)) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
@@ -171,7 +171,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
 
-    uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(_.valid))
+    uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(in => in.valid && in.bits.ctrl.lastUop))
 
     uops(i).psrc(0) := Mux1H(uops(i).ctrl.srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).ctrl.srcType(1), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
