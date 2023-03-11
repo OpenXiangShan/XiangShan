@@ -538,7 +538,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val metaArray      = Module(new ICacheMetaArray)
   val metaArrayCopy = Module(new ICacheMetaArray)
-  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
+//  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
   val dataArray      = Module(new ICacheDataArray)
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
@@ -549,6 +549,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  1))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
+  val metaCopy_read_arb = Module(new Arbiter(new ICacheReadBundle, 2))
 
   mainPipe.io.PIQ <> missUnit.io.to_main_pipe
   ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
@@ -566,12 +567,15 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   meta_read_arb.io.in(0)      <> mainPipe.io.metaArray.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
-  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
-  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
+  metaCopy_read_arb.io.in(0) <> prefetchPipe.io.toIMeta
+  metaCopy_read_arb.io.in(1) <> ipfBuffer.io.meta_filter_read.toIMeta
+  metaArrayCopy.io.read <> metaCopy_read_arb.io.out
+//  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
+//  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
 
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
   prefetchPipe.io.fromIMeta             <> metaArrayCopy.io.readResp
-  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayMoveFilterCopy.io.readResp
+  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayCopy.io.readResp //metaArrayMoveFilterCopy.io.readResp
 
   data_read_arb.io.in(0)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
@@ -585,7 +589,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   metaArray.io.write <> meta_write_arb.io.out
   metaArrayCopy.io.write <> meta_write_arb.io.out
-  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
+//  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
 //  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
 //  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
 //  meta_write_arb.io.out.ready := true.B
@@ -669,7 +673,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
+//  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
   // TODO : metaArrayCopy & metaArrayMoveFilterCopy cache op may has bug
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
