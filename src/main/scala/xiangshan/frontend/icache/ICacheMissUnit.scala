@@ -77,7 +77,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
-    val toPrefetch    = ValidIO(UInt(PAddrBits.W))
+    val ongoing_req    = ValidIO(UInt(PAddrBits.W))
 
   })
 
@@ -114,8 +114,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.req.ready := (state === s_idle)
   io.mem_acquire.valid := (state === s_send_mem_aquire)
 
-  io.toPrefetch.valid := (state =/= s_idle)
-  io.toPrefetch.bits  :=  addrAlign(req.paddr, blockBytes, PAddrBits)
+  io.ongoing_req.valid := (state =/= s_idle)
+  io.ongoing_req.bits  :=  addrAlign(req.paddr, blockBytes, PAddrBits)
 
   //state change
   switch(state) {
@@ -211,7 +211,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
-    val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
+    val mshr_info             =  Vec(totalMSHRNum,ValidIO(UInt(PAddrBits.W)))
     val freePIQEntry          =  Output(UInt(log2Ceil(nPrefetchEntries).W))
 
     val fencei = Input(Bool())
@@ -250,7 +250,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     }
 
     io.resp(i) <> entry.io.resp
-    io.prefetch_check(i) <> entry.io.toPrefetch
+    io.mshr_info(i) <> entry.io.ongoing_req
 
 //    XSPerfAccumulate(
 //      "entryPenalty" + Integer.toString(i, 10),
@@ -284,6 +284,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     prefetchEntry.io.req.bits  := io.prefetch_req.bits
 
     prefetchEntry.io.id := i.U
+
+    io.mshr_info(i) := prefetchEntry.io.ongoing_req
 
     prefetchEntry
   }

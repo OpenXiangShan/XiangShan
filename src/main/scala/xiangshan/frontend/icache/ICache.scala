@@ -88,6 +88,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def pWay = nWays/partWayNum
 
   def nPrefetchEntries = cacheParams.nPrefetchEntries
+  def totalMSHRNum = PortNumber + nPrefetchEntries
   def nIPFBufferSize   = cacheParams.nPrefBufferEntries
   def maxIPFMoveConf   = 1 // temporary use small value to cause more "move" operation
 
@@ -557,7 +558,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
   mainPipe.io.IPFBufMove <> ipfBuffer.io.replace
   ipfBuffer.io.filter_read <> prefetchPipe.io.IPFBufferRead
-  mainPipe.io.IPFPipe <> prefetchPipe.io.fromMainPipe
+  mainPipe.io.missSlotInfo <> prefetchPipe.io.mainPipeMissSlotInfo
   mainPipe.io.mainPipeMissInfo <> ipfBuffer.io.mainpipe_missinfo
 
   ipfBuffer.io.fencei := false.B
@@ -636,7 +637,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
   missUnit.io.hartId       := io.hartId
-  prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
+  prefetchPipe.io.fromMSHR <> missUnit.io.mshr_info
   prefetchPipe.io.fencei := false.B
   prefetchPipe.io.freePIQEntry := missUnit.io.freePIQEntry
 

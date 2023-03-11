@@ -96,7 +96,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val PIQ          = Flipped(Vec(nPrefetchEntries,new PIQToMainPipe))
   val IPFBufMove   = Flipped(new IPFBufferMove)
   val mainPipeMissInfo = new MainPipeMissInfo()
-  val IPFPipe      = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe)) // need to be discarded
+  val missSlotInfo = Vec(PortNumber, ValidIO(new MainPipeToPrefetchPipe))
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -131,7 +131,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   val fromPIQ             = io.PIQ.map(_.info)
   val IPFBufferMove       = io.IPFBufMove
-  val toIPFPipe           = io.IPFPipe
+  val missSlotInfo        = io.missSlotInfo
   val mainPipeMissInfo    = io.mainPipeMissInfo
 
   io.itlb.foreach(_.req_kill := false.B)
@@ -364,14 +364,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** when tlb stall, ipfBuffer stage2 need also stall */
   mainPipeMissInfo.s1_already_check_ipf := s1_valid && tlbRespAllValid // when tlb back, s1 must has already check ipf
-
-  // TODO : remove this
-  (0 until PortNumber).foreach{
-    i =>
-      toIPFPipe(i).valid := false.B
-      toIPFPipe(i).bits.vSetIdx := 0.U
-      toIPFPipe(i).bits.ptage := 0.U
-  }
 
   /** <PERF> replace victim way number */
 
@@ -725,6 +717,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }.elsewhen(missSwitchBit && s2_fetch_finish){
     missSwitchBit := false.B
     io.prefetchDisable := true.B
+  }
+
+  (0 until PortNumber).foreach{
+    i =>
+      missSlotInfo(i).valid := missStateQueue(i) =/= m_invalid
+      missSlotInfo(i).bits.vSetIdx := missSlot(i).m_vSetIdx
+      missSlotInfo(i).bits.ptage := missSlot(i).m_pTag
   }
 
 
