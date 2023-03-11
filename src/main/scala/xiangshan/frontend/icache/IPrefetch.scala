@@ -164,10 +164,10 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   }
 
   (0 until PortNumber).foreach { i =>
-    when(r_valid(i) && r_hit_oh(i).reduce(_ || _)) {
+    when(io.read.req(i).valid && r_hit_oh(i).reduce(_ || _)) {
       meta_buffer(r_buffer_hit_idx(i)).has_been_hit := true.B
     }
-    XSPerfAccumulate("ipf_entry_first_hit_by_port_" + i, r_valid(i) && r_hit_oh(i).reduce(_ || _) &&
+    XSPerfAccumulate("ipf_entry_first_hit_by_port_" + i, io.read.req(i).valid && r_hit_oh(i).reduce(_ || _) &&
       meta_buffer(r_buffer_hit_idx(i)).has_been_hit === false.B)
   }
 
