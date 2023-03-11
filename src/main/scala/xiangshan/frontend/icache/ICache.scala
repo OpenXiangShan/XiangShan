@@ -114,6 +114,13 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     bit || valid
   }
 
+  def blockCounter(block: Bool, flush: Bool, threshold: Int): Bool = {
+    val counter = RegInit(0.U(log2Up(threshold + 1).W))
+    when (block) { counter := counter + 1.U }
+    when (flush) { counter := 0.U}
+    counter > threshold.U
+  }
+
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }
