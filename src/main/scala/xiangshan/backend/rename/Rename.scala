@@ -229,12 +229,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.imm := Cat(io.in(i).bits.lsrc(0).orR.asUInt, io.in(i).bits.imm(14,0))                           // lsrc(0) Not Zero
     }
     // dirty code for SoftPrefetch (prefetch.r/prefetch.w)
-    when (io.in(i).bits.isSoftPrefetch) {
-      io.out(i).bits.fuType := FuType.ldu.U
-      io.out(i).bits.fuOpType := Mux(io.in(i).bits.lsrc(1) === 1.U, LSUOpType.prefetch_r, LSUOpType.prefetch_w)
-      io.out(i).bits.selImm := SelImm.IMM_S
-      io.out(i).bits.imm := Cat(io.in(i).bits.imm(io.in(i).bits.imm.getWidth - 1, 5), 0.U(5.W))
-    }
+//    when (io.in(i).bits.isSoftPrefetch) {
+//      io.out(i).bits.fuType := FuType.ldu.U
+//      io.out(i).bits.fuOpType := Mux(io.in(i).bits.lsrc(1) === 1.U, LSUOpType.prefetch_r, LSUOpType.prefetch_w)
+//      io.out(i).bits.selImm := SelImm.IMM_S
+//      io.out(i).bits.imm := Cat(io.in(i).bits.imm(io.in(i).bits.imm.getWidth - 1, 5), 0.U(5.W))
+//    }
 
     // write speculative rename table
     // we update rat later inside commit code
