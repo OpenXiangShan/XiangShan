@@ -54,10 +54,36 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   }
 }
 
+class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
+  assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+  val hit = Bool()
+  val pre = Bool()
+  val ppn = Vec(tlbcontiguous, UInt(ppnLen.W))
+  val perm = Vec(tlbcontiguous, new PtePermBundle())
+  // When ecc(addr_low) = true.B, eccflush will be triggered
+  // And cache will resp miss to l2 tlb
+  // Elsewhen ecc(other) = true.B, will only set valid(other) = false.B
+  // Wait for next ptw from l1 tlb
+  val ecc = Bool()
+  val level = UInt(2.W)
+  val v = Vec(tlbcontiguous, Bool())
+
+  def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)) {
+    this.hit := hit && !ecc
+    this.pre := pre
+    this.ppn := ppn
+    this.perm := perm
+    this.ecc := ecc && hit
+    this.level := level
+    this.v := valid
+  }
+}
+
 class PageCacheRespBundle(implicit p: Parameters) extends PtwBundle {
   val l1 = new PageCachePerPespBundle
   val l2 = new PageCachePerPespBundle
-  val l3 = new PageCachePerPespBundle
+  val l3 = new PageCacheMergePespBundle
   val sp = new PageCachePerPespBundle
 }
 
@@ -80,7 +106,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l2Hit = Bool()
       val ppn = UInt(ppnLen.W)
     }
-    val toTlb = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
+    val toTlb = new PtwMergeResp()
   })
   val refill = Flipped(ValidIO(new Bundle {
     val ptes = UInt(blockBits.W)
@@ -343,9 +369,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     (hit, hitWayData, hitWayData.prefetch, eccError)
   }
-  val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
-  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
-  val l3HitValid = l3HitData.vs(genPtwL3SectorIdx(stageCheck(0).bits.req_info.vpn))
+  val l3HitPPN = l3HitData.ppns
+  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))
+  val l3HitValid = l3HitData.vs
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
@@ -399,13 +425,20 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
-  io.resp.bits.toTlb.tag   := stageResp.bits.req_info.vpn
-  io.resp.bits.toTlb.asid  := io.csr_dup(0).satp.asid // DontCare
-  io.resp.bits.toTlb.ppn   := Mux(resp_res.l3.hit, resp_res.l3.ppn, resp_res.sp.ppn)
-  io.resp.bits.toTlb.perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm, resp_res.sp.perm))
-  io.resp.bits.toTlb.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
-  io.resp.bits.toTlb.prefetch := from_pre(stageResp.bits.req_info.source)
-  io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
+  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
+  io.resp.bits.toTlb.entry.map(_.asid := io.csr_dup(0).satp.asid) // DontCare
+  io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level)))
+  io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
+  for (i <- 0 until tlbcontiguous) {
+    io.resp.bits.toTlb.entry(i).ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(ppnLen - 1, sectortlbwidth), resp_res.sp.ppn(ppnLen - 1, sectortlbwidth))
+    io.resp.bits.toTlb.entry(i).ppn_low := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(sectortlbwidth - 1, 0), resp_res.sp.ppn(sectortlbwidth - 1, 0))
+    io.resp.bits.toTlb.entry(i).perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(i), resp_res.sp.perm))
+    io.resp.bits.toTlb.entry(i).v := Mux(resp_res.l3.hit, resp_res.l3.v(i), resp_res.sp.v)
+    io.resp.bits.toTlb.entry(i).pf := !io.resp.bits.toTlb.entry(i).v
+    io.resp.bits.toTlb.entry(i).af := false.B
+  }
+  io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
+  io.resp.bits.toTlb.all_valid := Mux(resp_res.l3.hit, true.B, false.B)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")

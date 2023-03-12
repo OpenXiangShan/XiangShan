@@ -128,7 +128,7 @@ class TLBFA(
       resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
 
-    access.sets := get_set_idx(vpn_reg, nSets) // no use
+    access.sets := get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), nSets) // no use
     access.touch_ways.valid := resp.valid && Cat(hitVecReg).orR
     access.touch_ways.bits := OHToUInt(hitVecReg)
 
@@ -141,8 +141,9 @@ class TLBFA(
     v(io.w.bits.wayIdx) := true.B
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
-  // write assert, shoulg not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid) && vi })
+  // write assert, should not duplicate with the existing entries
+  //
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, io.csr.satp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
@@ -159,6 +160,7 @@ class TLBFA(
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
   val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.asid))
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.asid, ignoreAsid = true))
+  // Sfence will flush all sectors of an entry when hit
   when (io.sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
@@ -189,6 +191,8 @@ class TLBFA(
     n.ppn := ns.ppn
     n.tag := ns.tag
     n.asid := ns.asid
+    n.valididx := ns.valididx
+    n.ppn_low := ns.ppn_low
     n
   }
 
@@ -244,10 +248,10 @@ class TLBSA(
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire())
 
-    val ridx = get_set_idx(vpn, nSets)
+    val ridx = get_set_idx(vpn(vpn.getWidth - 1, sectortlbwidth), nSets)
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
-    val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
-    val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn(vpn.getWidth - 1, sectortlbwidth), VPOST_SELECT), VPRE_SELECT)))
+    val vidx = vidx_resize(get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
     val vidx_bypass = RegNext((entries.io.waddr === ridx) && entries.io.wen)
     entries.io.raddr(i) := ridx
 
@@ -264,7 +268,7 @@ class TLBSA(
     resp.bits.ppn.suggestName("ppn")
     resp.bits.perm.suggestName("perm")
 
-    access.sets := get_set_idx(vpn_reg, nSets) // no use
+    access.sets := get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), nSets) // no use
     access.touch_ways.valid := resp.valid && hit
     access.touch_ways.bits := 1.U // TODO: set-assoc need no replacer when nset is 1
   }
@@ -298,12 +302,13 @@ class TLBSA(
 
   val sfence = io.sfence
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
+  // Sfence will flush all sectors of an entry when hit
   when (io.sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
         v.map(a => a.map(b => b := false.B))
     }.otherwise {
         // specific addr but all asid
-        v(get_set_idx(sfence_vpn, nSets)).map(_ := false.B)
+        v(get_set_idx(sfence_vpn(sfence_vpn.getWidth - 1, sectortlbwidth), nSets)).map(_ := false.B)
     }
   }
 
@@ -321,7 +326,7 @@ class TLBSA(
 
   for (i <- 0 until nSets) {
     XSPerfAccumulate(s"hit${i}", io.r.resp.map(a => a.valid & a.bits.hit)
-      .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn, nSets)) === i.U))
+      .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn(a.bits.vpn.getWidth - 1, sectortlbwidth), nSets)) === i.U))
       .map{a => (a._1 && a._2).asUInt()}
       .fold(0.U)(_ + _)
     )
@@ -329,7 +334,7 @@ class TLBSA(
 
   for (i <- 0 until nSets) {
     XSPerfAccumulate(s"access${i}", io.r.resp.map(_.valid)
-      .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn, nSets)) === i.U))
+      .zip(io.r.req.map(a => RegNext(get_set_idx(a.bits.vpn(a.bits.vpn.getWidth - 1, sectortlbwidth), nSets)) === i.U))
       .map{a => (a._1 && a._2).asUInt()}
       .fold(0.U)(_ + _)
     )
