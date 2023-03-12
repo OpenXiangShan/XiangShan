@@ -274,6 +274,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
+  // save only one pte for each id, for sector tlb
+  // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
+  val resp_pte_sector = VecInit((0 until MemReqWidth).map(i =>
+    if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, mem_resp_done && !mem_resp_from_mq) }
+    else { DataHoldBypass(refill_data, llptw_mem.buffer_it(i)) }
+    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
+  ))
+
   // mem -> miss queue
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_mq
   llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
@@ -337,7 +345,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     mergeArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
-    mergeArb(i).in(outArbMqPort).bits := contiguous_pte_to_merge_ptwResp(refill_data.asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
+    mergeArb(i).in(outArbMqPort).bits := contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
 
