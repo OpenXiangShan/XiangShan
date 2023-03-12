@@ -86,7 +86,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   println(s"specialFuCfgs: ${specialFuCfgs.map(_.map(_.name))}")
   lazy val io = IO(new IssueQueueIO())
   dontTouch(io.deq)
-
+  dontTouch(io.deqResp)
   // Modules
   val statusArray   = Module(new StatusArray)
   val immArray      = Module(new DataArray(UInt(XLEN.W), params.numDeq, params.numEnq, params.numEntries))
@@ -157,9 +157,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.deq.zipWithIndex.foreach { case (deq, i) =>
       deq.deqSelOH.valid  := finalDeqSelValidVec(i)
       deq.deqSelOH.bits   := finalDeqSelOHVec(i)
-      deq.resp.valid      := io.deq(i).ready && io.deq(i).valid // Todo
-      deq.resp.bits.addrOH := io.deq(i).bits.addrOH
-      deq.resp.bits.success := io.deq(i).ready
+      deq.resp.valid      := io.deqResp(i).valid
+      deq.resp.bits.addrOH := io.deqResp(i).bits.addrOH
+      deq.resp.bits.success := io.deqResp(i).bits.success
       deq.resp.bits.dataInvalidSqIdx := 0.U.asTypeOf(deq.resp.bits.dataInvalidSqIdx)
       deq.resp.bits.respType := 0.U.asTypeOf(deq.resp.bits.respType)
     }

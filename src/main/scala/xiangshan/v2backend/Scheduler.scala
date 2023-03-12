@@ -88,7 +88,7 @@ class SchedulerImp(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Para
     iq.io.enq <> dispatch2Iq.io.out(i)
     iq.io.wakeup <> io.writeback
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := io.toDataPath(i)(j).ready && iq.io.deq(j).valid
+      deqResp.valid := iq.io.deq(j).valid
       deqResp.bits.success := io.toDataPath(i)(j).ready
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
