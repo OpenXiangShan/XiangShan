@@ -40,6 +40,16 @@ class ExeUnitImp(
     module
   })
 
+  val busy = RegInit(false.B)
+  val robIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
+  when (robIdx.needFlush(io.flush)) {
+    busy := false.B
+  }.elsewhen(io.out.fire) {
+    busy := false.B
+  }.elsewhen(io.in.fire) {
+    busy := true.B
+  }
+
   // rob flush --> funcUnits
   funcUnits.zipWithIndex.foreach { case (fu, i) =>
     fu.io.flush <> io.flush
@@ -52,7 +62,9 @@ class ExeUnitImp(
   val in1ToN = Module(new Dispatcher(new ExuInput(exuParams), funcUnits.length, acceptCond))
 
   // ExeUnit.in <---> Dispatcher.in
-  in1ToN.io.in <> io.in
+  in1ToN.io.in.valid := io.in.valid && !busy
+  in1ToN.io.in.bits := io.in.bits
+  io.in.ready := !busy
 
   // Dispatcher.out <---> FunctionUnits
   in1ToN.io.out.zip(funcUnits.map(_.io.in)).foreach {
