@@ -96,16 +96,17 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val subDeqPolicies  = specialFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
 
   // Wires
-  val enqValidVec = io.enq.map(_.valid)
-  val enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
-  val enqSelOHVec = Wire(Vec(params.numEnq, UInt(params.numEntries.W)))
-  val enqOH: IndexedSeq[UInt] = (enqSelValidVec zip enqSelOHVec).map { case (valid, oh) =>
+  val s0_enqValidVec = io.enq.map(_.valid)
+  val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
+  val s0_enqSelOHVec = Wire(Vec(params.numEnq, UInt(params.numEntries.W)))
+  val s0_enqNotFlush = !io.flush.valid
+  val s0_doEnqSelValidVec = s0_enqSelValidVec.map(_ && s0_enqNotFlush)
+  val s0_doEnqOH: IndexedSeq[UInt] = (s0_doEnqSelValidVec zip s0_enqSelOHVec).map { case (valid, oh) =>
     Mux(valid, oh, 0.U)
   }
-  val enqMask: UInt = enqOH.reduce(_ | _)
 
-  val enqImmValidVec = io.enq.map(enq => enq.valid)
-  val enqImmVec = VecInit(io.enq.map(_.bits.imm))
+  val s0_enqImmValidVec = io.enq.map(enq => enq.valid)
+  val s0_enqImmVec = VecInit(io.enq.map(_.bits.imm))
 
   val mainDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
   val mainDeqSelOHVec = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
@@ -140,8 +141,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.flush  <> io.flush
     statusArrayIO.wakeup <> io.wakeup
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
-      enq.valid                 := enqSelValidVec(i)
-      enq.bits.addrOH           := enqSelOHVec(i)
+      enq.valid                 := s0_doEnqSelValidVec(i)
+      enq.bits.addrOH           := s0_enqSelOHVec(i)
       val numLSrc = io.enq(i).bits.srcType.size.min(enq.bits.data.srcType.size)
       for (j <- 0 until numLSrc) {
         enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j) | wakeupEnqSrcStateBypass(i)(j)
@@ -168,9 +169,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val immArrayRdataVec = immArray.io.read.map(_.data)
   immArray.io match { case immArrayIO: DataArrayIO[UInt] =>
     immArrayIO.write.zipWithIndex.foreach { case (w, i) =>
-      w.en := enqSelValidVec(i) && enqImmValidVec(i)
-      w.addr := enqSelOHVec(i)
-      w.data := enqImmVec(i)
+      w.en := s0_doEnqSelValidVec(i) && s0_enqImmValidVec(i)
+      w.addr := s0_enqSelOHVec(i)
+      w.data := s0_enqImmVec(i)
     }
     immArrayIO.read.zipWithIndex.foreach { case (r, i) =>
       r.addr := finalDeqOH(i)
@@ -180,8 +181,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val payloadArrayRdata = Wire(Vec(params.numDeq, Output(new DynInst)))
   payloadArray.io match { case payloadArrayIO: DataArrayIO[DynInst] =>
     payloadArrayIO.write.zipWithIndex.foreach { case (w, i) =>
-      w.en := enqSelValidVec(i)
-      w.addr := enqSelOHVec(i)
+      w.en := s0_doEnqSelValidVec(i)
+      w.addr := s0_enqSelOHVec(i)
       w.data := io.enq(i).bits
     }
     payloadArrayIO.read.zipWithIndex.foreach { case (r, i) =>
@@ -194,7 +195,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val fuTypeNextVec = WireInit(fuTypeRegVec)
   fuTypeRegVec := fuTypeNextVec
 
-  enqSelValidVec.zip(enqSelOHVec).zipWithIndex.foreach { case ((valid, oh), i) =>
+  s0_doEnqSelValidVec.zip(s0_enqSelOHVec).zipWithIndex.foreach { case ((valid, oh), i) =>
     when (valid) {
       fuTypeNextVec(OHToUInt(oh)) := io.enq(i).bits.fuType
     }
@@ -202,8 +203,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   enqPolicy match { case ep =>
     ep.io.valid     := validVec.asUInt
-    enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid).zip(enqValidVec).map { case(sel, enqValid) => enqValid && sel}
-    enqSelOHVec     := ep.io.enqSelOHVec.map(oh => oh.bits)
+    s0_enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid).zip(s0_enqValidVec).map { case(sel, enqValid) => enqValid && sel}
+    s0_enqSelOHVec     := ep.io.enqSelOHVec.map(oh => oh.bits)
   }
 
   mainDeqPolicy match { case dp =>
@@ -268,7 +269,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   // Todo: better counter implementation
   private val validCnt = PopCount(validVec)
-  private val enqSelCnt = PopCount(enqSelValidVec)
+  private val enqSelCnt = PopCount(s0_doEnqSelValidVec)
   private val validCntNext = validCnt + enqSelCnt
   io.status.full := validVec.asUInt.andR
   io.status.empty := !validVec.asUInt.orR
@@ -326,8 +327,8 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
       r.addr := finalDeqSelOHVec(i)
     }
     pcArrayIO.write.zipWithIndex.foreach { case (w, i) =>
-      w.en := enqSelValidVec(i)
-      w.addr := enqSelOHVec(i)
+      w.en := s0_doEnqSelValidVec(i)
+      w.addr := s0_enqSelOHVec(i)
       w.data := io.enqJmp.get(i).pc
     }
   }
@@ -338,8 +339,8 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
       r.addr := finalDeqSelOHVec(i)
     }
     arrayIO.write.zipWithIndex.foreach { case (w, i) =>
-      w.en := enqSelValidVec(i)
-      w.addr := enqSelOHVec(i)
+      w.en := s0_doEnqSelValidVec(i)
+      w.addr := s0_enqSelOHVec(i)
       w.data := io.enqJmp.get(i).target
     }
   }
