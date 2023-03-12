@@ -38,12 +38,14 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   divDataModule.io.valid := io.in.valid
   divDataModule.io.src(0) := divInputCvtFunc(io.in.bits.src(0))
   divDataModule.io.src(1) := divInputCvtFunc(io.in.bits.src(1))
-  divDataModule.io.sign := ctrl.sign // Todo: check it if assign with ctrlReg
+  divDataModule.io.sign := ctrl.sign
   divDataModule.io.kill_w := kill_w
   divDataModule.io.kill_r := kill_r
   divDataModule.io.isHi := ctrlReg.isHi
   divDataModule.io.isW := ctrlReg.isW
   divDataModule.io.out_ready := io.out.ready
+
+  val validNext = divDataModule.io.out_validNext // if high, io.valid will assert next cycle
 
   io.in.ready := divDataModule.io.in_ready
   io.out.valid := divDataModule.io.out_valid

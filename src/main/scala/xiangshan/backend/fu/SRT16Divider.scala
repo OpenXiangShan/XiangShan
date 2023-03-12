@@ -34,6 +34,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     val valid, sign, kill_w, kill_r, isHi, isW = Input(Bool())
     val in_ready = Output(Bool())
     val out_valid = Output(Bool())
+    val out_validNext = Output(Bool())
     val out_data = Output(UInt(len.W))
     val out_ready = Input(Bool())
   })
@@ -90,9 +91,9 @@ class SRT16DividerDataModule(len: Int) extends Module {
     state := Mux(finalIter, UIntToOH(s_post_0, 7), UIntToOH(s_iter, 7))
   } .elsewhen(state(s_post_0)) { // if rem < 0, rem = rem + d
     state := UIntToOH(s_post_1, 7)
-  } .elsewhen(state(s_post_1) && out_fire) {
+  } .elsewhen(state(s_post_1)) {
     state := UIntToOH(s_finish, 7)
-  } .elsewhen(state(s_finish)) {
+  } .elsewhen(state(s_finish) && io.out_ready) {
     state := UIntToOH(s_idle, 7)
   } .otherwise {
     state := state
@@ -389,8 +390,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state(s_idle)
-  io.out_valid := state(s_post_1)
-
+  io.out_valid := state(s_finish)
+  io.out_validNext := state(s_post_1)
 }
 
 object mLookUpTable2 {
