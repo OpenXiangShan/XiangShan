@@ -40,9 +40,9 @@ class BranchModule(implicit p: Parameters) extends XSModule {
   val xor     = src1 ^ src2
   // branch
   val branchOpTable = List(
-    BRUOpType.getBranchType(ALUOpType.beq)  -> !xor.orR,
-    BRUOpType.getBranchType(ALUOpType.blt)  -> slt,
-    BRUOpType.getBranchType(ALUOpType.bltu) -> sltu
+    BRUOpType.getBranchType(BRUOpType.beq)  -> !xor.orR,
+    BRUOpType.getBranchType(BRUOpType.blt)  -> slt,
+    BRUOpType.getBranchType(BRUOpType.bltu) -> sltu
   )
   val taken = LookupTree(BRUOpType.getBranchType(func), branchOpTable) ^ BRUOpType.isBranchInvert(func)
 
