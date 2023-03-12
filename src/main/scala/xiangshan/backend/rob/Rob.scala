@@ -643,7 +643,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
-    wb.bits.redirect.get.bits.cfiUpdate.isMisPred && wb.bits.redirect.get.valid
+    wb.bits.redirect.get.bits.cfiUpdate.isMisPred && wb.bits.redirect.get.valid && wb.valid
   ))).orR
   val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
@@ -988,6 +988,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     */
   XSDebug(p"enqPtr ${enqPtr} deqPtr ${deqPtr}\n")
   XSDebug("")
+  XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
   for(i <- 0 until RobSize){
     XSDebug(false, !valid(i), "-")
     XSDebug(false, valid(i) && writebacked(i), "w")

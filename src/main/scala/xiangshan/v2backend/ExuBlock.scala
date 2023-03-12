@@ -30,7 +30,7 @@ class ExuBlockImp(
   private val outs: IndexedSeq[DecoupledIO[ExuOutput]] = io.out.flatten
 
   (ins zip exus zip outs).foreach { case ((input, exu), output) =>
-    exu.io.flush <> io.redirect
+    exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => io.frm.get <> exuio)
@@ -40,7 +40,7 @@ class ExuBlockImp(
 }
 
 class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBundle {
-  val redirect = Flipped(ValidIO(new Redirect))
+  val flush = Flipped(ValidIO(new Redirect))
   // in(i)(j): issueblock(i), exu(j)
   val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputBundle)
   // out(i)(j): issueblock(i), exu(j).

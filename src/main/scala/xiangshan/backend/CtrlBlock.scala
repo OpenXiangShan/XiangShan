@@ -31,7 +31,7 @@ import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.Ftq_RF_Components
-import xiangshan.v2backend.Bundles.{DecodedInst, DynInst, ExceptionInfo}
+import xiangshan.v2backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.v2backend.{BackendParams, VAddrData}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -132,20 +132,27 @@ class CtrlBlockImp(
     s2_s4_pendingRedirectValid := false.B
   }
 
-  // Redirect will be RegNext at ExuBlocks.
+  // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
 
-  private val exuPredecode = RegNext(VecInit(
-    io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get)
-  ))
-
-  private val exuRedirects: IndexedSeq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
-    val valid = x.valid && x.bits.redirect.get.valid
+  private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
+    val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
-    val delayed = Wire(Valid(new Redirect()))
-    delayed.valid := RegNext(valid && !killedByOlder, init = false.B)
-    delayed.bits := RegEnable(x.bits.redirect.get.bits, x.valid)
+    val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
+    delayed.valid := RegNext(valid && !killedByOlder)
+    delayed.bits := RegEnable(x.bits, x.valid)
     delayed
+  })
+
+  private val exuPredecode = VecInit(
+    delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get)
+  )
+
+  private val exuRedirects: IndexedSeq[ValidIO[Redirect]] = delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => {
+    val out = Wire(Valid(new Redirect()))
+    out.valid := x.valid && x.bits.redirect.get.valid
+    out.bits := x.bits.redirect.get.bits
+    out
   })
 
   private val memViolation = io.fromMem.violation
@@ -363,6 +370,7 @@ class CtrlBlockImp(
   io.toIssueBlock.vfUops  <> fpDq.io.deq
   io.toIssueBlock.memUops <> lsDq.io.deq
   io.toIssueBlock.allocPregs <> dispatch.io.allocPregs
+  io.toIssueBlock.flush   <> s2_s4_redirect
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
@@ -376,6 +384,8 @@ class CtrlBlockImp(
   private val jumpTargetVec     : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   io.toIssueBlock.pcVec := jumpPcVec
   io.toIssueBlock.targetVec := jumpTargetVec
+
+  io.toExuBlock.flush := s2_s4_redirect
 
   for (i <- 0 until params.numPcReadPort) {
     pcMem.io.raddr(i) := intDq.io.deqNext(i).ftqPtr.value
@@ -398,7 +408,7 @@ class CtrlBlockImp(
 
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect <> s1_s3_redirect
-  rob.io.writeback := io.fromWB.wbData // Todo
+  rob.io.writeback := delayedNotFlushedWriteBack
 
   io.redirect <> s1_s3_redirect
 
@@ -454,12 +464,16 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val frontend = Flipped(new FrontendToCtrlIO())
   val toIssueBlock = new Bundle {
+    val flush = ValidIO(new Redirect)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val intUops = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new DynInst))
     val vfUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
     val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val targetVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
+  }
+  val toExuBlock = new Bundle {
+    val flush = ValidIO(new Redirect)
   }
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2CtrlBundles))

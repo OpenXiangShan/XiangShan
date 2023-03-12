@@ -72,7 +72,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.lsq <> io.mem.lsq
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
-  intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.redirect
+  intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   intScheduler.io.fromCtrlBlock.pcVec := ctrlBlock.io.toIssueBlock.pcVec
   intScheduler.io.fromCtrlBlock.targetVec := ctrlBlock.io.toIssueBlock.targetVec
   intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
@@ -100,7 +100,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugFpRat := ctrlBlock.io.debug_fp_rat
   dataPath.io.debugVecRat := ctrlBlock.io.debug_vec_rat
 
-  intExuBlock.io.redirect := ctrlBlock.io.redirect
+  intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
       PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire, io.redirect.valid)
@@ -124,7 +124,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fenceio.disableSfence := csrio.disableSfence
   io.fenceio <> fenceio
 
-//  fpExuBlock.io.redirect := ctrlBlock.io.redirect
+//  fpExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
 //  fpExuBlock.io.in := dataPath.io.toFpExu
 //  fpExuBlock.io.frm.get := intExuBlock.io.csrio.get.fpu.frm
 
