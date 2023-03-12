@@ -424,6 +424,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     memBlock.io.VecloadRegIn(i).bits := DontCare
     memBlock.io.VecloadRegIn(i).valid := DontCare
     memBlock.io.Vecwriteback.ready := DontCare
+    memBlock.io.vecFeedback := DontCare
   }
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)

@@ -41,19 +41,18 @@ class VecLoadPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp{
   // val pipe_accept = Input(Bool()) need pipe ready to send req to pipe
   val vaddr = Output(UInt(VAddrBits.W))
   val sram_mask = Output(UInt(8.W))
-  val stq_forward_mask = Output(UInt(64.W))
+  val stq_forward_mask = Output(UInt((CacheLineSize / 8).W))//TODO:need add support logic in LoadUnit
   val flow_entry_index = Output(UInt(5.W))
   val uop_unit_stride_fof = Output(Bool())
 }
 
-// TODO: Fix all width
 // For example: 0 is 8, 1 is 16, 2 is 32, 3 is 64
 // So we only use two bits
 class Flow2UopBuddle(implicit p: Parameters) extends XSBundle{
   val flow_index = Output(UInt(5.W)) // index of flow entry
-  val flow_inner_index = Output(UInt(4.W)) // An uop can be split to 0 to 15
-  val flow_offset = Output(UInt(6.W)) // Offset of vaddr
-  val flow_robIdx = Output(UInt(log2Ceil(RobSize).W))  //change width TODO：Maybe need more flow_robIdx
+  val flow_inner_index = Output(UInt(4.W)) // An uop can be split to 0 to 15//TODO: need ???
+  val flow_offset = Output(UInt(6.W)) // Offset of vaddr // TODO：Maybe every flow_robIdx need a flow_offset
+  val flow_robIdx = Output(UInt(log2Ceil(RobSize).W))  //change width TODO：Maybe need more flow_robIdx,
 }
 
 class VlflowQueueIOBundle(implicit p: Parameters) extends XSBundle {
@@ -64,10 +63,10 @@ class VlflowQueueIOBundle(implicit p: Parameters) extends XSBundle {
 
 class VlflowBundle(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val inner_index = UInt(5.W)
+  val inner_index = UInt(5.W)//TODO: need???
   val vaddr = UInt(VAddrBits.W)
   val sram_mask = UInt(8.W)
-  val stqfwd_mask = UInt(8.W)
+  val stqfwd_mask = UInt((CacheLineSize / 8).W)
   val unit_stride_fof = Bool()
 }
 
@@ -78,7 +77,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   println("LoadFlowQueue: size:" + VlFlowSize)
 
   // TODO: merge these to an FlowQueue Entry?
-  val flow_entry = Reg(Vec(2, Vec(VlFlowSize, new VlflowBundle)))
+  val flow_entry = Reg(Vec(2, Vec(VlFlowSize, new VlflowBundle))) //TODO: VlFlowSize need to be smaller
   val flow_entry_valid = RegInit(VecInit(Seq.fill(2)(VecInit(Seq.fill(VlFlowSize)(false.B)))))
   val LoadInstDec = Wire(Vec(2, new VecDecode()))
 
@@ -107,7 +106,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       // TODO: implement inner_index?
       flow_entry(0)(index).inner_index := 0.U
       flow_entry(0)(index).sram_mask := Fill(8, true.B)
-      flow_entry(0)(index).stqfwd_mask := Fill(64, true.B)
+      flow_entry(0)(index).stqfwd_mask := Fill((CacheLineSize / 8), true.B)
       flow_entry(0)(index).vaddr := io.loadRegIn(0).bits.baseaddr
       flow_entry(0)(index).unit_stride_fof := LoadInstDec(0).uop_unit_stride_fof
       flow_entry_valid(0)(index) := true.B
@@ -121,7 +120,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       // TODO: implement inner_index?
       flow_entry(1)(index).inner_index := 0.U
       flow_entry(1)(index).sram_mask := Fill(8, true.B)
-      flow_entry(1)(index).stqfwd_mask := Fill(64, true.B)
+      flow_entry(1)(index).stqfwd_mask := Fill(CacheLineSize / 8, true.B)
       flow_entry(1)(index).vaddr := io.loadRegIn(1).bits.baseaddr
       flow_entry(1)(index).unit_stride_fof := LoadInstDec(1).uop_unit_stride_fof
       flow_entry_valid(1)(index) := true.B

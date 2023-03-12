@@ -47,7 +47,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
   val way_en = Bits(DCacheWays.W)
   val addr = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
-
+  val rlineflag = Bool()
 }
 
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
@@ -153,10 +153,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   def dumpResp() = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
-      XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r).raw_data.asUInt)
-      // XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),
-      //                                 Cat(io.read_resp_delayed(r)(1).raw_data,io.read_resp_delayed(r)(0).raw_data),
-      //                                 io.read_resp_delayed(r)(0).raw_data))//TODO:when have is128Req
+      XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r)(0).raw_data)
+      //XSDebug(s"cycle: $r data: %lx\n", Cat((0 until DCacheBanks).map(i => io.read_resp_delayed(r)(i).raw_data)).asUInt)// TODO:when have is128Req  VecInit
     }
   }
 
@@ -412,21 +410,24 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    // when(io.is128Req(rport_index)){ //TODO:when have is128Req
-    //   (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-    //     io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //       read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
-    //       !RegNext(io.bank_conflict_slow(rport_index))
-    //   })
-    // }.otherwise{
-    //   io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //     read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
-    //     !RegNext(io.bank_conflict_slow(rport_index))
-    //   io.read_error_delayed(rport_index)(1) := DontCare
-    // }
+    //when(io.is128Req(rport_index)){ //TODO:when have is128Req
+    //  (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+    //    io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
+    //      Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
+    //        read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
+    //      !RegNext(io.bank_conflict_slow(rport_index))
+    //  })
+    //}.otherwise{
+    //  io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
+    //    Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
+    //      read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
+    //    !RegNext(io.bank_conflict_slow(rport_index))
+    //  io.read_error_delayed(rport_index)(1) := DontCare
+    //}
     io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
-      Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR, 
-      read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
+      Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
+        VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR) &&
+        //read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
       !RegNext(io.bank_conflict_slow(rport_index))
   })
   // readline port

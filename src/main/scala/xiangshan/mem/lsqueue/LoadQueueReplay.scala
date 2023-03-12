@@ -389,7 +389,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       } .elsewhen (replayInfo.cause(LoadReplayCauses.dcacheReplay) || replayInfo.cause(LoadReplayCauses.waitStore)) {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := blockPtrOthers(enqIdx) + Mux(blockPtrOthers(enqIdx) === 3.U(2.W), 0.U, 1.U)
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError) || replayInfo.cause(LoadReplayCauses.rejectEnq || replayInfo.cause(LoadReplayCauses.vecForwardFail))) {
+      } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError) || replayInfo.cause(LoadReplayCauses.rejectEnq) || replayInfo.cause(LoadReplayCauses.vecForwardFail)) {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := Mux(blockPtrOthers(enqIdx) === 3.U(2.W), blockPtrOthers(enqIdx), blockPtrOthers(enqIdx) + 1.U(2.W)) 
       }

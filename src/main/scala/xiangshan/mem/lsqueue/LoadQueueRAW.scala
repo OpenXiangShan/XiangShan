@@ -130,7 +130,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       io.storeIn(i).valid &&
       !io.storeIn(i).bits.miss &&
       isAfter(lastEnqBits.uop.robIdx, io.storeIn(i).bits.uop.robIdx) &&
-      Mux(lastEnqBits.isVec, lastEnqBits.paddr(PAddrBits-1, DCacheLineOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset), 
+      Mux(lastEnqBits.rlineflag, lastEnqBits.paddr(PAddrBits-1, DCacheLineOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheLineOffset),
       (lastEnqBits.paddr(PAddrBits-1,4) === io.storeIn(i).bits.paddr(PAddrBits-1, 4)) && (lastEnqBits.mask & io.storeIn(i).bits.mask).orR))).asUInt.orR
     
     when (lastEnqValid) {

@@ -273,6 +273,7 @@ class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp 
   val miss = Bool()
   val mask = UInt(8.W)
   val paddr = UInt(PAddrBits.W)
+  val rlineflag = Bool()
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
@@ -333,7 +334,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
     // old dcache
     // val dcache_data = Mux1H(bank_oh, bankedDcacheData)
     // new dcache
-    val bankedDCacheData = VecInit((0 until (DCacheBanks * XLEN) / VLEN).map(b => respDcacheData(VLEN * b (b + 1) - 1, VLEN * b)))
+    val bankedDCacheData = VecInit((0 until (DCacheBanks * XLEN) / VLEN).map(b => respDcacheData(VLEN * (b + 1) - 1, VLEN * b)))
     val dcache_data = Mux1H(UIntToOH(bankAddr), bankedDCacheData)
     val use_D = forward_D && forward_result_valid
     val use_mshr = forward_mshr && forward_result_valid

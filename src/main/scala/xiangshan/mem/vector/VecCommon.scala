@@ -81,10 +81,19 @@ object VecGenMask {
 // TODO: How to merge discrete data together in the future?
 object VecGenData{
   def apply(mask: UInt, data: UInt): UInt = {
-    val result = WireInit(VecInit(Fill(64,0.U(8.W))))
+    val result = WireInit(VecInit(Seq.fill(512)(false.B)))
+    var j = 0
     for (i <- 0 until 64) {
       when (mask(i)) {
-        result(i) := data(i)
+        result(j) := data(8 * i)
+        result(j + 1) := data(8 * i + 1)
+        result(j + 2) := data(8 * i + 2)
+        result(j + 3) := data(8 * i + 3)
+        result(j + 4) := data(8 * i + 4)
+        result(j + 5) := data(8 * i + 5)
+        result(j + 6) := data(8 * i + 6)
+        result(j + 7) := data(8 * i + 7)
+        j = j + 8
       }
     }
     result.asUInt(127, 0)

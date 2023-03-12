@@ -1,1 +1,0 @@
-cycle is 538081,addr is 0x80004268,data is 0x80004358,mask is 0xff
