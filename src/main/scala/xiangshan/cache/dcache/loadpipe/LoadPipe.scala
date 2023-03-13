@@ -279,6 +279,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+  // s2 miss merged
+  val s2_miss_merged = io.miss_req.valid && io.miss_resp.merged
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   dontTouch(s2_bank_addr)
@@ -396,9 +398,35 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.valid := s3_error && s3_valid
 
   // update plru in s3
-  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && !s2_nack_no_mshr)
-  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
-  io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
+  if (!cfg.updateReplaceOn2ndmiss) {
+    // replacement is only updated on 1st miss
+    io.replace_access.valid := RegNext(RegNext(
+      RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && 
+      !s2_nack_no_mshr &&
+      !s2_miss_merged
+    )
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
+  } else {
+    // replacement is updated on both 1st and 2nd miss
+    // timing is worse than !cfg.updateReplaceOn2ndmiss
+    io.replace_access.valid := RegNext(RegNext(
+      RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
+      !s2_nack_no_mshr
+    )
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.way := RegNext(
+      Mux(
+        RegNext(s1_tag_match_dup_dc),
+        RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
+        Mux( // if miss
+          !s2_miss_merged,
+          RegNext(io.replace_way.way), // 1st fire: access new selected replace way
+          OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
+        )
+      )
+    )
+  }
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit
