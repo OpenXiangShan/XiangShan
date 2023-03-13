@@ -408,45 +408,47 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
-  /** deal with customized cache op */
   require(nWays <= 32)
-  // 4: rdata, rdataEcc, wdata, wdataEcc
-  val DCacheAccessPart = 4
-  // It can be guaranteed that `DCacheDupNum` satisfies or even exceeds all `DCacheBanks`, 
-  // so the case of excess should be excluded to guarantee `DCacheBankStep` > 0.
-  val tmp = DCacheBanks / (DCacheDupNum / DCacheAccessPart)
-  val DCacheBankStep = if(tmp == 0) 1 else tmp
   io.cacheOp.resp.bits := DontCare
   val cacheOpShouldResp = WireInit(false.B)
   val eccReadResult = Wire(Vec(DCacheBanks, UInt(eccBits.W)))
+  /** distribute `DCacheDupNum` dup signals to different groups*/
+  //one group has 4 parts: rdata, rdataEcc, wdata, wdataEcc
+  val DCacheAccessPart = 4
+  //It can be guaranteed that `DCacheDupNum` satisfies or even exceeds all `DCacheBanks`,
+  //so the case of excess should be excluded to guarantee in-group number > 0.
+  val tmp = DCacheBanks / (DCacheDupNum / DCacheAccessPart)
+  //in-group number
+  val DCacheBankStep = if(tmp == 0) 1 else tmp
 
-  for(i <- 0 until DCacheDupNum){
-    val j = i % DCacheAccessPart
-    val k = i / DCacheAccessPart
-    if(DCacheBankStep * (k + 1) <= DCacheBanks) {
-      for (bank_index <- DCacheBankStep * k until DCacheBankStep * (k + 1)) {
+  for(dupIdx <- 0 until DCacheDupNum){
+    val partIdx = dupIdx % DCacheAccessPart
+    val groupIdx = dupIdx / DCacheAccessPart
+    //avoid bank_index out of range
+    if(DCacheBankStep * (groupIdx + 1) <= DCacheBanks) {
+      for (bank_index <- DCacheBankStep * groupIdx until DCacheBankStep * (groupIdx + 1)) {
         for (way_index <- 0 until DCacheWays) {
-          j match {
-            case 0 => when(io.cacheOp_req_dup(i).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(i))) {
+          partIdx match {
+            case 0 => when(io.cacheOp_req_dup(dupIdx).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
               val data_bank = data_banks(bank_index)(way_index)
               data_bank.io.r.en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
               data_bank.io.r.addr := io.cacheOp.req.bits.index
               cacheOpShouldResp := true.B
             }
-            case 1 => when(io.cacheOp_req_dup(i).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(i))) {
+            case 1 => when(io.cacheOp_req_dup(dupIdx).valid && CacheInstrucion.isReadDataECC(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
               val ecc_bank = ecc_banks(bank_index)(way_index)
               ecc_bank.io.r.req.valid := true.B
               ecc_bank.io.r.req.bits.setIdx := io.cacheOp.req.bits.index
               cacheOpShouldResp := true.B
             }
-            case 2 => when(io.cacheOp_req_dup(i).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(i))) {
+            case 2 => when(io.cacheOp_req_dup(dupIdx).valid && CacheInstrucion.isWriteData(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
               val data_bank = data_banks(bank_index)(way_index)
               data_bank.io.w.en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
               data_bank.io.w.addr := io.cacheOp.req.bits.index
               data_bank.io.w.data := io.cacheOp.req.bits.write_data_vec(bank_index)
               cacheOpShouldResp := true.B
             }
-            case 3 => when(io.cacheOp_req_dup(i).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(i))) {
+            case 3 => when(io.cacheOp_req_dup(dupIdx).valid && CacheInstrucion.isWriteDataECC(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
               val ecc_bank = ecc_banks(bank_index)(way_index)
               ecc_bank.io.w.req.valid := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))(way_index)
               ecc_bank.io.w.req.bits.apply(
