@@ -142,7 +142,6 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
   // write assert, should not duplicate with the existing entries
-  //
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, io.csr.satp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
@@ -511,7 +510,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     }
     rp.bits.super_hit := sp.bits.hit
     rp.bits.super_ppn := sp.bits.ppn(0)
-    rp.bits.spm := np.bits.perm(0).pm
+    rp.bits.spm := np.bits.perm(0).pm(RegNext(io.r.req(i).bits.vpn(sectortlbwidth - 1, 0)))
     assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
 

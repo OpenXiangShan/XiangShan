@@ -81,9 +81,9 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val w = Bool()
   val r = Bool()
 
-  val pm = new TlbPMBundle
+  val pm = Vec(tlbcontiguous, new TlbPMBundle)
 
-  def apply(item: PtwSectorResp, pm: PMPConfig) = {
+  def apply(item: PtwSectorResp, pm: Seq[PMPConfig]) = {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
@@ -95,7 +95,9 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this.w := ptePerm.w
     this.r := ptePerm.r
 
-    this.pm.assign_ap(pm)
+    for (i <- 0 until tlbcontiguous) {
+      this.pm(i).assign_ap(pm(i))
+    }
     this
   }
   override def toPrintable: Printable = {
@@ -136,7 +138,7 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(impli
 class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) extends TlbBundle {
   require(pageNormal || pageSuper)
 
-  val tag = if (!pageNormal) UInt((sectorvpnLen - vpnnLen).W)
+  val tag = if (!pageNormal) UInt((vpnLen - vpnnLen).W)
             else UInt(sectorvpnLen.W)
   val asid = UInt(asidLen.W)
   val level = if (!pageNormal) Some(UInt(1.W))
@@ -166,8 +168,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     //       do not need store the low bits actually
     if (!pageSuper) asid_hit && drop_set_equal(vpn(vpn.getWidth - 1, sectortlbwidth), tag, nSets) && addr_low_hit
     else if (!pageNormal) {
-      val tag_match_hi = tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen*3-1, vpnnLen*2)
-      val tag_match_mi = tag(vpnnLen - sectortlbwidth -  1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen + sectortlbwidth)
+      val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
+      val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
       asid_hit && tag_match && addr_low_hit
     }
@@ -193,8 +195,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       vpn_hit := asid_hit && drop_set_equal(vpn(vpn.getWidth - 1, sectortlbwidth), tag, nSets)
     }
     else if (!pageNormal) {
-      val tag_match_hi = tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen*3-1, vpnnLen*2)
-      val tag_match_mi = tag(vpnnLen - sectortlbwidth -  1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen + sectortlbwidth)
+      val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
+      val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
       vpn_hit := asid_hit && tag_match
     }
@@ -214,8 +216,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     vpn_hit && index_hit.reduce(_ || _)
   }
 
-  def apply(item: PtwSectorResp, asid: UInt, pm: PMPConfig): TlbEntry = {
-    this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(sectorvpnLen - 1, vpnnLen)}
+  def apply(item: PtwSectorResp, asid: UInt, pm: Seq[PMPConfig]): TlbEntry = {
+    this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
     this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U, Seq(
@@ -298,7 +300,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwSectorResp)
-    val data_replenish = Output(new PMPConfig)
+    val data_replenish = Vec(tlbcontiguous, Output(new PMPConfig))
   }))
   val victim = new Bundle {
     val out = ValidIO(Output(new Bundle {
@@ -319,7 +321,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwSectorResp, data_replenish: PMPConfig): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwSectorResp, data_replenish: Seq[PMPConfig]): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
@@ -345,7 +347,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }
   val w = Flipped(ValidIO(new Bundle {
     val data = Output(new PtwSectorResp)
-    val data_replenish = Output(new PMPConfig)
+    val data_replenish = Vec(tlbcontiguous, Output(new PMPConfig))
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
@@ -359,7 +361,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     this.r.resp(i).bits.super_hit, this.r.resp(i).bits.super_ppn, this.r.resp(i).bits.spm)
   }
 
-  def w_apply(valid: Bool, data: PtwSectorResp, data_replenish: PMPConfig): Unit = {
+  def w_apply(valid: Bool, data: PtwSectorResp, data_replenish: Seq[PMPConfig]): Unit = {
     this.w.valid := valid
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
@@ -514,7 +516,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val flushPipe = Vec(Width, Input(Bool()))
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
-  val ptw_replenish = Input(new PMPConfig())
+  val ptw_replenish = Vec(tlbcontiguous, Input(new PMPConfig()))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
@@ -891,9 +893,9 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
 class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   val entry = Vec(tlbcontiguous, new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
   val pteidx = Vec(tlbcontiguous, Bool())
-  val all_valid = Bool()
+  val not_super = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, addr_low : UInt, all_valid : Boolean = true) = {
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, addr_low : UInt, not_super : Boolean = true) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
 
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
@@ -908,7 +910,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.prefetch := DontCare
     ptw_resp.asid := asid
     this.pteidx := UIntToOH(addr_low).asBools
-    this.all_valid := all_valid.B
+    this.not_super := not_super.B
     for (i <- 0 until tlbcontiguous) {
       this.entry(i) := ptw_resp
     }

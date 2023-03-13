@@ -438,7 +438,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     io.resp.bits.toTlb.entry(i).af := false.B
   }
   io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
-  io.resp.bits.toTlb.all_valid := Mux(resp_res.l3.hit, true.B, false.B)
+  io.resp.bits.toTlb.not_super := Mux(resp_res.l3.hit, true.B, false.B)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")

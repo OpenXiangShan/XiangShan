@@ -324,8 +324,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
       difftest.io.index := i.U
       difftest.io.satp := io.csr.tlb.satp.ppn
-      difftest.io.vpn := Cat(io.tlb(i).resp.bits.entry.tag, io.tlb(i).resp.bits.addr_low)
-      difftest.io.ppn := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(io.tlb(i).resp.bits.addr_low))
+      difftest.io.vpn := Cat(io.tlb(i).resp.bits.entry.tag, 0.U(sectortlbwidth.W))
+      for (j <- 0 until tlbcontiguous) {
+        difftest.io.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
+        difftest.io.valididx(j) := io.tlb(i).resp.bits.valididx(j)
+      }
       difftest.io.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       difftest.io.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
       difftest.io.pf := io.tlb(i).resp.bits.pf
@@ -400,7 +403,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_resp
   }
 
-  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, all_valid: Boolean = true) : PtwMergeResp = {
+  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true) : PtwMergeResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_merge_resp = Wire(new PtwMergeResp())
     for (i <- 0 until tlbcontiguous) {
@@ -419,7 +422,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_merge_resp.entry(i) := ptw_resp
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
-    ptw_merge_resp.all_valid := all_valid.B
+    ptw_merge_resp.not_super := not_super.B
     ptw_merge_resp
   }
 
@@ -442,7 +445,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      ptw_sector_resp.valididx(i) := ppn_equal && perm_equal && v_equal && af_equal && pf_equal && pte.all_valid
+      ptw_sector_resp.valididx(i) := (ppn_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
