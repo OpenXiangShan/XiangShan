@@ -152,7 +152,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   val TagStep = if(tmp == 0) 1 else tmp
 
   /** dupIdx distribution
-    * part, port1, port2, port3
+    * part, port0, port1, port2
     * rdata, 0, 4, 8
     * rdataEcc,1, 5, 9
     * wdata, 2, 6, 10
