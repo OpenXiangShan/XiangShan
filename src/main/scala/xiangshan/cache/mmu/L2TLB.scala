@@ -26,19 +26,21 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import huancun.{PreferCacheKey, PreferCacheField}
+import huancun.{PreferCacheKey, PreferCacheField, DsidKey, DsidField}
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import device.lvna.NohypeMapper
 
 class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
+  val dsidBitsOpt = if (p(XSCoreParamsKey).LvnaEnable) Some (p(XSCoreParamsKey).DsidWidth) else None
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
     )),
-    requestFields = Seq(PreferCacheField())
+    requestFields = Seq(PreferCacheField()) ++
+      dsidBitsOpt.map(DsidField)
   )))
 
   lazy val module = new PTWImp(this)
@@ -253,6 +255,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
   mem.a.bits.user.lift(PreferCacheKey).foreach(_ := RegNext(io.csr.prefercache, true.B))
+  if (coreParams.LvnaEnable) {
+    mem.a.bits.user.lift(DsidKey).foreach(_ := RegNext(io.csr.dsid, 0.U))
+  }
   mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))

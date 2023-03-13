@@ -27,13 +27,17 @@ import xiangshan.L1CacheErrorInfo
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
+  val dsid = if (hasDsid) Some(UInt(dsidWidth.W)) else None
 }
 
 object L1Metadata {
-  def apply(tag: Bits, coh: ClientMetadata, paddr: UInt)(implicit p: Parameters) = {
+  def apply(tag: Bits, coh: ClientMetadata, paddr: UInt, dsid: Option[Bits] = None)(implicit p: Parameters) = {
     val meta = Wire(new L1Metadata)
     meta.tag := tag
     meta.coh := coh
+    if (meta.dsid.isDefined) {
+      meta.dsid.get := dsid.get
+    }
     meta
   }
 }

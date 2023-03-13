@@ -46,6 +46,10 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 
   def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
   def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
+  def dsids = if (hasDsid)
+    VecInit(metaData.map(port => VecInit(port.map( way=> way.dsid.get ))))
+  else
+    None
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
@@ -55,6 +59,10 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
   val coh     = new ClientMetadata
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
+  val dsid = if (hasDsid)
+    Some(UInt(dsidWidth.W))
+  else
+    None
 
   def generate(tag:UInt, coh: ClientMetadata, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx

@@ -22,6 +22,7 @@ import utils._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import huancun.{DsidField, DsidKey}
 import xiangshan._
 import xiangshan.frontend._
 
@@ -48,6 +49,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
     val mmio_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
     val flush = Input(Bool())
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
 
@@ -93,6 +96,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
           toAddress       = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
+    if (hasDsid)
+      io.mmio_acquire.bits.user.lift(DsidKey).foreach(_ := io.dsid.get)
 
     when (io.mmio_acquire.fire()) {
       state := s_refill_resp
@@ -136,6 +141,7 @@ class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
     val req = Flipped(DecoupledIO(new InsUncacheReq ))
     val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
 }
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -145,6 +151,7 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICachePa
       "InstrUncache",
       sourceId = IdRange(0, cacheParams.nMMIOs)
     ))
+    ,requestFields = if (hasDsid) Seq(DsidField(dsidWidth)) else Nil
   )
   val clientNode = TLClientNode(Seq(clientParameters))
 
@@ -184,6 +191,10 @@ class InstrUncacheImp(outer: InstrUncache)
 
     entry.io.id := i.U(log2Up(cacheParams.nMMIOs).W)
     entry.io.flush := io.flush
+
+    if (hasDsid) {
+      entry.io.dsid.get := io.dsid.get
+    }
 
     // entry req
     entry.io.req.valid := (i.U === entry_alloc_idx) && req.valid

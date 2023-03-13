@@ -127,6 +127,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
   val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
+  val r1_meta_dsid = if (hasDsid)
+    Some(ResultHoldBypass(data = VecInit(metaResp.map(way => way.dsid.get)),valid = RegNext(r0_fire)))
+  else
+    None
   val r1_meta_errors             = ResultHoldBypass(data = metaError, valid = RegNext(r0_fire))
 
   val r1_data_cacheline          = ResultHoldBypass(data = VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
@@ -137,10 +141,19 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val probe_phy_tag   = r1_req.ptag
   val probe_hit_vec   = VecInit(r1_meta_ptags.zip(r1_meta_cohs).map{case(way_tag,way_coh) => way_tag === probe_phy_tag && way_coh.isValid()})
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
+  val probe_hit_dsid  = if (hasDsid)
+    Some(Mux1H(probe_hit_vec, r1_meta_dsid.get))
+  else
+    None
 
   /*** for Release way select ***/
   val release_waymask  = r1_req.waymask
   val (release_tag, release_coh)   = (Mux1H(release_waymask, r1_meta_ptags), Mux1H(release_waymask, r1_meta_cohs))
+  val release_dsid = if (hasDsid)
+    Some(Mux1H(release_waymask, r1_meta_dsid.get))
+  else
+    None
+
   val release_addr     = get_block_addr(Cat(release_tag, get_untag(r1_req.vaddr)) )
 
   when(RegNext(io.meta_read.fire()) && r1_req.isProbe){
@@ -175,6 +188,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_probe_hit_ptag =   RegEnable(next = probe_phy_tag, enable = r1_fire)
   val r2_probe_hit_vec = RegEnable(next = probe_hit_vec, enable = r1_fire)
   val r2_probe_hit_coh = RegEnable(next = probe_hit_coh, enable = r1_fire)
+  val r2_probe_hit_dsid = if (hasDsid)
+    Some(RegEnable(next = probe_hit_dsid.get, enable = r1_fire))
+  else
+    None
   val r2_probe_hit_data = Mux1H(r2_probe_hit_vec, r2_data_cacheline)
 
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = r2_probe_hit_coh.onProbe(r2_req.param)
@@ -220,6 +237,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_release_coh  = RegEnable(next = release_coh, enable = r1_fire)
   val r2_release_data = Mux1H(r2_req.waymask, r2_data_cacheline)
   val r2_release_addr = RegEnable(next = release_addr, enable = r1_fire)
+  val r2_release_dsid = if (hasDsid)
+    Some(RegEnable(next = release_dsid.get, enable = r1_fire))
+  else
+    None
 
   val release_need_send = r2_valid &&  r2_req.isRelease && r2_release_coh.isValid()
 
@@ -231,6 +252,11 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_hasData = r2_req_is_probe_dup_1 && r2_probe_hit_coh.isValid() && (r2_req.needData || probe_has_dirty_data) || r2_req.isRelease
   val r2_data  = Mux(r2_req_is_probe_dup_1, r2_probe_hit_data , r2_release_data)
 
+  val r2_dsid = if (hasDsid)
+    Some(Mux(r2_req_is_probe_dup_0, r2_probe_hit_dsid.get, r2_release_dsid.get))
+  else
+    None
+
   val r2_write_tag = Mux(r2_req_is_probe_dup_0, r2_probe_hit_ptag , r2_release_ptag)
   val r2_write_coh = Mux(r2_req_is_probe_dup_1, probe_new_coh , release_new_coh)
   val r2_write_waymask = Mux(r2_req_is_probe_dup_1, r2_probe_hit_vec.asUInt , r2_req.waymask)
@@ -238,6 +264,8 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   //release not write back
   io.meta_write.valid := r2_fire && r2_req_is_probe_dup_0
   io.meta_write.bits.generate(tag = r2_probe_hit_ptag, coh = probe_new_coh, idx = r2_req.vidx, waymask = r2_probe_hit_vec.asUInt, bankIdx = r2_req.vidx(0))
+  if (hasDsid)
+    io.meta_write.bits.dsid.get := r2_dsid.get
 
   //NToN Release should not been send to slave
   io.release_req.valid          := r2_valid && (r2_req.isProbe || release_need_send)
@@ -249,6 +277,8 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.release_req.bits.dirty     := release_has_dirty_data || probe_has_dirty_data
   io.release_req.bits.waymask   := DontCare
   io.release_req.bits.vidx      := DontCare
+  if (hasDsid)
+    io.release_req.bits.dsid.get := r2_dsid.get
 
   //response to MissQueue
   // io.pipe_resp.valid := r2_fire && r2_req.isRelease

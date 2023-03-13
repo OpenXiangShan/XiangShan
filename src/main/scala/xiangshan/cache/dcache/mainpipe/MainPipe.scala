@@ -162,6 +162,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -264,10 +267,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   s1_s0_set_conflict := s1_valid_dup(1) && s0_idx === s1_idx
   s1_s0_set_conflict_store := s1_valid_dup(2) && store_idx === s1_idx
 
-  val meta_resp = Wire(Vec(nWays, (new Meta).asUInt()))
+  val meta_resp = Wire(Vec(nWays, new Meta))
   val tag_resp = Wire(Vec(nWays, UInt(tagBits.W)))
   val ecc_resp = Wire(Vec(nWays, UInt(eccTagBits.W)))
-  meta_resp := Mux(RegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegNext(meta_resp))
+  meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(meta_resp))
   tag_resp := Mux(RegNext(s0_fire), VecInit(io.tag_resp.map(r => r(tagBits - 1, 0))), RegNext(tag_resp))
   ecc_resp := Mux(RegNext(s0_fire), VecInit(io.tag_resp.map(r => r(encTagBits - 1, tagBits))), RegNext(ecc_resp))
   val enc_tag_resp = Wire(io.tag_resp.cloneType)
@@ -275,22 +278,33 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
-  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && Meta(meta_resp(w)).coh.isValid()).asUInt
+  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
 
   val s1_hit_tag = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => tag_resp(w))), get_tag(s1_req.addr))
-  val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
+  val s1_hit_coh = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w).coh)), ClientMetadata.onReset)
   val s1_encTag = Mux1H(s1_tag_match_way, wayMap((w: Int) => enc_tag_resp(w)))
   val s1_flag_error = false.B//Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => io.error_flag_resp(w))), false.B)
   val s1_l2_error = false.B//s1_req.error
-
+  val s1_hit_dsid = if (hasDsid)
+    Some(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w).dsid.get)), 0.U))
+  else
+    None
   // replacement policy
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(io.replace_way.way), RegNext(s1_repl_way_en))
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
-  val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).coh))
+  val s1_repl_dsid = if (hasDsid)
+    Some(Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).dsid.get)))
+  else
+    None
   val s1_miss_tag = Mux1H(s1_req.miss_way_en, wayMap(w => tag_resp(w)))
-  val s1_miss_coh = Mux1H(s1_req.miss_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_miss_coh = Mux1H(s1_req.miss_way_en, wayMap(w => meta_resp(w).coh))
+  val s1_miss_dsid = if (hasDsid)
+    Some(Mux1H(s1_req.miss_way_en, wayMap(w => meta_resp(w).dsid.get)))
+  else
+    None
 
   val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
   s1_repl_way_raw := Mux(RegNext(s0_fire), io.replace_way.way, RegNext(s1_repl_way_raw))
@@ -321,13 +335,26 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   )
   val s1_coh = Mux(
     s1_req.replace,
-    Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
+    Mux1H(s1_req.replace_way_en, meta_resp.map(_.coh)),
     Mux(
       s1_req.miss,
       s1_miss_coh,
       Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
     )
   )
+  val s1_dsid = if (hasDsid) Some(
+    Mux(
+      s1_req.replace,
+      Mux1H(s1_req.replace_way_en, meta_resp.map(_.dsid.get)),
+      Mux(
+        s1_req.miss,
+        s1_miss_dsid.get,
+        Mux(s1_need_replacement, s1_repl_dsid.get, s1_hit_dsid.get)
+      )
+    )
+  )
+  else
+    None
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_hit = s1_tag_match && s1_has_permission
@@ -344,6 +371,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val (s2_has_permission, _, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
+  val s2_hit_dsid = if (hasDsid) Some(RegEnable(s1_hit_dsid.get, s1_fire)) else None
 
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
@@ -369,6 +397,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = RegEnable(s1_tag, s1_fire)
   val s2_coh = RegEnable(s1_coh, s1_fire)
+  val s2_dsid = if (hasDsid) Some(RegEnable(s1_dsid.get, s1_fire)) else None
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = false.B//RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = false.B //dcacheParameters.tagCode.decode(s2_encTag).error && s2_need_tag
@@ -437,10 +466,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_tag = RegEnable(s2_tag, s2_fire_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
+  val s3_dsid = if (hasDsid) Some(RegEnable(s2_dsid.get, s2_fire_to_s3)) else None
   val s3_hit = RegEnable(s2_hit, s2_fire_to_s3)
   val s3_amo_hit = RegEnable(s2_amo_hit, s2_fire_to_s3)
   val s3_store_hit = RegEnable(s2_store_hit, s2_fire_to_s3)
   val s3_hit_coh = RegEnable(s2_hit_coh, s2_fire_to_s3)
+  val s3_hit_dsid = if (hasDsid) Some(RegEnable(s2_hit_dsid.get, s2_fire_to_s3)) else None
   val s3_new_hit_coh = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
@@ -786,6 +817,22 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       )
     )
   )
+
+  val new_dsid = if (hasDsid){
+    Some(
+      Mux(
+        miss_update_meta_dup_for_meta_w_valid,
+        io.dsid.get,
+        Mux(
+          probe_update_meta,
+          s3_dsid.get,
+          io.dsid.get
+        )
+      )
+    )
+  }
+  else
+    None
 
   when (s2_fire_to_s3) { s3_valid_dup_for_meta_w_valid := true.B }
   .elsewhen (s3_fire_dup_for_meta_w_valid) { s3_valid_dup_for_meta_w_valid := false.B }
@@ -1464,6 +1511,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.meta_write.bits.idx := s3_idx_dup(2)
   io.meta_write.bits.way_en := s3_way_en_dup(0)
   io.meta_write.bits.meta.coh := new_coh
+  if (hasDsid) io.meta_write.bits.meta.dsid.get := new_dsid.get
 
   io.error_flag_write.valid := s3_fire_dup_for_err_w_valid && update_meta_dup_for_err_w_valid && s3_l2_error
   io.error_flag_write.bits.idx := s3_idx_dup(3)
@@ -1519,6 +1567,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.wb.bits.data := s3_data.asUInt()
   io.wb.bits.delay_release := s3_req_replace_dup_for_wb_valid
   io.wb.bits.miss_id := s3_req.miss_id
+  if (hasDsid) io.wb.bits.dsid.get := s3_dsid.get
 
   io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe)
   io.replace_access.bits.set := s2_idx_dup_for_replace_access

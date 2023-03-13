@@ -22,7 +22,7 @@ import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
+import huancun.{AliasField, DirtyField, DsidField, PreferCacheField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
@@ -43,16 +43,20 @@ case class ICacheParameters(
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 4,
     hasPrefetch: Boolean = false,
+    //for lvna use
+    hasDsid: Boolean = false,
+    dsidWidth: Int = 1,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
 
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val dsidBitsOpt = if (hasDsid) Some(dsidWidth) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
-  ) ++ aliasBitsOpt.map(AliasField)
+  ) ++ aliasBitsOpt.map(AliasField) ++ dsidBitsOpt.map(DsidField)
   val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
@@ -125,13 +129,17 @@ abstract class ICacheArray(implicit p: Parameters) extends XSModule
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
   val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
+  val dsid = if (hasDsid) Some(UInt(dsidWidth.W)) else None
 }
 
 object ICacheMetadata {
-  def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
+  def apply(tag: Bits, coh: ClientMetadata, dsid: Option[Bits] = Some(0.U))(implicit p: Parameters) = {
     val meta = Wire(new L1Metadata)
     meta.tag := tag
     meta.coh := coh
+    if (meta.dsid.isDefined) {
+      meta.dsid.get := dsid.get
+    }
     meta
   }
 }
@@ -226,7 +234,11 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   //Parity Encode
   val write = io.write.bits
-  write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
+  if (hasDsid)
+    write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh,
+      dsid = write.dsid).asUInt)
+  else
+    write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
   val wayNum   = OHToUInt(io.write.bits.waymask)
   val validPtr = Cat(io.write.bits.virIdx, wayNum)
@@ -458,6 +470,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   /* CSR control signal */
   val csr_pf_enable = Input(Bool())
   val csr_parity_enable = Input(Bool())
+  /* LvNA label id */
+  val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -594,6 +608,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
   missUnit.io.hartId       := io.hartId
   prefetchPipe.io.fromMSHR <> missUnit.io.prefetch_check
+
+  if (hasDsid) {
+    missUnit.io.dsid.get := io.dsid.get
+  }
 
   bus.b.ready := false.B
   bus.c.valid := false.B

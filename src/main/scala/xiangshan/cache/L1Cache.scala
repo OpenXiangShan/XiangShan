@@ -31,6 +31,9 @@ trait L1CacheParameters {
   def rowBits:       Int
   def blockBytes:    Int
   val pageSize = 4 * 1024
+  //for lvna use
+  def hasDsid:       Boolean
+  def dsidWidth:     Int
 }
 
 trait HasL1CacheParameters extends HasXSParameter
@@ -91,6 +94,10 @@ trait HasL1CacheParameters extends HasXSParameter
   def beatRows = beatBits/rowBits
   def rowWords = rowBits/wordBits
   def blockBeats = blockBytes / beatBytes
+
+  //for lvna
+  def hasDsid: Boolean = cacheParams.hasDsid
+  def dsidWidth: Int = cacheParams.dsidWidth
 
   def full_divide(a: Int, b: Int) = a >= b && isPow2(a / b)
 }

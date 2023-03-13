@@ -25,12 +25,16 @@ import xiangshan.cache.CacheInstrucion._
 
 class Meta(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
+  val dsid = if (hasDsid) Some(UInt(dsidWidth.W)) else None
 }
 
 object Meta {
-  def apply(meta: UInt)(implicit p: Parameters) = {
+  def apply(meta: UInt, dsid: Option[UInt] = None)(implicit p: Parameters) = {
     val m = Wire(new Meta)
     m.coh := meta.asTypeOf(new ClientMetadata)
+    if (m.dsid.isDefined) {
+      m.dsid.get := dsid.get
+    }
     m
   }
 }

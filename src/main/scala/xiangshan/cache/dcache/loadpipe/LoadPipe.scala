@@ -138,6 +138,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_match_dup_lsu = s1_tag_match_way_dup_lsu.orR
 
   val s1_fake_meta = Wire(new Meta)
+  if (hasDsid) s1_fake_meta.dsid.get := DontCare
 //  s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
   s1_fake_meta.coh := ClientMetadata.onReset
   val s1_fake_tag = get_tag(s1_paddr_dup_dcache)

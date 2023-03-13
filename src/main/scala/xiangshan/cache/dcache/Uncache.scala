@@ -22,6 +22,7 @@ import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import huancun.{DsidField, DsidKey}
 import xiangshan.{MicroOp, Redirect}
 
 // One miss entry deals with one mmio request
@@ -37,6 +38,9 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
 
@@ -101,6 +105,8 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   when (state === s_refill_req) {
     io.mem_acquire.valid := true.B
     io.mem_acquire.bits  := Mux(req.cmd === MemoryOpConstants.M_XWR, store, load)
+    if (hasDsid)
+      io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.dsid.get)
 
     when (io.mem_acquire.fire()) {
       state := s_refill_resp
@@ -138,18 +144,20 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
 class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = Flipped(new UncacheWordIO)
+  val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
 }
 
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 
-class Uncache()(implicit p: Parameters) extends LazyModule {
+class Uncache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "uncache",
       sourceId = IdRange(0, 1)
     ))
+    ,requestFields = if (hasDsid) Seq(DsidField(dsidWidth)) else Nil
   )
   val clientNode = TLClientNode(Seq(clientParameters))
 
@@ -160,6 +168,7 @@ class Uncache()(implicit p: Parameters) extends LazyModule {
 class UncacheImp(outer: Uncache)
   extends LazyModuleImp(outer)
     with HasTLDump
+    with HasDCacheParameters
 {
   val io = IO(new UncacheIO)
 
@@ -203,6 +212,11 @@ class UncacheImp(outer: Uncache)
     entry.io.mem_grant.bits  := DontCare
     when (mem_grant.bits.source === i.U) {
       entry.io.mem_grant <> mem_grant
+    }
+
+    // for lvna
+    if (hasDsid) {
+      entry.io.dsid.get := io.dsid.get
     }
     entry
   }

@@ -238,6 +238,7 @@ case class XSCoreParameters
   L2NBanks: Int = 1,
   //lvna paramters
   LvnaEnable: Boolean = false,
+  DsidWidth: Int = 5,
   
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only

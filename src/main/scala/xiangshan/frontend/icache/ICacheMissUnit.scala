@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-import huancun.{AliasKey, DirtyKey}
+import huancun.{AliasKey, DirtyKey, DsidKey}
 import xiangshan.cache._
 import utils._
 import difftest._
@@ -84,6 +84,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     val toPrefetch    = ValidIO(UInt(PAddrBits.W))
 
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
   /** default value for control signals */
@@ -225,6 +227,10 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.mem_acquire.bits := acquireBlock
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
+  if (hasDsid) {
+    //miss acquire always use current dsid
+    io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.dsid.get)
+  }
   require(nSets <= 256) // icache size should not be more than 128KB
 
   /** Grant ACK */
@@ -246,6 +252,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   io.meta_write.valid := (state === s_write_back)
   io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
+  if (hasDsid)
+    io.meta_write.bits.dsid.get := io.dsid.get
 
   io.data_write.valid := (state === s_write_back)
   val dataWriteEn = Wire(Vec(4, Bool()))
@@ -288,7 +296,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val prefetch_req          =  Flipped(DecoupledIO(new PIQReq))
     val prefetch_check        =  Vec(PortNumber,ValidIO(UInt(PAddrBits.W)))
 
-
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
@@ -326,6 +335,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     io.victimInfor(i) := entry.io.victimInfor
     io.prefetch_check(i) <> entry.io.toPrefetch
 
+    if (hasDsid) {
+      entry.io.dsid.get := io.dsid.get
+    }
+
     entry.io.release_resp <> io.release_resp
 
     XSPerfAccumulate(
@@ -354,6 +367,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     prefetchEntry.io.req.valid := io.prefetch_req.valid && ((i-PortNumber).U === alloc)
     prefetchEntry.io.req.bits  := io.prefetch_req.bits
+
+    if (hasDsid) {
+      prefetchEntry.io.dsid.get := io.dsid.get
+    }
 
     prefetchEntry.io.id := i.U
     println(s"prefetch entry ID: ${i}")

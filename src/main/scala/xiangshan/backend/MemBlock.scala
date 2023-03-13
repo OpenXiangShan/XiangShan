@@ -121,6 +121,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  if (coreParams.LvnaEnable) {
+    dcache.io.dsid.get := csrCtrl.lvna.get.dsid
+    uncache.io.dsid.get := csrCtrl.lvna.get.dsid
+  }
   dcache.io.l2_pf_store_only := RegNext(io.csrCtrl.l2_pf_store_only, false.B)
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))

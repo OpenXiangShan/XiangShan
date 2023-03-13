@@ -734,14 +734,19 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
 class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
+
+  val haslvna = p(XSCoreParamsKey).LvnaEnable
+  val dsidW = p(XSCoreParamsKey).DsidWidth
+
   val csr = new Bundle {
     val tlb = Input(new TlbCsrBundle)
     val distribute_csr = Flipped(new DistributedCSRIO)
     val prefercache = Input(Bool())
+    val dsid = if(haslvna) Input(UInt(dsidW.W)) else null
   }
   // add nohype control
-  val memOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
-  val ioOffset = if(p(XSCoreParamsKey).LvnaEnable) Input(UInt(64.W)) else null
+  val memOffset = if(haslvna) Input(UInt(64.W)) else null
+  val ioOffset = if(haslvna) Input(UInt(64.W)) else null
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

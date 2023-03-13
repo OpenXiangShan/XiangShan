@@ -26,7 +26,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey, DsidKey}
 import huancun.utils.FastArbiter
 import mem.{AddPipelineReg}
 
@@ -151,6 +151,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val tag = UInt(tagBits.W) // paddr
     })
     val l2_pf_store_only = Input(Bool())
+
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -425,6 +428,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isStore, true.B))
   // prefer not to cache data in L2 by default
   io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  // for lvna
+  if (hasDsid)
+    io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.dsid.get)
   require(nSets <= 256)
 
   io.mem_grant.ready := !w_grantlast && s_acquire
@@ -477,6 +483,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       Cat(wr, toT, true.B)   -> Dirty))
   }
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
+  if (hasDsid)
+    refill.meta.dsid.get := io.dsid.get
   refill.error := error
   refill.alias := req.vaddr(13, 12) // TODO
 
@@ -570,6 +578,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       val tag = UInt(tagBits.W) // paddr
     }))
     val l2_pf_store_only = Input(Bool())
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -634,6 +644,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       when (io.mem_grant.bits.source === i.U) {
         e.io.mem_grant <> io.mem_grant
       }
+
+      if (hasDsid)
+        e.io.dsid.get := io.dsid.get
 
       e.io.refill_pipe_resp := io.refill_pipe_resp.valid && io.refill_pipe_resp.bits === i.U
       e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U

@@ -24,7 +24,7 @@ import utils._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import huancun.{PreferCacheKey}
+import huancun.{PreferCacheKey, DsidKey}
 
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
@@ -216,6 +216,8 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
     val mem_hint = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_hint_ack = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
+    // for lvna
+    val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
   })
 
   /** default value for control signals */
@@ -261,6 +263,9 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
   )._2
   io.mem_hint.bits := hint
   io.mem_hint.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
+  if (hasDsid) {
+    io.mem_hint.bits.user.lift(DsidKey).foreach(_ := io.dsid.get)
+  }
 
 
   XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())

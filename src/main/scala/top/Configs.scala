@@ -349,14 +349,50 @@ class WithNohypeOffsetDevices extends Config((site, here, up) => {
 
 class WithLvNA extends Config((site, here, up) => {
   case SoCParamsKey =>
+    val socParams = up(SoCParamsKey)
+    val reqKeys = socParams.L3CacheParamsOpt.get.reqKey
+    val newReqKeys = reqKeys ++ Seq(DsidKey)
+    val upL3Params = Some(
+      socParams.L3CacheParamsOpt.get.copy(
+        LvnaEnable = true,
+        dsidWidth = 5,
+        reqKey = newReqKeys,
+    ))
     up(SoCParamsKey).copy(
       LvnaEnable = true,
+      L3CacheParamsOpt = upL3Params
     )
   case XSTileKey =>
     val upParams = up(XSTileKey)
-    upParams.map(p => p.copy(
-      LvnaEnable = true,
-    ))
+    upParams.map(p => {
+      val l2upP = p.L2CacheParamsOpt
+      val newl2P = if (l2upP.isDefined) {
+        val reqKeys = l2upP.get.reqKey
+        val newReqKeys = reqKeys ++ Seq(DsidKey)
+        Some(l2upP.get.copy(
+          LvnaEnable = true,
+          dsidWidth = 5,
+          reqKey = newReqKeys,
+        ))
+      }
+      else
+        None
+      val l1iup = p.icacheParameters
+      val l1dupOpt = p.dcacheParametersOpt
+      p.copy(
+        icacheParameters = l1iup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        ),
+        dcacheParametersOpt = l1dupOpt.map(l1dup => l1dup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        )),
+        L2CacheParamsOpt = newl2P,
+        LvnaEnable = true,
+        DsidWidth = 5,
+      )
+    })
 })
 class LabeledConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)

@@ -26,7 +26,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField, DsidField, DsidKey}
 import huancun.utils.FastArbiter
 import mem.{AddPipelineReg}
 
@@ -46,6 +46,9 @@ case class DCacheParameters
   nReleaseEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
+  //for lvna use
+  hasDsid: Boolean = false,
+  dsidWidth: Int = 1,
   blockBytes: Int = 64,
   alwaysReleaseData: Boolean = true
 ) extends L1CacheParameters {
@@ -54,10 +57,11 @@ case class DCacheParameters
   // we need to avoid this by recoding additional bits in L2 cache
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val dsidBitsOpt = if (hasDsid) Some(dsidWidth) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
-  ) ++ aliasBitsOpt.map(AliasField)
+  ) ++ aliasBitsOpt.map(AliasField) ++ dsidBitsOpt.map(DsidField)
   val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
 
   def tagCode: Code = Code.fromString(tagECC)
@@ -445,6 +449,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
+  val dsid = if (hasDsid) Some(Input(UInt(dsidWidth.W))) else None
 }
 
 
@@ -504,6 +509,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
+  if (hasDsid)
+    missQueue.io.dsid.get := io.dsid.get
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
@@ -668,6 +675,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   )
 
   mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
+
+  //----------------------------------------
+  // lvna for mainpipe
+  if (hasDsid)  mainPipe.io.dsid.get := io.dsid.get
 
   //----------------------------------------
   // replace (main pipe)

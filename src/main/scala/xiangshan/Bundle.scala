@@ -531,7 +531,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 }
 
 class LvNACSRIO(implicit p: Parameters) extends XSBundle {
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+  val dsid = Output(UInt(p(XSCoreParamsKey).DsidWidth.W))
   val nohypeMemOffset = Output(UInt(64.W))
   val nohypeIoOffset = Output(UInt(64.W))
   val nohypeModeSel = Output(Bool())

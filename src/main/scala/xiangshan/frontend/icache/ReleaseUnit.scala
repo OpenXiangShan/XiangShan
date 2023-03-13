@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import xiangshan._
 import utils._
-import huancun.{DirtyField, DirtyKey}
+import huancun.{DirtyField, DirtyKey, DsidKey}
 
 class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(PAddrBits.W)
@@ -33,6 +33,7 @@ class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val dirty = Bool()
   val data = UInt((blockBytes * 8).W)
   val waymask = UInt(nWays.W)
+  val dsid = if (hasDsid) Some(UInt(dsidWidth.W)) else None
 }
 
 class ICacheReleaseBundle(implicit p: Parameters) extends  ICacheBundle{
@@ -112,6 +113,11 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req )
   io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
                             Mux(req.hasData,probeResponseData,probeResponse))
+
+  if (hasDsid) {
+    // release/probeack use dsid from req
+    io.mem_release.bits.user.lift(DsidKey).foreach(_ := req.dsid.get)
+  }
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
 
