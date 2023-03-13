@@ -50,6 +50,30 @@ object genVWmask {
   }
 }
 
+object genVecMask {
+  def apply(addr: UInt, datasize: UInt): UInt = {
+    (LookupTree(datasize,List(
+      "b0000".U -> 0x1.U,
+      "b0001".U -> 0x3.U,
+      "b0010".U -> 0x7.U,
+      "b0011".U -> 0xf.U,
+      "b0100".U -> 0x1f.U,
+      "b0101".U -> 0x3f.U,
+      "b0110".U -> 0x7f.U,
+      "b0111".U -> 0xff.U,
+      "b1000".U -> 0x1ff.U,
+      "b1001".U -> 0x3ff.U,
+      "b1010".U -> 0x7ff.U,
+      "b1011".U -> 0xfff.U,
+      "b1100".U -> 0x1fff.U,
+      "b1101".U -> 0x3fff.U,
+      "b1110".U -> 0x7fff.U,
+      "b1111".U -> 0xffff.U
+    )) << addr(3,0)).asUInt()
+  }
+}
+
+
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(

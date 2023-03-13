@@ -297,7 +297,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     }
   }.elsewhen(lfsrc_vecloadFirstIssue_select) {
     s0_vaddr := io.vec_in.bits.vaddr
-    s0_mask := Fill(DCacheLineBytes, 1.U(1.W)) // TODO: Mask of cacheline?
+    s0_mask := genVecMask(s0_vaddr,0.U) // TODO:
     s0_uop := io.vec_in.bits.uop
     s0_isFirstIssue := io.isFirstIssue
     s0_sqIdx := io.vec_in.bits.uop.sqIdx // TODO: Should allocate when dispatch?
@@ -1304,7 +1304,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.VecloadOut.bits.redirectValid := s3_loadWbMeta.redirectValid
   io.VecloadOut.bits.redirect := s3_loadWbMeta.redirect
   io.VecloadOut.bits.debug := s3_loadWbMeta.debug
-  io.VecloadOut.bits.flow_index := RegNext(load_s2.io.out.bits.Vecvlflowidx)
+  io.VecloadOut.bits.vecdata := s3_vecReadData.asUInt
+  io.VecloadOut.bits.mask           := DontCare
+  io.VecloadOut.bits.rob_idx_valid  := DontCare
+  io.VecloadOut.bits.rob_idx        := DontCare
+  io.VecloadOut.bits.rob_inner_idx  := DontCare
+  io.VecloadOut.bits.offset         := DontCare
+  io.VecloadOut.bits.eew            := DontCare
   // TODO: Here use s3_rdataSelDcache(128 bits) when hitLoadOut,
   //  this width and s3_rdataPartialLoadLQ should be changed in the future?
   io.VecloadOut.bits.data := Mux(hitLoadOut.valid, s3_rdataSelDcache, s3_rdataPartialLoadLQ)

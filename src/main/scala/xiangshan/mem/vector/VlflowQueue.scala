@@ -58,7 +58,7 @@ class Flow2UopBuddle(implicit p: Parameters) extends XSBundle{
 class VlflowQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadRegIn = Vec(2, Flipped(Decoupled(new VecOperand())))
   val loadPipeOut = Vec(LoadPipelineWidth, Decoupled(new VecLoadPipelineBundle))
-  val loadFlow2UopOut = Vec(LoadPipelineWidth, Decoupled(new Flow2UopBuddle()))
+  //val loadFlow2UopOut = Vec(LoadPipelineWidth, Decoupled(new Flow2UopBuddle()))
 }
 
 class VlflowBundle(implicit p: Parameters) extends XSBundle {
@@ -137,20 +137,20 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     //  1. DontCare?
     //  2. Other information?
     io.loadPipeOut(i).bits := DontCare
-    io.loadFlow2UopOut(i).bits := DontCare
+    //io.loadFlow2UopOut(i).bits := DontCare
     io.loadPipeOut(i).valid := false.B
-    io.loadFlow2UopOut(i).valid := false.B
+    //io.loadFlow2UopOut(i).valid := false.B
     when (flow_entry_valid(i)(index)){
       io.loadPipeOut(i).valid := true.B
       io.loadPipeOut(i).bits.flow_entry_index := index
       io.loadPipeOut(i).bits.vaddr := flow_entry(i)(index).vaddr
       io.loadPipeOut(i).bits.uop_unit_stride_fof := flow_entry(i)(index).unit_stride_fof
-      io.loadFlow2UopOut(i).valid := true.B
-      io.loadFlow2UopOut(i).bits.flow_robIdx := flow_entry(i)(index).uop.robIdx.value
-      io.loadFlow2UopOut(i).bits.flow_index := index
-      io.loadFlow2UopOut(i).bits.flow_inner_index := flow_entry(i)(index).inner_index
-      io.loadFlow2UopOut(i).bits.flow_offset := flow_entry(i)(index).vaddr(5, 0)
-      when (io.loadPipeOut(i).fire && io.loadFlow2UopOut(i).fire) {
+      //io.loadFlow2UopOut(i).valid := true.B
+      //io.loadFlow2UopOut(i).bits.flow_robIdx := flow_entry(i)(index).uop.robIdx.value
+      //io.loadFlow2UopOut(i).bits.flow_index := index
+      //io.loadFlow2UopOut(i).bits.flow_inner_index := flow_entry(i)(index).inner_index
+      //io.loadFlow2UopOut(i).bits.flow_offset := flow_entry(i)(index).vaddr(5, 0)
+      when (io.loadPipeOut(i).fire) { //io.loadFlow2UopOut(i).fire
         flow_entry_valid(i)(index) := false.B
         deqPtr(i) := deqPtr(i) + 1.U
       }

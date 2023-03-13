@@ -577,7 +577,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vlflowqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   //vluopqueue.io.loadRegIn <> io.VecloadRegIn
   vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
-  vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
+  //vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
   vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
   //vluopqueue.io.loadWriteback <> io.Vecwriteback
   vluopqueue.io.loadWriteback <> vlExcSignal.io.vecwriteback
