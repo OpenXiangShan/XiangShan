@@ -23,7 +23,6 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import yunsuan.vector.VectorIntAdder
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
 import yunsuan.{VectorElementFormat, VipuType}
 import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule}
@@ -107,9 +106,124 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
 //  )
 //  val opcode :: srcType1 :: srcType2 :: vdType :: Nil = ListLookup(Cat(io.in.fuOpType, io.in.sew), DecodeDefault, DecodeTable)
 
-// u 00 s 01 f 10 mask 1111
+  // u 00 s 01 f 10 mask 1111
+  val uSew = Cat(0.U(2.W), io.in.sew)
+  val uSew2 = Cat(0.U(2.W), (io.in.sew+1.U))
+  val uSewf2 = Cat(0.U(2.W), (io.in.sew-1.U))
+  val uSewf4 = Cat(0.U(2.W), (io.in.sew-2.U))
+  val uSewf8 = Cat(0.U(2.W), (io.in.sew-3.U))
+  val sSew = Cat(1.U(2.W), io.in.sew)
+  val sSew2 = Cat(1.U(2.W), (io.in.sew+1.U))
+  val sSewf2 = Cat(1.U(2.W), (io.in.sew - 1.U))
+  val sSewf4 = Cat(1.U(2.W), (io.in.sew - 2.U))
+  val sSewf8 = Cat(1.U(2.W), (io.in.sew - 3.U))
+  val mask = "b1111".U(4.W)
+
   val out = LookupTree(io.in.fuOpType, List(
-    VipuType.add -> Cat(VAluOpcode.vadd, Cat(1.U(2.W), io.in.sew), Cat(1.U(2.W), io.in.sew), Cat(1.U(2.W), io.in.sew)).asUInt()
+    // --------------------- opcode       srcType(0) (1) vdType
+    VipuType.vadd_vv -> Cat(VAluOpcode.vadd, uSew, uSew, uSew).asUInt(),
+    VipuType.vsub_vv -> Cat(VAluOpcode.vsub, uSew, uSew, uSew).asUInt(),
+    VipuType.vrsub_vv -> Cat(VAluOpcode.vsub, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vwaddu_vv -> Cat(VAluOpcode.vadd, uSew, uSew, uSew2).asUInt(),
+    VipuType.vwsubu_vv -> Cat(VAluOpcode.vsub, uSew, uSew, uSew2).asUInt(),
+    VipuType.vwadd_vv -> Cat(VAluOpcode.vadd, sSew, sSew, sSew2).asUInt(),
+    VipuType.vwsub_vv -> Cat(VAluOpcode.vsub, sSew, sSew, sSew2).asUInt(),
+    VipuType.vwaddu_wv -> Cat(VAluOpcode.vadd, uSew2, uSew, uSew2).asUInt(),
+    VipuType.vwsubu_wv -> Cat(VAluOpcode.vsub, uSew2, uSew, uSew2).asUInt(),
+    VipuType.vwadd_wv -> Cat(VAluOpcode.vadd, sSew2, sSew, sSew2).asUInt(),
+    VipuType.vwsub_wv -> Cat(VAluOpcode.vsub, sSew2, sSew, sSew2).asUInt(),
+
+    VipuType.vzext_vf2 -> Cat(VAluOpcode.vext, uSewf2, uSewf2, uSew).asUInt(),
+    VipuType.vsext_vf2 -> Cat(VAluOpcode.vext, sSewf2, sSewf2, sSew).asUInt(),
+    VipuType.vzext_vf4 -> Cat(VAluOpcode.vext, uSewf4, uSewf4, uSew).asUInt(),
+    VipuType.vsext_vf4 -> Cat(VAluOpcode.vext, sSewf4, sSewf4, sSew).asUInt(),
+    VipuType.vzext_vf8 -> Cat(VAluOpcode.vext, uSewf8, uSewf8, uSew).asUInt(),
+    VipuType.vsext_vf8 -> Cat(VAluOpcode.vext, sSewf8, sSewf8, sSew).asUInt(),
+
+    VipuType.vadc_vvm -> Cat(VAluOpcode.vadc, uSew, uSew, uSew).asUInt(),
+    VipuType.vmadc_vvm -> Cat(VAluOpcode.vmadc, uSew, uSew, mask).asUInt(),
+    VipuType.vmadc_vv -> Cat(VAluOpcode.vmadc, uSew, uSew, mask).asUInt(),
+
+    VipuType.vsbc_vvm -> Cat(VAluOpcode.vsbc, uSew, uSew, uSew).asUInt(),
+    VipuType.vmsbc_vvm -> Cat(VAluOpcode.vsbc, uSew, uSew, mask).asUInt(),
+    VipuType.vmsbc_vv -> Cat(VAluOpcode.vsbc, uSew, uSew, mask).asUInt(),
+
+    VipuType.vand_vv -> Cat(VAluOpcode.vand, uSew, uSew, uSew).asUInt(),
+    VipuType.vor_vv -> Cat(VAluOpcode.vor, uSew, uSew, uSew).asUInt(),
+    VipuType.vxor_vv -> Cat(VAluOpcode.vxor, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vsll_vv -> Cat(VAluOpcode.vsll, uSew, uSew, uSew).asUInt(),
+    VipuType.vsrl_vv -> Cat(VAluOpcode.vsrl, uSew, uSew, uSew).asUInt(),
+    VipuType.vsra_vv -> Cat(VAluOpcode.vsra, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vnsrl_wv -> Cat(VAluOpcode.vsrl, uSew2, uSew, uSew).asUInt(),
+    VipuType.vnsra_wv -> Cat(VAluOpcode.vsra, uSew2, uSew, uSew).asUInt(),
+
+    VipuType.vmseq_vv -> Cat(VAluOpcode.vmseq, uSew, uSew, mask).asUInt(),
+    VipuType.vmsne_vv -> Cat(VAluOpcode.vmsne, uSew, uSew, mask).asUInt(),
+    VipuType.vmsltu_vv -> Cat(VAluOpcode.vmslt, uSew, uSew, mask).asUInt(),
+    VipuType.vmslt_vv -> Cat(VAluOpcode.vmslt, sSew, sSew, mask).asUInt(),
+    VipuType.vmsleu_vv -> Cat(VAluOpcode.vmsle, uSew, uSew, mask).asUInt(),
+    VipuType.vmsle_vv -> Cat(VAluOpcode.vmsle, sSew, sSew, mask).asUInt(),
+    VipuType.vmsgtu_vv -> Cat(VAluOpcode.vmsgt, uSew, uSew, mask).asUInt(),
+    VipuType.vmsgt_vv -> Cat(VAluOpcode.vmsgt, sSew, sSew, mask).asUInt(),
+
+    VipuType.vminu_vv -> Cat(VAluOpcode.vmin, uSew, uSew, uSew).asUInt(),
+    VipuType.vmin_vv -> Cat(VAluOpcode.vmin, sSew, sSew, sSew).asUInt(),
+    VipuType.vmaxu_vv -> Cat(VAluOpcode.vmax, uSew, uSew, uSew).asUInt(),
+    VipuType.vmax_vv -> Cat(VAluOpcode.vmax, sSew, sSew, sSew).asUInt(),
+
+    VipuType.vmerge_vvm -> Cat(VAluOpcode.vmerge, uSew, uSew, mask).asUInt(),
+
+    VipuType.vmv_v_v -> Cat(VAluOpcode.vmv, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vsaddu_vv -> Cat(VAluOpcode.vsadd, uSew, uSew, uSew).asUInt(),
+    VipuType.vsadd_vv -> Cat(VAluOpcode.vsadd, sSew, sSew, sSew).asUInt(),
+    VipuType.vssubu_vv -> Cat(VAluOpcode.vssub, uSew, uSew, uSew).asUInt(),
+    VipuType.vssub_vv -> Cat(VAluOpcode.vssub, sSew, sSew, sSew).asUInt(),
+
+    VipuType.vaaddu_vv -> Cat(VAluOpcode.vaadd, uSew, uSew, uSew).asUInt(),
+    VipuType.vaadd_vv -> Cat(VAluOpcode.vaadd, sSew, sSew, sSew).asUInt(),
+    VipuType.vasubu_vv -> Cat(VAluOpcode.vasub, uSew, uSew, uSew).asUInt(),
+    VipuType.vasub_vv -> Cat(VAluOpcode.vasub, sSew, sSew, sSew).asUInt(),
+
+    VipuType.vssrl_vv -> Cat(VAluOpcode.vssrl, uSew, uSew, uSew).asUInt(),
+    VipuType.vssra_vv -> Cat(VAluOpcode.vssra, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vnclipu_wv -> Cat(VAluOpcode.vssrl, uSew2, uSew, uSew).asUInt(),
+    VipuType.vnclip_wv -> Cat(VAluOpcode.vssra, uSew2, uSew, uSew).asUInt(),
+
+    VipuType.vredsum_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew).asUInt(),
+    VipuType.vredmaxu_vs -> Cat(VAluOpcode.vredmax, uSew, uSew, uSew).asUInt(),
+    VipuType.vredmax_vs -> Cat(VAluOpcode.vredmax, sSew, sSew, sSew).asUInt(),
+    VipuType.vredminu_vs -> Cat(VAluOpcode.vredmin, uSew, uSew, uSew).asUInt(),
+    VipuType.vredmin_vs -> Cat(VAluOpcode.vredmin, sSew, sSew, sSew).asUInt(),
+    VipuType.vredand_vs -> Cat(VAluOpcode.vredand, uSew, uSew, uSew).asUInt(),
+    VipuType.vredor_vs -> Cat(VAluOpcode.vredor, uSew, uSew, uSew).asUInt(),
+    VipuType.vredxor_vs -> Cat(VAluOpcode.vredxor, uSew, uSew, uSew).asUInt(),
+
+    VipuType.vwredsumu_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew2).asUInt(),
+    VipuType.vwredsum_vs -> Cat(VAluOpcode.vredsum, sSew, sSew, sSew2).asUInt(),
+
+    VipuType.vmand_mm -> Cat(VAluOpcode.vand, mask, mask, mask).asUInt(),
+    VipuType.vmnand_mm -> Cat(VAluOpcode.vnand, mask, mask, mask).asUInt(),
+    VipuType.vmandn_mm -> Cat(VAluOpcode.vandn, mask, mask, mask).asUInt(),
+    VipuType.vmxor_mm -> Cat(VAluOpcode.vxor, mask, mask, mask).asUInt(),
+    VipuType.vmor_mm -> Cat(VAluOpcode.vor, mask, mask, mask).asUInt(),
+    VipuType.vmnor_mm -> Cat(VAluOpcode.vnor, mask, mask, mask).asUInt(),
+    VipuType.vmorn_mm -> Cat(VAluOpcode.vorn, mask, mask, mask).asUInt(),
+    VipuType.vmxnor_mm -> Cat(VAluOpcode.vxnor, mask, mask, mask).asUInt(),
+
+    VipuType.vcpop_m -> Cat(VAluOpcode.vcpop, mask, mask, mask).asUInt(),
+    VipuType.vfirst_m -> Cat(VAluOpcode.vfirst, mask, mask, mask).asUInt(),
+    VipuType.vmsbf_m -> Cat(VAluOpcode.vmsbf, mask, mask, mask).asUInt(),
+    VipuType.vmsif_m -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt(),
+    VipuType.vmsof_m -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt(),
+
+    VipuType.viota_m -> Cat(VAluOpcode.viota, mask, mask, uSew).asUInt(),
+    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt(),
+
   )).asTypeOf(new VIAluDecodeResultBundle)
 
   io.out <> out
@@ -129,15 +243,16 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 
 // generate src1 and src2
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-  val _src1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
-  val _src2 = in.src(1)
-  val src1 = Mux(VipuType.needReverse(ctrl.fuOpType), _src2, _src1)
-  val src2 = Mux(VipuType.needReverse(ctrl.fuOpType), _src1, _src2)
+  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
+  val _vs2 = in.src(1)
+  val vs1 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs2, _vs1)
+  val vs2 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs1, _vs2)
+  val mask = Mux(VipuType.needClearMask(ctrl.fuOpType), 0.U, in.src(3))
 
 // connect VIAlu
   val decoder = Module(new VIAluDecoder)
   val vialu = Module(new VIAlu)
-  decoder.io.in.fuOpType := in.uop.ctrl.fuType
+  decoder.io.in.fuOpType := in.uop.ctrl.fuOpType
   decoder.io.in.sew := in.uop.ctrl.vconfig.vtype.vsew(1,0)
 
   vialu.io.in.bits.opcode := decoder.io.out.opcode
@@ -146,16 +261,18 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
   vialu.io.in.bits.info.ta := in.uop.ctrl.vconfig.vtype.vta
   vialu.io.in.bits.info.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
   vialu.io.in.bits.info.vl := in.uop.ctrl.vconfig.vl
+
   vialu.io.in.bits.info.vstart := 0.U // TODO :
   vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
+
   vialu.io.in.bits.info.vxrm := vxrm
   vialu.io.in.bits.srcType(0) := decoder.io.out.srcType(0)
   vialu.io.in.bits.srcType(1) := decoder.io.out.srcType(1)
   vialu.io.in.bits.vdType := decoder.io.out.vdType
-  vialu.io.in.bits.vs1 := src1
-  vialu.io.in.bits.vs2 := src2
+  vialu.io.in.bits.vs1 := vs1
+  vialu.io.in.bits.vs2 := vs2
   vialu.io.in.bits.old_vd := in.src(2)
-  vialu.io.in.bits.mask := in.src(3)
+  vialu.io.in.bits.mask := mask
 
   val vdOut = vialu.io.out.bits.vd
   val vxsatOut = vialu.io.out.bits.vxsat
