@@ -421,6 +421,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   //in-group number
   val DCacheBankStep = if(tmp == 0) 1 else tmp
 
+  /** dupIdx distribution
+    * part, bank0+1, bank2+3, bank4+5, bank6+7
+    * rdata, 0, 4, 8, 12
+    * rdataEcc,1, 5, 9, 13
+    * wdata, 2, 6, 10, 14
+    * wdataEcc, 3, 7, 11, 15
+    */
   for(dupIdx <- 0 until DCacheDupNum){
     val partIdx = dupIdx % DCacheAccessPart
     val groupIdx = dupIdx / DCacheAccessPart

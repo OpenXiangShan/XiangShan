@@ -151,6 +151,13 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   //in-group number
   val TagStep = if(tmp == 0) 1 else tmp
 
+  /** dupIdx distribution
+    * part, port1, port2, port3
+    * rdata, 0, 4, 8
+    * rdataEcc,1, 5, 9
+    * wdata, 2, 6, 10
+    * wdataEcc, 3, 7, 11
+    */
   for (dupIdx <- 0 until DCacheDupNum) {
     val partIdx = dupIdx % TagAccessPart
     val groupIdx = dupIdx / TagAccessPart
