@@ -28,10 +28,8 @@ class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       // s1
       c.io.update.valid.poke(true.B)
       c.io.update.bits.s1_real_way_en.poke("b00010000".U)
-      // s2
-      c.clock.step()
-      c.io.resp.bits.s2_pred_fail.expect(false.B)
-      println("Last output value :" + c.io.resp.bits.s2_pred_fail.peek().litValue)
+      c.io.resp.bits.s1_pred_fail.expect(false.B)
+      println("Last output value :" + c.io.resp.bits.s1_pred_fail.peek().litValue)
     }
   }
 

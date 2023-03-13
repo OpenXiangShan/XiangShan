@@ -77,6 +77,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def refillWords = refillBytes / wordBytes
 
   def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
+  def get_vir_tag(vaddr: UInt) = (vaddr >> untagBits).asUInt
   def get_tag(addr: UInt) = get_phy_tag(addr)
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
   def get_untag(addr: UInt) = addr(pgUntagBits-1, 0)

@@ -152,7 +152,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_real_tag_match_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
 
   wpu.io.update.valid := s1_valid
+  wpu.io.update.bits.vaddr := s1_vaddr
   wpu.io.update.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
+  val s1_wpu_pred_fail = wpu.io.resp.bits.s1_pred_fail
 
   val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
   val s1_tag_match_way_dup_lsu = Wire(UInt(nWays.W))
@@ -218,10 +220,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // --------------------------------------------------------------------------------
   // return data
 
-  // correct in s2
-  val s2_wpu_pred_fail = wpu.io.resp.bits.s2_pred_fail
-  val s2_real_way_en = RegNext(s1_real_tag_match_way_dup_dc)
-
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
@@ -229,6 +227,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
+  val s2_wpu_pred_fail = RegEnable(s1_wpu_pred_fail, s1_fire)
+  val s2_real_way_en = RegEnable(s1_real_tag_match_way_dup_dc, s1_fire)
+
   s2_ready := true.B
 
   val s2_fire = s2_valid
@@ -333,7 +334,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
 
-  XSPerfAccumulate("wpu_pred_fail", s2_wpu_pred_fail && s2_valid)
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss)
   XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss && !s2_hit_access)

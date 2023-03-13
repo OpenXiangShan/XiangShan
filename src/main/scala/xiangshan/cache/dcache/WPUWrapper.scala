@@ -2,13 +2,19 @@ package xiangshan.cache.dcache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.ExtModule
 import chisel3.util._
+import utils.XSPerfAccumulate
 import xiangshan._
-import utils._
-import xiangshan.cache.{HasDCacheParameters, HasL1CacheParameters, L1CacheParameters, Meta}
+import xiangshan.cache.HasDCacheParameters
 
-trait HasWPUParameters extends HasDCacheParameters
+trait HasWPUParameters extends HasDCacheParameters{
+  //auxiliary 1 bit is used to judge whether cache miss
+  val auxWayBits = wayBits + 1
+  val nTagIdx = nWays
+  val TagIdxBits = log2Up(nTagIdx)
+  val AlgorithmList = List("MRU", "MMRU", "UTAG")
+}
+
 abstract class WPUBuddle(implicit P: Parameters) extends XSBundle with HasWPUParameters
 abstract class WPUModule(implicit P: Parameters) extends XSModule with HasWPUParameters
 
@@ -34,22 +40,17 @@ object ReplayCarry{
 }
 
 class WPUReq(implicit p: Parameters) extends WPUBuddle {
-  val vaddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
   val replayCarry = new ReplayCarry
 }
 
 class WPUResp(implicit p:Parameters) extends WPUBuddle{
   val s0_pred_way_en = UInt(nWays.W)
-  val s2_pred_fail = Bool()
-}
-
-class WPUCheckIO(implicit p: Parameters) extends WPUBuddle{
-  val s1_tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
-  val s1_meta_resp = Input(Vec(nWays, new Meta))
-  val s1_real_tag = Input(UInt(encTagBits.W))
+  val s1_pred_fail = Bool()
 }
 
 class WPUUpdate(implicit p: Parameters) extends WPUBuddle{
+  val vaddr = UInt(VAddrBits.W)
   val s1_real_way_en = UInt(nWays.W)
 }
 
@@ -62,23 +63,24 @@ class WPUIO(implicit p:Parameters) extends WPUBuddle{
 class DCacheWPU (implicit p:Parameters) extends WPUModule{
   val io = IO(new WPUIO)
 
-  val predict_regs = RegInit(VecInit(Seq.fill(nSets)(0.U(wayBits.W))))
+  val wpu = Module(new MmruWPU)
 
   // predict and response in s0
   io.req.ready := true.B
   if(EnableDCacheWPU){
-    io.resp.valid := true.B
-  }else{
     io.resp.valid := io.req.valid
+  }else{
+    io.resp.valid := false.B
   }
-  val idx = addr_to_dcache_set(io.req.bits.vaddr)
+  wpu.io.pred_en := io.req.valid
+  wpu.io.pred_vaddr := io.req.bits.vaddr
   val s0_pred_way_en = Wire(UInt(nWays.W))
   // when (io.req.valid){
-    when (io.req.bits.replayCarry.valid){
-      s0_pred_way_en := io.req.bits.replayCarry.real_way_en
-    }.otherwise{
-      s0_pred_way_en := UIntToOH(predict_regs(idx))
-    }
+  when (io.req.bits.replayCarry.valid){
+    s0_pred_way_en := io.req.bits.replayCarry.real_way_en
+  }.otherwise{
+    s0_pred_way_en := wpu.io.pred_way_en
+  }
   // }.otherwise{
   //   s0_pred_way_en := 0.U(nWays.W)
   // }
@@ -86,17 +88,25 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
   assert(PopCount(io.resp.bits.s0_pred_way_en) <= 1.U, "tag should not match with more than 1 way")
 
   // check and update in s1
-  when(io.update.valid) {
-    when(io.update.bits.s1_real_way_en.orR){ // not cache miss
-      predict_regs(RegNext(idx)) := OHToUInt(io.update.bits.s1_real_way_en)
-    }
-    // FIXME lyq: if cache misses, it can be updated by way number replaced
-  }
+  wpu.io.update_en := io.update.valid
+  wpu.io.update_vaddr := io.update.bits.vaddr
 
-  // correct in s2 (not in s1 due to meeting the timing requirements)
-  // val s2_pred_hit = RegNext(s1_pred_way_en =/= real_way_en && real_way_en.orR)
-  val s2_pred_fail = RegNext(RegNext(s0_pred_way_en) =/= io.update.bits.s1_real_way_en && RegNext(io.resp.valid))
-  io.resp.bits.s2_pred_fail := s2_pred_fail
+  when(io.update.bits.s1_real_way_en.orR){ // not cache miss
+    wpu.io.update_way_en := io.update.bits.s1_real_way_en
+  }.otherwise{
+    wpu.io.update_way_en := 0.U(nWays.W)
+  }
+  // FIXME lyq: if cache misses, it can be updated by way number replaced
+
+  val s1_pred_fail = RegNext(s0_pred_way_en) =/= io.update.bits.s1_real_way_en && RegNext(io.resp.valid)
+  io.resp.bits.s1_pred_fail := s1_pred_fail
+
+  //in s1
+  XSPerfAccumulate("wpu_pred_total", RegNext(io.resp.valid))
+  XSPerfAccumulate("wpu_pred_succ", !s1_pred_fail && RegNext(io.resp.valid))
+  XSPerfAccumulate("wpu_pred_fail", s1_pred_fail && RegNext(io.resp.valid))
+  XSPerfAccumulate("wpu_pred_miss", RegNext(s0_pred_way_en).orR)
+  XSPerfAccumulate("wpu_real_miss", io.update.bits.s1_real_way_en.orR)
 }
 
 /** IdealWPU:
@@ -107,13 +117,14 @@ class IdealWPUIO(implicit p:Parameters) extends WPUBuddle{
   val resp = ValidIO(new WPUResp)
   val update = Flipped(ValidIO(new WPUUpdate))
 }
+
 class IdealWPU(implicit p:Parameters) extends WPUModule{
-  val io = IO(new IdealWPUIO)
+  val io = IO(new WPUIO)
 
   val s1_pred_way_en = io.update.bits.s1_real_way_en
 
   if(EnableDCacheWPU){
-    io.resp.valid := true.B
+    io.resp.valid := io.req.valid
   }else{
     io.resp.valid := false.B
   }
