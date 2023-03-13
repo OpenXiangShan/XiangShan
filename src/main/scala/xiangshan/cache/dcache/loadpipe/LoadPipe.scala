@@ -116,6 +116,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   tag_read.idx := get_idx(io.lsu.req.bits.addr)
   // tag_read.way_en := wpu.io.resp.bits.s0_pred_way_en
   tag_read.way_en := ~0.U(nWays.W)
+  // FIXME lyq: tag read will act on every way, it need to be changed in this experiment
+  XSPerfAccumulate("tag_read_counter", PopCount(Cat(Seq.fill(nWays)(io.tag_read.valid)) & tag_read.way_en))
 
   // --------------------------------------------------------------------------------
   // stage 1
@@ -320,9 +322,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }.otherwise{
     real_miss := !s2_hit_dup_lsu
   }
-  // io.debug_s2_cache_miss := real_miss
-  resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
-  // load pipe need replay when there is a bank conflict or wpu predict fail
+  resp.bits.miss := real_miss
+  // load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := resp.bits.replay
   resp.bits.replayCarry.real_way_en := s2_real_way_en

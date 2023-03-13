@@ -200,6 +200,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     data_sram.io.r.req.valid := io.r.en
     data_sram.io.r.req.bits.apply(setIdx = io.r.addr)
     io.r.data := data_sram.io.r.resp.data(0)
+    XSPerfAccumulate("data_read_counter", data_sram.io.r.req.valid)
 
     def dump_r() = {
       when(RegNext(io.r.en)) {

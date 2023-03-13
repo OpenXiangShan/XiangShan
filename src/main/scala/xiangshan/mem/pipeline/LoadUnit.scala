@@ -97,7 +97,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
+class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
@@ -125,8 +125,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_sqIdx = Wire(new SqPtr)
   val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
   // default value
-  s0_replayCarry.valid := false.B
-  s0_replayCarry.real_way_en := 0.U
+  s0_replayCarry := ReplayCarry.init
 
   io.s0_sqIdx := s0_sqIdx
 
@@ -139,7 +138,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // src2: int read / software prefetch first issue from RS (io.in)
   // src3: vec read first issue from RS (TODO)
   // src4: load try pointchaising when no issued or replayed load (io.fastpath)
-  // src5: hardware prefetch from prefetchor (high confidence) (io.prefetch)
+  // src5: hardware prefetch from prefetchor (low confidence) (io.prefetch)
 
   // load flow source valid
   val lfsrc0_loadReplay_valid = io.lsqOut.valid
@@ -154,10 +153,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   dontTouch(lfsrc3_vecloadFirstIssue_valid)
   dontTouch(lfsrc4_l2lForward_valid)
   dontTouch(lfsrc5_lowconfhwPrefetch_valid)
-  
+
   // load flow source ready
   val lfsrc_loadReplay_ready = WireInit(true.B)
-  val lfsrc_highconfhwPrefetch_ready = !lfsrc0_loadReplay_valid 
+  val lfsrc_highconfhwPrefetch_ready = !lfsrc0_loadReplay_valid
   val lfsrc_intloadFirstIssue_ready = !lfsrc0_loadReplay_valid &&
     !lfsrc1_highconfhwPrefetch_valid
   val lfsrc_vecloadFirstIssue_ready = !lfsrc0_loadReplay_valid &&
@@ -167,7 +166,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     !lfsrc1_highconfhwPrefetch_valid &&
     !lfsrc2_intloadFirstIssue_valid &&
     !lfsrc3_vecloadFirstIssue_valid
-  val lfsrc_lowconfhwPrefetch_ready = !lfsrc0_loadReplay_valid && 
+  val lfsrc_lowconfhwPrefetch_ready = !lfsrc0_loadReplay_valid &&
     !lfsrc1_highconfhwPrefetch_valid &&
     !lfsrc2_intloadFirstIssue_valid &&
     !lfsrc3_vecloadFirstIssue_valid &&
@@ -178,15 +177,15 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   dontTouch(lfsrc_vecloadFirstIssue_ready)
   dontTouch(lfsrc_l2lForward_ready)
   dontTouch(lfsrc_lowconfhwPrefetch_ready)
-    
+
   // load flow source select (OH)
   val lfsrc_loadReplay_select = lfsrc0_loadReplay_valid && lfsrc_loadReplay_ready
-  val lfsrc_hwprefetch_select = lfsrc_highconfhwPrefetch_ready && lfsrc1_highconfhwPrefetch_valid || 
+  val lfsrc_hwprefetch_select = lfsrc_highconfhwPrefetch_ready && lfsrc1_highconfhwPrefetch_valid ||
     lfsrc_lowconfhwPrefetch_ready && lfsrc5_lowconfhwPrefetch_valid
   val lfsrc_intloadFirstIssue_select = lfsrc_intloadFirstIssue_ready && lfsrc2_intloadFirstIssue_valid
   val lfsrc_vecloadFirstIssue_select = lfsrc_vecloadFirstIssue_ready && lfsrc3_vecloadFirstIssue_valid
   val lfsrc_l2lForward_select = lfsrc_l2lForward_ready && lfsrc4_l2lForward_valid
-  assert(!lfsrc_vecloadFirstIssue_select) // to be added
+  assert(!lfsrc_vecloadFirstIssue_select) // TODO: to be added
   dontTouch(lfsrc_loadReplay_select)
   dontTouch(lfsrc_hwprefetch_select)
   dontTouch(lfsrc_intloadFirstIssue_select)
@@ -212,7 +211,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // query DTLB
   io.dtlbReq.valid := s0_valid
   // hw prefetch addr does not need to be translated, give tlb paddr
-  io.dtlbReq.bits.vaddr := Mux(lfsrc_hwprefetch_select, io.prefetch_in.bits.paddr, s0_vaddr) 
+  io.dtlbReq.bits.vaddr := Mux(lfsrc_hwprefetch_select, io.prefetch_in.bits.paddr, s0_vaddr)
   io.dtlbReq.bits.cmd := Mux(isPrefetch,
     Mux(isPrefetchWrite, TlbCmd.write, TlbCmd.read),
     TlbCmd.read
@@ -252,7 +251,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   // assign default value
   s0_uop := DontCare
-  
+
   // load flow priority mux
   when(lfsrc_loadReplay_select) {
     s0_vaddr := io.lsqOut.bits.vaddr
@@ -367,6 +366,11 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   XSPerfAccumulate("software_prefetch_fire", io.out.fire && isPrefetch && lfsrc_intloadFirstIssue_select)
   XSPerfAccumulate("hardware_prefetch_blocked", io.prefetch_in.valid && !lfsrc_hwprefetch_select)
   XSPerfAccumulate("hardware_prefetch_total", io.prefetch_in.valid)
+  XSPerfAccumulate("loadsrc_loadReplay_select", lfsrc_loadReplay_select)
+  XSPerfAccumulate("loadsrc_hwprefetch_select", lfsrc_hwprefetch_select)
+  XSPerfAccumulate("loadsrc_intloadFirstIssue_select", lfsrc_intloadFirstIssue_select)
+  XSPerfAccumulate("loadsrc_vecloadFirstIssue_select", lfsrc_vecloadFirstIssue_select)
+  XSPerfAccumulate("loadsrc_l2lForward_select", lfsrc_l2lForward_select)
 }
 
 
@@ -814,17 +818,17 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   XSPerfAccumulate("dcache_miss_first_issue", io.in.fire && s2_cache_miss && io.in.bits.isFirstIssue)
   XSPerfAccumulate("full_forward", io.in.valid && fullForward)
   XSPerfAccumulate("dcache_miss_full_forward", io.in.valid && s2_cache_miss && fullForward)
-  XSPerfAccumulate("replay",  io.rsFeedback.valid && !io.rsFeedback.bits.hit)
-  XSPerfAccumulate("replay_tlb_miss", io.rsFeedback.valid && !io.rsFeedback.bits.hit && s2_tlb_miss)
-  XSPerfAccumulate("replay_cache", io.rsFeedback.valid && !io.rsFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
+  XSPerfAccumulate("replay_rs",  io.rsFeedback.valid && !io.rsFeedback.bits.hit)
+  XSPerfAccumulate("replay_rs_tlb_miss", io.rsFeedback.valid && !io.rsFeedback.bits.hit && s2_tlb_miss)
+  XSPerfAccumulate("replay_rs_cache", io.rsFeedback.valid && !io.rsFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
   XSPerfAccumulate("replay_from_fetch_forward", io.out.valid && debug_forwardFailReplay)
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
   XSPerfAccumulate("replay_lq",  io.replaySlow.valid && (!io.replaySlow.tlb_hited || !io.replaySlow.cache_no_replay || !io.replaySlow.forward_data_valid))
-  XSPerfAccumulate("replay_tlb_miss_lq", io.replaySlow.valid && !io.replaySlow.tlb_hited)
+  XSPerfAccumulate("replay_lq_tlb_miss", io.replaySlow.valid && !io.replaySlow.tlb_hited)
   XSPerfAccumulate("replay_sl_vio", io.replaySlow.valid && io.replaySlow.tlb_hited && !io.replaySlow.st_ld_check_ok)
-  XSPerfAccumulate("replay_cache_lq", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_no_replay)
-  XSPerfAccumulate("replay_cache_miss_lq", io.replaySlow.valid && !io.replaySlow.cache_hited)
+  XSPerfAccumulate("replay_lq_cache", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_no_replay)
+  XSPerfAccumulate("replay_lq_cache_miss", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_hited)
   XSPerfAccumulate("prefetch", io.in.fire && s2_is_prefetch)
   XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full / miss req port conflict
   XSPerfAccumulate("prefetch_miss", io.in.fire && s2_is_prefetch && s2_cache_miss) // prefetch req miss in l1 
