@@ -40,6 +40,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   val disableSfence = WireInit(false.B)
   val csr_frm = WireInit(frm.getOrElse(0.U(3.W)))
   val csr_vxrm = WireInit(vxrm.getOrElse(0.U(2.W)))
+  val csr_vstart = WireInit(vstart.getOrElse(0.U(XLEN.W)))
 
   val hasRedirect = config.fuConfigs.zip(functionUnits).filter(_._1.hasRedirect).map(_._2)
   println(s"ExeUnit: ${functionUnits.map(_.name).reduce(_ + " " + _)} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
@@ -104,6 +105,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   if (vipuModules.nonEmpty) {
     vipuModules.map(_._1.asInstanceOf[VIPU]).foreach(mod => {
       mod.vxrm := csr_vxrm
+      mod.vstart := csr_vstart
       io.out.bits.vxsat := mod.vxsat
     })
   }

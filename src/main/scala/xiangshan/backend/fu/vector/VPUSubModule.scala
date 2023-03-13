@@ -24,4 +24,5 @@ import xiangshan.backend.fu.{FunctionUnit}
 
 abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
+  val vstart = IO(Input(UInt(XLEN.W)))
 }

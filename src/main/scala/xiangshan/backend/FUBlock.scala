@@ -156,6 +156,7 @@ class VecFUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) 
 
   val frm = Input(UInt(3.W))
   val vxrm = Input(UInt(2.W))
+  val vstart = Input(UInt(XLEN.W))
 
   override def toString: String = {
     s"VecFUBlockExtraIO: " + configs.map(a => a._1.name + "*" + a._2).reduce(_ + " " + _) + s" hasFrm"
@@ -175,6 +176,9 @@ class VecFUBlockImp(configVec: Seq[(ExuConfig, Int)], out: VecFUBlock)(implicit 
     }
     if (exu.vxrm.isDefined){
       exu.vxrm.get := extraio.vxrm
+    }
+    if (exu.vstart.isDefined) {
+      exu.vstart.get := extraio.vstart
     }
   }
   println(extraio)
