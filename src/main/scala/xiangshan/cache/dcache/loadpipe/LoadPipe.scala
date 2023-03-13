@@ -78,28 +78,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
 
-  // ready can wait for valid
-  io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
-  io.meta_read.valid := io.lsu.req.fire() && !io.nack
-  io.tag_read.valid := io.lsu.req.fire() && !io.nack
-
-  val meta_read = io.meta_read.bits
-  val tag_read = io.tag_read.bits
-
-  // Tag read for new requests
-  meta_read.idx := get_idx(io.lsu.req.bits.addr)
-  meta_read.way_en := ~0.U(nWays.W)
-  // meta_read.tag := DontCare
-
-  tag_read.idx := get_idx(io.lsu.req.bits.addr)
-  tag_read.way_en := ~0.U(nWays.W)
-
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
   // --------------------------------------------------------------------------------
   // read tag
 
+  // ready can wait for valid
+  io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
+  io.meta_read.valid := io.lsu.req.fire() && !io.nack
+  io.tag_read.valid := io.lsu.req.fire() && !io.nack
+  
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
@@ -107,6 +96,26 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_replayCarry = s0_req.replayCarry
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
+
+  // wpu
+  val wpu = Module(new DCacheWPU)
+  // req in s0
+  wpu.io.req.bits.vaddr := s0_vaddr
+  wpu.io.req.bits.replayCarry := s0_replayCarry
+  wpu.io.req.valid := s0_valid
+
+  val meta_read = io.meta_read.bits
+  val tag_read = io.tag_read.bits
+
+  // Tag read for new requests
+  meta_read.idx := get_idx(io.lsu.req.bits.addr)
+  // meta_read.way_en := wpu.io.resp.bits.s0_pred_way_en
+  meta_read.way_en := ~0.U(nWays.W)
+  // meta_read.tag := DontCare
+
+  tag_read.idx := get_idx(io.lsu.req.bits.addr)
+  // tag_read.way_en := wpu.io.resp.bits.s0_pred_way_en
+  tag_read.way_en := ~0.U(nWays.W)
 
   // --------------------------------------------------------------------------------
   // stage 1
@@ -136,52 +145,34 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val tag_resp = io.tag_resp.map(r => r(tagBits - 1, 0))
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
 
-  // dcache side tag match
-  /* // just ideal situation
-  val idealWPU = Module(new IdealWPU)
-  val s1_vaddr_dup_dc = Wire(UInt(PAddrBits.W))
-  s1_vaddr_dup_dc := RegEnable(s0_req.addr, s0_fire)
-  idealWPU.io.req.bits.vaddr := s1_vaddr_dup_dc
-  idealWPU.io.req.valid := true.B
-  idealWPU.io.idealIf.s1_tag_resp := tag_resp
-  idealWPU.io.idealIf.s1_meta_resp := meta_resp
-  idealWPU.io.idealIf.s1_real_tag := get_tag(s1_paddr_dup_dcache)
-  */
-  // real wpu
-  val wpu = Module(new DCacheWPU)
-  // req in s0
-  wpu.io.req.bits.vaddr := s0_vaddr
-  wpu.io.req.bits.replayCarry := s0_replayCarry
-  wpu.io.req.valid := s0_valid
-  // check in s1
-  wpu.io.check.bits.s1_tag_resp := tag_resp
-  wpu.io.check.bits.s1_meta_resp := meta_resp
-  wpu.io.check.bits.s1_real_tag := get_tag(s1_paddr_dup_dcache)
-  wpu.io.check.valid := s1_valid
-  // correct in s2
-  val s2_wpu_pred_fail = wpu.io.s2_pred_fail
-  val s2_real_way_en = wpu.io.s2_real_way_en
-
   // resp in s1
+  val s1_real_tag_match_way_dup_dc = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
+  val s1_real_tag_match_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
+
+  wpu.io.update.valid := s1_valid
+  wpu.io.update.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
+
   val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
   val s1_tag_match_way_dup_lsu = Wire(UInt(nWays.W))
-  when (wpu.io.resp.valid){
-    s1_tag_match_way_dup_dc := wpu.io.resp.bits.predict_way_en
-    s1_tag_match_way_dup_lsu := wpu.io.resp.bits.predict_way_en
-  }.otherwise {
-    val s1_tag_eq_way_dup_dc = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
-    s1_tag_match_way_dup_dc := wayMap((w: Int) => s1_tag_eq_way_dup_dc(w) && meta_resp(w).coh.isValid()).asUInt
-    
-    // lsu side tag match
-    val s1_tag_eq_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_lsu))).asUInt
-    s1_tag_match_way_dup_lsu := wayMap((w: Int) => s1_tag_eq_way_dup_lsu(w) && meta_resp(w).coh.isValid()).asUInt
+  if (EnableDCacheWPU) {
+    s1_tag_match_way_dup_dc := s1_real_tag_match_way_dup_dc
+    s1_tag_match_way_dup_lsu := s1_real_tag_match_way_dup_lsu
+  } else {
+    when(RegNext(wpu.io.resp.valid)) {
+      s1_tag_match_way_dup_dc := RegNext(wpu.io.resp.bits.s0_pred_way_en)
+      s1_tag_match_way_dup_lsu := RegNext(wpu.io.resp.bits.s0_pred_way_en)
+    }.otherwise {
+      s1_tag_match_way_dup_dc := s1_real_tag_match_way_dup_dc
+      s1_tag_match_way_dup_lsu := s1_real_tag_match_way_dup_lsu
+    }
   }
+
   val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
   val s1_tag_match_dup_lsu = s1_tag_match_way_dup_lsu.orR
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
 
   val s1_fake_meta = Wire(new Meta)
-//  s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
+  // s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
   s1_fake_meta.coh := ClientMetadata.onReset
   val s1_fake_tag = get_tag(s1_paddr_dup_dcache)
 
@@ -224,6 +215,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // stage 2
   // --------------------------------------------------------------------------------
   // return data
+
+  // correct in s2
+  val s2_wpu_pred_fail = wpu.io.resp.bits.s2_pred_fail
+  val s2_real_way_en = RegNext(s1_real_tag_match_way_dup_dc)
 
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
@@ -321,7 +316,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // * report a miss if bank conflict is detected
   val real_miss = Wire(Bool())
   when (wpu.io.resp.valid){
-    real_miss := s2_real_way_en.orR
+    real_miss := !s2_real_way_en.orR
   }.otherwise{
     real_miss := !s2_hit_dup_lsu
   }
@@ -329,7 +324,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
-  resp.bits.replayCarry.valid := resp.bits.miss
+  resp.bits.replayCarry.valid := resp.bits.replay
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access

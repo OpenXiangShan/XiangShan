@@ -169,7 +169,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableDCacheWPU: Boolean = false,
+  EnableDCacheWPU: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
