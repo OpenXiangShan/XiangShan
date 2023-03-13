@@ -322,7 +322,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }.otherwise{
     real_miss := !s2_hit_dup_lsu
   }
-  resp.bits.miss := real_miss
+  resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
+  // resp.bits.miss := real_miss
   // load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := resp.bits.replay
