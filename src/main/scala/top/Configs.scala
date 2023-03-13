@@ -186,132 +186,6 @@ class MinimalConfig(n: Int = 1) extends Config(
   })
 )
 
-class NanHuGConfig(n: Int = 1) extends Config(
-  new BaseConfig(n).alter((site, here, up) => {
-    case XSTileKey => up(XSTileKey).map(
-      _.copy(
-        DecodeWidth = 4,
-        RenameWidth = 4,
-        FetchWidth = 8,
-        IssQueSize = 8,
-        NRPhyRegs = 64,
-        LoadQueueSize = 32,
-        LoadQueueNWriteBanks = 4,
-        StoreQueueSize = 16,
-        StoreQueueNWriteBanks = 4,
-        RobSize = 128,
-        FtqSize = 32,
-        IBufSize = 32,
-        StoreBufferSize = 4,
-        StoreBufferThreshold = 3,
-        dpParams = DispatchParameters(
-          IntDqSize = 12,
-          FpDqSize = 12,
-          LsDqSize = 12,
-          IntDqDeqWidth = 4,
-          FpDqDeqWidth = 4,
-          LsDqDeqWidth = 4
-        ),
-        exuParameters = ExuParameters(
-          JmpCnt = 1,
-          AluCnt = 2,
-          MulCnt = 0,
-          MduCnt = 1,
-          FmacCnt = 2,
-          FmiscCnt = 1,
-          FmiscDivSqrtCnt = 0,
-          LduCnt = 2,
-          StuCnt = 2
-        ),
-        prefetcher = None,
-        // 4-way 16KB DCache        
-        icacheParameters = ICacheParameters(
-          nSets = 64, 
-          nWays = 4,
-          tagECC = None,
-          dataECC = None,
-          replacer = Some("setplru"),
-          nMissEntries = 2,
-          nReleaseEntries = 1,
-          nProbeEntries = 2,
-          nPrefetchEntries = 2,
-          hasPrefetch = false
-        ),
-        // 8-way 32KB DCache        
-        dcacheParametersOpt = Some(DCacheParameters(
-          nSets = 64, 
-          nWays = 8,
-          tagECC = Some("secded"),
-          dataECC = Some("secded"),
-          replacer = Some("setplru"),
-          nMissEntries = 4,
-          nProbeEntries = 4,
-          nReleaseEntries = 8,
-        )),
-        EnableBPD = false, // disable TAGE
-        EnableLoop = false,
-        itlbParameters = TLBParameters(
-          name = "itlb",
-          fetchi = true,
-          useDmode = false,
-          sameCycle = false,
-          missSameCycle = true,
-          normalReplacer = Some("plru"),
-          superReplacer = Some("plru"),
-          normalNWays = 4,
-          normalNSets = 1,
-          superNWays = 2,
-          shouldBlock = true
-        ),
-        ldtlbParameters = TLBParameters(
-          name = "ldtlb",
-          normalNSets = 16, // 6when da or sa
-          normalNWays = 1, // when fa or sa
-          normalAssociative = "sa",
-          normalReplacer = Some("setplru"),
-          superNWays = 4,
-          normalAsVictim = true,
-          partialStaticPMP = true,
-          outReplace = false
-        ),
-        sttlbParameters = TLBParameters(
-          name = "sttlb",
-          normalNSets = 16, // when da or sa
-          normalNWays = 1, // when fa or sa
-          normalAssociative = "sa",
-          normalReplacer = Some("setplru"),
-          normalAsVictim = true,
-          superNWays = 4,
-          partialStaticPMP = true,
-          outReplace = false
-        ),
-        btlbParameters = TLBParameters(
-          name = "btlb",
-          normalNSets = 1,
-          normalNWays = 8,
-          superNWays = 2
-        ),
-        l2tlbParameters = L2TLBParameters(
-          l1Size = 4,
-          l2nSets = 4,
-          l2nWays = 4,
-          l3nSets = 4,
-          l3nWays = 8,
-          spSize = 2,
-        ),
-        L2CacheParamsOpt = None // remove L2 Cache
-      )
-    )    
-    case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sets = 1024,
-        simulation = true
-      )),
-      L3NBanks = 1
-    )
-  })
-)
-
 // Non-synthesizable MinimalConfig, for fast simulation only
 class MinimalSimConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
@@ -332,8 +206,8 @@ class WithNKBL1D(n: Int, ways: Int = 4) extends Config((site, here, up) => {
       dcacheParametersOpt = Some(DCacheParameters(
         nSets = sets,
         nWays = ways,
-        tagECC = None,
-        dataECC = None,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
         replacer = Some("setplru"),
         nMissEntries = 16,
         nProbeEntries = 8,
