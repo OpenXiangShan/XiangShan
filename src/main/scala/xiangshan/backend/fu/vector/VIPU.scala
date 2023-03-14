@@ -84,7 +84,8 @@ class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN)
 
 class VIAluDecodeResultBundle extends Bundle {
   val opcode = UInt(6.W)
-  val srcType = Vec(2, UInt(4.W))
+  val srcType2 = UInt(4.W)
+  val srcType1 = UInt(4.W)
   val vdType = UInt(4.W)
 }
 
@@ -120,7 +121,7 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
   val mask = "b1111".U(4.W)
 
   val out = LookupTree(io.in.fuOpType, List(
-    // --------------------- opcode       srcType(0) (1) vdType
+    // --------------------- opcode       srcType2 1 vdType
     VipuType.vadd_vv -> Cat(VAluOpcode.vadd, uSew, uSew, uSew).asUInt(),
     VipuType.vsub_vv -> Cat(VAluOpcode.vsub, uSew, uSew, uSew).asUInt(),
     VipuType.vrsub_vv -> Cat(VAluOpcode.vsub, uSew, uSew, uSew).asUInt(),
@@ -243,7 +244,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 
 // generate src1 and src2
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
+  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL || ctrl.uopDivType === UopDivType.VEC_MV_WIDE || ctrl.uopDivType === UopDivType.VEC_MV_WIDE0 || ctrl.uopDivType === UopDivType.VEC_MV_NARROW, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
   val _vs2 = in.src(1)
   val vs1 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs2, _vs1)
   val vs2 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs1, _vs2)
@@ -266,8 +267,8 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
   vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
 
   vialu.io.in.bits.info.vxrm := vxrm
-  vialu.io.in.bits.srcType(0) := decoder.io.out.srcType(0)
-  vialu.io.in.bits.srcType(1) := decoder.io.out.srcType(1)
+  vialu.io.in.bits.srcType(0) := decoder.io.out.srcType1
+  vialu.io.in.bits.srcType(1) := decoder.io.out.srcType2
   vialu.io.in.bits.vdType := decoder.io.out.vdType
   vialu.io.in.bits.vs1 := vs1
   vialu.io.in.bits.vs2 := vs2
