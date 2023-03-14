@@ -219,7 +219,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     // Now 0x10 and 0x13 are both valid in page cache
     // However, when 0x13 refill to tlb, will trigger multi hit
     // So will only trigger multi-hit when PopCount(valididx) = 1
-    vpn_hit && index_hit.reduce(_ || _) && PopCount(valididx) === 1.U
+    vpn_hit && index_hit.reduce(_ || _) && PopCount(data.valididx) === 1.U
   }
 
   def apply(item: PtwSectorResp, asid: UInt, pm: Seq[PMPConfig]): TlbEntry = {
