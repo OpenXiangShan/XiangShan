@@ -114,7 +114,7 @@ case class FDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, uopDivType, selImm,  xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopDivType,  xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
   }
 }
 
