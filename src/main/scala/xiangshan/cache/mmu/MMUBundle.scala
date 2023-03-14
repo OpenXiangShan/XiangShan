@@ -81,6 +81,8 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val w = Bool()
   val r = Bool()
 
+  // static pmp & pma check has a minimum grain size of 4K
+  // So sector tlb will use eight static pm entries
   val pm = Vec(tlbcontiguous, new TlbPMBundle)
 
   def apply(item: PtwSectorResp, pm: Seq[PMPConfig]) = {
@@ -218,7 +220,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     // When 0x13 refill to page cache, previous item will be flushed
     // Now 0x10 and 0x13 are both valid in page cache
     // However, when 0x13 refill to tlb, will trigger multi hit
-    // So will only trigger multi-hit when PopCount(valididx) = 1
+    // So will only trigger multi-hit when PopCount(data.valididx) = 1
     vpn_hit && index_hit.reduce(_ || _) && PopCount(data.valididx) === 1.U
   }
 
@@ -922,8 +924,6 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     }
   }
 }
-
-
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))

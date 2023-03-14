@@ -274,7 +274,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
-  // save only one pte for each id, for sector tlb
+  // save eight ptes for each id when sector tlb
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte_sector = VecInit((0 until MemReqWidth).map(i =>
     if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, mem_resp_done && !mem_resp_from_mq) }
@@ -342,6 +342,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.pmp.resp <> pmp_check(1).resp
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
+
+  // Timing: Maybe need to do some optimization or even add one more cycle
   for (i <- 0 until PtwWidth) {
     mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
     mergeArb(i).in(outArbCachePort).bits := cache.io.resp.bits.toTlb
@@ -403,6 +405,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_resp
   }
 
+  // not_super means that this is a normal page
+  // valididx(i) will be all true when super page to be convenient for l1 tlb matching
   def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true) : PtwMergeResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_merge_resp = Wire(new PtwMergeResp())

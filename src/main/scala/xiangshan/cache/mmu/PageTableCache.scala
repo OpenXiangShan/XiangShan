@@ -60,10 +60,6 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   val pre = Bool()
   val ppn = Vec(tlbcontiguous, UInt(ppnLen.W))
   val perm = Vec(tlbcontiguous, new PtePermBundle())
-  // When ecc(addr_low) = true.B, eccflush will be triggered
-  // And cache will resp miss to l2 tlb
-  // Elsewhen ecc(other) = true.B, will only set valid(other) = false.B
-  // Wait for next ptw from l1 tlb
   val ecc = Bool()
   val level = UInt(2.W)
   val v = Vec(tlbcontiguous, Bool())

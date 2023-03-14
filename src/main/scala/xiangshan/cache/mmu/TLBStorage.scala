@@ -116,7 +116,9 @@ class TLBFA(
     hitVec.suggestName("hitVec")
 
     val hitVecReg = RegEnable(hitVec, req.fire())
-    assert(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U), s"${parentName} fa port${i} multi-hit")
+    // Sector tlb may trigger multi-hit, see def "wbhit"
+    XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
+    // assert(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U), s"${parentName} fa port${i} multi-hit")
 
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
@@ -511,7 +513,9 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     rp.bits.super_hit := sp.bits.hit
     rp.bits.super_ppn := sp.bits.ppn(0)
     rp.bits.spm := np.bits.perm(0).pm(RegNext(io.r.req(i).bits.vpn(sectortlbwidth - 1, 0)))
-    assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
+    // Sector tlb may trigger multi-hit, see def "wbhit"
+    XSPerfAccumulate(s"port${i}_np_sp_multi_hit", !(!np.bits.hit || !sp.bits.hit || !rp.valid))
+    //assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
 
   normalPage.victim.in <> superPage.victim.out
