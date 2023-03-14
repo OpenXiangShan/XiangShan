@@ -134,10 +134,11 @@ class CtrlBlockImp(
 
   // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
+  val s3_s5_redirect = RegNextWithEnable(s2_s4_redirect)
 
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
-    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
+    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
     delayed.valid := RegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
@@ -385,6 +386,7 @@ class CtrlBlockImp(
   io.toIssueBlock.pcVec := jumpPcVec
   io.toIssueBlock.targetVec := jumpTargetVec
 
+  io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect
 
   for (i <- 0 until params.numPcReadPort) {
@@ -471,6 +473,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
     val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val targetVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
+  }
+  val toDataPath = new Bundle {
+    val flush = ValidIO(new Redirect)
   }
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)

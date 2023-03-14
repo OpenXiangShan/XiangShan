@@ -85,9 +85,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 //  vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.uops
 //  vfScheduler.io.writeback := wbDataPath.io.toVfPreg.map(_.toWakeUpBundle)
 
+  dataPath.io.flush := ctrlBlock.io.toDataPath.flush
+
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
-      PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).fire, io.redirect.valid)
+      PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).fire,
+        intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.redirect))
     }
   }
 
@@ -103,7 +106,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
-      PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire, io.redirect.valid)
+      PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
+        dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
     }
   }
 

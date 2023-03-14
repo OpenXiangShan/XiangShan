@@ -8,7 +8,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.v2backend.Bundles._
 import xiangshan.v2backend.issue._
-import xiangshan.{HasXSParameter, SrcType, XSBundle}
+import xiangshan.{HasXSParameter, Redirect, SrcType, XSBundle}
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   private implicit val dpParams: BackendParams = params
@@ -22,6 +22,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val (fromIntIQ, toIntExu) = (io.fromIntIQ, io.toIntExu)
   private val (fromVfIQ, toVfExu) = (io.fromVfIQ, io.toFpExu)
+  private val fromMemIQ = io.fromMemIQ
 
   private val intSchdParams = params.schdParams(IntScheduler())
   private val vfSchdParams = params.schdParams(VfScheduler())
@@ -60,8 +61,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   intRfWdata := io.fromIntWb.map(_.data)
   intRfWen := io.fromIntWb.map(_.wen)
 
-  io.connectWithIntRfRaddrVec(intRfRaddr)
-  io.connectWithExuIntRdataVec(intRfRdata)
+  private val addrFromIntIQ = fromIntIQ.map(_.map(_.bits.getIntRfReadBundle.map(_.addr)))
+  private val addrFromMemIQ = fromMemIQ.map(_.map(_.bits.getIntRfReadBundle.map(_.addr)))
+  private val addrFromIQ: IndexedSeq[IndexedSeq[Seq[UInt]]] = addrFromIntIQ ++ addrFromMemIQ
+  private val fromIQFire: IndexedSeq[IndexedSeq[Bool]] = fromIntIQ.map(_.map(_.fire)) ++ fromMemIQ.map(_.map(_.fire))
+  // hold read addr until new fromIQ.fire
+  addrFromIQ.zip(fromIQFire).map { case (addrVec2, fireVec) =>
+    addrVec2.zip(fireVec).map { case (addrVec, fire) =>
+      addrVec.map(addr => (addr, fire))
+    }
+  }.flatten.flatten.zip(intRfRaddr).foreach { case ((source, fire), sink) => sink := DataHoldBypass(source, fire)}
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat
@@ -72,36 +81,100 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 //  }
   println(s"intDebugRead: ${intDebugRead}")
 
-  toIntExu.zip(fromIntIQ).foreach { case (sinkVec, sourceVec) =>
-    sinkVec.zip(sourceVec).foreach { case (sink, source) =>
-      sink.valid := source.valid // Todo: read arbiter
-      sink.bits.fromIssueBundle(source.bits) // don't connect src data here
-      source.ready := sink.ready
-      // imm extract
-      if (sink.bits.params.immType.nonEmpty) {
-        // rs1 is always int reg, rs2 may be imm
-        when (SrcType.isImm(source.bits.srcType(1))) {
-          sink.bits.src(1) := ImmExtractor(
-            source.bits.common.imm,
-            source.bits.immType,
-            sink.bits.DataBits,
-            sink.bits.params.immType.map(_.litValue)
-          )
-        }
+  val s1_toIntExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(toIntExu.map(x => MixedVec(x.map(_.valid.cloneType)))))
+  val s1_toIntExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toIntExu.map(x => MixedVec(x.map(_.bits.cloneType)))))
+  val s1_toIntExuReady = Wire(MixedVec(toIntExu.map(x => MixedVec(x.map(_.ready.cloneType)))))
+  val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIntIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)))))
+  val s1_pregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toIntExu.map(x => MixedVec(x.map(_.bits.src.cloneType)))))
+  s1_pregRData.flatten.flatten.zip(intRfRdata).foreach { case (sink, source) => sink := source }
+
+  for (i <- fromIntIQ.indices) {
+    for (j <- fromIntIQ(i).indices) {
+      val s1_valid = s1_toIntExuValid(i)(j)
+      val s1_ready = s1_toIntExuReady(i)(j)
+      val s1_data = s1_toIntExuData(i)(j)
+      val s0 = fromIntIQ(i)(j) // s0
+      val block = false.B // Todo: read arbiter
+      val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
+      when (s0.fire && !s1_flush && !block) {
+        s1_valid := s0.valid
+        s1_data.fromIssueBundle(s0.bits) // no src data here
+      }.elsewhen (s1_ready) {
+        s1_valid := false.B
       }
-      if (sink.bits.params.hasJmpFu) {
-        when (SrcType.isPc(source.bits.srcType(0))) {
-          sink.bits.src(0) := SignExt(source.bits.jmp.get.pc, XLEN)
+
+      s0.ready := (s1_ready || !s1_valid) && !block
+
+      // imm extract
+      when (s0.fire && !s1_flush && !block) {
+        if (s1_data.params.immType.nonEmpty) {
+          // rs1 is always int reg, rs2 may be imm
+          when(SrcType.isImm(s0.bits.srcType(1))) {
+            s1_data.src(1) := ImmExtractor(
+              s0.bits.common.imm,
+              s0.bits.immType,
+              s1_data.DataBits,
+              s1_data.params.immType.map(_.litValue)
+            )
+          }
+        }
+        if (s1_data.params.hasJmpFu) {
+          when(SrcType.isPc(s0.bits.srcType(0))) {
+            s1_data.src(0) := SignExt(s0.bits.jmp.get.pc, XLEN)
+          }
         }
       }
     }
   }
 
-  toVfExu.zip(fromVfIQ).foreach { case (sinkVec, sourceVec) =>
-    sinkVec.zip(sourceVec).foreach { case (sink, source) =>
-      sink.valid := source.valid // Todo: read arbiter
-      sink.bits.fromIssueBundle(source.bits)
-      source.ready := sink.ready
+//  // over write data
+//  io.connectWithExuIntRdataVec(intRfRdata)
+
+  Queue
+  for (i <- toIntExu.indices) {
+    for (j <- toIntExu(i).indices) {
+      val sinkData = toIntExu(i)(j).bits
+      toIntExu(i)(j).valid := s1_toIntExuValid(i)(j)
+      s1_toIntExuReady(i)(j) := toIntExu(i)(j).ready // wire assign
+      sinkData := s1_toIntExuData(i)(j)
+      // preg read data
+      sinkData.src := s1_pregRData(i)(j)
+
+      // extracted imm and pc
+      if (sinkData.params.immType.nonEmpty) {
+        when(SrcType.isImm(s1_srcType(i)(j)(1))) {
+          sinkData.src(1) := s1_toIntExuData(i)(j).src(1)
+        }
+      }
+      if (sinkData.params.hasJmpFu) {
+        when(SrcType.isPc(s1_srcType(i)(j)(0))) {
+          sinkData.src(0) := s1_toIntExuData(i)(j).src(0)
+        }
+      }
+    }
+  }
+
+  val s1_toVfExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(toVfExu.map(x => MixedVec(x.map(_.valid.cloneType)))))
+  val s1_toVfExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toVfExu.map(x => MixedVec(x.map(_.bits.cloneType)))))
+  val s1_toVfExuReady: MixedVec[MixedVec[Bool]] = Reg(MixedVec(toVfExu.map(x => MixedVec(x.map(_.ready.cloneType)))))
+
+  for (i <- fromVfIQ.indices) {
+    for (j <- fromVfIQ(i).indices) {
+      val sinkValid = s1_toVfExuValid(i)(j)
+      val sinkReady = s1_toVfExuReady(i)(j)
+      val sinkData = s1_toVfExuData(i)(j)
+      val source = fromVfIQ(i)(j)
+      sinkValid := source.valid && source.bits.common.robIdx.needFlush(io.flush) // Todo: read arbiter
+      sinkData.fromIssueBundle(source.bits)
+      source.ready := sinkReady
+    }
+  }
+
+  for (i <- toVfExu.indices) {
+    for (j <- toVfExu(i).indices) {
+      toVfExu(i)(j).valid := s1_toVfExuValid(i)(j)
+      toVfExu(i)(j).bits := s1_toVfExuData(i)(j)
+      s1_toVfExuReady(i)(j) := toVfExu(i)(j).ready
     }
   }
 
@@ -131,6 +204,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   private val memSchdParams = params.schdParams(MemScheduler())
   // bundles
   val hartId = Input(UInt(8.W))
+
+  val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
