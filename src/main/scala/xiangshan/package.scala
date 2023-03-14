@@ -562,6 +562,10 @@ package object xiangshan {
     def VEC_LMUL = "b00010".U
     def VEC_MV_LMUL = "b00011".U
     def VEC_MV = "b00100".U
+    def VEC_WIDE = "b00101".U
+    def VEC_WIDE0 = "b00110".U
+    def VEC_MV_WIDE = "b00111".U
+    def VEC_MV_WIDE0 = "b01000".U
     def dummy = "b11111".U
 
     def X = BitPat("b00000")

@@ -85,7 +85,11 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_MV -> 2.U,
     UopDivType.DIR -> 2.U,
     UopDivType.VEC_LMUL -> lmul,
-    UopDivType.VEC_MV_LMUL -> (lmul + 1.U)
+    UopDivType.VEC_MV_LMUL -> (lmul + 1.U),
+    UopDivType.VEC_WIDE -> (lmul + lmul),
+    UopDivType.VEC_WIDE0 -> (lmul + lmul),
+    UopDivType.VEC_MV_WIDE -> (lmul + lmul + 1.U),
+    UopDivType.VEC_MV_WIDE0 -> (lmul + lmul + 1.U)
   ))
 
   //uop div up to maxNumOfUop
@@ -185,6 +189,108 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
         csBundle(i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + i.U
         csBundle(i + 1).ctrl.uopIdx := i.U
+      }
+    }
+    is(UopDivType.VEC_WIDE) {
+      for (i <- 0 until 8) {
+        csBundle(2 * i).ctrl.srcType(3) := 0.U
+        csBundle(2 * i).ctrl.lsrc(0) := ctrl_flow.instr(19, 15) + i.U
+        csBundle(2 * i).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
+        csBundle(2 * i).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i).U
+        csBundle(2 * i).ctrl.uopIdx := (2 * i).U
+        csBundle(2 * i + 1).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 1).ctrl.lsrc(0) := ctrl_flow.instr(19, 15) + i.U
+        csBundle(2 * i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
+        csBundle(2 * i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i + 1).U
+        csBundle(2 * i + 1).ctrl.uopIdx := (2 * i + 1).U
+      }
+    }
+    is(UopDivType.VEC_WIDE0) {
+      for (i <- 0 until 8) {
+        csBundle(2 * i).ctrl.srcType(3) := 0.U
+        csBundle(2 * i).ctrl.lsrc(0) := ctrl_flow.instr(19, 15) + i.U
+        csBundle(2 * i).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + (2 * i).U
+        csBundle(2 * i).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i).U
+        csBundle(2 * i).ctrl.uopIdx := (2 * i).U
+        csBundle(2 * i + 1).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 1).ctrl.lsrc(0) := ctrl_flow.instr(19, 15) + i.U
+        csBundle(2 * i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + (2 * i + 1).U
+        csBundle(2 * i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i + 1).U
+        csBundle(2 * i + 1).ctrl.uopIdx := (2 * i + 1).U
+      }
+    }
+    is(UopDivType.VEC_MV_WIDE) {
+      /*
+      FMV.D.X
+       */
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := 33.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := false.B
+      csBundle(0).ctrl.vecWen := true.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+
+      for (i <- 0 until 8) {
+        csBundle(2 * i + 1).ctrl.srcType(0) := SrcType.vp
+        csBundle(2 * i + 1).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 1).ctrl.lsrc(0) := 33.U
+        csBundle(2 * i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
+        csBundle(2 * i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i).U
+        csBundle(2 * i + 1).ctrl.uopIdx := (2 * i).U
+        csBundle(2 * i + 2).ctrl.srcType(0) := SrcType.vp
+        csBundle(2 * i + 2).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 2).ctrl.lsrc(0) := 33.U
+        csBundle(2 * i + 2).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + i.U
+        csBundle(2 * i + 2).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i + 1).U
+        csBundle(2 * i + 2).ctrl.uopIdx := (2 * i + 1).U
+      }
+    }
+    is(UopDivType.VEC_MV_WIDE0) {
+      /*
+      FMV.D.X
+       */
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := 33.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := false.B
+      csBundle(0).ctrl.vecWen := true.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+
+      for (i <- 0 until 8) {
+        csBundle(2 * i + 1).ctrl.srcType(0) := SrcType.vp
+        csBundle(2 * i + 1).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 1).ctrl.lsrc(0) := 33.U
+        csBundle(2 * i + 1).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + (2 * i).U
+        csBundle(2 * i + 1).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i).U
+        csBundle(2 * i + 1).ctrl.uopIdx := (2 * i).U
+        csBundle(2 * i + 2).ctrl.srcType(0) := SrcType.vp
+        csBundle(2 * i + 2).ctrl.srcType(3) := 0.U
+        csBundle(2 * i + 2).ctrl.lsrc(0) := 33.U
+        csBundle(2 * i + 2).ctrl.lsrc(1) := ctrl_flow.instr(24, 20) + (2 * i + 1).U
+        csBundle(2 * i + 2).ctrl.ldest := ctrl_flow.instr(11, 7) + (2 * i + 1).U
+        csBundle(2 * i + 2).ctrl.uopIdx := (2 * i + 1).U
       }
     }
   }

@@ -115,7 +115,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val robCommits = Input(new RobCommitIO)
   })
 
-  val decoderComp = Module(new DecodeUnitComp(10))
+  val decoderComp = Module(new DecodeUnitComp(17))
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
   val debug_globalCounter = RegInit(0.U(XLEN.W))
   val vconfigGen = Module(new VConfigGen)
