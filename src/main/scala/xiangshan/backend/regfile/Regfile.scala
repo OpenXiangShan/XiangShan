@@ -53,7 +53,7 @@ class Regfile
   val mem = Reg(Vec(numPregs, UInt(len.W)))
   for (r <- io.readPorts) {
     val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
-    r.data := rdata
+    r.data := RegNext(rdata)
   }
   for (w <- io.writePorts) {
     when(w.wen) {
