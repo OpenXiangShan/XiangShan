@@ -306,6 +306,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
+  val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
@@ -341,7 +342,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // select in s3
   val data_delayed = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
-
+  val firstHit = Bool()
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache miss, and failed to enter the missqueue, replay from RS is needed
@@ -429,6 +430,7 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
+  val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry
 
   def dump() = {
@@ -446,6 +448,7 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val replay    = Bool()
   val tag_error = Bool()
   val error     = Bool()
+  val firstHit = Bool()
   val replayCarry = new ReplayCarry
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
@@ -844,6 +847,28 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
+  }
+
+  /** LoadMissDB: record load miss state */
+  val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
+  val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
+  val loadMissDB = ChiselDB.createTable(tableName, new LoadMissEntry)
+  for( i <- 0 until LoadPipelineWidth){
+    val loadMissWriteEn = ldu(i).io.miss_req.fire || ldu(i).io.lsu.resp.bits.firstHit
+    when(loadMissWriteEn) {
+      val loadMissEntry = Wire(new LoadMissEntry)
+      loadMissEntry.time := GTimer()
+      loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
+      loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
+      loadMissEntry.missState := OHToUInt(Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, ldu(i).io.lsu.resp.bits.firstHit)))
+      loadMissDB.log(
+        data = loadMissEntry,
+        en = loadMissWriteEn,
+        site = siteName,
+        clock = clock,
+        reset = reset
+      )
+    }
   }
 
   //----------------------------------------
