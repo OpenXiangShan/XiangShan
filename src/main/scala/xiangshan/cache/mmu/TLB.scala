@@ -203,7 +203,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
-    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.entry.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
+    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
     when (RegEnable(io.requestor(idx).req_kill, RegNext(io.requestor(idx).req.fire))) {
       io.ptw.req(idx).valid := false.B
@@ -220,7 +220,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
     val miss_req_memidx = req_out(idx).memidx
-    val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
+    val hit = io.ptw.resp.bits.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
     val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val miss_wire = new_coming && missVec(idx)
@@ -235,7 +235,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       for (d <- 0 until nRespDups) {
-        resp(idx).bits.paddr(d) := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+        resp(idx).bits.paddr(d) := Cat(pte.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
         perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
@@ -268,8 +268,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // when ptw resp, tlb at refill_idx maybe set to miss by force.
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt) = {
-    val p_hit = RegNext(ptw.resp.bits.entry.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
-    val p_ppn = RegEnable(ptw.resp.bits.entry.genPPN(vpn), io.ptw.resp.fire)
+    val p_hit = RegNext(ptw.resp.bits.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
+    val p_ppn = RegEnable(ptw.resp.bits.genPPN(vpn), io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits), io.ptw.resp.fire)
     (p_hit, p_ppn, p_perm)
   }
