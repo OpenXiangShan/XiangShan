@@ -213,7 +213,13 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       index_hit(i) := data.valididx(i) && valididx(i)
     }
 
-    vpn_hit && index_hit.reduce(_ || _)
+    // For example, tlb req to page cache with vpn 0x10
+    // At this time, 0x13 has not been paged, so page cache only resp 0x10
+    // When 0x13 refill to page cache, previous item will be flushed
+    // Now 0x10 and 0x13 are both valid in page cache
+    // However, when 0x13 refill to tlb, will trigger multi hit
+    // So will only trigger multi-hit when PopCount(valididx) = 1
+    vpn_hit && index_hit.reduce(_ || _) && PopCount(valididx) === 1.U
   }
 
   def apply(item: PtwSectorResp, asid: UInt, pm: Seq[PMPConfig]): TlbEntry = {
