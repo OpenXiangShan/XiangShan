@@ -26,6 +26,7 @@ class WPUBaseIO(implicit p:Parameters) extends WPUBuddle {
 class MruWPU (implicit p:Parameters) extends WPUModule{
   val io = IO(new WPUBaseIO)
 
+  println("  WPU: MRU")
   val predict_regs = RegInit(VecInit(Seq.fill(nSets)(0.U(wayBits.W))))
 
   val predSetIdx = get_idx(io.pred_vaddr)
@@ -44,6 +45,7 @@ class MruWPU (implicit p:Parameters) extends WPUModule{
 class MmruWPU(implicit p:Parameters) extends WPUModule {
   val io = IO(new WPUBaseIO)
 
+  println("  WPU: MMRU")
   val predict_regs = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nTagIdx)(0.U(auxWayBits.W))))))
 
   val predSetIdx = get_idx(io.pred_vaddr)
