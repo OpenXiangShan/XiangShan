@@ -850,20 +850,37 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   /** LoadMissDB: record load miss state */
+  val IS_FIRST_HIT_WRITE = Constantin.createRecord("is_first_hit_write")
   val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
   val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
   val loadMissDB = ChiselDB.createTable(tableName, new LoadMissEntry)
   for( i <- 0 until LoadPipelineWidth){
-    val loadMissWriteEn = ldu(i).io.miss_req.fire || ldu(i).io.lsu.resp.bits.firstHit
-    when(loadMissWriteEn) {
+    val loadMissEntry = Wire(new LoadMissEntry)
+    loadMissEntry.debug_isFirstHitWrite := IS_FIRST_HIT_WRITE
+    loadMissEntry.timeCnt := GTimer()
+    loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
+    loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
+    loadMissEntry.missState := Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, 0.U(1.W)))
+    // OHToUInt(Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, 0.U(1.W))))
+    loadMissDB.log(
+      data = loadMissEntry,
+      en = !ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire,
+      site = siteName,
+      clock = clock,
+      reset = reset
+    )
+
+    when(IS_FIRST_HIT_WRITE.orR){
       val loadMissEntry = Wire(new LoadMissEntry)
-      loadMissEntry.time := GTimer()
+      loadMissEntry.debug_isFirstHitWrite := IS_FIRST_HIT_WRITE
+      loadMissEntry.timeCnt := GTimer()
       loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
       loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
-      loadMissEntry.missState := OHToUInt(Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, ldu(i).io.lsu.resp.bits.firstHit)))
+      loadMissEntry.missState := Cat(0.U(1.W), 0.U(1.W), ldu(i).io.lsu.resp.bits.firstHit)
+      // OHToUInt(Cat(0.U(1.W), 0.U(1.W), ldu(i).io.lsu.resp.bits.firstHit))
       loadMissDB.log(
         data = loadMissEntry,
-        en = loadMissWriteEn,
+        en = ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid,
         site = siteName,
         clock = clock,
         reset = reset
