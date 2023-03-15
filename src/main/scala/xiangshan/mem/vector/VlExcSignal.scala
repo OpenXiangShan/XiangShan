@@ -9,7 +9,7 @@ import xiangshan._
 
 class vlExcSignalBundle(implicit p: Parameters) extends XSBundle{
   val vecloadRegIn = Vec(2,Decoupled(new VecOperand()))
-  val vecwriteback = Flipped(Decoupled(new ExuOutput))
+  val vecwriteback = Flipped(Decoupled(new VecWriteback))
   val vecFeedback = Vec(2,Input(Bool()))
 }
 

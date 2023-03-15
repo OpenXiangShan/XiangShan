@@ -80,7 +80,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val VecloadRegIn = Vec(2, Flipped(Decoupled(new VecOperand())))
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-    val Vecwriteback = DecoupledIO(new ExuOutput)
+    val Vecwriteback = DecoupledIO(new VecWriteback)
     val vecFeedback = Vec(2,Output(Bool()))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
@@ -579,8 +579,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   //vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
   vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
-  //vluopqueue.io.loadWriteback <> io.Vecwriteback
-  vluopqueue.io.loadWriteback <> vlExcSignal.io.vecwriteback
+  //vluopqueue.io.vecLoadWriteback <> io.Vecwriteback
+  vluopqueue.io.vecLoadWriteback <> vlExcSignal.io.vecwriteback
   //io.vecFeedback := vluopqueue.io.vecFeedback
   vlExcSignal.io.vecFeedback := vluopqueue.io.vecFeedback
 

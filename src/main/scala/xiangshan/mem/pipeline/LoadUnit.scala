@@ -1318,23 +1318,26 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     io.lsq.loadOut.valid && !io.lsq.loadOut.bits.uop.robIdx.needFlush(io.redirect) && !hitLoadOut.valid) &&
                     !load_s2.io.out.bits.vec128bit
 
-  io.VecloadOut.bits.uop := s3_loadWbMeta.uop
-  io.VecloadOut.bits.fflags  := s3_loadWbMeta.fflags
-  io.VecloadOut.bits.redirectValid := s3_loadWbMeta.redirectValid
-  io.VecloadOut.bits.redirect := s3_loadWbMeta.redirect
-  io.VecloadOut.bits.debug := s3_loadWbMeta.debug
-  io.VecloadOut.bits.vecdata := Mux(hitLoadOut.valid, s3_rdataSelDcache, s3_rdataPartialLoadLQ)// TODO: widen s3_rdataSelDcache
+  io.VecloadOut.valid := s3_loadOutValid && s3_loadOutBits.vec128bit
+  io.VecloadOut.bits.uop := s3_loadOutBits.uop
+  io.VecloadOut.bits.uop.cf.exceptionVec(loadAccessFault) := s3_delayedLoadError && !s3_loadOutBits.tlbMiss  ||
+    s3_loadOutBits.uop.cf.exceptionVec(loadAccessFault)
+  io.VecloadOut.bits.uop.ctrl.replayInst := s3_replayInst
+  io.VecloadOut.bits.debug.paddr := s3_loadOutBits.paddr
+  io.VecloadOut.bits.debug.vaddr := s3_loadOutBits.vaddr
+  io.VecloadOut.bits.debug.isMMIO := DontCare
+  io.VecloadOut.bits.debug.isPerfCnt := false.B
+  io.VecloadOut.bits.fflags  := DontCare
+  io.VecloadOut.bits.redirectValid := false.B
+  io.VecloadOut.bits.redirect := DontCare
   io.VecloadOut.bits.data    := DontCare
+
+  io.VecloadOut.bits.vecdata        := s3_rdataDcache
   io.VecloadOut.bits.mask           := s3_loadOutBits.mask
   io.VecloadOut.bits.rob_idx_valid  := s3_loadOutBits.rob_idx_valid
   io.VecloadOut.bits.rob_idx        := s3_loadOutBits.rob_idx
   io.VecloadOut.bits.offset         := s3_loadOutBits.offset
   io.VecloadOut.bits.reg_offset     := s3_loadOutBits.reg_offset
-  // TODO: Here use s3_rdataSelDcache(128 bits) when hitLoadOut,
-  //  this width and s3_rdataPartialLoadLQ should be changed in the future?
-  io.VecloadOut.valid := (hitLoadOut.valid  ||
-                    io.lsq.loadOut.valid && !io.lsq.loadOut.bits.uop.robIdx.needFlush(io.redirect) && !hitLoadOut.valid) &&
-                    load_s2.io.out.bits.vec128bit
 
   io.lsq.loadOut.ready := !hitLoadOut.valid
 
