@@ -298,16 +298,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, flushRedirect.valid)
 
-  val isCommitWriteVconfigVec = rob.io.diffCommits.commitValid.zip(rob.io.diffCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
-  val commitPdestReverse = rob.io.diffCommits.info.map(info => info.pdest).reverse
+  val isCommitWriteVconfigVec = rob.io.rabCommits.commitValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
+  val commitPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
+  val commitSel = PriorityMux(isCommitWriteVconfigVec, commitPdestReverse)
   val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
   val walkPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
-  val commitSel = PriorityMux(isCommitWriteVconfigVec, commitPdestReverse)
   val walkSel = PriorityMux(isWalkWriteVconfigVec, walkPdestReverse)
-  val vconfigAddr = Mux(rob.io.diffCommits.isCommit, commitSel, walkSel)
+  val vconfigAddr = Mux(rob.io.isVsetFlushPipe, rob.io.vconfigPdest,
+                      Mux(rob.io.rabCommits.isCommit, commitSel, walkSel))
   io.vconfigReadPort.addr := RegNext(vconfigAddr)
   decode.io.vconfig := io.vconfigReadPort.data(15, 0).asTypeOf(new VConfig)
-  decode.io.isVsetFlushPipe := rob.io.isVsetFlushPipe
+  decode.io.isVsetFlushPipe := RegNext(rob.io.isVsetFlushPipe)
 
   val stage2Redirect = Mux(flushRedirect.valid, flushRedirect, redirectGen.io.stage2Redirect)
   // Redirect will be RegNext at ExuBlocks.
@@ -592,8 +593,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.robio.toCSR.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.uop.cf.pc := flushPC
-
-  io.robio.toCSR.vcsrFlag := RegNext(rob.io.commits.isCommit && Cat(isCommitWriteVconfigVec).orR)
+  io.robio.toCSR.vcsrFlag := rob.io.csr.vcsrFlag
 
   // rob to mem block
   io.robio.lsq <> rob.io.lsq

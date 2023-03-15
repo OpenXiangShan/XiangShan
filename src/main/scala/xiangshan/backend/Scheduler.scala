@@ -340,7 +340,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
     // for vset
-    val vconfigReadPort = if(outer.hasIntRf) Some(new RfReadPort(XLEN, IntPregIdxWidth)) else None
+    val archVconfigReadPort = if(outer.hasIntRf) Some(new RfReadPort(XLEN, IntPregIdxWidth)) else None
+    val diffVconfigReadData = if(outer.hasIntRf) Some(Output(new VConfig)) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -355,6 +356,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_vconfig_rat = Input(UInt(PhyRegIdxWidth.W))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_vec_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     // perf
@@ -409,7 +411,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     * Currently, read regfile when at select stage of rs, get data at the same cycle.
     * Store-Data-RS reads fp Regfile (Cross Domain).
     */
-  def readIntRf: Seq[UInt] = extractIntReadRf() ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr) :+ io.extra.vconfigReadPort.get.addr
+  def readIntRf: Seq[UInt] = extractIntReadRf() ++ io.extra.intRfReadOut.getOrElse(Seq()).map(_.addr) :+ io.extra.archVconfigReadPort.get.addr
   def readFpRf: Seq[UInt] = extractFpReadRf() ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
 
   val intRfReadData_asyn = if (intRfConfig._1) genRegfile()
@@ -504,7 +506,7 @@ trait IntSchedulerImpMethod { this: IntSchedulerImp =>
     val wbPorts = io.writebackInt
     val waddr = wbPorts.map(_.bits.uop.pdest)
     val wdata = wbPorts.map(_.bits.data)
-    val debugRead = io.extra.debug_int_rat
+    val debugRead = io.extra.debug_int_rat :+ io.extra.debug_vconfig_rat
     val wen = wbPorts.map(wb =>wb.valid && wb.bits.uop.ctrl.rfWen)
     IntRegFile("IntRegFile", IntPhyRegs, readIntRf, wen, waddr, wdata, debugReadAddr = Some(debugRead))
   }
@@ -558,7 +560,7 @@ class IntSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends Schedule
 
   if (io.extra.intRfReadOut.isDefined) {
     println("Scheduler: has IntRfReadOut")
-    val extraIntReadData = intRfReadData_asyn.dropRight(33).takeRight(outer.outIntRfReadPorts)
+    val extraIntReadData = intRfReadData_asyn.dropRight(34).takeRight(outer.outIntRfReadPorts)
     io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
     require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
   }
@@ -569,8 +571,12 @@ class IntSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends Schedule
     io.extra.loadFastImm.get := allLoadRS.map(_.map(_.fastImm)).fold(Seq())(_ ++ _)
   }
 
-  if(io.extra.vconfigReadPort.isDefined) {
-    io.extra.vconfigReadPort.get.data := intRfReadData_asyn.dropRight(32).last
+  if(io.extra.archVconfigReadPort.isDefined) {
+    io.extra.archVconfigReadPort.get.data := intRfReadData_asyn.dropRight(33).last
+  }
+
+  if (io.extra.diffVconfigReadData.isDefined) {
+    io.extra.diffVconfigReadData.get := intRfReadData_asyn.last(15, 0).asTypeOf(new VConfig)
   }
 
   var feedbackIdx = 0
@@ -605,7 +611,7 @@ class IntSchedulerImp(outer: Scheduler)(implicit p: Parameters) extends Schedule
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId
-    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData_asyn.takeRight(32))))
+    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData_asyn.takeRight(33).take(32))))
   }
   if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
     val stall_ls_dq = WireDefault(0.B)

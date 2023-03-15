@@ -204,8 +204,9 @@ class BaseReservationStationImp(params: RSParams, wrapper: BaseReservationStatio
   })
   val io = IO(new ReservationStationIO(params)(updatedP))
   val extra = IO(new RSExtraIO(params)(updatedP))
-  val numIntRfPorts = params.exuCfg.get.fuConfigs.map(_.numIntSrc).max
-  val numFpRfPorts = params.exuCfg.get.fuConfigs.map(_.numFpSrc).max
+  val numIntRfPorts = wrapper.numIntRfPorts
+  val numFpRfPorts = wrapper.numFpRfPorts
+
   val readIntRf_asyn = IO(Vec((params.numDeq) * numIntRfPorts, Flipped(new RfReadPort(params.dataBits, IntPregIdxWidth))))
   val readFpRf_asyn = IO(Vec((params.numDeq) * numFpRfPorts, Flipped(new RfReadPort(params.dataBits, VfPregIdxWidth))))
   extra <> DontCare

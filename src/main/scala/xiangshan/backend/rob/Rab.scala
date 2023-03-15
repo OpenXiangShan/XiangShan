@@ -19,6 +19,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val commitSize = Input(UInt(log2Up(size).W))
     val rabWalkEnd = Output(Bool())
 
+    val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
+
     val commits = Output(new RobCommitIO)
     val diffCommits = Output(new DiffCommitIO)
   })
@@ -142,6 +144,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val numValidEntries = distanceBetween(tailPtr, headPtr)
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U
   io.canEnq := allowEnqueue
+
+  io.vconfigPdest := Mux(commitCandidates(0).ldest === 32.U, diffCandidates(0).pdest, diffCandidates(1).pdest)
 
   // for difftest
   io.diffCommits := 0.U.asTypeOf(new DiffCommitIO)
