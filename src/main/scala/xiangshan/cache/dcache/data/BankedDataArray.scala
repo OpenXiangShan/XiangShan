@@ -583,9 +583,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bankConflictData.fake_rr_bank_conflict := false.B
   }
 
+  val isWriteBankConflictTable = Constantin.createRecord("isWriteBankConflictTable")
   bankConflictTable.log(
     data = bankConflictData,
-    en = rr_bank_conflict(0)(1),
+    en = isWriteBankConflictTable.orR && rr_bank_conflict(0)(1),
     site = siteName,
     clock = clock,
     reset = reset

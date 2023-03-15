@@ -748,8 +748,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   debug_miss_trace.source := io.req.bits.source
   debug_miss_trace.pc := io.req.bits.pc
 
+  val isWriteL1MissQMissTable = Constantin.createRecord("isWriteL1MissQMissTable")
   val table = ChiselDB.createTable("L1MissQMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
-  table.log(debug_miss_trace, io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
+  table.log(debug_miss_trace, isWriteL1MissQMissTable.orR && io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
 
   // Difftest
   if (env.EnableDifftest) {

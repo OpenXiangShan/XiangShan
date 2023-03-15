@@ -96,7 +96,7 @@ class DebugLSIO(implicit p: Parameters) extends XSBundle {
   val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfoBundle))
 }
 
-class DebugInstDB(implicit p: Parameters) extends XSBundle{
+class InstInfoTable(implicit p: Parameters) extends XSBundle{
   val globalID = UInt(XLEN.W)
   val robIdx = UInt(log2Ceil(RobSize).W)
   val instType = FuType()
@@ -1102,13 +1102,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * log trigger is at writeback valid
     * */
   if(!env.FPGAPlatform){
-    val instTableName = "InstDB" + p(XSCoreParamsKey).HartId.toString
+    val isWriteInstInfoTable = Constantin.createRecord("isWriteInstInfoTable")
+    val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new DebugInstDB)
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoTable)
     // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
     for (wb <- exuWriteback) {
       when(wb.valid) {
-        val debug_instData = Wire(new DebugInstDB)
+        val debug_instData = Wire(new InstInfoTable)
         val idx = wb.bits.uop.robIdx.value
         debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
         debug_instData.robIdx := idx

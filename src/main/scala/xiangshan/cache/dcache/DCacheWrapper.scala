@@ -850,15 +850,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   /** LoadMissDB: record load miss state */
-  val IS_FIRST_HIT_WRITE = Constantin.createRecord("is_first_hit_write")
+  val isWriteLoadMissTable = Constantin.createRecord("isWriteLoadMissTable")
+  val isFirstHitWrite = Constantin.createRecord("isFirstHitWrite")
   val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
   val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
-  val loadMissDB = ChiselDB.createTable(tableName, new LoadMissEntry)
+  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
   for( i <- 0 until LoadPipelineWidth){
     val loadMissEntry = Wire(new LoadMissEntry)
     val loadMissWriteEn =
       (!ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire) ||
-      (ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid && IS_FIRST_HIT_WRITE.orR)
+      (ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid && isFirstHitWrite.orR)
     loadMissEntry.timeCnt := GTimer()
     loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
     loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
@@ -867,9 +868,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged,
       ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid
     )))
-    loadMissDB.log(
+    loadMissTable.log(
       data = loadMissEntry,
-      en = loadMissWriteEn,
+      en = isWriteLoadMissTable.orR && loadMissWriteEn,
       site = siteName,
       clock = clock,
       reset = reset
