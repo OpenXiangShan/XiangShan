@@ -28,7 +28,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import utility.FastArbiter
+import utility.{FastArbiter}
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry
 
@@ -633,6 +633,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
+  val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
@@ -690,16 +691,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
-  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
+  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1 + StorePipelineWidth, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array
   val accessArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = LoadPipelineWidth + 2))
-  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
+  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1 + StorePipelineWidth))
   bankedDataArray.dump()
 
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
+  val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   // val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
@@ -719,9 +721,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // read / write coh meta
   val meta_read_ports = ldu.map(_.io.meta_read) ++
-    Seq(mainPipe.io.meta_read)
+    Seq(mainPipe.io.meta_read) ++
+    stu.map(_.io.meta_read)
+
   val meta_resp_ports = ldu.map(_.io.meta_resp) ++
-    Seq(mainPipe.io.meta_resp)
+    Seq(mainPipe.io.meta_resp) ++
+    stu.map(_.io.meta_resp)
+
   val meta_write_ports = Seq(
     mainPipe.io.meta_write,
     refillPipe.io.meta_write
@@ -731,9 +737,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
   // read extra meta
-  meta_read_ports.zip(errorArray.io.read).foreach { case (p, r) => r <> p }
-  meta_read_ports.zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
-  meta_read_ports.zip(accessArray.io.read).foreach { case (p, r) => r <> p }
+  meta_read_ports.take(LoadPipelineWidth + 1).zip(errorArray.io.read).foreach { case (p, r) => r <> p }
+  meta_read_ports.take(LoadPipelineWidth + 1).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
+  meta_read_ports.take(LoadPipelineWidth + 1).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
   val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp) ++
     Seq(mainPipe.io.extra_meta_resp)
   extra_meta_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => {
@@ -767,7 +773,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // tag array
-  require(tagArray.io.read.size == (ldu.size + 1))
+  require(tagArray.io.read.size == (ldu.size + stu.size + 1))
   val tag_write_intend = missQueue.io.refill_pipe_req.valid || mainPipe.io.tag_write_intend
   assert(!RegNext(!tag_write_intend && tagArray.io.write.valid))
   ldu.zipWithIndex.foreach {
@@ -775,6 +781,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       tagArray.io.read(i) <> ld.io.tag_read
       ld.io.tag_resp := tagArray.io.resp(i)
       ld.io.tag_read.ready := !tag_write_intend
+  }
+  stu.zipWithIndex.foreach {
+    case (st, i) =>
+      tagArray.io.read(ldu.size + i) <> st.io.tag_read
+      st.io.tag_resp := tagArray.io.resp(ldu.size + i)
+      st.io.tag_read.ready := !tag_write_intend
   }
   tagArray.io.read.last <> mainPipe.io.tag_read
   mainPipe.io.tag_resp := tagArray.io.resp.last
@@ -846,6 +858,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   //----------------------------------------
+  // Sta pipe
+  for (w <- 0 until StorePipelineWidth) {
+    stu(w).io.lsu <> io.lsu.sta(w)
+  }
+
+  //----------------------------------------
   // atomics
   // atomics not finished yet
   // io.lsu.atomics <> atomicsReplayUnit.io.lsu
@@ -856,14 +874,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // miss queue
-  val MissReqPortCount = LoadPipelineWidth + 1
+  val MissReqPortCount = LoadPipelineWidth + 1 + StorePipelineWidth
   val MainPipeMissReqPort = 0
 
   // Request
   val missReqArb = Module(new ArbiterFilterByCacheLineAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
-  for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  for (w <- 0 until LoadPipelineWidth)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp.id := missQueue.io.resp.id }
 
@@ -1019,7 +1038,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // replacement algorithm
   val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
 
-  val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
+  val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
   replWayReqs.foreach{
     case req =>
       req.way := DontCare
@@ -1028,7 +1047,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val replAccessReqs = ldu.map(_.io.replace_access) ++ Seq(
     mainPipe.io.replace_access
-  )
+  ) ++ stu.map(_.io.replace_access)
   val touchWays = Seq.fill(replAccessReqs.size)(Wire(ValidIO(UInt(log2Up(nWays).W))))
   touchWays.zip(replAccessReqs).foreach {
     case (w, req) =>

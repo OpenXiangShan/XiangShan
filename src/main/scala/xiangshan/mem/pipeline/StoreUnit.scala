@@ -26,16 +26,18 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class StoreUnit_S0(implicit p: Parameters) extends XSModule {
+class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
+    val dcache = DecoupledIO(new DcacheStoreRequestIO)
   })
 
   // send req to dtlb
@@ -61,6 +63,15 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
+  // not real dcache write
+  // just a write intent
+  io.dcache.valid           := io.in.valid
+  io.dcache.bits.cmd        := MemoryOpConstants.M_PFW
+  io.dcache.bits.vaddr      := saddr
+  io.dcache.bits.mask       := genWmask(saddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.dcache.bits.instrtype  := DCACHE_PREFETCH_SOURCE.U
+
+
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
 
@@ -73,8 +84,8 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.isFirstIssue := io.isFirstIssue
   io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
-  io.out.valid := io.in.valid
-  io.in.ready := io.out.ready
+  io.out.valid := io.in.valid && io.dcache.fire
+  io.in.ready := io.out.ready && io.dcache.ready
   when(io.in.valid && io.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -108,6 +119,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
     val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
+    val s1_kill = Output(Bool())
   })
 
   // mmio cbo decoder
@@ -160,6 +172,9 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.bits := io.out.bits
   io.lsq.bits.miss := s1_tlb_miss
 
+  // kill dcache write intent request when tlb miss or exception
+  io.s1_kill := io.in.valid && (s1_tlb_miss || s1_exception || s1_mmio)
+
   // mmio inst with exception will be writebacked immediately
   // io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
 
@@ -183,6 +198,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     val pmpResp = Flipped(new PMPRespBundle)
     val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
+    val s2_kill = Output(Bool())
   })
   val pmp = WireInit(io.pmpResp)
   when (io.static_pm.valid) {
@@ -194,6 +210,9 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
 
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || pmp.mmio
+
+  // kill dcache write intent request when mmio or exception
+  io.s2_kill := io.in.valid && (is_mmio || s2_exception)
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
@@ -228,6 +247,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
+    val dcache = new DCacheStoreIO
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Flipped(new PMPRespBundle())
@@ -250,9 +270,19 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
+  store_s0.io.dcache <> io.dcache.req
   io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
+
+  io.dcache.s1_paddr := store_s1.io.out.bits.paddr
+  // if redirect, also kill store write prefetch
+  io.dcache.s1_kill := store_s1.io.s1_kill || RegNext(store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s2_kill := store_s2.io.s2_kill || RegNext(store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s2_pc := store_s2.io.out.bits.uop.cf.pc
+
+  // TODO: dcache resp
+  io.dcache.resp.ready := true.B
 
   io.storeMaskOut.valid := store_s0.io.in.valid
   io.storeMaskOut.bits.mask := store_s0.io.out.bits.mask

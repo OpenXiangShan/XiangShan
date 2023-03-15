@@ -456,6 +456,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.out := DontCare
 
     stu.io.redirect     <> redirect
+    stu.io.dcache       <> dcache.io.lsu.sta(i)
     stu.io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
     stu.io.rsIdx        <> io.rsfeedback(i).rsIdx
     // NOTE: just for dtlb's perf cnt
