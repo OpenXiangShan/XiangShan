@@ -9,5 +9,6 @@ isWriteL2TlbMissQueueTable 0
 isWriteL2TlbPrefetchTable 0
 isWriteLoadMissTable 1
 isWritePageCacheTable 0
+isWritePTWTable 0
 
 isFirstHitWrite 0
