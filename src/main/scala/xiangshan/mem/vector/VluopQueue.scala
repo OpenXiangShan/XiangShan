@@ -91,9 +91,9 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   val mask_buffer_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(0.U((VLEN/8).W))))
   val rob_idx_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(log2Ceil(RobSize).W))))))
   val rob_idx_valid_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(false.B)))))
-  val rob_inner_idx_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
+  val reg_offset_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
   val offset_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
-  val eew_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
+  //val eew_s0 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
   val uop2rob_buffer_s0 = RegInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new ExuOutput))))
   //Second-level buffer
   val buffer_valid_s1 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(false.B)))))
@@ -249,9 +249,8 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
       mask_buffer_s0(i)   := io.loadPipeIn(i).bits.mask
       rob_idx_s0(i)       := io.loadPipeIn(i).bits.rob_idx
       rob_idx_valid_s0(i) := io.loadPipeIn(i).bits.rob_idx_valid
-      rob_inner_idx_s0(i) := io.loadPipeIn(i).bits.rob_inner_idx
+      reg_offset_s0(i)    := io.loadPipeIn(i).bits.reg_offset
       offset_s0(i)        := io.loadPipeIn(i).bits.offset
-      eew_s0(i)           := io.loadPipeIn(i).bits.eew
     }
   }
   // write data from first_level buffer to second_level buffer
@@ -260,10 +259,8 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
       rob_idx_valid_s1(i) := rob_idx_valid_s0(i)
       rob_idx_s1(i)       := rob_idx_s0(i)
       buffer_valid_s1(i).map(_ := buffer_valid_s0(i))
-      mask_buffer_s1(i)   := VecGenMask(rob_idx_valid = rob_idx_valid_s0(i),rob_inner_idx = rob_inner_idx_s0(i),
-                                        eew = eew_s0(i),offset = offset_s0(i),mask = mask_buffer_s0(i))
-      data_buffer_s1(i)   := VecGenData(rob_idx_valid = rob_idx_valid_s0(i),rob_inner_idx = rob_inner_idx_s0(i),
-                                        eew = eew_s0(i),offset = offset_s0(i),data = data_buffer_s0(i))
+      mask_buffer_s1(i)   := VecGenMask(rob_idx_valid = rob_idx_valid_s0(i), reg_offset = reg_offset_s0(i), offset = offset_s0(i), mask = mask_buffer_s0(i))
+      data_buffer_s1(i)   := VecGenData(rob_idx_valid = rob_idx_valid_s0(i), reg_offset = reg_offset_s0(i), offset = offset_s0(i), data = data_buffer_s0(i))
     }
   }
 

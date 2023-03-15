@@ -43,7 +43,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
 
   for(i <- 0 until LoadPipelineWidth){
     io.vecloadRegIn(i).valid := DelayN(loadRegIn_valid(i),1)
-    io.vecloadRegIn(i).bits := DelayN(loadRegIn(i),1)
+    io.vecloadRegIn(i).bits  := DelayN(loadRegIn(i),1)
   }
   io.vecwriteback.ready := LFSR64(seed=Some(123L))(3,0) === 0.U
 }

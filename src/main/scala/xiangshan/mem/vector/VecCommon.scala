@@ -33,7 +33,7 @@ class VecOperand(implicit p: Parameters) extends XSBundleWithMicroOp {
   val sew = UInt(2.W)
   val vma = Bool()
   val vta = Bool()
-  val inner_idx = UInt(3.W) // the number index among 8 lsu_flow
+  val inner_idx = UInt(3.W) // the number index among 8 uop
   val vl = UInt(8.W)
   // TODO: How will OOO calculatr vector register numbers?
   //  (EEW / SEW) * LMUL or (vl * EEW) / VLEN ?
@@ -68,22 +68,19 @@ class VecExuOutput(implicit p: Parameters) extends ExuOutput {
   val mask = UInt((VLEN/8).W)
   val rob_idx_valid = Vec(2,Bool())
   val rob_idx = Vec(2,UInt(log2Up(RobSize).W))
-  val rob_inner_idx = Vec(2,UInt(4.W))
   val offset = Vec(2,UInt(4.W))
-  val eew = Vec(2,UInt(3.W))
+  val reg_offset = Vec(2,UInt(4.W))
 }
 
 object VecGenMask {
-  def apply(rob_idx_valid: Vec[Bool], rob_inner_idx: Vec[UInt], eew: Vec[UInt], offset: Vec[UInt], mask: UInt):Vec[UInt] = {
+  def apply(rob_idx_valid: Vec[Bool], reg_offset: Vec[UInt], offset: Vec[UInt], mask: UInt):Vec[UInt] = {
     val vMask = VecInit(Seq.fill(2)(0.U(16.W)))
-    val regOffset = VecInit(Seq.fill(2)(0.U(4.W)))
     for (i <- 0 until 2){
       when (rob_idx_valid(i)) {
-        regOffset(i) := rob_inner_idx(i) << eew(i)(1,0)
-        when (offset(i) <= regOffset(i)) {
-          vMask(i) := mask << (regOffset(i) - offset(i))
+        when (offset(i) <= reg_offset(i)) {
+          vMask(i) := mask << (reg_offset(i) - offset(i))
         }.otherwise {
-          vMask(i) := mask >> (offset(i) - regOffset(i))
+          vMask(i) := mask >> (offset(i) - reg_offset(i))
         }
       }
     }
@@ -93,16 +90,14 @@ object VecGenMask {
 
 
 object VecGenData {
-  def apply (rob_idx_valid: Vec[Bool], rob_inner_idx: Vec[UInt], eew: Vec[UInt],offset: Vec[UInt],data:UInt):Vec[UInt] = {
+  def apply (rob_idx_valid: Vec[Bool], reg_offset: Vec[UInt], offset: Vec[UInt], data:UInt):Vec[UInt] = {
     val vData = VecInit(Seq.fill(2)(0.U(128.W)))
-    val regOffset = VecInit(Seq.fill(2)(0.U(4.W)))
     for (i <- 0 until 2){
       when (rob_idx_valid(i)) {
-        regOffset(i) := rob_inner_idx(i) << eew(i)(1,0)
-        when (offset(i) <= regOffset(i)) {
-          vData(i) := data << ((regOffset(i) - offset(i)) << 3.U)
+        when (offset(i) <= reg_offset(i)) {
+          vData(i) := data << ((reg_offset(i) - offset(i)) << 3.U)
         }.otherwise {
-          vData(i) := data >> ((offset(i) - regOffset(i)) << 3.U)
+          vData(i) := data >> ((offset(i) - reg_offset(i)) << 3.U)
         }
       }
     }

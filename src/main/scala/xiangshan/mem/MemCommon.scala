@@ -50,30 +50,6 @@ object genVWmask {
   }
 }
 
-object genVecMask {
-  def apply(addr: UInt, datasize: UInt): UInt = {
-    (LookupTree(datasize,List(
-      "b0000".U -> 0x1.U,
-      "b0001".U -> 0x3.U,
-      "b0010".U -> 0x7.U,
-      "b0011".U -> 0xf.U,
-      "b0100".U -> 0x1f.U,
-      "b0101".U -> 0x3f.U,
-      "b0110".U -> 0x7f.U,
-      "b0111".U -> 0xff.U,
-      "b1000".U -> 0x1ff.U,
-      "b1001".U -> 0x3ff.U,
-      "b1010".U -> 0x7ff.U,
-      "b1011".U -> 0xfff.U,
-      "b1100".U -> 0x1fff.U,
-      "b1101".U -> 0x3fff.U,
-      "b1110".U -> 0x7fff.U,
-      "b1111".U -> 0xffff.U
-    )) << addr(3,0)).asUInt()
-  }
-}
-
-
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -125,8 +101,13 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   def isSWPrefetch = isPrefetch && !isHWPrefetch
 
   // Vector instruction
-  val isVec = Bool()
-  val Vecvlflowidx = UInt(5.W)
+  val vec128bit = Bool()
+  //val dataSize            = UInt(4.W)   //the memory access width of flow entry
+  val uop_unit_stride_fof = Bool()
+  val rob_idx_valid       = Vec(2,Bool())
+  val rob_idx             = Vec(2,UInt(log2Up(RobSize).W))
+  val reg_offset          = Vec(2,UInt(4.W))
+  val offset              = Vec(2,UInt(4.W))
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -170,8 +151,14 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     forwardData := input.forwardData
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
-    isVec := input.isVec
-    Vecvlflowidx := input.Vecvlflowidx
+    vec128bit := input.vec128bit
+    //dataSize            := input.dataSize
+    uop_unit_stride_fof := input.uop_unit_stride_fof
+    rob_idx_valid       := input.rob_idx_valid
+    rob_idx             := input.rob_idx
+    reg_offset          := input.reg_offset
+    offset              := input.offset
+    //Vecvlflowidx := input.Vecvlflowidx
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
     canAccept := input.canAccept
@@ -216,7 +203,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     forwardData := input.forwardData
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
-    isVec := input.isVec
+    vec128bit := input.vec128bit
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
