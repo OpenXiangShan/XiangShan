@@ -73,6 +73,8 @@ case class XSCoreParameters
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
+  RasSpecSize: Int = 64,
+  RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -371,6 +373,8 @@ trait HasXSParameter {
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
+  val RasSpecSize = coreParams.RasSpecSize
+  val RasCtrSize = coreParams.RasCtrSize
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)

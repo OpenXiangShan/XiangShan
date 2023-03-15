@@ -427,6 +427,30 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.lastBrNumOH := s3_last_br_num_oh_dup(2)
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.afhob       := s3_ahead_fh_oldest_bits_dup(2)
 
+  val full_pred_diff = WireInit(false.B)
+  val full_pred_diff_stage = WireInit(0.U)
+  val full_pred_diff_offset = WireInit(0.U)
+  dontTouch(full_pred_diff)
+  dontTouch(full_pred_diff_stage)
+  dontTouch(full_pred_diff_offset)
+  for (i <- 0 until numDup - 1) {
+    when (io.bpu_to_ftq.resp.valid &&
+      ((io.bpu_to_ftq.resp.bits.s1.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s1.full_pred(i+1).asTypeOf(UInt()) && io.bpu_to_ftq.resp.bits.s1.full_pred(i).hit) ||
+          (io.bpu_to_ftq.resp.bits.s2.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s2.full_pred(i+1).asTypeOf(UInt()) && io.bpu_to_ftq.resp.bits.s2.full_pred(i).hit) ||
+          (io.bpu_to_ftq.resp.bits.s3.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s3.full_pred(i+1).asTypeOf(UInt()) && io.bpu_to_ftq.resp.bits.s3.full_pred(i).hit))) {
+      full_pred_diff := true.B
+      full_pred_diff_offset := i.U
+      when (io.bpu_to_ftq.resp.bits.s1.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s1.full_pred(i+1).asTypeOf(UInt())) {
+        full_pred_diff_stage := 1.U
+      } .elsewhen (io.bpu_to_ftq.resp.bits.s2.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s2.full_pred(i+1).asTypeOf(UInt())) {
+        full_pred_diff_stage := 2.U
+      } .otherwise {
+        full_pred_diff_stage := 3.U
+      }
+    }                  
+  }
+  XSError(full_pred_diff, "Full prediction difference detected!")
+
   npcGen_dup.zip(s0_pc_reg_dup).map{ case (gen, reg) =>
     gen.register(true.B, reg, Some("stallPC"), 0)}
   foldedGhGen_dup.zip(s0_folded_gh_reg_dup).map{ case (gen, reg) =>

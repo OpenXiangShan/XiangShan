@@ -433,8 +433,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
   
   val s1_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
-  val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, f))
-  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, f)}
+  val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, 0.B, f))
+  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, 0.B, f)}
   val writeWay = ftbBank.io.read_hits.bits
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)

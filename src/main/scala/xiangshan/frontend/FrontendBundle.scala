@@ -545,8 +545,12 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
   val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry
+  val ssp = UInt(log2Up(RasSize).W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
+  val TOSW = new RASPtr
+  val TOSR = new RASPtr
+  val NOS = new RASPtr
+  val topAddr = UInt(VAddrBits.W)
 }
 
 @chiselName
@@ -633,6 +637,9 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
   def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
+
+  def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
+  def is_ret_taken = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
