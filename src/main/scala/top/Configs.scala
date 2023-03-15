@@ -316,3 +316,136 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new WithNKBL1D(64)
     ++ new BaseConfig(n)
 )
+
+/*** Nanhu General Config ( Nanhu-G Config) ***/
+
+// XSCore Config: 
+// * Including Frontend/Backend/MMU/MemBlock
+// * Including DebugOptions
+// * Not Including L1D/L2/L3 Cache
+class NanHuGCoreConfig(n: Int = 1) extends Config(
+  new BaseConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(
+      _.copy(
+        DecodeWidth = 4,
+        RenameWidth = 4,
+        FetchWidth = 8,
+        IssQueSize = 8,
+        NRPhyRegs = 128,
+        LoadQueueSize = 32,
+        LoadQueueNWriteBanks = 4,
+        StoreQueueSize = 16,
+        StoreQueueNWriteBanks = 4,
+        RobSize = 128,
+        FtqSize = 32,
+        IBufSize = 32,
+        StoreBufferSize = 4,
+        StoreBufferThreshold = 3,
+        dpParams = DispatchParameters(
+          IntDqSize = 12,
+          FpDqSize = 12,
+          LsDqSize = 12,
+          IntDqDeqWidth = 4,
+          FpDqDeqWidth = 4,
+          LsDqDeqWidth = 4
+        ),
+        exuParameters = ExuParameters(
+          JmpCnt = 1,
+          AluCnt = 2,
+          MulCnt = 0,
+          MduCnt = 1,
+          FmacCnt = 1,
+          FmiscCnt = 1,
+          FmiscDivSqrtCnt = 0,
+          LduCnt = 2,
+          StuCnt = 2
+        ),
+        // 4-way 16KB DCache        
+        icacheParameters = ICacheParameters(
+          nSets = 64, 
+          nWays = 4,
+          tagECC = None,
+          dataECC = None,
+          replacer = Some("setplru"),
+          nMissEntries = 2,
+          nReleaseEntries = 1,
+          nProbeEntries = 2,
+          nPrefetchEntries = 2,
+          hasPrefetch = false
+        ),
+        itlbParameters = TLBParameters(
+          name = "itlb",
+          fetchi = true,
+          useDmode = false,
+          sameCycle = false,
+          missSameCycle = true,
+          normalReplacer = Some("plru"),
+          superReplacer = Some("plru"),
+          normalNWays = 4,
+          normalNSets = 1,
+          superNWays = 2,
+          shouldBlock = true
+        ),
+        ldtlbParameters = TLBParameters(
+          name = "ldtlb",
+          normalNSets = 16, // 6when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          superNWays = 4,
+          normalAsVictim = true,
+          partialStaticPMP = true,
+          outReplace = false
+        ),
+        sttlbParameters = TLBParameters(
+          name = "sttlb",
+          normalNSets = 16, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 4,
+          partialStaticPMP = true,
+          outReplace = false
+        ),
+        btlbParameters = TLBParameters(
+          name = "btlb",
+          normalNSets = 1,
+          normalNWays = 8,
+          superNWays = 2
+        ),
+        l2tlbParameters = L2TLBParameters(
+          l1Size = 4,
+          l2nSets = 4,
+          l2nWays = 4,
+          l3nSets = 4,
+          l3nWays = 8,
+          spSize = 2,
+        )
+      )
+    )
+  })
+)
+
+// Cache Hierarchy Config: 
+// * Including L1D/L2/L3 Cache
+class NanHuGCacheConfig extends Config(
+  new WithNKBL3(6 * 256, inclusive = false, banks = 4, ways = 6)
+  ++ new WithNKBL2(256,inclusive = false, banks = 4, alwaysReleaseData = true) 
+  ++ new WithNKBL1D(32) 
+)
+
+// XSSoC Config:
+class NanHuGConfig(n: Int = 1) extends Config(
+  new NanHuGCacheConfig ++ new NanHuGCoreConfig(n)
+)
+
+// FPGA Config:
+// * Dissable BasicDiff
+class NanHuGFPGAConfig(n: Int = 1) extends Config(
+  new NanHuGConfig(n).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false
+    )
+  })
+)
