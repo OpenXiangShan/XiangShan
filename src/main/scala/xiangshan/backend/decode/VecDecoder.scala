@@ -47,7 +47,7 @@ case class OPIVI(src3: BitPat, fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Bo
 case class OPMVV(vdRen: Boolean, fu: BitPat, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean, uopDivType: BitPat = UopDivType.dummy) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, uopDivType, SelImm.X, xWen, F, vWen, mWen, F, F, F, F).generate()
+    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopDivType, xWen, F, vWen, mWen, F, F, F, F).generate()
   }
 }
 
@@ -143,8 +143,8 @@ object VecDecoder extends DecodeConstants {
     VSLL_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F),
     VSRL_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F),
     VSRA_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsra_vv, T, F, F),
-    VNSRL_WV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F),
-    VNSRA_WV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F),
+    VNSRL_WV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F, UopDivType.VEC_NARROW),
+    VNSRA_WV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F, UopDivType.VEC_NARROW),
 
     VSADDU_VV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsaddu_vv, T, F, T),
     VSADD_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsadd_vv, T, F, T),
@@ -156,8 +156,8 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vssrl_vv, T, F, F),
     VSSRA_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vssra_vv, T, F, F),
 
-    VNCLIPU_WV      -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T),
-    VNCLIP_WV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T),
+    VNCLIPU_WV      -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T, UopDivType.VEC_NARROW),
+    VNCLIP_WV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T, UopDivType.VEC_NARROW),
 
     VWREDSUMU_VS    -> OPIVV(SrcType.X, FuType.vipu, VipuType.vwredsumu_vs, T, F, F),
     VWREDSUM_VS     -> OPIVV(SrcType.X, FuType.vipu, VipuType.vwredsum_vs, T, F, F),
@@ -205,8 +205,8 @@ object VecDecoder extends DecodeConstants {
     VSLL_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F),
     VSRL_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F),
     VSRA_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsra_vv, T, F, F),
-    VNSRL_WX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F),
-    VNSRA_WX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F),
+    VNSRL_WX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F, UopDivType.VEC_MV_NARROW),
+    VNSRA_WX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F, UopDivType.VEC_MV_NARROW),
 
     VSADDU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsaddu_vv, T, F, T),
     VSADD_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsadd_vv, T, F, T),
@@ -219,8 +219,8 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vssrl_vv, T, F, F),
     VSSRA_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vssra_vv, T, F, F),
 
-    VNCLIPU_WX    -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T),
-    VNCLIP_WX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T),
+    VNCLIPU_WX    -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T, UopDivType.VEC_MV_NARROW),
+    VNCLIP_WX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T, UopDivType.VEC_MV_NARROW),
   )
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
@@ -254,8 +254,8 @@ object VecDecoder extends DecodeConstants {
     VSLL_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F, SelImm.IMM_OPIVIU),
     VSRL_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F, SelImm.IMM_OPIVIU),
     VSRA_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsra_vv, T, F, F, SelImm.IMM_OPIVIU),
-    VNSRL_WI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F, SelImm.IMM_OPIVIU),
-    VNSRA_WI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F, SelImm.IMM_OPIVIU),
+    VNSRL_WI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnsrl_wv, T, F, F, SelImm.IMM_OPIVIU, UopDivType.VEC_NARROW),
+    VNSRA_WI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnsra_wv, T, F, F, SelImm.IMM_OPIVIU, UopDivType.VEC_NARROW),
 
     VSADDU_VI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsaddu_vv, T, F, T, SelImm.IMM_OPIVIS),
     VSADD_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsadd_vv, T, F, T, SelImm.IMM_OPIVIS),
@@ -263,8 +263,8 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vssrl_vv, T, F, F, SelImm.IMM_OPIVIU),
     VSSRA_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vssra_vv, T, F, F, SelImm.IMM_OPIVIU),
 
-    VNCLIPU_WI    -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T, SelImm.IMM_OPIVIU),
-    VNCLIP_WI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T, SelImm.IMM_OPIVIU),
+    VNCLIPU_WI    -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnclipu_wv, T, F, T, SelImm.IMM_OPIVIU, UopDivType.VEC_NARROW),
+    VNCLIP_WI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vnclip_wv, T, F, T, SelImm.IMM_OPIVIU, UopDivType.VEC_NARROW),
 
     VMV1R_V       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
     VMV2R_V       -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
@@ -317,26 +317,26 @@ object VecDecoder extends DecodeConstants {
     VREDXOR_VS   -> OPMVV(F, FuType.vipu, VipuType.vredxor_vs, F, T, F),
     VREM_VV      -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VREMU_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VSEXT_VF2    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf2, F, T, F),
-    VSEXT_VF4    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf4, F, T, F),
-    VSEXT_VF8    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf8, F, T, F),
-    VZEXT_VF2    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf2, F, T, F),
-    VZEXT_VF4    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf4, F, T, F),
-    VZEXT_VF8    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf8, F, T, F),
-    VWADD_VV     -> OPMVV(F, FuType.vipu, VipuType.vwadd_vv, F, T, F),
-    VWADD_WV     -> OPMVV(F, FuType.vipu, VipuType.vwadd_wv, F, T, F),
-    VWADDU_VV    -> OPMVV(F, FuType.vipu, VipuType.vwaddu_vv, F, T, F),
-    VWADDU_WV    -> OPMVV(F, FuType.vipu, VipuType.vwaddu_wv, F, T, F),
+    VSEXT_VF2    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf2, F, T, F, UopDivType.VEC_EXT2),
+    VSEXT_VF4    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf4, F, T, F, UopDivType.VEC_EXT4),
+    VSEXT_VF8    -> OPMVV(F, FuType.vipu, VipuType.vsext_vf8, F, T, F, UopDivType.VEC_EXT8),
+    VZEXT_VF2    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf2, F, T, F, UopDivType.VEC_EXT2),
+    VZEXT_VF4    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf4, F, T, F, UopDivType.VEC_EXT4),
+    VZEXT_VF8    -> OPMVV(F, FuType.vipu, VipuType.vzext_vf8, F, T, F, UopDivType.VEC_EXT8),
+    VWADD_VV     -> OPMVV(F, FuType.vipu, VipuType.vwadd_vv, F, T, F, UopDivType.VEC_WIDE),
+    VWADD_WV     -> OPMVV(F, FuType.vipu, VipuType.vwadd_wv, F, T, F, UopDivType.VEC_WIDE0),
+    VWADDU_VV    -> OPMVV(F, FuType.vipu, VipuType.vwaddu_vv, F, T, F, UopDivType.VEC_WIDE),
+    VWADDU_WV    -> OPMVV(F, FuType.vipu, VipuType.vwaddu_wv, F, T, F, UopDivType.VEC_WIDE0),
     VWMACC_VV    -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMACCSU_VV  -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMACCU_VV   -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VWMUL_VV     -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWMULSU_VV   -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWMULU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUB_VV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_vv, F, T, F),
-    VWSUB_WV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_wv, F, T, F),
-    VWSUBU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
+    VWSUB_VV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_vv, F, T, F, UopDivType.VEC_WIDE),
+    VWSUB_WV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_wv, F, T, F, UopDivType.VEC_WIDE0),
+    VWSUBU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F, UopDivType.VEC_WIDE),
+    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F, UopDivType.VEC_WIDE0),
   )
 
   val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
@@ -361,10 +361,10 @@ object VecDecoder extends DecodeConstants {
 
     VSLIDE1DOWN_VX -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VSLIDE1UP_VX   -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWADD_VX       -> OPMVX(F, FuType.vipu, VipuType.vwadd_vv, F, T, F),
-    VWADD_WX       -> OPMVX(F, FuType.vipu, VipuType.vwadd_wv, F, T, F),
-    VWADDU_VX      -> OPMVX(F, FuType.vipu, VipuType.vwaddu_vv, F, T, F),
-    VWADDU_WX      -> OPMVX(F, FuType.vipu, VipuType.vwaddu_wv, F, T, F),
+    VWADD_VX       -> OPMVX(F, FuType.vipu, VipuType.vwadd_vv, F, T, F, UopDivType.VEC_MV_WIDE),
+    VWADD_WX       -> OPMVX(F, FuType.vipu, VipuType.vwadd_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
+    VWADDU_VX      -> OPMVX(F, FuType.vipu, VipuType.vwaddu_vv, F, T, F, UopDivType.VEC_MV_WIDE),
+    VWADDU_WX      -> OPMVX(F, FuType.vipu, VipuType.vwaddu_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
 
     // OutOfMemoryError
     VWMACC_VX      -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
@@ -376,8 +376,8 @@ object VecDecoder extends DecodeConstants {
     VWMULSU_VX     -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     // Ok
     VWMULU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUB_VX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_vv, F, T, F),
-    VWSUB_WX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_wv, F, T, F),
+    VWSUB_VX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_vv, F, T, F, UopDivType.VEC_MV_WIDE),
+    VWSUB_WX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
     VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
   )
