@@ -143,7 +143,7 @@ case class XSCoreParameters
   StoreQueueNWriteBanks: Int = 8,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
-  RabSize: Int = 512,
+  RabSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,

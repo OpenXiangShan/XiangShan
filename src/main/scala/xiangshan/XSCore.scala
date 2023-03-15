@@ -375,10 +375,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.sqDeq := memBlock.io.sqDeq
   ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
-
-  val vconfigReadPort = exuBlocks(0).io.scheExtra.vconfigReadPort.get
-  ctrlBlock.io.vconfigReadPort <> vconfigReadPort
-  val vconfigArch = vconfigReadPort.data(15, 0).asTypeOf(new VConfig)
+  ctrlBlock.io.vconfigReadPort <> exuBlocks(0).io.scheExtra.archVconfigReadPort.get
+  val vconfigDiff = exuBlocks(0).io.scheExtra.diffVconfigReadData.get
 
   intExuBlock.io.scheExtra.fpRfReadIn.get <> vecExuBlock.io.scheExtra.fpRfReadOut.get
   intExuBlock.io.scheExtra.fpStateReadIn.get <> vecExuBlock.io.scheExtra.fpStateReadOut.get
@@ -409,6 +407,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
     exu.scheExtra.debug_vec_rat <> ctrlBlock.io.debug_vec_rat
+    exu.scheExtra.debug_vconfig_rat <> ctrlBlock.io.debug_vconfig_rat
     exu.scheExtra.lqFull := memBlock.io.lqFull
     exu.scheExtra.sqFull := memBlock.io.sqFull
     exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
@@ -454,8 +453,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.vpu.set_vl.valid     <> ctrlBlock.io.robio.toCSR.vcsrFlag
   csrioIn.vpu.set_vtype.valid  <> ctrlBlock.io.robio.toCSR.vcsrFlag
   csrioIn.vpu.set_vstart.bits  <> 0.U
-  csrioIn.vpu.set_vl.bits <> ZeroExt(vconfigArch.vl, XLEN)
-  csrioIn.vpu.set_vtype.bits <> ZeroExt(vconfigArch.vtype.asUInt, XLEN)
+  csrioIn.vpu.set_vl.bits <> ZeroExt(vconfigDiff.vl, XLEN)
+  csrioIn.vpu.set_vtype.bits <> ZeroExt(vconfigDiff.vtype.asUInt, XLEN)
   csrioIn.vpu.vxrm <> vecExuBlock.extraio.fuExtra.vxrm
   csrioIn.exception <> ctrlBlock.io.robio.exception
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
