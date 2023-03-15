@@ -100,7 +100,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val vpn = UInt(vpnLen.W)
     val source = UInt(bSourceWidth.W)
   }, if (l2tlbParams.enablePrefetch) 4 else 3))
-  val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
+  val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwSectorResp, 1)).io)
+  val mergeArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwMergeResp, 3)).io)
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
@@ -274,6 +275,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
+  // save eight ptes for each id when sector tlb
+  // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
+  val resp_pte_sector = VecInit((0 until MemReqWidth).map(i =>
+    if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, mem_resp_done && !mem_resp_from_mq) }
+    else { DataHoldBypass(refill_data, llptw_mem.buffer_it(i)) }
+    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
+  ))
+
   // mem -> miss queue
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_mq
   llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
@@ -316,8 +325,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
       difftest.io.index := i.U
       difftest.io.satp := io.csr.tlb.satp.ppn
-      difftest.io.vpn := io.tlb(i).resp.bits.entry.tag
-      difftest.io.ppn := io.tlb(i).resp.bits.entry.ppn
+      difftest.io.vpn := Cat(io.tlb(i).resp.bits.entry.tag, 0.U(sectortlbwidth.W))
+      for (j <- 0 until tlbcontiguous) {
+        difftest.io.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
+        difftest.io.valididx(j) := io.tlb(i).resp.bits.valididx(j)
+      }
       difftest.io.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       difftest.io.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
       difftest.io.pf := io.tlb(i).resp.bits.pf
@@ -331,15 +343,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.pmp.resp <> pmp_check(1).resp
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
+
+  // Timing: Maybe need to do some optimization or even add one more cycle
   for (i <- 0 until PtwWidth) {
-    outArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
-    outArb(i).in(outArbCachePort).bits.entry := cache.io.resp.bits.toTlb
-    outArb(i).in(outArbCachePort).bits.pf := !cache.io.resp.bits.toTlb.v
-    outArb(i).in(outArbCachePort).bits.af := false.B
-    outArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
-    outArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
-    outArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
+    mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
+    mergeArb(i).in(outArbCachePort).bits := cache.io.resp.bits.toTlb
+    mergeArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
+    mergeArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
+    mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
+    mergeArb(i).in(outArbMqPort).bits := contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
+    mergeArb(i).out.ready := outArb(i).in(0).ready
+  }
+
+  for (i <- 0 until PtwWidth) {
+    outArb(i).in(0).valid := mergeArb(i).out.valid
+    outArb(i).in(0).bits := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -388,9 +406,60 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_resp
   }
 
+  // not_super means that this is a normal page
+  // valididx(i) will be all true when super page to be convenient for l1 tlb matching
+  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true) : PtwMergeResp = {
+    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    val ptw_merge_resp = Wire(new PtwMergeResp())
+    for (i <- 0 until tlbcontiguous) {
+      val pte_in = pte(64 * i + 63, 64 * i).asTypeOf(new PteBundle())
+      val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
+      ptw_resp.ppn := pte_in.ppn(ppnLen - 1, sectortlbwidth)
+      ptw_resp.ppn_low := pte_in.ppn(sectortlbwidth - 1, 0)
+      ptw_resp.level.map(_ := 2.U)
+      ptw_resp.perm.map(_ := pte_in.getPerm())
+      ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
+      ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
+      ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && (af || pte_in.isAf())
+      ptw_resp.v := !ptw_resp.pf
+      ptw_resp.prefetch := DontCare
+      ptw_resp.asid := satp.asid
+      ptw_merge_resp.entry(i) := ptw_resp
+    }
+    ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
+    ptw_merge_resp.not_super := not_super.B
+    ptw_merge_resp
+  }
+
+  def merge_ptwResp_to_sector_ptwResp(pte: PtwMergeResp) : PtwSectorResp = {
+    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    val ptw_sector_resp = Wire(new PtwSectorResp)
+    ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
+    ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid
+    ptw_sector_resp.entry.ppn := pte.entry(OHToUInt(pte.pteidx)).ppn
+    ptw_sector_resp.entry.perm.map(_ := pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
+    ptw_sector_resp.entry.level.map(_ := pte.entry(OHToUInt(pte.pteidx)).level.getOrElse(0.U(2.W)))
+    ptw_sector_resp.entry.prefetch := pte.entry(OHToUInt(pte.pteidx)).prefetch
+    ptw_sector_resp.entry.v := pte.entry(OHToUInt(pte.pteidx)).v
+    ptw_sector_resp.af := pte.entry(OHToUInt(pte.pteidx)).af
+    ptw_sector_resp.pf := pte.entry(OHToUInt(pte.pteidx)).pf
+    ptw_sector_resp.addr_low := OHToUInt(pte.pteidx)
+    for (i <- 0 until tlbcontiguous) {
+      val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
+      val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
+      val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
+      val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
+      ptw_sector_resp.valididx(i) := (ppn_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super
+      ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
+    }
+    ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
+    ptw_sector_resp
+  }
+
   def outReady(source: UInt, port: Int): Bool = {
     MuxLookup(source, true.B,
-      (0 until PtwWidth).map(i => i.U -> outArb(i).in(port).ready))
+      (0 until PtwWidth).map(i => i.U -> mergeArb(i).in(port).ready))
   }
 
   // debug info
@@ -411,7 +480,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
   XSPerfAccumulate("mem_count", mem.a.fire())
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"llptw_ppn_af${i}", outArb(i).in(outArbMqPort).valid && outArb(i).in(outArbMqPort).bits.af && !llptw_out.bits.af)
+    XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).valid && mergeArb(i).in(outArbMqPort).bits.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.af)
   }
 
@@ -443,11 +512,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val isWritePageCacheTable = Constantin.createRecord("isWritePageCacheTable")
   val PageCacheTable = ChiselDB.createTable("PageCache_hart" + p(XSCoreParamsKey).HartId.toString, new PageCacheDB)
   val PageCacheDB = Wire(new PageCacheDB)
-  PageCacheDB.vpn := cache.io.resp.bits.toTlb.tag
+  PageCacheDB.vpn := Cat(cache.io.resp.bits.toTlb.entry(0).tag, OHToUInt(cache.io.resp.bits.toTlb.pteidx))
   PageCacheDB.source := cache.io.resp.bits.req_info.source
   PageCacheDB.bypassed := cache.io.resp.bits.bypassed
   PageCacheDB.is_first := cache.io.resp.bits.isFirst
-  PageCacheDB.prefetched := cache.io.resp.bits.toTlb.prefetch
+  PageCacheDB.prefetched := cache.io.resp.bits.toTlb.entry(0).prefetch
   PageCacheDB.prefetch := cache.io.resp.bits.prefetch
   PageCacheDB.l2Hit := cache.io.resp.bits.toFsm.l2Hit
   PageCacheDB.l1Hit := cache.io.resp.bits.toFsm.l1Hit
