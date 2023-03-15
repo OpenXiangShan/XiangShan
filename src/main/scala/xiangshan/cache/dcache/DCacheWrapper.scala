@@ -43,6 +43,7 @@ case class DCacheParameters
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
+  updateReplaceOn2ndmiss: Boolean = true,
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
@@ -865,7 +866,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
-  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp.id := missQueue.io.resp.id }
+  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
+  mainPipe.io.miss_resp := missQueue.io.resp
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
