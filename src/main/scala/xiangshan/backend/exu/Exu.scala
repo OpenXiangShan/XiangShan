@@ -64,7 +64,7 @@ case class ExuConfig
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
   private val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
   private val vecSrcCnt = max(fuConfigs.map(_.numVecSrc))
-  val fpVecSrcCnt = max(Seq(fpSrcCnt, vecSrcCnt))
+  val fpVecSrcCnt = max(fuConfigs.map(x => x.numFpSrc + x.numVecSrc))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
   val readVecRf = vecSrcCnt > 0
