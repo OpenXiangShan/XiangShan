@@ -856,36 +856,24 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val loadMissDB = ChiselDB.createTable(tableName, new LoadMissEntry)
   for( i <- 0 until LoadPipelineWidth){
     val loadMissEntry = Wire(new LoadMissEntry)
-    loadMissEntry.debug_isFirstHitWrite := IS_FIRST_HIT_WRITE
+    val loadMissWriteEn =
+      (!ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire) ||
+      (ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid && IS_FIRST_HIT_WRITE.orR)
     loadMissEntry.timeCnt := GTimer()
     loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
     loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
-    loadMissEntry.missState := Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, 0.U(1.W)))
-    // OHToUInt(Cat(Seq(ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged, ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged, 0.U(1.W))))
+    loadMissEntry.missState := OHToUInt(Cat(Seq(
+      ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged,
+      ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged,
+      ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid
+    )))
     loadMissDB.log(
       data = loadMissEntry,
-      en = !ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire,
+      en = loadMissWriteEn,
       site = siteName,
       clock = clock,
       reset = reset
     )
-
-    when(IS_FIRST_HIT_WRITE.orR){
-      val loadMissEntry = Wire(new LoadMissEntry)
-      loadMissEntry.debug_isFirstHitWrite := IS_FIRST_HIT_WRITE
-      loadMissEntry.timeCnt := GTimer()
-      loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
-      loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
-      loadMissEntry.missState := Cat(0.U(1.W), 0.U(1.W), ldu(i).io.lsu.resp.bits.firstHit)
-      // OHToUInt(Cat(0.U(1.W), 0.U(1.W), ldu(i).io.lsu.resp.bits.firstHit))
-      loadMissDB.log(
-        data = loadMissEntry,
-        en = ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid,
-        site = siteName,
-        clock = clock,
-        reset = reset
-      )
-    }
   }
 
   //----------------------------------------

@@ -1,1 +1,1 @@
-is_first_hit_write 0
+is_first_hit_write 1
