@@ -6,15 +6,14 @@ import chiseltest._
 import chiseltest.ChiselScalatestTester
 import chiseltest.VerilatorBackendAnnotation
 import chiseltest.simulator.{VerilatorFlags, VerilatorCFlags}
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import freechips.rocketchip.util.HasRocketChipStageUtils
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import firrtl.stage.RunFirrtlTransformAnnotation
 import xstransforms.PrintModuleName
-
 import firrtl.options.TargetDirAnnotation
-
 import top.ArgParser
+import utility.FileRegisters
 import xiangshan.backend.decode.DecodeUnit
 
 object DecodeMain extends App with HasRocketChipStageUtils {
@@ -34,8 +33,8 @@ object DecodeMain extends App with HasRocketChipStageUtils {
       ChiselGeneratorAnnotation(() => new DecodeUnit()(defaultConfig)
     )))
 //    // Generate files when compiling. Used by ChiselDB.
-//    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-//      writeOutputFile("./build", s"DecodeUnit.${extension}", contents())
+//    FileRegisters.files.foreach{ case (filename, contents) =>
+//      writeOutputFile("./build", filename, contents())
 //    }
   }
 }

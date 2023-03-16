@@ -22,7 +22,7 @@ import chisel3.util._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import freechips.rocketchip.util.ElaborationArtefacts
+import utility.FileRegisters
 import utility.ChiselDB
 import top.TopMain.writeOutputFile
 import utility.GTimer
@@ -115,16 +115,11 @@ object SimTop extends App {
       DisableMonitors(p => new SimTop()(p))(config),
       firrtlComplier
     )
-    ChiselDB.addToElaborationArtefacts
-    Constantin.addToElaborationArtefacts
-    ElaborationArtefacts.files.foreach{
-      case (extension, contents) =>
-        val prefix = extension match {
-          case "h" | "cpp" => "chisel_db"
-          case "hxx" | "cxx" => "constantin"
-          case _ => "XSTop"
-        }
-        writeOutputFile("./build", s"$prefix.${extension}", contents())
+    ChiselDB.addToFileRegisters
+    Constantin.addToFileRegisters
+    // TODO: change to parameterization
+    FileRegisters.files.foreach{ case (filename, contents) =>
+      writeOutputFile("./build", filename, contents())
     }
   }
 }
