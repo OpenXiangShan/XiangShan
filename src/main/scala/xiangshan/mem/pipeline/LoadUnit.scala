@@ -129,7 +129,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   // vector related ctrl signal
   val s0_vec128bit           = WireInit(false.B)
-  //val s0_dataSize            = UInt(4.W)   //the memory access width of flow entry
   val s0_uop_unit_stride_fof = WireInit(false.B)
   val s0_rob_idx_valid       = WireInit(VecInit(Seq.fill(2)(false.B)))
   val s0_rob_idx             = WireInit(VecInit(Seq.fill(2)(0.U(log2Up(RobSize).W))))
@@ -259,12 +258,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   s0_uop := DontCare
   s0_fromRs := false.B
   s0_fromPreFetch := false.B
-  s0_vec128bit           := false.B
-  s0_uop_unit_stride_fof := false.B
-  s0_rob_idx_valid       := VecInit(Seq.fill(2)(false.B))
-  s0_rob_idx             := VecInit(Seq.fill(2)(0.U))
-  s0_reg_offset          := VecInit(Seq.fill(2)(0.U))
-  s0_offset              := VecInit(Seq.fill(2)(0.U))
 
   // load flow priority mux
   when(lfsrc_loadReplay_select) {
@@ -1318,6 +1311,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     io.lsq.loadOut.valid && !io.lsq.loadOut.bits.uop.robIdx.needFlush(io.redirect) && !hitLoadOut.valid) &&
                     !load_s2.io.out.bits.vec128bit
 
+  io.VecloadOut.bits := DontCare
   io.VecloadOut.valid := s3_loadOutValid && s3_loadOutBits.vec128bit
   io.VecloadOut.bits.uop := s3_loadOutBits.uop
   io.VecloadOut.bits.uop.cf.exceptionVec(loadAccessFault) := s3_delayedLoadError && !s3_loadOutBits.tlbMiss  ||
@@ -1325,13 +1319,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.VecloadOut.bits.uop.ctrl.replayInst := s3_replayInst
   io.VecloadOut.bits.debug.paddr := s3_loadOutBits.paddr
   io.VecloadOut.bits.debug.vaddr := s3_loadOutBits.vaddr
-  io.VecloadOut.bits.debug.isMMIO := DontCare
-  io.VecloadOut.bits.debug.isPerfCnt := false.B
-  io.VecloadOut.bits.fflags  := DontCare
-  io.VecloadOut.bits.redirectValid := false.B
-  io.VecloadOut.bits.redirect := DontCare
-  io.VecloadOut.bits.data    := DontCare
-
+  //io.VecloadOut.bits.debug.isMMIO := DontCare
+  //io.VecloadOut.bits.debug.isPerfCnt := false.B
+  //io.VecloadOut.bits.fflags  := DontCare
+  //io.VecloadOut.bits.redirectValid := false.B
+  //io.VecloadOut.bits.redirect := DontCare
+  //io.VecloadOut.bits.data    := DontCare
   io.VecloadOut.bits.vecdata        := s3_rdataDcache
   io.VecloadOut.bits.mask           := s3_loadOutBits.mask
   io.VecloadOut.bits.rob_idx_valid  := s3_loadOutBits.rob_idx_valid

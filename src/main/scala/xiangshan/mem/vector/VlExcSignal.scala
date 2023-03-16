@@ -9,7 +9,7 @@ import xiangshan._
 
 class vlExcSignalBundle(implicit p: Parameters) extends XSBundle{
   val vecloadRegIn = Vec(2,Decoupled(new VecOperand()))
-  val vecwriteback = Flipped(Decoupled(new VecWriteback))
+  val vecwriteback = Vec(2,Flipped(Decoupled(new VecWriteback)))
   val vecFeedback = Vec(2,Input(Bool()))
 }
 
@@ -45,5 +45,5 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
     io.vecloadRegIn(i).valid := DelayN(loadRegIn_valid(i),1)
     io.vecloadRegIn(i).bits  := DelayN(loadRegIn(i),1)
   }
-  io.vecwriteback.ready := LFSR64(seed=Some(123L))(3,0) === 0.U
+  io.vecwriteback.map(_.ready := LFSR64(seed=Some(123L))(3,0) === 0.U)
 }
