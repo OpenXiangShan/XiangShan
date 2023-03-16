@@ -133,7 +133,7 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   IntLogicRegs: Int = 33,
   FpLogicRegs: Int = 34,
-  VecLogicRegs: Int = 34,
+  VecLogicRegs: Int = 35,
   NRPhyRegs: Int = 192,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,

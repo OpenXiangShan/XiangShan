@@ -378,8 +378,8 @@ object VecDecoder extends DecodeConstants {
     VWMULU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_VX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_vv, F, T, F, UopDivType.VEC_MV_WIDE),
     VWSUB_WX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
-    VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_vv, F, T, F),
-    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_wv, F, T, F),
+    VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_vv, F, T, F, UopDivType.VEC_MV_WIDE),
+    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
   )
 
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
