@@ -64,7 +64,7 @@ case class ExuConfig
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
   private val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
   private val vecSrcCnt = max(fuConfigs.map(_.numVecSrc))
-  val fpVecSrcCnt = max(Seq(fpSrcCnt, vecSrcCnt))
+  val fpVecSrcCnt = max(fuConfigs.map(x => x.numFpSrc + x.numVecSrc))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
   val readVecRf = vecSrcCnt > 0
@@ -147,6 +147,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
   @public val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
   @public val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
   @public val vxrm = if (config == FmacExeUnitCfg) Some(IO(Input(UInt(2.W)))) else None // TODO: only VIPU need vxrm
+  @public val vstart = if (config == FmacExeUnitCfg) Some(IO(Input(UInt(XLEN.W)))) else None // TODO: only VPU need vstart
 
   val functionUnits = config.fuConfigs.map(cfg => {
     val mod = Module(cfg.fuGen(p))

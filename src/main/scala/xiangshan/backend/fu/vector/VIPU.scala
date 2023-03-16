@@ -41,9 +41,9 @@ class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN)
   val dataWire = Wire(dataReg.cloneType)
   val s_idle :: s_compute :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
-  val vialu = Module(new VIAluWrapper)
-  val outValid = vialu.io.out.valid
-  val outFire = vialu.io.out.fire()
+  val vialuWp = Module(new VIAluWrapper)
+  val outValid = vialuWp.io.out.valid
+  val outFire = vialuWp.io.out.fire()
 
 // reg input signal
   val s0_uopReg = Reg(io.in.bits.uop.cloneType)
@@ -68,17 +68,18 @@ class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN)
   }
 
 // connect VIAlu
-  dataWire := vialu.io.out.bits.data
-  vialu.io.in.bits <> io.in.bits
-  vialu.io.redirectIn := DontCare  // TODO :
-  vialu.vxrm := vxrm
+  dataWire := vialuWp.io.out.bits.data
+  vialuWp.io.in.bits <> io.in.bits
+  vialuWp.io.redirectIn := DontCare  // TODO :
+  vialuWp.vxrm := vxrm
+  vialuWp.vstart := vstart
   io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
   io.out.bits.uop := s0_uopReg
-  vxsat := vialu.vxsat
+  vxsat := vialuWp.vxsat
 
-  vialu.io.in.valid := io.in.valid && state === s_idle
+  vialuWp.io.in.valid := io.in.valid && state === s_idle
   io.out.valid := state === s_compute && outValid || state === s_finish
-  vialu.io.out.ready := io.out.ready
+  vialuWp.io.out.ready := io.out.ready
   io.in.ready := state === s_idle
 }
 
@@ -97,15 +98,6 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     })
     val out = Output(new VIAluDecodeResultBundle)
   })
-
-//  val DecodeDefault = List(VAluOpcode.dummy,  VpuDataType.dummy, VpuDataType.dummy, VpuDataType.dummy)
-//  val DecodeTable = Array(
-//    BitPat("b" + Cat(VipuType.add, "b00".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s8, VpuDataType.s8, VpuDataType.s8),
-//    BitPat("b" + Cat(VipuType.add, "b01".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s16, VpuDataType.s16, VpuDataType.s16),
-//    BitPat("b" + Cat(VipuType.add, "b10".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s32, VpuDataType.s32, VpuDataType.s32),
-//    BitPat("b" + Cat(VipuType.add, "b11".U).litValue().toString()) -> List(VAluOpcode.vadd,  VpuDataType.s64, VpuDataType.s64, VpuDataType.s64),
-//  )
-//  val opcode :: srcType1 :: srcType2 :: vdType :: Nil = ListLookup(Cat(io.in.fuOpType, io.in.sew), DecodeDefault, DecodeTable)
 
   // u 00 s 01 f 10 mask 1111
   val uSew = Cat(0.U(2.W), io.in.sew)
@@ -263,7 +255,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
   vialu.io.in.bits.info.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
   vialu.io.in.bits.info.vl := in.uop.ctrl.vconfig.vl
 
-  vialu.io.in.bits.info.vstart := 0.U // TODO :
+  vialu.io.in.bits.info.vstart := vstart // TODO :
   vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
 
   vialu.io.in.bits.info.vxrm := vxrm

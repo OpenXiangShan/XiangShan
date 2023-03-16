@@ -335,8 +335,8 @@ object VecDecoder extends DecodeConstants {
     VWMULU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_VV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_vv, F, T, F, UopDivType.VEC_WIDE),
     VWSUB_WV     -> OPMVV(F, FuType.vipu, VipuType.vwsub_wv, F, T, F, UopDivType.VEC_WIDE0),
-    VWSUBU_VV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F, UopDivType.VEC_WIDE),
-    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.dummy, F, T, F, UopDivType.VEC_WIDE0),
+    VWSUBU_VV    -> OPMVV(F, FuType.vipu, VipuType.vwsubu_vv, F, T, F, UopDivType.VEC_WIDE),
+    VWSUBU_WV    -> OPMVV(F, FuType.vipu, VipuType.vwsubu_wv, F, T, F, UopDivType.VEC_WIDE0),
   )
 
   val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
@@ -378,8 +378,8 @@ object VecDecoder extends DecodeConstants {
     VWMULU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
     VWSUB_VX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_vv, F, T, F, UopDivType.VEC_MV_WIDE),
     VWSUB_WX       -> OPMVX(F, FuType.vipu, VipuType.vwsub_wv, F, T, F, UopDivType.VEC_MV_WIDE0),
-    VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+    VWSUBU_VX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_vv, F, T, F),
+    VWSUBU_WX      -> OPMVX(F, FuType.vipu, VipuType.vwsubu_wv, F, T, F),
   )
 
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
@@ -426,8 +426,8 @@ object VecDecoder extends DecodeConstants {
     VFREC7_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
-    VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFMAX_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fmin, F, T, F),
+    VFMAX_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fmax, F, T, F),
 
     // 13.12. Vector Floating-Point Sign-Injection Instructions
     VFSGNJ_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -522,8 +522,8 @@ object VecDecoder extends DecodeConstants {
     VFWNMSAC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
-    VFMIN_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFMAX_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFMIN_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fmin, F, T, F),
+    VFMAX_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fmax, F, T, F),
 
     // 13.12. Vector Floating-Point Sign-Injection Instructions
     VFSGNJ_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),

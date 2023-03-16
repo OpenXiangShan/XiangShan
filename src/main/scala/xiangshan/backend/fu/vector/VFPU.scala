@@ -117,6 +117,8 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   fflagsWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd  -> vfalu.io.out.bits.fflags,
     VfpuType.fsub  -> vfalu.io.out.bits.fflags,
+    VfpuType.fmin  -> vfalu.io.out.bits.fflags,
+    VfpuType.fmax  -> vfalu.io.out.bits.fflags,
     VfpuType.fmacc -> vfmacc.io.out.bits.fflags,
     VfpuType.fdiv  -> vfdiv.io.out.bits.fflags,
   ))
@@ -124,6 +126,8 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   dataWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
     VfpuType.fadd -> vfalu.io.out.bits.result,
     VfpuType.fsub -> vfalu.io.out.bits.result,
+    VfpuType.fmin -> vfalu.io.out.bits.result,
+    VfpuType.fmax -> vfalu.io.out.bits.result,
     VfpuType.fmacc -> vfmacc.io.out.bits.result,
     VfpuType.fdiv -> vfdiv.io.out.bits.result,
   ))
@@ -183,8 +187,8 @@ class VfdivWrapper(implicit p: Parameters)  extends XSModule{
   val src1 = Mux(in.srcType(0) === SrcType.vp, in.src(0), VecExtractor(in.fp_format, in.src(0)))
   val src2 = Mux(in.srcType(1) === SrcType.vp, in.src(1), VecExtractor(in.fp_format, in.src(1)))
   for (i <- 0 until NumAdder) {
-    vfdiv(i).io.opa_i := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfdiv(i).io.opb_i := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfdiv(i).io.opa_i := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfdiv(i).io.is_vec_i := true.B // If you can enter, it must be vector
     vfdiv(i).io.rm_i := in.round_mode
     vfdiv(i).io.fp_format_i := Mux(inHs, in.fp_format, 3.U(2.W))
@@ -292,8 +296,8 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
   val src1 = Mux(in.srcType(0) === SrcType.vp, in.src(0), VecExtractor(in.fp_format, in.src(0)))
   val src2 = Mux(in.srcType(1) === SrcType.vp, in.src(1), VecExtractor(in.fp_format, in.src(1)))
   for (i <- 0 until NumAdder) {
-    vfalu(i).io.fp_a := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
-    vfalu(i).io.fp_b := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfalu(i).io.fp_b := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfalu(i).io.fp_a := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfalu(i).io.is_vec := true.B // If you can enter, it must be vector
     vfalu(i).io.round_mode := in.round_mode
     vfalu(i).io.fp_format := Mux(inHs, in.fp_format, 3.U(2.W))
@@ -315,11 +319,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
   val s1_fflags = RegEnable(s0_fflags, validPipe(Latency-2))
   out.fflags := s1_fflags
 
-  val s0_result = LookupTree(s0_sew(1, 0), List(
-    "b01".U -> VecInit(vfalu.map(_.io.fp_f16_result)).asUInt(),
-    "b10".U -> VecInit(vfalu.map(_.io.fp_f32_result)).asUInt(),
-    "b11".U -> VecInit(vfalu.map(_.io.fp_f64_result)).asUInt(),
-  ))
+  val s0_result = VecInit(vfalu.map(_.io.fp_result)).asUInt()
   val s1_result = RegEnable(s0_result, validPipe(Latency-2))
   out.result := s1_result
 

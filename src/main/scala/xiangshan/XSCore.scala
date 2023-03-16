@@ -456,6 +456,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.vpu.set_vl.bits <> ZeroExt(vconfigDiff.vl, XLEN)
   csrioIn.vpu.set_vtype.bits <> ZeroExt(vconfigDiff.vtype.asUInt, XLEN)
   csrioIn.vpu.vxrm <> vecExuBlock.extraio.fuExtra.vxrm
+  csrioIn.vpu.vstart <> vecExuBlock.extraio.fuExtra.vstart
   csrioIn.exception <> ctrlBlock.io.robio.exception
   csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
