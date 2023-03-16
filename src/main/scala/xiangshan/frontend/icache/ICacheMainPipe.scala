@@ -340,14 +340,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val PIQ_hit_oh = VecInit((0 until PortNumber).map(i =>
     VecInit(fromPIQ.map(entry => entry.valid &&
       entry.bits.vSetIdx === s1_req_vsetIdx(i) &&
-      entry.bits.ptage === s1_req_ptags(i)))))
+      entry.bits.ptage === s1_req_ptags(i))))) // TODO : when piq1 has data piq0 miss but both hit,now we still need stall
   val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid && tlbRespAllValid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line && tlbRespAllValid)) // TODO: Handle TLB blocking in the PIQ
-  val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
-  val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
+  val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => PriorityMux(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
+  val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => PriorityMux(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack)))) // TODO opt better timing
   val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
   val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
   val s1_PIQ_hit      = VecInit((0 until PortNumber).map(i => PIQ_write_back(i) || PIQ_hold_res(i)))
-  s1_wait := s1_wait_vec(0) || (s1_double_line && s1_wait_vec(1))
+  s1_wait := s1_valid && ((s1_wait_vec(0) && !tlbExcp(0)) || (s1_double_line && s1_wait_vec(1) && !tlbExcp(0) && !tlbExcp(1)))
 
   (0 until PortNumber).foreach(i =>
     when(s1_fire){
