@@ -167,7 +167,7 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vmaxu_vv -> Cat(VAluOpcode.vmax, uSew, uSew, uSew).asUInt(),
     VipuType.vmax_vv -> Cat(VAluOpcode.vmax, sSew, sSew, sSew).asUInt(),
 
-    VipuType.vmerge_vvm -> Cat(VAluOpcode.vmerge, uSew, uSew, mask).asUInt(),
+    VipuType.vmerge_vvm -> Cat(VAluOpcode.vmerge, uSew, uSew, uSew).asUInt(),
 
     VipuType.vmv_v_v -> Cat(VAluOpcode.vmv, uSew, uSew, uSew).asUInt(),
 
