@@ -19,6 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest.DifftestRefillEvent
 import freechips.rocketchip.tilelink.ClientStates
 import xiangshan._
 import xiangshan.cache.mmu._
@@ -365,6 +366,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_prefetch_hit = VecInit((0 until PortNumber).map(i => s1_ipf_hit_latch(i) || s1_PIQ_hit(i)))
   val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i),s1_ipf_data(i), s1_PIQ_data(i))))
 
+  (0 until PortNumber).foreach { i =>
+    val diffPIQ = Module(new DifftestRefillEvent)
+    diffPIQ.io.clock := clock
+    diffPIQ.io.coreid := 0.U
+    diffPIQ.io.cacheid := (i + 7).U
+    if (i == 0) diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && !tlbExcp(0)
+    else        diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
+    diffPIQ.io.addr := s1_req_paddr(i)
+    diffPIQ.io.data := s1_PIQ_data(i).asTypeOf(diffPIQ.io.data)
+  }
+
   /** when tlb stall, ipfBuffer stage2 need also stall */
   mainPipeMissInfo.s1_already_check_ipf := s1_valid && tlbRespAllValid // when tlb back, s1 must has already check ipf
 
@@ -421,6 +433,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_tag_match_vec = RegEnable(s1_tag_match_vec, s1_fire)
   val s2_prefetch_hit = RegEnable(s1_prefetch_hit, s1_fire)
   val s2_prefetch_hit_data = RegEnable(s1_prefetch_hit_data, s1_fire)
+  val s2_prefetch_hit_in_ipf = RegEnable(s1_ipf_hit_latch, s1_fire)
+  val s2_prefetch_hit_in_piq = RegEnable(s1_PIQ_hit, s1_fire)
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
 
@@ -817,7 +831,37 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
-  XSError(blockCounter(s0_valid, s0_fire, 5000), "mainPipe_stage0_block_5000_cycle,may_has_error\n")
-  XSError(blockCounter(s1_valid, s1_fire, 5000), "mainPipe_stage1_block_5000_cycle,may_has_error\n")
-  XSError(blockCounter(s2_valid, s2_fire, 5000), "mainPipe_stage2_block_5000_cycle,may_has_error\n")
+  XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
+  XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
+  XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
+
+  if (env.EnableDifftest) {
+    val discards = (0 until PortNumber).map { i =>
+      val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio
+      discard
+    }
+    (0 until PortNumber).map { i =>
+      val diffMainPipeOut = Module(new DifftestRefillEvent)
+      diffMainPipeOut.io.clock := clock
+      diffMainPipeOut.io.coreid := 0.U
+      diffMainPipeOut.io.cacheid := (4 + i).U
+      if (i == 0) diffMainPipeOut.io.valid := s2_fire && !discards(0)
+      else        diffMainPipeOut.io.valid := s2_fire && s2_double_line && !discards(0) && !discards(1)
+      diffMainPipeOut.io.addr := s2_req_paddr(i)
+      when (toIFU(i).bits.select.asBool) {
+        diffMainPipeOut.io.data := toIFU(i).bits.sramData.asTypeOf(diffMainPipeOut.io.data)
+      } .otherwise {
+        diffMainPipeOut.io.data := toIFU(i).bits.registerData.asTypeOf(diffMainPipeOut.io.data)
+      }
+      // idtfr: 1 -> data from icache 2 -> data from ipf 3 -> data from piq 4 -> data from missUnit
+      when (s2_port_hit(i)) { diffMainPipeOut.io.idtfr := 1.U }
+        .elsewhen(s2_prefetch_hit(i)) {
+          when (s2_prefetch_hit_in_ipf(i)) { diffMainPipeOut.io.idtfr := 2.U  }
+            .elsewhen(s2_prefetch_hit_in_piq(i)) { diffMainPipeOut.io.idtfr := 3.U }
+            .otherwise { XSError(true.B, "should not in this situation\n")}
+        }
+        .otherwise { diffMainPipeOut.io.idtfr := 4.U }
+      diffMainPipeOut
+    }
+  }
 }

@@ -307,6 +307,16 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   XSPerfAccumulate("refill_ipf_num", io.piq_write_ipbuffer.fire)
 
   if (env.EnableDifftest) {
+    val diffipfrefill = Module(new DifftestRefillEvent)
+    diffipfrefill.io.clock := clock
+    diffipfrefill.io.coreid := io.hartId
+    diffipfrefill.io.cacheid := 3.U
+    diffipfrefill.io.valid := ipf_write_arb.io.out.valid
+    diffipfrefill.io.addr := ipf_write_arb.io.out.bits.meta.paddr
+    diffipfrefill.io.data := ipf_write_arb.io.out.bits.data.asTypeOf(diffipfrefill.io.data)
+  }
+
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
     difftest.io.coreid := io.hartId

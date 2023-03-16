@@ -19,6 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest.DifftestRefillEvent
 import freechips.rocketchip.tilelink._
 import utils._
 import xiangshan.cache.mmu._
@@ -365,6 +366,16 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     }
   }
 
+  if (env.EnableDifftest) {
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.cacheid := 6.U
+    difftest.io.valid := io.move.meta_write.fire
+    difftest.io.addr := s3_move_meta.paddr
+    difftest.io.data := s3_move_data.cachline.asTypeOf(difftest.io.data)
+  }
+
   /** write logic */
   val replacer = ReplacementPolicy.fromString(Some("random"), nIPFBufferSize)
   val curr_write_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
@@ -702,5 +713,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     toAddress       = Cat(req.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
 
-  XSError(blockCounter(io.req.fire, io.piq_write_ipbuffer.fire, 5000), "PIQEntry"+ io.id +"_block_5000_cycle,may_has_error\n")
+
+
+  XSError(blockCounter(io.req.fire, io.piq_write_ipbuffer.fire, 10000), "PIQEntry"+ io.id +"_block_10000_cycle,may_has_error\n")
 }
