@@ -850,8 +850,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   /** LoadMissDB: record load miss state */
-  val isWriteLoadMissTable = Constantin.createRecord("isWriteLoadMissTable")
-  val isFirstHitWrite = Constantin.createRecord("isFirstHitWrite")
+  val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable" + p(XSCoreParamsKey).HartId.toString))
+  val isFirstHitWrite = WireInit(Constantin.createRecord("isFirstHitWrite" + p(XSCoreParamsKey).HartId.toString))
   val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
   val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
   val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
