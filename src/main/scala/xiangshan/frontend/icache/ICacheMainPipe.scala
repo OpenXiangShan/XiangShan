@@ -305,8 +305,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
 
   /** choose victim cacheline */
-  val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))       // FIXME
-  val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(s0_fire))
+  val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
+  val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)(highestIdxBit, 1)))}), valid = RegNext(s0_fire))
 
 
   when(s1_valid){
@@ -733,11 +733,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
-    t_s(0)         := s2_req_vsetIdx(i)
+    t_s(0)         := s2_req_vsetIdx(i)(highestIdxBit, 1)
     t_w(0).valid   := s2_valid && s2_port_hit(i)
     t_w(0).bits    := OHToUInt(s2_tag_match_vec(i))
 
-    t_s(1)         := s2_req_vsetIdx(i)
+    t_s(1)         := s2_req_vsetIdx(i)(highestIdxBit, 1)
     t_w(1).valid   := s2_valid && !s2_port_hit(i)
     t_w(1).bits    := OHToUInt(s2_waymask(i))
   }
