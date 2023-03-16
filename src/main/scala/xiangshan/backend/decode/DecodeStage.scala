@@ -181,7 +181,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.vecRat(i)(0).addr := io.out(i).bits.ctrl.lsrc(0)
     io.vecRat(i)(1).addr := io.out(i).bits.ctrl.lsrc(1)
     io.vecRat(i)(2).addr := io.out(i).bits.ctrl.lsrc(2)
-    io.vecRat(i)(3).addr := 0.U
+    io.vecRat(i)(3).addr := io.out(i).bits.ctrl.lsrc(3)
     io.vecRat(i)(4).addr := io.out(i).bits.ctrl.ldest
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }

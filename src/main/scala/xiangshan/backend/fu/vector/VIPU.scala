@@ -259,8 +259,8 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
   vialu.io.in.bits.info.uopIdx := in.uop.ctrl.uopIdx
 
   vialu.io.in.bits.info.vxrm := vxrm
-  vialu.io.in.bits.srcType(0) := decoder.io.out.srcType1
-  vialu.io.in.bits.srcType(1) := decoder.io.out.srcType2
+  vialu.io.in.bits.srcType(0) := decoder.io.out.srcType2
+  vialu.io.in.bits.srcType(1) := decoder.io.out.srcType1
   vialu.io.in.bits.vdType := decoder.io.out.vdType
   vialu.io.in.bits.vs1 := vs1
   vialu.io.in.bits.vs2 := vs2
