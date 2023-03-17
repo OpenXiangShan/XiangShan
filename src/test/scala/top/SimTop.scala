@@ -117,7 +117,6 @@ object SimTop extends App {
     )
     ChiselDB.addToFileRegisters
     Constantin.addToFileRegisters
-    // TODO: change to parameterization
     FileRegisters.files.foreach{ case (filename, contents) =>
       writeOutputFile("./build", filename, contents())
     }
