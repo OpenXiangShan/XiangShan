@@ -25,7 +25,7 @@ import utils._
 import utility._
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
 import yunsuan.{VectorElementFormat, VipuType}
-import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule}
+import xiangshan.{SelImm, SrcType, XSCoreParamsKey, XSModule}
 
 import scala.collection.Seq
 
@@ -236,7 +236,8 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 
 // generate src1 and src2
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL || ctrl.uopDivType === UopDivType.VEC_MV_WIDE || ctrl.uopDivType === UopDivType.VEC_MV_WIDE0 || ctrl.uopDivType === UopDivType.VEC_MV_NARROW || ctrl.uopDivType === UopDivType.VEC_MV_MASK, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
+  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, 
+             Mux(in.uop.ctrl.srcType(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0))))
   val _vs2 = in.src(1)
   val vs1 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs2, _vs1)
   val vs2 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs1, _vs2)

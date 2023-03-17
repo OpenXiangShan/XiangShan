@@ -557,27 +557,29 @@ package object xiangshan {
   }
 
   object UopDivType {
-    def SCA_SIM = "b00000".U
-    def DIR = "b00001".U
-    def VEC_LMUL = "b00010".U
-    def VEC_MV_LMUL = "b00011".U
-    def VEC_MV = "b00100".U
-    def VEC_WIDE = "b00101".U
-    def VEC_WIDE0 = "b00110".U
-    def VEC_MV_WIDE = "b00111".U
-    def VEC_MV_WIDE0 = "b01000".U
-    def VEC_NARROW = "b01001".U
-    def VEC_MV_NARROW = "b01010".U
-    def VEC_EXT2 = "b01011".U
-    def VEC_EXT4 = "b01100".U
-    def VEC_EXT8 = "b01101".U
-    def VEC_MASK = "b01110".U
-    def VEC_MV_MASK = "b01111".U
+    def SCA_SIM        = "b00000".U // 
+    def DIR            = "b10001".U // dirty: vset
+    def VEC_VVV        = "b10010".U // VEC_VVV
+    def VEC_VXV        = "b10011".U // VEC_VXV
+    def VEC_0XV        = "b10100".U // VEC_0XV
+    def VEC_VVW        = "b10101".U // VEC_VVW
+    def VEC_WVW        = "b10110".U // VEC_WVW
+    def VEC_VXW        = "b10111".U // VEC_VXW
+    def VEC_WXW        = "b11000".U // VEC_WXW
+    def VEC_WVV        = "b11001".U // VEC_WVV
+    def VEC_WXV        = "b11010".U // VEC_WXV
+    def VEC_EXT2       = "b11011".U // VF2 0 -> V
+    def VEC_EXT4       = "b11100".U // VF4 0 -> V
+    def VEC_EXT8       = "b11101".U // VF8 0 -> V
+    def VEC_VVM        = "b11110".U // VEC_VVM
+    def VEC_VXM        = "b11111".U // VEC_VXM
+    def VEC_MMM        = "b00000".U // VEC_MMM
     def dummy = "b11111".U
 
     def X = BitPat("b00000")
 
     def apply() = UInt(5.W)
+    def needSplit(UopDivType: UInt) = UopDivType(4)
   }
 
   object ExceptionNO {
