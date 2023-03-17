@@ -33,9 +33,7 @@ object DecodeMain extends App with HasRocketChipStageUtils {
       ChiselGeneratorAnnotation(() => new DecodeUnit()(defaultConfig)
     )))
 //    // Generate files when compiling. Used by ChiselDB.
-//    FileRegisters.files.foreach{ case (filename, contents) =>
-//      writeOutputFile("./build", filename, contents())
-//    }
+//    FileRegisters.write("./build")
   }
 }
 

@@ -24,7 +24,6 @@ import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import utility.FileRegisters
 import utility.ChiselDB
-import top.TopMain.writeOutputFile
 import utility.GTimer
 import xiangshan.DebugOptionsKey
 import utility.Constantin
@@ -117,8 +116,6 @@ object SimTop extends App {
     )
     ChiselDB.addToFileRegisters
     Constantin.addToFileRegisters
-    FileRegisters.files.foreach{ case (filename, contents) =>
-      writeOutputFile("./build", filename, contents())
-    }
+    FileRegisters.write(fileDir = "./build")
   }
 }

@@ -205,8 +205,6 @@ object TopMain extends App with HasRocketChipStageUtils {
     val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     Generator.execute(firrtlOpts, soc.module, firrtlComplier)
-    FileRegisters.files.foreach{ case (filename, contents) =>
-      writeOutputFile("./build", s"XSTop.${filename}", contents())
-    }
+    FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
   }
 }
