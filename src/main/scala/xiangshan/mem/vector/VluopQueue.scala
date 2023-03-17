@@ -110,8 +110,10 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   val deqPtr = RegInit(0.U.asTypeOf(new VluopPtr))
   val already_in = WireInit(VecInit(Seq.fill(2)(false.B)))
   val enq_valid = WireInit(VecInit(Seq.fill(2)(false.B)))
-  for (i <- 0 until 2) {
-    already_in(i) := VluopEntry.map(_.rob_idx === io.loadRegIn(i).bits.uop.robIdx.value).reduce(_ || _)
+  for (i <- 0 until exuParameters.LduCnt) {
+    for (entry <- i until VlUopSize) {
+      already_in(i) := VluopEntry(entry).rob_idx === io.loadRegIn(i).bits.uop.robIdx.value && (pre_allocated(entry) || allocated(entry))
+    }
     enq_valid(i)  := io.loadRegIn(i).fire && !already_in(i)
   }
 

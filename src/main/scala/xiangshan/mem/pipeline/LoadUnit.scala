@@ -706,12 +706,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
     forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
     forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
   }
-  //val LoadforwardMaskH = VecInit((0 until 8).map(i=>forwardMask(i+8)))
-  //val LoadforwardMaskL = VecInit((0 until 8).map(i=>forwardMask(i)))
-  //val LoadforwardMask = Mux(s2_paddr(3),LoadforwardMaskH,LoadforwardMaskL)
-  //val LoadforwardDataH = VecInit((0 until 8).map(i=>forwardData(i+8)))
-  //val LoadforwardDataL = VecInit((0 until 8).map(i=>forwardData(i)))
-  //val LoadforwardData = Mux(s2_paddr(3),LoadforwardDataH,LoadforwardDataL)
 
   //val fullForward = ((~LoadforwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
   val fullForward = ((~forwardMask.asUInt).asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
