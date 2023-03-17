@@ -279,7 +279,7 @@ class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp 
   val miss = Bool()
   val mask = UInt(8.W)
   val paddr = UInt(PAddrBits.W)
-  val rlineflag = Bool()
+  //val rlineflag = Bool()
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {

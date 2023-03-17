@@ -668,7 +668,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   }
   io.loadLoadViolationQueryReq.bits.index := io.in.bits.rarIndex
   io.loadLoadViolationQueryReq.bits.allocated := io.in.bits.rarAllocated
-  io.loadLoadViolationQueryReq.bits.rlineflag := io.in.bits.rlineflag
+  //io.loadLoadViolationQueryReq.bits.rlineflag := io.in.bits.rlineflag
 
   // st-ld violation require
   io.storeLoadViolationQueryReq.valid := io.in.valid && !s2_tlb_miss && !s2_schedError && !s2_is_prefetch && !s2_exception && !s2_mmio && !io.in.bits.replayInfo.cause(LoadReplayCauses.schedError)
@@ -679,7 +679,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.storeLoadViolationQueryReq.bits.miss := io.loadLoadViolationQueryReq.bits.miss
   io.storeLoadViolationQueryReq.bits.index := io.in.bits.rawIndex
   io.storeLoadViolationQueryReq.bits.allocated := io.in.bits.rawAllocated
-  io.storeLoadViolationQueryReq.bits.rlineflag := io.in.bits.rlineflag
+  //io.storeLoadViolationQueryReq.bits.rlineflag := io.in.bits.rlineflag
 
   // merge forward result
   // lsq has higher priority than sbuffer
