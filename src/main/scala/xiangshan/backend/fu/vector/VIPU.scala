@@ -139,8 +139,8 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vmadc_vv -> Cat(VAluOpcode.vmadc, uSew, uSew, mask).asUInt(),
 
     VipuType.vsbc_vvm -> Cat(VAluOpcode.vsbc, uSew, uSew, uSew).asUInt(),
-    VipuType.vmsbc_vvm -> Cat(VAluOpcode.vsbc, uSew, uSew, mask).asUInt(),
-    VipuType.vmsbc_vv -> Cat(VAluOpcode.vsbc, uSew, uSew, mask).asUInt(),
+    VipuType.vmsbc_vvm -> Cat(VAluOpcode.vmsbc, uSew, uSew, mask).asUInt(),
+    VipuType.vmsbc_vv -> Cat(VAluOpcode.vmsbc, uSew, uSew, mask).asUInt(),
 
     VipuType.vand_vv -> Cat(VAluOpcode.vand, uSew, uSew, uSew).asUInt(),
     VipuType.vor_vv -> Cat(VAluOpcode.vor, uSew, uSew, uSew).asUInt(),
@@ -236,7 +236,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUSubModule(p(XSCoreParamsK
 
 // generate src1 and src2
   val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL || ctrl.uopDivType === UopDivType.VEC_MV_WIDE || ctrl.uopDivType === UopDivType.VEC_MV_WIDE0 || ctrl.uopDivType === UopDivType.VEC_MV_NARROW, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
+  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, Mux(ctrl.uopDivType === UopDivType.VEC_MV_LMUL || ctrl.uopDivType === UopDivType.VEC_MV_WIDE || ctrl.uopDivType === UopDivType.VEC_MV_WIDE0 || ctrl.uopDivType === UopDivType.VEC_MV_NARROW || ctrl.uopDivType === UopDivType.VEC_MV_MASK, VecExtractor(vtype.vsew, io.in.bits.src(0)), io.in.bits.src(0)))
   val _vs2 = in.src(1)
   val vs1 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs2, _vs1)
   val vs2 = Mux(VipuType.needReverse(ctrl.fuOpType), _vs1, _vs2)

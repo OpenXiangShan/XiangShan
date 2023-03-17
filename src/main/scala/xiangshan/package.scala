@@ -571,6 +571,8 @@ package object xiangshan {
     def VEC_EXT2 = "b01011".U
     def VEC_EXT4 = "b01100".U
     def VEC_EXT8 = "b01101".U
+    def VEC_MASK = "b01110".U
+    def VEC_MV_MASK = "b01111".U
     def dummy = "b11111".U
 
     def X = BitPat("b00000")

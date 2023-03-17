@@ -122,23 +122,23 @@ object VecDecoder extends DecodeConstants {
     VRGATHEREI16_VV -> OPIVV(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
 
     VADC_VVM        -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vadc_vvm, T, F, F),
-    VMADC_VVM       -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmadc_vvm, F, T, F),
-    VMADC_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmadc_vv, F, T, F),
+    VMADC_VVM       -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmadc_vvm, F, T, F, UopDivType.VEC_MASK),
+    VMADC_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmadc_vv, F, T, F, UopDivType.VEC_MASK),
 
     VSBC_VVM        -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vsbc_vvm, T, F, F),
-    VMSBC_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsbc_vvm, F, T, F),
-    VMSBC_VVM       -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmsbc_vv, F, T, F),
+    VMSBC_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsbc_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSBC_VVM       -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmsbc_vvm, F, T, F, UopDivType.VEC_MASK),
 
     VMERGE_VVM      -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmerge_vvm, T, F, F),
 
     VMV_V_V      -> OPIVV(SrcType.vp, FuType.vipu, VipuType.vmv_v_v, T, F, F),
 
-    VMSEQ_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F),
-    VMSNE_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F),
-    VMSLTU_VV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsltu_vv, F, T, F),
-    VMSLT_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmslt_vv, F, T, F),
-    VMSLEU_VV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F),
-    VMSLE_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F),
+    VMSEQ_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSNE_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSLTU_VV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsltu_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSLT_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmslt_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSLEU_VV       -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F, UopDivType.VEC_MASK),
+    VMSLE_VV        -> OPIVV(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F, UopDivType.VEC_MASK),
 
     VSLL_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F),
     VSRL_VV         -> OPIVV(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F),
@@ -183,24 +183,24 @@ object VecDecoder extends DecodeConstants {
     VSLIDEDOWN_VX -> OPIVX(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F),
 
     VADC_VXM      -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vadc_vvm, T, F, F),
-    VMADC_VXM      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmadc_vvm, F, T, F),
-    VMADC_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmadc_vv, F, T, F),
+    VMADC_VXM      -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vmadc_vvm, F, T, F, UopDivType.VEC_MV_MASK),
+    VMADC_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmadc_vv, F, T, F, UopDivType.VEC_MV_MASK),
     VSBC_VXM      -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vsbc_vvm, T, F, F),
-    VMSBC_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsbc_vvm, F, T, F),
-    VMSBC_VXM     -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vmsbc_vv, F, T, F),
+    VMSBC_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsbc_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSBC_VXM     -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vmsbc_vvm, F, T, F, UopDivType.VEC_MV_MASK),
 
     VMERGE_VXM    -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vmerge_vvm, T, F, F),
     
     VMV_V_X    -> OPIVX(SrcType.vp, FuType.vipu, VipuType.vmv_v_v, T, F, F),
 
-    VMSEQ_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F),
-    VMSNE_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F),
-    VMSLTU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsltu_vv, F, T, F),
-    VMSLT_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmslt_vv, F, T, F),
-    VMSLEU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F),
-    VMSLE_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F),
-    VMSGTU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsgtu_vv, F, T, F),
-    VMSGT_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsgt_vv, F, T, F),
+    VMSEQ_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSNE_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSLTU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsltu_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSLT_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmslt_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSLEU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSLE_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSGTU_VX     -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsgtu_vv, F, T, F, UopDivType.VEC_MV_MASK),
+    VMSGT_VX      -> OPIVX(SrcType.X, FuType.vipu, VipuType.vmsgt_vv, F, T, F, UopDivType.VEC_MV_MASK),
 
     VSLL_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F),
     VSRL_VX       -> OPIVX(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F),
@@ -237,19 +237,19 @@ object VecDecoder extends DecodeConstants {
     VSLIDEDOWN_VI -> OPIVI(SrcType.X, FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
 
     VADC_VIM      -> OPIVI(SrcType.vp, FuType.vipu, VipuType.vadc_vvm, T, F, F, SelImm.IMM_OPIVIS),
-    VMADC_VIM     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmadc_vvm, T, F, F, SelImm.IMM_OPIVIS),
-    VMADC_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmadc_vv, T, F, F, SelImm.IMM_OPIVIS),
+    VMADC_VIM     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmadc_vvm, T, F, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMADC_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmadc_vv, T, F, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
 
     VMERGE_VIM    -> OPIVI(SrcType.vp, FuType.vipu, VipuType.vmerge_vvm, T, F, F, SelImm.IMM_OPIVIS),
     
     VMV_V_I    -> OPIVI(SrcType.vp, FuType.vipu, VipuType.vmv_v_v, T, F, F, SelImm.IMM_OPIVIS),
 
-    VMSEQ_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F, SelImm.IMM_OPIVIS),
-    VMSNE_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F, SelImm.IMM_OPIVIS),
-    VMSLEU_VI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F, SelImm.IMM_OPIVIS),
-    VMSLE_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F, SelImm.IMM_OPIVIS),
-    VMSGTU_VI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsgtu_vv, F, T, F, SelImm.IMM_OPIVIS),
-    VMSGT_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsgt_vv, F, T, F, SelImm.IMM_OPIVIS),
+    VMSEQ_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmseq_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMSNE_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsne_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMSLEU_VI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsleu_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMSLE_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsle_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMSGTU_VI     -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsgtu_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
+    VMSGT_VI      -> OPIVI(SrcType.X, FuType.vipu, VipuType.vmsgt_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_MASK),
 
     VSLL_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsll_vv, T, F, F, SelImm.IMM_OPIVIU),
     VSRL_VI       -> OPIVI(SrcType.X, FuType.vipu, VipuType.vsrl_vv, T, F, F, SelImm.IMM_OPIVIU),
