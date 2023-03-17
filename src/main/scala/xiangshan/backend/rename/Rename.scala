@@ -43,6 +43,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
+    // from rename table
+    val int_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val fp_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val int_need_free = Vec(CommitWidth, Input(Bool()))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     // debug arch ports
@@ -52,12 +56,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
-  val intRefCounter = Module(new RefCounter(NRPhyRegs))
   val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
 
-  intRefCounter.io.commit        <> io.robCommits
-  intRefCounter.io.redirect      := io.redirect.valid
-  intRefCounter.io.debug_int_rat <> io.debug_int_rat
   intFreeList.io.commit    <> io.robCommits
   intFreeList.io.debug_rat <> io.debug_int_rat
   fpFreeList.io.commit     <> io.robCommits
@@ -152,8 +152,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       walkNeedIntDest(i) := io.robCommits.walkValid(i) && needDestRegWalk(fp = false, io.robCommits.info(i))
       walkIsMove(i) := io.robCommits.info(i).isMove
     }
-    fpFreeList.io.allocateReq(i) := Mux(io.robCommits.isWalk, walkNeedFpDest(i), needFpDest(i))
-    intFreeList.io.allocateReq(i) := Mux(io.robCommits.isWalk, walkNeedIntDest(i) && !walkIsMove(i), needIntDest(i) && !isMove(i))
+    fpFreeList.io.allocateReq(i) := needFpDest(i)
+    fpFreeList.io.walkReq(i) := walkNeedFpDest(i)
+    intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
+    intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
@@ -171,7 +173,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }
     uops(i).psrc(2) := io.fpReadPorts(i)(2)
-    uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, io.intReadPorts(i).last, io.fpReadPorts(i).last)
     uops(i).eliminatedMove := isMove(i)
 
     // update pdest
@@ -208,9 +209,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     } else {
       walkPdest(i) := io.out(i).bits.pdest
     }
-
-    intRefCounter.io.allocate(i).valid := Mux(io.robCommits.isWalk, walkIntSpecWen(i), intSpecWen(i))
-    intRefCounter.io.allocate(i).bits := Mux(io.robCommits.isWalk, walkPdest(i), io.out(i).bits.pdest)
   }
 
   /**
@@ -255,9 +253,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.psrc(2) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(2)(i-1).asBools).foldLeft(uops(i).psrc(2)) {
-      (z, next) => Mux(next._2, next._1, z)
-    }
-    io.out(i).bits.old_pdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).old_pdest) {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
@@ -311,26 +306,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       II. Free List Update
        */
       if (fp) { // Float Point free list
-        fpFreeList.io.freeReq(i)  := commitValid && needDestRegCommit(fp, io.robCommits.info(i))
-        fpFreeList.io.freePhyReg(i) := io.robCommits.info(i).old_pdest
+        fpFreeList.io.freeReq(i)  := RegNext(commitValid && needDestRegCommit(fp, io.robCommits.info(i)), false.B)
+        fpFreeList.io.freePhyReg(i) := io.fp_old_pdest(i)
       } else { // Integer free list
-        intFreeList.io.freeReq(i) := intRefCounter.io.freeRegs(i).valid
-        intFreeList.io.freePhyReg(i) := intRefCounter.io.freeRegs(i).bits
-      }
-    }
-    intRefCounter.io.deallocate(i).valid := commitValid && needDestRegCommit(false, io.robCommits.info(i)) && !io.robCommits.isWalk
-    intRefCounter.io.deallocate(i).bits := io.robCommits.info(i).old_pdest
-  }
-
-  when(io.robCommits.isWalk) {
-    (intFreeList.io.allocateReq zip intFreeList.io.allocatePhyReg).take(CommitWidth) zip io.robCommits.info foreach {
-      case ((reqValid, allocReg), commitInfo) => when(reqValid) {
-        XSError(allocReg =/= commitInfo.pdest, "walk alloc reg =/= rob reg\n")
-      }
-    }
-    (fpFreeList.io.allocateReq zip fpFreeList.io.allocatePhyReg).take(CommitWidth) zip io.robCommits.info foreach {
-      case ((reqValid, allocReg), commitInfo) => when(reqValid) {
-        XSError(allocReg =/= commitInfo.pdest, "walk alloc reg =/= rob reg\n")
+        intFreeList.io.freeReq(i) := io.int_need_free(i)
+        intFreeList.io.freePhyReg(i) := RegNext(io.int_old_pdest(i))
       }
     }
   }
@@ -343,8 +323,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
       p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
       p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
-      p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-      p"old_pdest:${out.bits.old_pdest}\n"
+      p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} "
     )
   }
 
@@ -357,8 +336,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   for (i <- 0 until CommitWidth) {
     val info = io.robCommits.info(i)
     XSDebug(io.robCommits.isWalk && io.robCommits.walkValid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
-      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} " +
-      p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
+      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} ")
   }
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")

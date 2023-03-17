@@ -41,6 +41,8 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
+    val old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val need_free = Vec(CommitWidth, Output(Bool()))
     val debug_rdata = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
@@ -51,6 +53,9 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   // arch state rename table
   val arch_table = RegInit(rename_table_init)
   val arch_table_next = WireDefault(arch_table)
+  // old_pdest
+  val old_pdest = RegInit(VecInit.fill(CommitWidth)(0.U(PhyRegIdxWidth.W)))
+  val need_free = RegInit(VecInit.fill(CommitWidth)(false.B))
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
@@ -81,13 +86,25 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
     r.data := Mux(t1_bypass.asUInt.orR, bypass_data, t1_rdata(i))
   }
 
-  for (w <- io.archWritePorts) {
+  for ((w, i) <- io.archWritePorts.zipWithIndex) {
     when (w.wen) {
       arch_table_next(w.addr) := w.data
     }
+    val arch_mask = VecInit.fill(PhyRegIdxWidth)(w.wen).asUInt
+    old_pdest(i) :=
+      MuxCase(arch_table(w.addr) & arch_mask,
+              io.archWritePorts.take(i).reverse.map(x => (x.wen && x.addr === w.addr, x.data & arch_mask)))
   }
   arch_table := arch_table_next
 
+  for (((old, free), i) <- (old_pdest zip need_free).zipWithIndex) {
+    val hasDuplicate = old_pdest.take(i).map(_ === old)
+    val blockedByDup = if (i == 0) false.B else VecInit(hasDuplicate).asUInt.orR
+    free := VecInit(arch_table.map(_ =/= old)).asUInt.andR && !blockedByDup
+  }
+
+  io.old_pdest := old_pdest
+  io.need_free := need_free
   io.debug_rdata := arch_table
 }
 
@@ -99,6 +116,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     val fpReadPorts = Vec(RenameWidth, Vec(4, new RatReadPort))
     val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
+    val int_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val fp_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val int_need_free = Vec(CommitWidth, Output(Bool()))
     // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
@@ -111,6 +131,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   intRat.io.readPorts <> io.intReadPorts.flatten
   intRat.io.redirect := io.redirect
   fpRat.io.redirect := io.redirect
+  io.int_old_pdest := intRat.io.old_pdest
+  io.fp_old_pdest := fpRat.io.old_pdest
+  io.int_need_free := intRat.io.need_free
   val intDestValid = io.robCommits.info.map(_.rfWen)
   for ((arch, i) <- intRat.io.archWritePorts.zipWithIndex) {
     arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && intDestValid(i)
