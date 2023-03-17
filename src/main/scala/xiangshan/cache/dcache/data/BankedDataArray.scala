@@ -37,7 +37,6 @@ class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
 {
-  val rlineflag = Bool()
   val way_en = Bits(DCacheWays.W)
   val addr = Bits(PAddrBits.W)
 }
@@ -108,10 +107,10 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data for readline and loadpipe
     val readline_resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Output(Bool())
-    val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec(DCacheBanks, new L1BankedDataReadResult())))
-    val read_error_delayed = Output(Vec(LoadPipelineWidth, Bool()))
-    // val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec((VLEN/DCacheSRAMRowBits),new L1BankedDataReadResult())))//TODO:when have is128Req
+    //val read_resp_delayed = Output(Vec(LoadPipelineWidth, new L1BankedDataReadResult()))
+    val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec((VLEN/DCacheSRAMRowBits),new L1BankedDataReadResult())))//TODO:when have is128Req
     //val read_error_delayed = Output(Vec(LoadPipelineWidth,Bool()))
+    val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec((VLEN/DCacheSRAMRowBits), Bool())))//TODO:when have is128Req
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
@@ -153,8 +152,10 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   def dumpResp() = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
-      XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r)(0).raw_data)
-      //XSDebug(s"cycle: $r data: %lx\n", Cat((0 until DCacheBanks).map(i => io.read_resp_delayed(r)(i).raw_data)).asUInt)// TODO:when have is128Req  VecInit
+      //XSDebug(s"cycle: $r data: %x\n", io.read_resp_delayed(r).raw_data)
+      XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),
+                                      Cat(io.read_resp_delayed(r)(1).raw_data,io.read_resp_delayed(r)(0).raw_data),
+                                      io.read_resp_delayed(r)(0).raw_data))//TODO:when have is128Req
     }
   }
 
@@ -286,21 +287,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read conflict
   val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => //TODO:when have is128Req
-    (io.read(x).bits.rlineflag || io.read(y).bits.rlineflag && (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)))
+    (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)))
   //val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
   //  bank_addrs(x) === bank_addrs(y) && io.read(x).valid && io.read(y).valid && io.read(x).bits.way_en === io.read(y).bits.way_en && set_addrs(x) =/= set_addrs(y)
   //))
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(i)))
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && Mux(io.read(i).bits.rlineflag, io.readline.bits.rmask.asUInt.orR, (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U)) //TODO:when have is128Req
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U)//TODO:when have is128Req
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict(i) := io.read(i).valid && io.readline.valid && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   if (ReduceReadlineConflict) {
     //(0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.rmask(bank_addrs(i)))
-    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && Mux(io.read(i).bits.rlineflag, io.readline.bits.rmask.asUInt.orR, (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U)) //TODO:when have is128Req
+    (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U) //TODO:when have is128Req
   } else {
     (0 until LoadPipelineWidth).foreach(i => rrl_bank_conflict_intend(i) := io.read(i).valid && io.readline_intend && io.readline.bits.way_en === way_en(i) && addr_to_dcache_set(io.readline.bits.addr)=/=set_addrs(i))
   }
@@ -347,7 +348,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       //     |    Data Bank    |
       //     +-----------------+
       val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {//TODO:when have is128Req
-        (io.read(i).bits.rlineflag || bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U) && io.read(i).valid && way_en(i)(way_index)
+        (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U) && io.read(i).valid && way_en(i)(way_index)
       })))
       //val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
       //  bank_addrs(i) === bank_index.U && io.read(i).valid && way_en(i)(way_index)
@@ -392,16 +393,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
 
   (0 until LoadPipelineWidth).map(i => {
-    // when(io.is128Req(i)){ //TODO:when have is128Req
-    //   (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-    //     io.read_resp_delayed(i)(j) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(j))))(RegNext(RegNext(OHToUInt(way_en(i)))))
-    //   })
-    // }.otherwise{
-    //   io.read_resp_delayed(i)(0) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(0))))(RegNext(RegNext(OHToUInt(way_en(i)))))
-    //   io.read_resp_delayed(i)(1) := DontCare
-    // }
-    io.read_resp_delayed(i) := VecInit(read_result_delayed.map(_(RegNext(RegNext(OHToUInt(io.read(i).bits.way_en))))))
-      // read_result_delayed(RegNext(RegNext(bank_addrs(i))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+    when(io.is128Req(i)){ //TODO:when have is128Req
+      (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+        io.read_resp_delayed(i)(j) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(j))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+      })
+    }.otherwise{
+      io.read_resp_delayed(i)(0) := read_result_delayed(RegNext(RegNext(bank_addrs(i)(0))))(RegNext(RegNext(OHToUInt(way_en(i)))))
+      io.read_resp_delayed(i)(1) := DontCare
+    }
+    //io.read_resp_delayed(i) := read_result_delayed(RegNext(RegNext(bank_addrs(i))))(RegNext(RegNext(OHToUInt(way_en(i)))))
   })
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
@@ -410,25 +410,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    //when(io.is128Req(rport_index)){ //TODO:when have is128Req
-    //  (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-    //    io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //      Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
-    //        read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
-    //      !RegNext(io.bank_conflict_slow(rport_index))
-    //  })
-    //}.otherwise{
-    //  io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
-    //    Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
-    //      read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
-    //    !RegNext(io.bank_conflict_slow(rport_index))
-    //  io.read_error_delayed(rport_index)(1) := DontCare
-    //}
-    io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
-      Mux(RegNext(RegNext(io.read(rport_index).bits.rlineflag)), VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR,
-        VecInit(read_error_delayed_result.map(_(RegNext(RegNext(OHToUInt(way_en(rport_index))))))).asUInt.orR) &&
-        //read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index)))))) &&
-      !RegNext(io.bank_conflict_slow(rport_index))
+    when(io.is128Req(rport_index)){ //TODO:when have is128Req
+      (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+        io.read_error_delayed(rport_index)(j) := RegNext(RegNext(io.read(rport_index).fire())) &&
+          read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(j))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+          !RegNext(io.bank_conflict_slow(rport_index))
+      })
+    }.otherwise{
+      io.read_error_delayed(rport_index)(0) := RegNext(RegNext(io.read(rport_index).fire())) &&
+        read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index)(0))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+        !RegNext(io.bank_conflict_slow(rport_index))
+      io.read_error_delayed(rport_index)(1) := DontCare
+    }
+    //io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
+    //  read_error_delayed_result(RegNext(RegNext(bank_addrs(rport_index))))(RegNext(RegNext(OHToUInt(way_en(rport_index))))) &&
+    //  !RegNext(io.bank_conflict_slow(rport_index))
   })
   // readline port
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) &&

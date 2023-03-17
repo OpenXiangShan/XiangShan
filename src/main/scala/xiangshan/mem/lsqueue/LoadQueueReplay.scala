@@ -55,15 +55,28 @@ object LoadReplayCauses {
   val rejectEnq         = 3
   // dcache bank conflict check
   val bankConflict      = 4
-  val vecForwardFail    = 5
   // store-to-load-forwarding check
-  val forwardFail       = 6
+  val forwardFail       = 5
   // dcache replay check
-  val dcacheReplay      = 7
+  val dcacheReplay      = 6
   // dcache miss check
-  val dcacheMiss        = 8
+  val dcacheMiss        = 7
   // total causes
-  val allCauses         = 9
+  val allCauses         = 8
+}
+
+class LrqPtr(implicit p: Parameters) extends CircularQueuePtr[LrqPtr](
+  p => p(XSCoreParamsKey).LoadQueueReplaySize
+){
+}
+
+object LrqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LrqPtr = {
+    val ptr = Wire(new LrqPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
 }
 
 class LoadQueueReplay(implicit p: Parameters) extends XSModule 
@@ -114,9 +127,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // raw queue has been allocated already
     val rawAllocated = Bool()
     val rawIndex = UInt(log2Up(LoadQueueRAWSize).W)
-
-    // vector
-    val rlineflag = Bool()
   }
   val flags = Reg(Vec(LoadQueueReplaySize, new QueueAllocateFlags))
 
@@ -295,7 +305,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replayRemFire(i) := false.B
   })
 
-  val hasBankConflictVec = VecInit(loadReplaySelV.zip(loadReplaySel).map(w => w._1 && (cause(w._2)(LoadReplayCauses.bankConflict) || cause(w._2)(LoadReplayCauses.vecForwardFail))))
+  val hasBankConflictVec = VecInit(loadReplaySelV.zip(loadReplaySel).map(w => w._1 && cause(w._2)(LoadReplayCauses.bankConflict)))
   val hasBankConflict = hasBankConflictVec.asUInt.orR
   val allBankConflict = hasBankConflictVec.asUInt.andR
   val coldCounter = RegInit(0.U(3.W))
@@ -304,7 +314,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val replayIdx = loadReplaySel(i)
     val cancelReplay = uop(replayIdx).robIdx.needFlush(RegNext(io.redirect))
     // In order to avoid deadlock, replay one inst which blocked by bank conflict
-    val bankConflictReplay = Mux(hasBankConflict && !allBankConflict, cause(replayIdx)(LoadReplayCauses.bankConflict) || cause(replayIdx)(LoadReplayCauses.vecForwardFail), true.B)
+    val bankConflictReplay = Mux(hasBankConflict && !allBankConflict, cause(replayIdx)(LoadReplayCauses.bankConflict), true.B)
 
     io.replay(i).valid := loadReplaySelV(i) && !cancelReplay && bankConflictReplay && coldCounter >= 0.U && coldCounter < 5.U
     io.replay(i).bits := DontCare
@@ -319,7 +329,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.rarIndex := flags(replayIdx).rarIndex
     io.replay(i).bits.rawAllocated := flags(replayIdx).rawAllocated
     io.replay(i).bits.rawIndex := flags(replayIdx).rawIndex
-    io.replay(i).bits.rlineflag := flags(replayIdx).rlineflag
 
     when (io.replay(i).fire) {
       allocated(replayIdx) := false.B
@@ -389,7 +398,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       } .elsewhen (replayInfo.cause(LoadReplayCauses.dcacheReplay) || replayInfo.cause(LoadReplayCauses.waitStore)) {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := blockPtrOthers(enqIdx) + Mux(blockPtrOthers(enqIdx) === 3.U(2.W), 0.U, 1.U)
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError) || replayInfo.cause(LoadReplayCauses.rejectEnq) || replayInfo.cause(LoadReplayCauses.vecForwardFail)) {
+      } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError) || replayInfo.cause(LoadReplayCauses.rejectEnq)) {
         blockByOthers(enqIdx) := true.B
         blockPtrOthers(enqIdx) := Mux(blockPtrOthers(enqIdx) === 3.U(2.W), blockPtrOthers(enqIdx), blockPtrOthers(enqIdx) + 1.U(2.W)) 
       }
@@ -418,7 +427,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       flags(enqIdx).rarIndex := enq.bits.rarIndex
       flags(enqIdx).rawAllocated := enq.bits.rawAllocated
       flags(enqIdx).rawIndex := enq.bits.rawIndex
-      flags(enqIdx).rlineflag := enq.bits.rlineflag
 
       // reset block counter
       blockCounter(enqIdx) := 0.U // reset count

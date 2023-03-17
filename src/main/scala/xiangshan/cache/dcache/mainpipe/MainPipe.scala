@@ -1223,7 +1223,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     io.data_write_dup(i).valid := s3_valid_dup_for_data_w_bank(i) && s3_update_data_cango_dup_for_data_w_bank && update_data_dup_for_data_w_bank
     io.data_write_dup(i).bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
     io.data_write_dup(i).bits.addr := RegEnable(s2_req.vaddr, s2_fire_to_s3)
-    io.data_write_dup(i).bits.rlineflag := DontCare
   }
   // -------------------------------------------------------------------------------------
 
@@ -1400,7 +1399,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.data_read.bits.rmask := s1_banked_rmask
   io.data_read.bits.way_en := s1_way_en
   io.data_read.bits.addr := s1_req_vaddr_dup_for_data_read
-  io.data_read.bits.rlineflag := DontCare
 
   io.miss_req.valid := s2_valid_dup(4) && s2_can_go_to_mq_dup(0)
   val miss_req = io.miss_req.bits
@@ -1520,7 +1518,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       s3_store_data_merged
     )
   )
-  io.data_write.bits.rlineflag := DontCare
   assert(RegNext(!io.meta_write.valid || !s3_req.replace))
   assert(RegNext(!io.tag_write.valid || !s3_req.replace))
   assert(RegNext(!io.data_write.valid || !s3_req.replace))

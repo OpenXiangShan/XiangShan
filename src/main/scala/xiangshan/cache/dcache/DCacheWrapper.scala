@@ -133,8 +133,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val DCacheVWordBytes = VLEN / 8
-  val DCacheLineBits = DCacheBanks * DCacheWordBits
-  val DCacheLineBytes = DCacheLineBits / 8
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
@@ -342,7 +340,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // read in s2
   val data = UInt(VLEN.W)
   // select in s3
-  val data_delayed = Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))
+  val data_delayed = UInt(VLEN.W)
   val id     = UInt(reqIdWidth.W)
 
   // cache req missed, send it to miss queue
@@ -496,7 +494,6 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
-  val s1_rlineflag = Output(Bool())
   // cycle 2: hit signal
   val s2_hit = Input(Bool()) // hit signal for lsu, 
 
