@@ -496,7 +496,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule
   // st-ld violation query
   val s1_schedError = VecInit((0 until StorePipelineWidth).map(w => io.reExecuteQuery(w).valid &&
                           isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) && 
-                          Mux(!io.in.bits.readCacheLine, (s1_paddr_dup_lsu(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s1_mask & io.reExecuteQuery(w).bits.mask).orR),
+                          Mux(!io.in.bits.readCacheLine, (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3) && (s1_mask & io.reExecuteQuery(w).bits.mask).orR),
                           s1_paddr_dup_lsu(PAddrBits-1, DCacheLineOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheLineOffset)) 
                         )).asUInt.orR && !s1_tlb_miss
   //  mdp read
@@ -658,7 +658,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   //  4. Data contains.
   val s2_schedError = VecInit((0 until StorePipelineWidth).map(w => io.reExecuteQuery(w).valid &&
                               isAfter(io.in.bits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
-                              Mux(!io.in.bits.readCacheLine, (s2_paddr(PAddrBits-1, 4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4) && (s2_mask & io.reExecuteQuery(w).bits.mask).orR),
+                              Mux(!io.in.bits.readCacheLine, (s2_paddr(PAddrBits-1, 3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3) && (s2_mask & io.reExecuteQuery(w).bits.mask).orR),
                               s2_paddr(PAddrBits-1, DCacheLineOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheLineOffset))
                               )).asUInt.orR && !s2_tlb_miss 
 
@@ -1193,7 +1193,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     //  4. Data contains.
     io.reExecuteQuery(w).valid &&
     isAfter(s3_loadOutBits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
-    Mux(!s3_loadOutBits.rlineflag, (s3_loadOutBits.paddr(PAddrBits-1,4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4)) &&
+    Mux(!s3_loadOutBits.readCacheLine, (s3_loadOutBits.paddr(PAddrBits-1,3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3)) &&
     (s3_loadOutBits.mask & io.reExecuteQuery(w).bits.mask).orR,
     s3_loadOutBits.paddr(PAddrBits-1, DCacheBankOffset) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, DCacheBankOffset)))).asUInt.orR && !s3_loadOutBits.tlbMiss
 
