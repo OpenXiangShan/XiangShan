@@ -750,7 +750,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.cf_ctrl := cf_ctrl
 
   io.deq.isVset := FuType.isIntExu(cs.fuType) && ALUOpType.isVset(cs.fuOpType)
-  io.deq.isComplex := (cs.uopDivType === UopDivType.DIR) || (cs.uopDivType === UopDivType.VEC_LMUL) || (cs.uopDivType === UopDivType.VEC_MV_LMUL)
+  io.deq.isComplex := UopDivType.needSplit(cs.uopDivType)
 
   //-------------------------------------------------------------
   // Debug Info
