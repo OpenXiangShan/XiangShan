@@ -145,7 +145,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U
   io.canEnq := allowEnqueue
 
-  io.vconfigPdest := Mux(commitCandidates(0).ldest === 32.U, diffCandidates(0).pdest, diffCandidates(1).pdest)
+  io.vconfigPdest := Mux(commitCandidates(0).ldest === 32.U && commitCandidates(0).rfWen, diffCandidates(0).pdest, diffCandidates(1).pdest)
 
   // for difftest
   io.diffCommits := 0.U.asTypeOf(new DiffCommitIO)

@@ -32,9 +32,8 @@ import scala.collection.Seq
 
 trait VectorConstants {
   val MAX_VLMUL = 8
-  val FP_TMP_REG_MV = 33
-  // val FP_TMP_REG_MV = 34
-  val VECTOR_TMP_REG_LMUL = 34
+  val FP_TMP_REG_MV = 32
+  val VECTOR_TMP_REG_LMUL = 32
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {

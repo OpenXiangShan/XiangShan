@@ -298,10 +298,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, flushRedirect.valid)
 
-  val isCommitWriteVconfigVec = rob.io.rabCommits.commitValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
+  val isCommitWriteVconfigVec = rob.io.rabCommits.commitValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U && info.rfWen }.reverse
   val commitPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
   val commitSel = PriorityMux(isCommitWriteVconfigVec, commitPdestReverse)
-  val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U }.reverse
+  val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U && info.rfWen }.reverse
   val walkPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
   val walkSel = PriorityMux(isWalkWriteVconfigVec, walkPdestReverse)
   val vconfigAddr = Mux(rob.io.isVsetFlushPipe, rob.io.vconfigPdest,
