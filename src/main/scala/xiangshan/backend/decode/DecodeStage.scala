@@ -71,8 +71,8 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
   vconfig_spec_next.vtype := vtype
 
   // vconfig update
-  val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U)}
-  val isCommitConfigVec = io.robCommits.commitValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U)}
+  val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U) && info.rfWen}
+  val isCommitConfigVec = io.robCommits.commitValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U) && info.rfWen}
   when(io.isVsetFlushPipe){                                          // for vsetvl vsetvli
     vconfig_arch := io.vconfig
   }.elsewhen(io.robCommits.isCommit && Cat(isCommitConfigVec).orR){  // for vsetivli
