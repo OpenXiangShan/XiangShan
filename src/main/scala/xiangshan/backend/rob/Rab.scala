@@ -6,8 +6,9 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
+import xiangshan.backend.decode.VectorConstants
 
-class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with VectorConstants {
   val io = IO(new Bundle {
     val redirectValid = Input(Bool())
 
@@ -145,7 +146,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U
   io.canEnq := allowEnqueue
 
-  io.vconfigPdest := Mux(commitCandidates(0).ldest === 32.U && commitCandidates(0).rfWen, diffCandidates(0).pdest, diffCandidates(1).pdest)
+  io.vconfigPdest := Mux(commitCandidates(0).ldest === INT_VCONFIG.U && commitCandidates(0).rfWen, diffCandidates(0).pdest, diffCandidates(1).pdest)
 
   // for difftest
   io.diffCommits := 0.U.asTypeOf(new DiffCommitIO)

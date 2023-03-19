@@ -23,10 +23,11 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rename.RatReadPort
+import xiangshan.backend.decode.VectorConstants
 
 
 
-class VConfigGen(implicit p: Parameters) extends XSModule{
+class VConfigGen(implicit p: Parameters) extends XSModule with VectorConstants{
   val io = IO(new Bundle(){
     // from Ibuffer
     val firstInstr = Input(UInt(32.W))
@@ -71,8 +72,8 @@ class VConfigGen(implicit p: Parameters) extends XSModule{
   vconfig_spec_next.vtype := vtype
 
   // vconfig update
-  val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U) && info.rfWen}
-  val isCommitConfigVec = io.robCommits.commitValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U) && info.rfWen}
+  val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === INT_VCONFIG.U) && info.rfWen}
+  val isCommitConfigVec = io.robCommits.commitValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === INT_VCONFIG.U) && info.rfWen}
   when(io.isVsetFlushPipe){                                          // for vsetvl vsetvli
     vconfig_arch := io.vconfig
   }.elsewhen(io.robCommits.isCommit && Cat(isCommitConfigVec).orR){  // for vsetivli

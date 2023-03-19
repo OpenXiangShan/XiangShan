@@ -32,7 +32,7 @@ import scala.collection.Seq
 
 trait VectorConstants {
   val MAX_VLMUL = 8
-  val XP_TMP_REG_VCONFIG = 32
+  val INT_VCONFIG = 32
   val FP_TMP_REG_MV = 32
   val VECTOR_TMP_REG_LMUL = 32
 }
@@ -124,7 +124,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       when(isVset_u) {
         csBundle(0).ctrl.flushPipe := ALUOpType.isVsetvli(cf_ctrl_u.ctrl.fuOpType) && cf_ctrl_u.ctrl.lsrc(0).orR
         csBundle(0).ctrl.fuOpType := ALUOpType.vsetExchange(cf_ctrl_u.ctrl.fuOpType)
-        csBundle(1).ctrl.ldest := XP_TMP_REG_VCONFIG.U
+        csBundle(1).ctrl.ldest := INT_VCONFIG.U
         csBundle(1).ctrl.flushPipe := false.B
       }
     }

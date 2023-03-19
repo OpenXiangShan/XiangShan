@@ -34,6 +34,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO}
+import xiangshan.backend.decode.VectorConstants
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
@@ -200,6 +201,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   with HasCircularQueuePtrHelper
   with HasWritebackSourceImp
   with HasPerfEvents
+  with VectorConstants
 {
   val writebackLengths = outer.writebackSinksParams.map(_.length)
 
@@ -298,10 +300,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, flushRedirect.valid)
 
-  val isCommitWriteVconfigVec = rob.io.rabCommits.commitValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U && info.rfWen }.reverse
+  val isCommitWriteVconfigVec = rob.io.rabCommits.commitValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === INT_VCONFIG.U && info.rfWen }.reverse
   val commitPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
   val commitSel = PriorityMux(isCommitWriteVconfigVec, commitPdestReverse)
-  val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === 32.U && info.rfWen }.reverse
+  val isWalkWriteVconfigVec = rob.io.rabCommits.walkValid.zip(rob.io.rabCommits.info).map { case (valid, info) => valid && info.ldest === INT_VCONFIG.U && info.rfWen }.reverse
   val walkPdestReverse = rob.io.rabCommits.info.map(info => info.pdest).reverse
   val walkSel = PriorityMux(isWalkWriteVconfigVec, walkPdestReverse)
   val vconfigAddr = Mux(rob.io.isVsetFlushPipe, rob.io.vconfigPdest,
