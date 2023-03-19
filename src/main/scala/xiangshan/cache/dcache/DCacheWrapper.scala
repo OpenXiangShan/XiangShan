@@ -344,7 +344,6 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // select in s3
   val data_delayed = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
-  val firstHit = Bool()
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache miss, and failed to enter the missqueue, replay from RS is needed
@@ -451,7 +450,6 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val replay    = Bool()
   val tag_error = Bool()
   val error     = Bool()
-  val firstHit = Bool()
   val replayCarry = new ReplayCarry
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
@@ -502,8 +500,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_bank_conflict = Input(Bool())
   // cycle 2: hit signal
   val s2_hit = Input(Bool()) // hit signal for lsu,
-  // TODO: change resp.bits.firstHit to s2_first_hit
-//  val s2_first_hit = Input(Bool())
+  val s2_first_hit = Input(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
@@ -865,7 +862,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val loadMissEntry = Wire(new LoadMissEntry)
     val loadMissWriteEn =
       (!ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire) ||
-      (ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid && isFirstHitWrite.orR)
+      (ldu(i).io.lsu.s2_first_hit && ldu(i).io.lsu.resp.valid && isFirstHitWrite.orR)
     loadMissEntry.timeCnt := GTimer()
     loadMissEntry.robIdx := ldu(i).io.lsu.resp.bits.debug_robIdx
     loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
@@ -873,7 +870,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     loadMissEntry.missState := OHToUInt(Cat(Seq(
       ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged,
       ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged,
-      ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid
+      ldu(i).io.lsu.s2_first_hit && ldu(i).io.lsu.resp.valid
     )))
     loadMissTable.log(
       data = loadMissEntry,
