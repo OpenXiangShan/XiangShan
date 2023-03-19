@@ -308,6 +308,8 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val instrtype   = UInt(sourceTypeWidth.W)
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry
+
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -352,6 +354,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val tag_error = Bool() // tag error
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
@@ -452,6 +455,7 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val replayCarry = new ReplayCarry
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
       data, id, miss, replay, tag_error, error) 
@@ -497,7 +501,9 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
   // cycle 2: hit signal
-  val s2_hit = Input(Bool()) // hit signal for lsu, 
+  val s2_hit = Input(Bool()) // hit signal for lsu,
+  // TODO: change resp.bits.firstHit to s2_first_hit
+//  val s2_first_hit = Input(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
@@ -861,6 +867,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       (!ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire) ||
       (ldu(i).io.lsu.resp.bits.firstHit && ldu(i).io.lsu.resp.valid && isFirstHitWrite.orR)
     loadMissEntry.timeCnt := GTimer()
+    loadMissEntry.robIdx := ldu(i).io.lsu.resp.bits.debug_robIdx
     loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
     loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
     loadMissEntry.missState := OHToUInt(Cat(Seq(

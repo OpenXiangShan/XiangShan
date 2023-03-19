@@ -247,6 +247,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }
   io.dcacheReq.bits.isFirstIssue := s0_isFirstIssue
   io.dcacheReq.bits.replayCarry := s0_replayCarry
+  io.dcacheReq.bits.debug_robIdx := s0_uop.robIdx.value
 
   // TODO: update cache meta
   io.dcacheReq.bits.id := DontCare
