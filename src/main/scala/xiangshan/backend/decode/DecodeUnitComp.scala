@@ -218,7 +218,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.fpu.typeTagOut := FPU.D
       csBundle(0).ctrl.fpu.fromInt := true.B
       csBundle(0).ctrl.fpu.wflags := false.B
-      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
       csBundle(0).ctrl.fpu.div := false.B
       csBundle(0).ctrl.fpu.sqrt := false.B
       csBundle(0).ctrl.fpu.fcvt := false.B
@@ -274,7 +274,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.fpu.typeTagOut := FPU.D
       csBundle(0).ctrl.fpu.fromInt := true.B
       csBundle(0).ctrl.fpu.wflags := false.B
-      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
       csBundle(0).ctrl.fpu.div := false.B
       csBundle(0).ctrl.fpu.sqrt := false.B
       csBundle(0).ctrl.fpu.fcvt := false.B
@@ -309,7 +309,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.fpu.typeTagOut := FPU.D
       csBundle(0).ctrl.fpu.fromInt := true.B
       csBundle(0).ctrl.fpu.wflags := false.B
-      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
       csBundle(0).ctrl.fpu.div := false.B
       csBundle(0).ctrl.fpu.sqrt := false.B
       csBundle(0).ctrl.fpu.fcvt := false.B
@@ -359,7 +359,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.fpu.typeTagOut := FPU.D
       csBundle(0).ctrl.fpu.fromInt := true.B
       csBundle(0).ctrl.fpu.wflags := false.B
-      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
       csBundle(0).ctrl.fpu.div := false.B
       csBundle(0).ctrl.fpu.sqrt := false.B
       csBundle(0).ctrl.fpu.fcvt := false.B
@@ -411,7 +411,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(0).ctrl.fpu.typeTagOut := FPU.D
       csBundle(0).ctrl.fpu.fromInt := true.B
       csBundle(0).ctrl.fpu.wflags := false.B
-      csBundle(0).ctrl.fpu.fpWen := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
       csBundle(0).ctrl.fpu.div := false.B
       csBundle(0).ctrl.fpu.sqrt := false.B
       csBundle(0).ctrl.fpu.fcvt := false.B
