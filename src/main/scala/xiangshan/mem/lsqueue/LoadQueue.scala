@@ -182,8 +182,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // specific cycles to block
   val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   block_cycles_tlb := io.tlbReplayDelayCycleCtrl
-  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+
+  XSPerfAccumulate("block_in_last", PopCount((0 until LoadQueueSize).map(i => block_ptr_cache(i) === 3.U)))
 
   val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
 
@@ -382,7 +384,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.isLoadReplay := true.B
     io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
-    io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
+    io.loadOut(i).bits.forward_tlDchannel := !cache_hited(replayIdx)
 
     when(io.loadOut(i).fire) {
       replayRemFire(i) := true.B
@@ -563,14 +565,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         // update credit and ptr
         val data_in_last_beat = io.replaySlow(i).data_in_last_beat
         creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
-                              Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat,
-                               Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)), 0.U)))
+                              Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)),
+                               Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat, 0.U)))
         when(!io.replaySlow(i).tlb_hited) {
           block_ptr_tlb(idx) := Mux(block_ptr_tlb(idx) === 3.U(2.W), block_ptr_tlb(idx), block_ptr_tlb(idx) + 1.U(2.W))
-        }.elsewhen(!io.replaySlow(i).cache_hited) {
-          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }.elsewhen(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok) {
           block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
+        }.elsewhen(!io.replaySlow(i).cache_hited) {
+          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }
       }
 
@@ -585,9 +587,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       }
 
       // special case: cache miss
-      miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
-      block_by_cache_miss(idx) := io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok && // this load tlb hit and no cache replay
-                                  !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data && // cache miss
+      val true_cache_miss = io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok &&
+                            !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data
+      when(true_cache_miss) {
+        miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
+      }
+      block_by_cache_miss(idx) := true_cache_miss && // cache miss
                                   !(io.refill.valid && io.refill.bits.id === io.replaySlow(i).miss_mshr_id) && // no refill in this cycle
                                   creditUpdate(idx) =/= 0.U // credit is not zero
     }
