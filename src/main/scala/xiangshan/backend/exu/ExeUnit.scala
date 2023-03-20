@@ -26,7 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
-import xiangshan.backend.fu.vector.{VFPU, VPPU, VIPU}
+import xiangshan.backend.fu.vector.{VFPU, VPPU, VPUSubModule}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
@@ -77,7 +77,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
 
   val fpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[FPUSubModule])
   val vfpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[VFPU])
-  val vipuModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(x => x._1.isInstanceOf[VIPU])
+  val vipuModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(x => x._1.isInstanceOf[VPUSubModule])
   if (fpModules.nonEmpty) {
     // frm is from csr/frm (from CSR) or instr_rm (from instruction decoding)
     val fpSubModules = fpModules.map(_._1.asInstanceOf[FPUSubModule])
@@ -103,7 +103,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     })
   }
   if (vipuModules.nonEmpty) {
-    vipuModules.map(_._1.asInstanceOf[VIPU]).foreach(mod => {
+    vipuModules.map(_._1.asInstanceOf[VPUSubModule]).foreach(mod => {
       mod.vxrm := csr_vxrm
       mod.vstart := csr_vstart
       io.out.bits.vxsat := mod.vxsat

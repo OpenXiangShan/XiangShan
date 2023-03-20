@@ -26,6 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
+import xiangshan.backend.decode.VectorConstants
 
 class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val ssid = UInt(SSIDWidth.W)
@@ -382,7 +383,7 @@ class Rob(implicit p: Parameters) extends LazyModule with HasWritebackSink with 
 }
 
 class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents {
+  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with VectorConstants{
   val wbExuConfigs = outer.writebackSinksParams.map(_.exuConfigs)
   val numWbPorts = wbExuConfigs.map(_.length)
 
@@ -826,7 +827,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // sync v csr to csr
   // for difftest
-  val isDiffWriteVconfigVec = io.diffCommits.commitValid.zip(io.diffCommits.info).map { case (valid, info) => valid && info.ldest === 32.U && info.rfWen }.reverse
+  val isDiffWriteVconfigVec = io.diffCommits.commitValid.zip(io.diffCommits.info).map { case (valid, info) => valid && info.ldest === INT_VCONFIG.U && info.rfWen }.reverse
   io.csr.vcsrFlag := RegNext(io.diffCommits.isCommit && Cat(isDiffWriteVconfigVec).orR)
 
   // commit load/store to lsq

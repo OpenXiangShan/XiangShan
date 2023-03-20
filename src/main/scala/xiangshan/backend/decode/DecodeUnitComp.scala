@@ -32,7 +32,7 @@ import scala.collection.Seq
 
 trait VectorConstants {
   val MAX_VLMUL = 8
-  val XP_TMP_REG_VCONFIG = 32
+  val INT_VCONFIG = 32
   val FP_TMP_REG_MV = 32
   val VECTOR_TMP_REG_LMUL = 32
 }
@@ -124,7 +124,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       when(isVset_u) {
         csBundle(0).ctrl.flushPipe := ALUOpType.isVsetvli(cf_ctrl_u.ctrl.fuOpType) && cf_ctrl_u.ctrl.lsrc(0).orR
         csBundle(0).ctrl.fuOpType := ALUOpType.vsetExchange(cf_ctrl_u.ctrl.fuOpType)
-        csBundle(1).ctrl.ldest := XP_TMP_REG_VCONFIG.U
+        csBundle(1).ctrl.ldest := INT_VCONFIG.U
         csBundle(1).ctrl.flushPipe := false.B
       }
     }
@@ -450,30 +450,16 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
 
   switch(stateReg) {
     is(normal) {
-      when(!io.validFromIBuf(0)) {
-        stateReg := normal
-        uopRes := 0.U
-      }.elsewhen((numOfUop > readyCounter) && (readyCounter =/= 0.U)){
-        stateReg := ext
-        uopRes := numOfUop - readyCounter
-      }.otherwise {
-        stateReg := normal
-        uopRes := 0.U
-      }
+      stateReg := Mux(io.validFromIBuf(0) && (numOfUop > readyCounter) && (readyCounter =/= 0.U), ext, normal)
     }
     is(ext) {
-      when(!io.validFromIBuf(0)) {
-        stateReg := normal
-        uopRes := 0.U
-      }.elsewhen(uopRes > readyCounter) {
-        stateReg := ext
-        uopRes := uopRes - readyCounter
-      }.otherwise {
-        stateReg := normal
-        uopRes := 0.U
-      }
+      stateReg := Mux(io.validFromIBuf(0) && (uopRes > readyCounter) && (readyCounter =/= 0.U), ext, normal)
     }
   }
+
+  val uopRes0 = Mux(stateReg === normal, numOfUop, uopRes)
+  uopRes := Mux(io.validFromIBuf(0) && (readyCounter =/= 0.U) && (uopRes0 > readyCounter),
+            uopRes0 - readyCounter, 0.U)
 
   for(i <- 0 until RenameWidth) {
     cf_ctrl(i) := MuxCase(csBundle(i), Seq(
@@ -491,60 +477,23 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
   notInfVec.drop(1).zip(0 until DecodeWidth - 1).map{ case (dst, i) => dst := Cat(notInf.take(i + 1)).andR}
   notInfVec(0) := true.B
 
-  complexNum := 1.U
-  validToRename.map{ case dst => dst := false.B }
-  readyToIBuf .map{ case dst => dst := false.B }
-  switch(stateReg) {
-    is(normal) {
-      when(!io.validFromIBuf(0)) {
-        complexNum := 1.U
-        validToRename(0) := false.B
-        for (i <- 1 until RenameWidth) {
-          validToRename(i) := notInfVec(i - 1) && validSimple(i - 1)
-        }
-        readyToIBuf(0) := io.readyFromRename(0)
-        for(i <- 1 until DecodeWidth) {
-          readyToIBuf(i) := notInfVec(i - 1) && validSimple(i - 1) && io.readyFromRename(i)
-        }
-      }.elsewhen(numOfUop > readyCounter) {
-        complexNum := Mux(readyCounter === 0.U, 1.U, readyCounter)
-        for (i <- 0 until RenameWidth) {
-          validToRename(i) := Mux(readyCounter > i.U, true.B, false.B)
-        }
-        readyToIBuf.map{ case dst => dst := false.B }
-      }.otherwise {
-        complexNum := numOfUop
-        for (i <- 0 until RenameWidth) {
-          validToRename(i) := Mux(complexNum > i.U, true.B, validSimple(i.U - complexNum) && notInfVec(i.U - complexNum) && io.readyFromRename(i))
-        }
-        readyToIBuf(0) := true.B
-        for (i <- 1 until DecodeWidth) {
-          readyToIBuf(i) := Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i - 1) && validSimple(i - 1) && io.readyFromRename(i), false.B)
-        }
-      }
-    }
-    is(ext) {
-      when(!io.validFromIBuf(0)) {
-        complexNum := 1.U
-        validToRename.map{ case dst => dst := false.B }
-        readyToIBuf.map{ case dst => dst := true.B }
-      }.elsewhen(uopRes > readyCounter) {
-        complexNum := Mux(readyCounter === 0.U, 1.U, readyCounter)
-        for (i <- 0 until RenameWidth) {
-          validToRename(i) := Mux(readyCounter > i.U, true.B, false.B)
-        }
-        readyToIBuf.map{ case dst => dst := false.B }
-      }.otherwise {
-        complexNum := uopRes
-        for (i <- 0 until RenameWidth) {
-          validToRename(i) := Mux(complexNum > i.U, true.B, validSimple(i.U - complexNum) && notInfVec(i.U - complexNum) && io.readyFromRename(i))
-        }
-        readyToIBuf(0) := true.B
-        for (i <- 1 until DecodeWidth) {
-          readyToIBuf(i) := Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i - 1) && validSimple(i - 1) && io.readyFromRename(i), false.B)
-        }
-      }
-    }
+  complexNum := Mux(io.validFromIBuf(0) && readyCounter.orR , 
+                    Mux(uopRes0 > readyCounter, readyCounter, uopRes0),
+                    1.U)
+  validToRename.zipWithIndex.foreach{
+    case(dst, i) =>
+      dst := MuxCase(false.B, Seq(
+        (io.validFromIBuf(0) && uopRes0 > readyCounter   ) -> Mux(readyCounter > i.U, true.B, false.B),
+        (io.validFromIBuf(0) && !(uopRes0 > readyCounter)) -> Mux(complexNum > i.U, true.B, validSimple(i.U - complexNum) && notInfVec(i.U - complexNum) && io.readyFromRename(i)),
+      ))
+  }
+
+  readyToIBuf.zipWithIndex.foreach {
+    case (dst, i) =>
+      dst := MuxCase(true.B, Seq(
+        (io.validFromIBuf(0) && uopRes0 > readyCounter) -> false.B,
+        (io.validFromIBuf(0) && !(uopRes0 > readyCounter)) -> (if (i==0) true.B else Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i - 1) && validSimple(i - 1) && io.readyFromRename(i), false.B)),
+      ))
   }
 
   io.deq.cf_ctrl := cf_ctrl

@@ -79,6 +79,7 @@ package object xiangshan {
     def mou          = "b01111".U // for amo, lr, sc, fence
 
     def vipu         = "b10000".U
+    def vialuF       = "b10001".U // for VIALU Fixed-Point instructions
     def vfpu         = "b11000".U
     def vldu         = "b11100".U
     def vstu         = "b11101".U
@@ -650,6 +651,7 @@ package object xiangshan {
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
   def vipuGen(p: Parameters) = new VIPU()(p)
+  def vialuFGen(p: Parameters) = new VIAluFix()(p)
   def vppuGen(p: Parameters) = new VPPU()(p)
   def vfpuGen(p: Parameters) = new VFPU()(p)
 
@@ -860,6 +862,17 @@ package object xiangshan {
     fastImplemented = true, //TODO: check
   )
 
+  val vialuFCfg = FuConfig(
+    name = "vialuF",
+    fuGen = vialuFGen,
+    fuSel = (uop: MicroOp) => FuType.vialuF === uop.ctrl.fuType,
+    fuType = FuType.vialuF,
+    numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false, writeVxsat = true,
+    numVecSrc = 4, writeVecRf = true,
+    fastUopOut = false, // TODO: check
+    fastImplemented = true, //TODO: check
+  )
+
   val vppuCfg = FuConfig(
     name = "vppu",
     fuGen = vppuGen,
@@ -887,7 +900,7 @@ package object xiangshan {
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg, vfpuCfg), Int.MaxValue, 0)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg, vfpuCfg, vialuFCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",
