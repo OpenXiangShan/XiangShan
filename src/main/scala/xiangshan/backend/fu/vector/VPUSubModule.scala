@@ -19,10 +19,118 @@ package xiangshan.backend.fu.vector
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.{XSModule}
 import xiangshan.backend.fu.{FunctionUnit}
+import xiangshan.{SelImm, SrcType}
+import utility._
+
+abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
+{
+  val vstart = IO(Input(UInt(XLEN.W)))
+  val vxrm = IO(Input(UInt(2.W)))
+  val vxsat = IO(Output(UInt(1.W)))
+  val needReverse = Wire(Bool())
+  val needClearMask = Wire(Bool())
+
+  // rename signal
+  val in = io.in.bits
+  val ctrl = in.uop.ctrl
+  val vtype = ctrl.vconfig.vtype
+
+  // for generate src1 and src2
+  val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
+  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm,
+             Mux(in.uop.ctrl.srcType(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0))))
+  val _vs2 = in.src(1)
+  // generate src1 and src2
+  val vs1 = Mux(needReverse, _vs2, _vs1)
+  val vs2 = Mux(needReverse, _vs1, _vs2)
+  val mask = Mux(needClearMask, 0.U, in.src(3))
+
+  // connect io
+  io.out.bits.uop := DontCare
+  io.in.ready := DontCare
+
+}
+
 
 abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
   val vstart = IO(Input(UInt(XLEN.W)))
+  val vxrm = IO(Input(UInt(2.W)))
+  val vxsat = IO(Output(UInt(1.W)))
+
+  val dataModule: VPUDataModule
+
+  def connectDataModule = {
+  // def some signal
+    val dataReg = Reg(io.out.bits.data.cloneType)
+    val dataWire = Wire(dataReg.cloneType)
+    val s_idle :: s_compute :: s_finish :: Nil = Enum(3)
+    val state = RegInit(s_idle)
+
+    val outValid = dataModule.io.out.valid
+    val outFire = dataModule.io.out.fire()
+
+  // reg input signal
+    val s0_uopReg = Reg(io.in.bits.uop.cloneType)
+    val inHs = io.in.fire()
+    when(inHs && state === s_idle){
+      s0_uopReg := io.in.bits.uop
+    }
+    dataReg := Mux(outValid, dataWire, dataReg)
+
+  // fsm
+    switch (state) {
+      is (s_idle) {
+        state := Mux(inHs, s_compute, s_idle)
+      }
+      is (s_compute) {
+        state := Mux(outValid, Mux(outFire, s_idle, s_finish),
+                              s_compute)
+      }
+      is (s_finish) {
+        state := Mux(io.out.fire(), s_idle, s_finish)
+      }
+    }
+
+  // connect VIAlu
+    dataWire := dataModule.io.out.bits.data
+    dataModule.io.in.bits <> io.in.bits
+    dataModule.io.redirectIn := DontCare  // TODO :
+    dataModule.vxrm := vxrm
+    dataModule.vstart := vstart
+    io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
+    io.out.bits.uop := s0_uopReg
+    vxsat := dataModule.vxsat
+
+    dataModule.io.in.valid := io.in.valid && state === s_idle
+    io.out.valid := state === s_compute && outValid || state === s_finish
+    dataModule.io.out.ready := io.out.ready
+    io.in.ready := state === s_idle
+  }
+}
+
+
+object VecImmExtractor {
+  def Imm_OPIVIS(imm: UInt): UInt = {
+    SignExt(imm(4,0), 8)
+  }
+  def Imm_OPIVIU(imm: UInt): UInt = {
+    ZeroExt(imm(4,0), 8)
+  }
+
+  def imm_sew(sew: UInt, imm: UInt): UInt = {
+    val _imm = SignExt(imm(7,0), 64)
+    LookupTree(sew(1,0), List(
+      "b00".U -> VecInit(Seq.fill(8)(_imm(7,0))).asUInt,
+      "b01".U -> VecInit(Seq.fill(4)(_imm(15,0))).asUInt,
+      "b10".U -> VecInit(Seq.fill(2)(_imm(31,0))).asUInt,
+      "b11".U -> _imm(63,0),
+    ))
+  }
+
+  def apply(immType: UInt, sew: UInt, imm: UInt): UInt = {
+    val _imm = Mux(immType === SelImm.IMM_OPIVIS, Imm_OPIVIS(imm), Imm_OPIVIU(imm))
+    imm_sew(sew, _imm(7,0))
+  }
 }

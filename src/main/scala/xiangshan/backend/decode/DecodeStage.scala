@@ -23,7 +23,6 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rename.RatReadPort
-import xiangshan.backend.decode.VectorConstants
 
 
 
