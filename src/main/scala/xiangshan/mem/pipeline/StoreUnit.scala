@@ -26,13 +26,14 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters}
+import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, MissReq}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
 class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
+    val sta_missQueue = Flipped(DecoupledIO(new MissReq))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
@@ -49,42 +50,48 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
     Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val use_flow_fromRS = io.in.valid
+  val use_flow_fromStaMissQueue = !use_flow_fromRS && io.sta_missQueue.valid
+  val fake_sta_missqueue_data = WireInit(0.U.asTypeOf(new ExuInput))
+  val fake_sta_missqueue_uop = fake_sta_missqueue_data.uop
 
-  io.dtlbReq.bits.vaddr := saddr
-  io.dtlbReq.valid := io.in.valid
+  io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
+  io.dtlbReq.valid := use_flow_fromRS || use_flow_fromStaMissQueue
   io.dtlbReq.bits.cmd := TlbCmd.write
-  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
+  io.dtlbReq.bits.size := Mux(use_flow_fromRS, LSUOpType.size(io.in.bits.uop.ctrl.fuOpType), 3.U)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := false.B
   io.dtlbReq.bits.memidx.is_st := true.B
-  io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
-  io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
+  io.dtlbReq.bits.memidx.idx := Mux(use_flow_fromRS, io.in.bits.uop.sqIdx.value, DontCare)
+  io.dtlbReq.bits.debug.robIdx := Mux(use_flow_fromRS, io.in.bits.uop.robIdx, DontCare)
   io.dtlbReq.bits.no_translate := false.B
-  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
-  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
+  io.dtlbReq.bits.debug.pc := Mux(use_flow_fromRS, io.in.bits.uop.cf.pc, DontCare)
+  io.dtlbReq.bits.debug.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
 
+  io.sta_missQueue.ready := io.out.ready && io.dcache.ready && !io.in.valid
   // not real dcache write
   // just a write intent
-  io.dcache.valid           := io.in.valid
+  io.dcache.valid           := use_flow_fromRS || use_flow_fromStaMissQueue
   io.dcache.bits.cmd        := MemoryOpConstants.M_PFW
-  io.dcache.bits.vaddr      := saddr
-  io.dcache.bits.mask       := genWmask(saddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.dcache.bits.vaddr      := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
+  io.dcache.bits.mask       := DontCare
   io.dcache.bits.instrtype  := DCACHE_PREFETCH_SOURCE.U
 
 
   io.out.bits := DontCare
-  io.out.bits.vaddr := saddr
+  io.out.bits.vaddr := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
 
   // Now data use its own io
   // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_sta_missqueue_uop)
   io.out.bits.miss := DontCare
-  io.out.bits.rsIdx := io.rsIdx
-  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
-  io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
-  io.out.valid := io.in.valid && io.dcache.fire
+  io.out.bits.rsIdx := Mux(use_flow_fromRS, io.rsIdx, DontCare)
+  io.out.bits.mask := Mux(use_flow_fromRS, genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0)), 3.U)
+  io.out.bits.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
+  io.out.bits.wlineflag := Mux(use_flow_fromRS, io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero, false.B)
+  io.out.bits.isHWPrefetch := use_flow_fromStaMissQueue
+  io.out.valid := (use_flow_fromRS || use_flow_fromStaMissQueue) && io.dcache.fire
   io.in.ready := io.out.ready && io.dcache.ready
   when(io.in.valid && io.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -98,7 +105,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
     "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
 
-  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := Mux(use_flow_fromRS, !addrAligned, false.B)
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -138,14 +145,14 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
 
   // st-ld violation dectect request.
-  io.reExecuteQuery.valid := io.in.valid && !s1_tlb_miss
+  io.reExecuteQuery.valid := io.in.valid && !s1_tlb_miss && !io.in.bits.isHWPrefetch
   io.reExecuteQuery.bits.robIdx := io.in.bits.uop.robIdx
   io.reExecuteQuery.bits.paddr := s1_paddr
   io.reExecuteQuery.bits.mask := io.in.bits.mask
 
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
-  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.valid := io.in.valid && !io.in.bits.isHWPrefetch
   io.rsFeedback.bits.hit := !s1_tlb_miss
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
@@ -168,7 +175,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
 
-  io.lsq.valid := io.in.valid
+  io.lsq.valid := io.in.valid && !io.in.bits.isHWPrefetch
   io.lsq.bits := io.out.bits
   io.lsq.bits.miss := s1_tlb_miss
 
@@ -190,6 +197,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("in_fire_first_issue", io.in.fire && io.in.bits.isFirstIssue)
   XSPerfAccumulate("tlb_miss", io.in.fire && s1_tlb_miss)
   XSPerfAccumulate("tlb_miss_first_issue", io.in.fire && s1_tlb_miss && io.in.bits.isFirstIssue)
+  XSPerfAccumulate("sta_prefetch_num", io.in.fire &&  io.in.bits.isHWPrefetch)
+  XSPerfAccumulate("normal_store_num", io.in.fire && !io.in.bits.isHWPrefetch)
 }
 
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
@@ -219,7 +228,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.atomic := io.in.bits.atomic || pmp.atomic
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
-  io.out.valid := io.in.valid && (!is_mmio || s2_exception)
+  io.out.valid := io.in.valid && (!is_mmio || s2_exception) && !io.in.bits.isHWPrefetch
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
@@ -246,6 +255,7 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
+    val sta_missQueue = Flipped(DecoupledIO(new MissReq))
     val redirect = Flipped(ValidIO(new Redirect))
     val dcache = new DCacheStoreIO
     val feedbackSlow = ValidIO(new RSFeedback)
@@ -271,6 +281,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.dcache <> io.dcache.req
+  store_s0.io.sta_missQueue <> io.sta_missQueue
   io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
@@ -289,7 +300,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.storeMaskOut.bits.sqIdx := store_s0.io.out.bits.uop.sqIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss
+  io.issue.valid := store_s1.io.in.valid && !store_s1.io.dtlbResp.bits.miss && !store_s1.io.in.bits.isHWPrefetch
   io.issue.bits := RegEnable(store_s0.io.in.bits, store_s0.io.in.valid)
 
   store_s1.io.dtlbResp <> io.tlb.resp
@@ -310,7 +321,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s3.io.stout <> io.stout
 
   io.debug_ls := DontCare
-  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
+  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !store_s1.io.in.bits.isHWPrefetch
   io.debug_ls.s1_robIdx := store_s1.io.in.bits.uop.robIdx.value
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {

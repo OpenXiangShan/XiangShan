@@ -32,6 +32,10 @@ import utility.FastArbiter
 import mem.{AddPipelineReg}
 import mem.trace._
 
+class MissEntryReleaseInfo(implicit p: Parameters) extends DCacheBundle {
+  val paddr = UInt(PAddrBits.W)
+}
+
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
   val cmd = UInt(M_SZ.W)
@@ -168,6 +172,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
+
+    val release_in_next_cycle = Output(Bool())
+    val paddr = Output(UInt(PAddrBits.W))
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -229,6 +236,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   when (release_entry && req_valid) {
     req_valid := false.B
   }
+  io.release_in_next_cycle := release_entry && req_valid
+  io.paddr := req.addr
 
   when (!s_write_storedata && req_valid) {
     // store data will be write to miss queue entry 1 cycle after req.fire()
@@ -613,6 +622,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
     val l2_pf_store_only = Input(Bool())
+
+    // Give paddr out when Release a entry
+    val entry_release_info = Valid(new MissEntryReleaseInfo)
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -702,6 +714,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       io.debug_early_replace(i) := e.io.debug_early_replace
   }
 
+  val release_in_next_cycle_vec = VecInit(entries.map(_.io.release_in_next_cycle))
+  val paddr_vec = VecInit(entries.map(_.io.paddr))
+  io.entry_release_info.valid := release_in_next_cycle_vec.asUInt.orR
+  io.entry_release_info.bits.paddr := Mux1H(release_in_next_cycle_vec, paddr_vec)
+
+  assert(PopCount(release_in_next_cycle_vec) <= 1.U, "release 2 or more mshr in a same cycle")
+
   io.req.ready := accept
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
@@ -754,6 +773,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   // Perf count
   XSPerfAccumulate("miss_req", io.req.fire())
+  XSPerfAccumulate("miss_req_uncancel", io.req.fire() && !io.req.bits.cancel)
+  XSPerfAccumulate("store_prefetch_num", io.req.fire() && !io.req.bits.cancel && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
   XSPerfAccumulate("miss_req_allocate", io.req.fire() && alloc)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_reject_load", io.req.valid && reject && io.req.bits.isFromLoad)

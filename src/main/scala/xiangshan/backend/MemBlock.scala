@@ -468,6 +468,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt)(i)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
 
+    // always replay to port 0
+    // TODO: maybe use both pipe lines?
+    if(i == 0) {
+      stu.io.sta_missQueue <> dcache.io.lsu.sta_missQueue
+    }else {
+      stu.io.sta_missQueue.valid := false.B
+      stu.io.sta_missQueue.bits := DontCare
+    }
+
     // store unit does not need fast feedback
     io.rsfeedback(i).feedbackFast := DontCare
 

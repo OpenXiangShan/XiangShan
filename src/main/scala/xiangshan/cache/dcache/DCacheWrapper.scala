@@ -640,6 +640,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
   val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
   val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+  val sta_missQueue = DecoupledIO(new MissReq)
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -702,12 +703,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
-  // val atomicsReplayUnit = Module(new AtomicsReplayEntry)
-  val mainPipe   = Module(new MainPipe)
-  val refillPipe = Module(new RefillPipe)
-  val missQueue  = Module(new MissQueue(edge))
-  val probeQueue = Module(new ProbeQueue(edge))
-  val wb         = Module(new WritebackQueue(edge))
+  val staMissQueue = Module(new StorePrefetchMissQueue)
+  val mainPipe     = Module(new MainPipe)
+  val refillPipe   = Module(new RefillPipe)
+  val missQueue    = Module(new MissQueue(edge))
+  val probeQueue   = Module(new ProbeQueue(edge))
+  val wb           = Module(new WritebackQueue(edge))
 
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
@@ -861,7 +862,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Sta pipe
   for (w <- 0 until StorePipelineWidth) {
     stu(w).io.lsu <> io.lsu.sta(w)
+    staMissQueue.io.enq(w) <> stu(w).io.to_store_pf_miss_queue
   }
+
+  staMissQueue.io.mshr_release_info <> missQueue.io.entry_release_info
+  staMissQueue.io.deq <> io.lsu.sta_missQueue
 
   //----------------------------------------
   // atomics
@@ -874,6 +879,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // miss queue
+  // load pipe * 2 + main pipe * 1 + store pipe * 2
   val MissReqPortCount = LoadPipelineWidth + 1 + StorePipelineWidth
   val MainPipeMissReqPort = 0
 

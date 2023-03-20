@@ -22,7 +22,6 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
-import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
 
 class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
@@ -70,8 +69,11 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPe
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
-    // send miss request to miss queue
+    // send miss request to dcache miss queue
     val miss_req = DecoupledIO(new MissReq)
+
+    // send dcache unhandled miss request to store prefetch miss queue
+    val to_store_pf_miss_queue = DecoupledIO(new MissReq)
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -183,6 +185,9 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPe
   io.lsu.resp.bits.replay := !io.miss_req.fire
   // TODO: consider tag error
   io.lsu.resp.bits.tag_error := false.B
+
+  io.to_store_pf_miss_queue.valid := s2_valid && !s2_hit && !io.lsu.s2_kill && io.lsu.resp.bits.replay
+  io.to_store_pf_miss_queue.bits  := io.miss_req.bits
 
   /** 
     * update replacer when hited
