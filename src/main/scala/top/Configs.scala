@@ -52,6 +52,172 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
 // * L1 cache included
 // * L2 cache NOT included
 // * L3 cache included
+class TutorialConfig(n: Int = 1) extends Config(
+  new BaseConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(
+      _.copy(
+        DecodeWidth = 2,
+        RenameWidth = 2,
+        CommitWidth = 2,
+        FetchWidth = 4,
+        IssQueSize = 8,
+        NRPhyRegs = 48,
+        LoadQueueSize = 16,
+        LoadQueueNWriteBanks = 4,
+        StoreQueueSize = 12,
+        StoreQueueNWriteBanks = 4,
+        RobSize = 24,
+        FtqSize = 8,
+        IBufSize = 8,
+        StoreBufferSize = 4,
+        StoreBufferThreshold = 3,
+        UbtbSize = 8,
+        FtbSize = 32,
+        RasSize = 16,
+        FtbWays = 4,
+        TageTableInfos =
+        //       Sets  Hist   Tag
+          // Seq(( 2048,    2,    8),
+          //     ( 2048,    9,    8),
+          //     ( 2048,   13,    8),
+          //     ( 2048,   20,    8),
+          //     ( 2048,   26,    8),
+          //     ( 2048,   44,    8),
+          //     ( 2048,   73,    8),
+          //     ( 2048,  256,    8)),
+          Seq(( 512,    8,    8),
+              ( 512,   13,    8)),
+        ITTageTableInfos =
+        //      Sets  Hist   Tag
+          Seq(( 256,    4,    9),
+              ( 256,    8,    9)),
+        dpParams = DispatchParameters(
+          IntDqSize = 4,
+          FpDqSize = 4,
+          LsDqSize = 4,
+          IntDqDeqWidth = 3,
+          FpDqDeqWidth = 3,
+          LsDqDeqWidth = 3
+        ),
+        exuParameters = ExuParameters(
+          JmpCnt = 1,
+          AluCnt = 2,
+          MulCnt = 0,
+          MduCnt = 1,
+          FmacCnt = 1,
+          FmiscCnt = 1,
+          FmiscDivSqrtCnt = 0,
+          LduCnt = 2,
+          StuCnt = 2
+        ),
+        icacheParameters = ICacheParameters(
+          nSets = 8, // 16KB ICache
+          tagECC = Some("parity"),
+          dataECC = Some("parity"),
+          replacer = Some("setplru"),
+          nMissEntries = 2,
+          nReleaseEntries = 1,
+          nProbeEntries = 2,
+          nPrefetchEntries = 2,
+          hasPrefetch = false
+        ),
+        dcacheParametersOpt = Some(DCacheParameters(
+          nSets = 8, // 32KB DCache
+          nWays = 2,
+          tagECC = Some("secded"),
+          dataECC = Some("secded"),
+          replacer = Some("setplru"),
+          nMissEntries = 2,
+          nProbeEntries = 2,
+          nReleaseEntries = 4,
+        )),
+        EnableBPD = false, // disable TAGE
+        EnableLoop = false,
+        itlbParameters = TLBParameters(
+          name = "itlb",
+          fetchi = true,
+          useDmode = false,
+          normalReplacer = Some("plru"),
+          superReplacer = Some("plru"),
+          normalNWays = 4,
+          normalNSets = 1,
+          superNWays = 2
+        ),
+        ldtlbParameters = TLBParameters(
+          name = "ldtlb",
+          normalNSets = 16, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          superNWays = 2,
+          normalAsVictim = true,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
+        sttlbParameters = TLBParameters(
+          name = "sttlb",
+          normalNSets = 16, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 2,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
+        pftlbParameters = TLBParameters(
+          name = "pftlb",
+          normalNSets = 16, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 2,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
+        btlbParameters = TLBParameters(
+          name = "btlb",
+          normalNSets = 1,
+          normalNWays = 4,
+          superNWays = 2
+        ),
+        l2tlbParameters = L2TLBParameters(
+          l1Size = 4,
+          l2nSets = 4,
+          l2nWays = 4,
+          l3nSets = 4,
+          l3nWays = 8,
+          spSize = 2,
+        ),
+        L2CacheParamsOpt = None, // remove L2 Cache
+        prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
+      )
+    )
+    case SoCParamsKey =>
+      val tiles = site(XSTileKey)
+      up(SoCParamsKey).copy(
+        L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+          sets = 64,
+          inclusive = false,
+          clientCaches = tiles.map{ p =>
+            CacheParameters(
+              "dcache",
+              sets = 2 * p.dcacheParametersOpt.get.nSets,
+              ways = p.dcacheParametersOpt.get.nWays + 2,
+              blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets),
+              aliasBitsOpt = None
+            )
+          },
+          simulation = !site(DebugOptionsKey).FPGAPlatform
+        )),
+        L3NBanks = 1
+      )
+  })
+)
 class MinimalConfig(n: Int = 1) extends Config(
   new BaseConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(
