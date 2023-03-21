@@ -130,6 +130,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val io = IO(new VlflowQueueIOBundle())
   println("LoadFlowQueue: size:" + VlFlowSize)
 
+  dontTouch(io.loadRegIn)
   // TODO: merge these to an FlowQueue Entry?
   val flow_entry       = Reg(Vec(2, Vec(VlFlowSize, new VlflowBundle)))
   val flow_entry_valid = RegInit(VecInit(Seq.fill(2)(VecInit(Seq.fill(VlFlowSize)(false.B)))))
@@ -156,11 +157,10 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
 
     for(i <- 0 until exuParameters.LduCnt){
-    // TODO: Why ===, Should be =/= ?
-    //  Should be confirmed
-    needAlloc(i)    := !flow_entry.map(_.map(_.uop.robIdx.value === io.loadRegIn(i).bits.uop.robIdx.value).reduce(_ || _)).reduce(_ || _) && io.loadRegIn(i).valid
+      needAlloc(i)  := !(0 until 2).map(j => (0 until VlFlowSize).map(entry =>
+        flow_entry(j)(entry).uop.robIdx.value === io.loadRegIn(i).bits.uop.robIdx.value && flow_entry_valid(j)(entry)).reduce(_||_)).reduce(_||_) && io.loadRegIn(i).valid
     loadInstDec(i)  := LoadInstDec(i).apply(io.loadRegIn(i).bits.uop.cf.instr)
-    dataWidth(i)    := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)
+    dataWidth(i)    := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)//TODO: for index inst need modify
     vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(3,0)
     vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(4,0)
     vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(5,0)
@@ -207,11 +207,13 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
             flow_entry(i)(index(i)).rob_idx(0)           := startRobIdx(i) + j.U
             flow_entry(i)(index(i)).offset(0)            := vaddr(i)(3,0)
             flow_entry(i)(index(i)).reg_offset(0)        := 0.U
-          }.otherwise {
-            flow_entry(i)(index(i)).rob_idx_valid(0)     := cross128(i)
-            flow_entry(i)(index(i)).rob_idx(0)           := startRobIdx(i) + j.U - cross128(i).asUInt
-            flow_entry(i)(index(i)).offset(0)            := 0.U
-            flow_entry(i)(index(i)).reg_offset(0)        := 16.U - genVecAddr(baseAddr(i),"b000001".U,(j.U-1.U))(3,0)
+          }.elsewhen(j.U === realFlowNum(i) - 1.U && !cross128(i)) {
+            flow_entry(i)(index(i)).rob_idx_valid(0)     := true.B
+            flow_entry(i)(index(i)).rob_idx(0)           := startRobIdx(i) + j.U
+            flow_entry(i)(index(i)).offset(0)            := vaddr(i)(3,0)
+            flow_entry(i)(index(i)).reg_offset(0)        := 0.U
+          }.elsewhen(j.U === realFlowNum(i) - 1.U && cross128(i)) {
+            flow_entry(i)(index(i)).rob_idx_valid(0)     := false.B
           }
 
           when (j.U =/= 0.U) {
@@ -219,6 +221,8 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
             flow_entry(i)(index(i)).rob_idx(1)           := startRobIdx(i) + j.U - cross128(i).asUInt
             flow_entry(i)(index(i)).offset(1)            := 0.U
             flow_entry(i)(index(i)).reg_offset(1)        := 16.U - genVecAddr(baseAddr(i),"b000001".U,(j.U-1.U))(3,0)
+          }.elsewhen(j.U === 0.U) {
+            flow_entry(i)(index(i)).rob_idx_valid(1)     := false.B
           }
         }
       }

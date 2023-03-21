@@ -46,7 +46,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
   val way_en = Bits(DCacheWays.W)
   val addr = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
-  val rlineflag = Bool()
+  //val rlineflag = Bool()
 }
 
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
