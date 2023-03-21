@@ -161,11 +161,12 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
         flow_entry(j)(entry).uop.robIdx.value === io.loadRegIn(i).bits.uop.robIdx.value && flow_entry_valid(j)(entry)).reduce(_||_)).reduce(_||_) && io.loadRegIn(i).valid
     loadInstDec(i)  := LoadInstDec(i).apply(io.loadRegIn(i).bits.uop.cf.instr)
     dataWidth(i)    := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)//TODO: for index inst need modify
-    vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(3,0)
-    vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(4,0)
-    vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(5,0)
-    vend_3(i)       := baseAddr(i)(6,0) + dataWidth(i)(6,0)
+    vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(3,0) - 1.U
+    vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(4,0) - 1.U
+    vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(5,0) - 1.U
+    vend_3(i)       := baseAddr(i)(6,0) + dataWidth(i)(6,0) - 1.U
     flowWriteNumber(i) := Mux(vend_3(i)(7) === 1.U, vend_3(i)(7,4), Mux(vend_2(i)(6) === 1.U, vend_2(i)(6,4), Mux(vend_1(i)(5) === 1.U, vend_1(i)(5,4), vend_0(i)(4))))
+      //TODO:******************
   }
 
   val enqPtr = RegInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new VlflowPtr))))
@@ -174,13 +175,13 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   for(i <- 0 until LoadPipelineWidth) {
     baseAddr(i)     := io.loadRegIn(i).bits.baseaddr
     cross128(i)     := baseAddr(i)(3, 0) =/= 0.U(4.W)
-    realFlowNum(i)  := flowWriteNumber(i).asUInt + cross128(i)
+    realFlowNum(i)  := flowWriteNumber(i).asUInt + 1.U
     enqPtr(i).value := enqPtr(i).value + realFlowNum(i)
   }
 
   for(i <- 0 until exuParameters.LduCnt) {
-    validCount(i) := distanceBetween(enqPtr(i), deqPtr(i))
-    allowEnqueue(i) := validCount(i) >= 16.U
+    validCount(i) := PopCount(flow_entry_valid(i))
+    allowEnqueue(i) := validCount(i) <= 16.U
     io.loadRegIn(i).ready := allowEnqueue(i)
   }
 
