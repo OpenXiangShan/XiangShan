@@ -102,6 +102,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
     // store miss go to miss queue
     val miss_req = DecoupledIO(new MissReq)
+    val miss_resp = Input(new MissResp) // miss resp is used to support plru update
     // store buffer
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
@@ -1544,9 +1545,45 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.wb.bits.delay_release := s3_req_replace_dup_for_wb_valid
   io.wb.bits.miss_id := s3_req.miss_id
 
-  io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe)
-  io.replace_access.bits.set := s2_idx_dup_for_replace_access
-  io.replace_access.bits.way := RegNext(OHToUInt(s1_way_en))
+  // update plru in main pipe s3
+  if (!cfg.updateReplaceOn2ndmiss) {
+  // replacement is only updated on 1st miss
+    io.replace_access.valid := RegNext(
+      // generated in mainpipe s1
+      RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
+      // generated in mainpipe s2
+      Mux(
+        io.miss_req.valid, 
+        !io.miss_resp.merged && io.miss_req.ready, // if store miss, only update plru for the first miss
+        true.B // normal store access
+      )
+    )
+    io.replace_access.bits.set := RegNext(s2_idx_dup_for_replace_access)
+    io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_way_en)))
+  } else {
+    // replacement is updated on both 1st and 2nd miss
+    // timing is worse than !cfg.updateReplaceOn2ndmiss
+    io.replace_access.valid := RegNext(
+      // generated in mainpipe s1
+      RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
+      // generated in mainpipe s2
+      Mux(
+        io.miss_req.valid, 
+        io.miss_req.ready, // if store miss, do not update plru if that req needs to be replayed
+        true.B // normal store access
+      )
+    )
+    io.replace_access.bits.set := RegNext(s2_idx_dup_for_replace_access)
+    io.replace_access.bits.way := RegNext(
+      Mux(
+        io.miss_req.valid && io.miss_resp.merged,
+        // miss queue 2nd fire: access replace way selected at miss queue allocate time
+        OHToUInt(io.miss_resp.repl_way_en),
+        // new selected replace way or hit way
+        RegNext(OHToUInt(s1_way_en))
+      )
+    )
+  }
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx_dup_for_replace_way

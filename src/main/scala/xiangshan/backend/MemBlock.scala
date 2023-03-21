@@ -285,7 +285,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
     io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.entry.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
+      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -312,10 +312,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
-  val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-  pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
-    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt)
-  dtlb.map(_.ptw_replenish := pmp_check_ptw.io.resp)
+  for (i <- 0 until 8) {
+    val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
+    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
+      Cat(io.ptw.resp.bits.data.entry.ppn, io.ptw.resp.bits.data.ppn_low(i), 0.U(12.W)).asUInt)
+    dtlb.map(_.ptw_replenish(i) := pmp_check_ptw.io.resp)
+  }
 
   val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
