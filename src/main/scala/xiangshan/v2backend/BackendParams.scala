@@ -297,7 +297,7 @@ case class SchdBlockParams(
 
   def numPcReadPort = {
     val bjIssueQueues = issueBlockParams.filter(x => (x.JmpCnt + x.BrhCnt + x.FenceCnt) > 0)
-    bjIssueQueues.map(x => x.numEnq).sum
+    if(bjIssueQueues.map(x => x.numEnq).sum > 0) numUopIn else 0
   }
   def needSrcFrm: Boolean = issueBlockParams.map(_.needSrcFrm).reduce(_ || _)
 

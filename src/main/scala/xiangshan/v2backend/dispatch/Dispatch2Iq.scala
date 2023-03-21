@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utility.SelectOne
 import utils._
 import xiangshan._
 import xiangshan.backend.rename.BusyTableReadIO
@@ -147,9 +148,34 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     }
   }
 
+
+  val outReadyMatrix = Wire(Vec(io.out.size, Vec(numInPorts, Bool())))
+  outReadyMatrix.foreach(_.foreach(_ := false.B))
+
   uopsIn <> io.in
-  uopsIn(0).ready := io.out.map(_(0).ready).reduce(_ && _) // Todo: more port
-  uopsIn.slice(1, io.in.size).foreach(_.ready := false.B)
+  uopsIn.foreach(_.ready := false.B)
+
+  for ((outs, iqIdx) <- io.out.zipWithIndex) {
+
+    val startIdx = io.out.take(iqIdx).map(_.size).sum
+    val canAccept = canAcceptMatrix(startIdx).zip(io.in).map{ case (canAccept, in) => canAccept && in.valid}
+
+    val select = SelectOne("naive", canAccept, outs.size)
+    for (j <- 0 until outs.size) {
+      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+      // 1 in uop can only route to one out port
+      outs(j).valid := selectValid
+      outs(j).bits := Mux1H(selectIdxOH, uopsIn.map(_.bits))
+
+      outReadyMatrix(iqIdx).zip(selectIdxOH).foreach { case (inReady, v) =>
+        when(v) {
+          inReady := outs(j).ready
+        }
+      }
+    }
+  }
+
+  uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
@@ -159,33 +185,13 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     io.readIntState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
   }
 
-  val intSrcStateVec = Wire(Vec(uopsIn.size, Vec(numIntSrc, SrcState())))
 
   // srcState is read from outside and connected directly
   if (io.readIntState.isDefined) {
-    io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
+    val intSrcStateVec = uopsIn.flatMap(_.bits.srcState.take(numIntSrc))
+    io.readIntState.get.map(_.resp).zip(intSrcStateVec).foreach(x => x._2 := x._1)
   }
 
-  var outIdx = 0
-  for ((iqPort, iqIdx) <- io.out.zipWithIndex) {
-    for ((port, portIdx) <- iqPort.zipWithIndex) {
-      if (portIdx > 0) {
-        port.valid := false.B
-      }
-      else {
-        port.valid := uopsIn(0).valid && canAcceptMatrix(outIdx)(0) // Todo: more
-        port.bits := Mux(port.valid, uopsIn(0).bits, 0.U.asTypeOf(port.bits))
-        for (i <- port.bits.srcState.indices) {
-          if (i < numIntSrc) {
-            port.bits.srcState(i) := Mux(port.valid, intSrcStateVec(0)(i), 0.U.asTypeOf(port.bits.srcState(i)))
-          } else {
-            port.bits.srcState(i) := false.B
-          }
-        }
-      }
-      outIdx += 1
-    }
-  }
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire", PopCount(io.in.map(_.fire)))
