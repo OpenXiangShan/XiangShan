@@ -203,7 +203,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   enqPolicy match { case ep =>
     ep.io.valid     := validVec.asUInt
-    s0_enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid).zip(s0_enqValidVec).map { case(sel, enqValid) => enqValid && sel}
+    s0_enqSelValidVec  := ep.io.enqSelOHVec.map(oh => oh.valid).zip(s0_enqValidVec).zip(io.enq).map { case((sel, enqValid), enq) => enqValid && sel && enq.ready}
     s0_enqSelOHVec     := ep.io.enqSelOHVec.map(oh => oh.bits)
   }
 
@@ -329,7 +329,8 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
     pcArrayIO.write.zipWithIndex.foreach { case (w, i) =>
       w.en := s0_doEnqSelValidVec(i)
       w.addr := s0_enqSelOHVec(i)
-      w.data := io.enqJmp.get(i).pc
+//      w.data := io.enqJmp.get(i).pc
+      w.data := io.enq(i).bits.pc
     }
   }
 

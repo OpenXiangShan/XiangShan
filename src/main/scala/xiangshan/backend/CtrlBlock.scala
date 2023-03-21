@@ -394,6 +394,16 @@ class CtrlBlockImp(
     jumpPcVec(i) := pcMem.io.rdata(i).getPc(RegNext(intDq.io.deqNext(i).ftqOffset))
   }
 
+  val dqOuts = Seq(io.toIssueBlock.intUops) ++ Seq(io.toIssueBlock.vfUops) ++ Seq(io.toIssueBlock.memUops)
+  dqOuts.zipWithIndex.foreach { case (dqOut, dqIdx) =>
+    dqOut.map(_.bits.pc).zipWithIndex.map{ case (pc, portIdx) =>
+      if(params.allSchdParams(dqIdx).numPcReadPort > 0){
+        val realJumpPcVec = jumpPcVec.drop(params.allSchdParams.take(dqIdx).map(_.numPcReadPort).sum).take(params.allSchdParams(dqIdx).numPcReadPort)
+        pc := realJumpPcVec(portIdx)
+      }
+    }
+  }
+
   private val newestTarget: UInt = io.frontend.fromFtq.newest_entry_target
   for (i <- 0 until numTargetMemRead) {
     val targetPtr = intDq.io.deqNext(i).ftqPtr
