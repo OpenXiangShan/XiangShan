@@ -453,13 +453,15 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       stateReg := Mux(io.validFromIBuf(0) && (numOfUop > readyCounter) && (readyCounter =/= 0.U), ext, normal)
     }
     is(ext) {
-      stateReg := Mux(io.validFromIBuf(0) && (uopRes > readyCounter) && (readyCounter =/= 0.U), ext, normal)
+      stateReg := Mux(io.validFromIBuf(0) && (uopRes > readyCounter), ext, normal)
     }
   }
 
   val uopRes0 = Mux(stateReg === normal, numOfUop, uopRes)
-  uopRes := Mux(io.validFromIBuf(0) && (readyCounter =/= 0.U) && (uopRes0 > readyCounter),
-            uopRes0 - readyCounter, 0.U)
+  val uopResJudge = Mux(stateReg === normal,
+                        io.validFromIBuf(0) && (readyCounter =/= 0.U) && (uopRes0 > readyCounter),
+                        io.validFromIBuf(0) && (uopRes0 > readyCounter))
+  uopRes := Mux(uopResJudge, uopRes0 - readyCounter, 0.U)
 
   for(i <- 0 until RenameWidth) {
     cf_ctrl(i) := MuxCase(csBundle(i), Seq(
