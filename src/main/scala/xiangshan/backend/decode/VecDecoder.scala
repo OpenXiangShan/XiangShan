@@ -360,7 +360,7 @@ object VecDecoder extends DecodeConstants {
     VREMU_VX       -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
 
     VSLIDE1DOWN_VX -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
-    VSLIDE1UP_VX   -> OPMVX(F, FuType.vipu, VipuType.dummy, F, T, F),
+    VSLIDE1UP_VX   -> OPMVX(T, FuType.vipu, VipuType.vslide1up, F, T, F, UopDivType.VEC_SLIDE1UP),
     VWADD_VX       -> OPMVX(F, FuType.vialuF, VialuFixType.vwadd_vv, F, T, F, UopDivType.VEC_VXW),
     VWADD_WX       -> OPMVX(F, FuType.vialuF, VialuFixType.vwadd_wv, F, T, F, UopDivType.VEC_WXW),
     VWADDU_VX      -> OPMVX(F, FuType.vialuF, VialuFixType.vwaddu_vv, F, T, F, UopDivType.VEC_VXW),
