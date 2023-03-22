@@ -188,7 +188,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val lfsrc_intloadFirstIssue_select = lfsrc_intloadFirstIssue_ready && lfsrc2_intloadFirstIssue_valid
   val lfsrc_vecloadFirstIssue_select = lfsrc_vecloadFirstIssue_ready && lfsrc3_vecloadFirstIssue_valid
   val lfsrc_l2lForward_select = lfsrc_l2lForward_ready && lfsrc4_l2lForward_valid
-  assert(!lfsrc_vecloadFirstIssue_select) // to be added
+  //assert(!lfsrc_vecloadFirstIssue_select) // TODO: to be added
   dontTouch(lfsrc_loadReplay_select)
   dontTouch(lfsrc_hwprefetch_select)
   dontTouch(lfsrc_intloadFirstIssue_select)
@@ -1124,7 +1124,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Load queue will be updated at s2 for both hit/miss int/fp load
   val s3_loadOutBits = RegEnable(load_s2.io.out.bits, s2_loadOutValid)
   val s3_loadOutValid = RegNext(s2_loadOutValid) && !RegNext(load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.lsq.loadIn.valid := s3_loadOutValid && !s3_loadOutBits.vec128bit
+  io.lsq.loadIn.valid := s3_loadOutValid
   io.lsq.loadIn.bits := s3_loadOutBits
 
   // DANGEROUS: Don't change sequence here
@@ -1172,7 +1172,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     //  4. Data contains.
     io.reExecuteQuery(w).valid &&
     isAfter(s3_loadOutBits.uop.robIdx, io.reExecuteQuery(w).bits.robIdx) &&
-    (s3_loadOutBits.paddr(PAddrBits-1,3) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 3)) &&
+    (s3_loadOutBits.paddr(PAddrBits-1,4) === io.reExecuteQuery(w).bits.paddr(PAddrBits-1, 4)) &&
     (s3_loadOutBits.mask & io.reExecuteQuery(w).bits.mask).orR)).asUInt.orR && !s3_loadOutBits.tlbMiss
 
   // write to rob and writeback bus
@@ -1272,7 +1272,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.loadOut.bits.data := Mux(hitLoadOut.valid, s3_rdataPartialLoadDcache, s3_rdataPartialLoadLQ)
   io.loadOut.valid := (hitLoadOut.valid  ||
                     io.lsq.loadOut.valid && !io.lsq.loadOut.bits.uop.robIdx.needFlush(io.redirect) && !hitLoadOut.valid) &&
-                    !load_s2.io.out.bits.vec128bit
+                    !s3_loadOutBits.vec128bit
 
   io.VecloadOut.bits := DontCare
   io.VecloadOut.valid := s3_loadOutValid && s3_loadOutBits.vec128bit

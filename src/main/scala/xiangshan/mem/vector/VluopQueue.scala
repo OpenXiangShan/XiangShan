@@ -139,7 +139,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
     }.elsewhen( enq_valid(0) && enq_valid(1) &&
       io.loadRegIn(0).bits.uop.robIdx.value - io.loadRegIn(0).bits.inner_idx =/= io.loadRegIn(1).bits.uop.robIdx.value - io.loadRegIn(1).bits.inner_idx) {
       enqPtr.value := enqPtr.value + io.loadRegIn(0).bits.total_num + io.loadRegIn(1).bits.total_num
-      printf(p"##################################\n")
+      //printf(p"##################################\n")
       for (i <- 0 until 8) {
         when (i.U < io.loadRegIn(0).bits.total_num) {
           val inUop = WireInit(io.loadRegIn(0).bits)
@@ -151,10 +151,10 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
           when (i.U === io.loadRegIn(0).bits.inner_idx) {
             allocated(enqPtr.value + i.U) := true.B
           }
-          printf(p"***************************************\n")
-          printf(p"totalNum = ${io.loadRegIn(0).bits.total_num}\n")
-          printf(p"robIdx = ${io.loadRegIn(0).bits.uop.robIdx.value}, innerIdx = ${io.loadRegIn(0).bits.inner_idx}, i = ${i.U}, res = ${inUop.uop.robIdx.value}\n")
-          printf(p"ptr = ${enqPtr.value + i.U}\n")
+          //printf(p"***************************************\n")
+          //printf(p"totalNum = ${io.loadRegIn(0).bits.total_num}\n")
+          //printf(p"robIdx = ${io.loadRegIn(0).bits.uop.robIdx.value}, innerIdx = ${io.loadRegIn(0).bits.inner_idx}, i = ${i.U}, res = ${inUop.uop.robIdx.value}\n")
+          //printf(p"ptr = ${enqPtr.value + i.U}\n")
         }
       }
 
@@ -169,10 +169,10 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
           when (i.U === io.loadRegIn(1).bits.inner_idx) {
             allocated(enqPtr.value + io.loadRegIn(0).bits.total_num + i.U) := true.B
           }
-          printf(p"++++++++++++++++++++++++++++\n")
-          printf(p"totalNum = ${io.loadRegIn(1).bits.total_num}\n")
-          printf(p"robIdx = ${io.loadRegIn(1).bits.uop.robIdx.value}, innerIdx = ${io.loadRegIn(1).bits.inner_idx}, i = ${i.U}, res = ${inUop.uop.robIdx.value}\n")
-          printf(p"ptr = ${enqPtr.value + io.loadRegIn(0).bits.total_num + i.U}\n")
+          //printf(p"++++++++++++++++++++++++++++\n")
+          //printf(p"totalNum = ${io.loadRegIn(1).bits.total_num}\n")
+          //printf(p"robIdx = ${io.loadRegIn(1).bits.uop.robIdx.value}, innerIdx = ${io.loadRegIn(1).bits.inner_idx}, i = ${i.U}, res = ${inUop.uop.robIdx.value}\n")
+          //printf(p"ptr = ${enqPtr.value + io.loadRegIn(0).bits.total_num + i.U}\n")
         }
       }
     } .elsewhen (enq_valid(0) && !enq_valid(1)) {

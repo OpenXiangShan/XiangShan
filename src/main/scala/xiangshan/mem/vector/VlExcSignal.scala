@@ -69,7 +69,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
         //loadRegIn(0).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
         //loadRegIn(0).index     := LFSR64(seed = Some(12L))(63,0)
         //loadRegIn(0).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := 4.U
+        loadRegIn(0).lmul      := "b010".U
         //loadRegIn(0).sew       := LFSR64(seed = Some(41L))(1,0)
         //loadRegIn(0).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
         //loadRegIn(0).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -91,7 +91,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
         //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
         //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
         //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := 4.U
+        loadRegIn(0).lmul      := "b010".U
         //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
         //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
         //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -111,7 +111,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
         //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
         //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
         //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := 4.U
+        loadRegIn(0).lmul      := "b010".U
         //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
         //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
         //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -131,7 +131,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
         //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
         //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
         //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := 4.U
+        loadRegIn(0).lmul      := "b010".U
         //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
         //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
         //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -161,7 +161,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
       //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
       //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-      loadRegIn(1).lmul      := 4.U
+      loadRegIn(1).lmul      := "b010".U
       //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
       //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
       //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -183,7 +183,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
       //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
       //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-      loadRegIn(1).lmul      := 4.U
+      loadRegIn(1).lmul      := "b010".U
       //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
       //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
       //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -203,7 +203,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
       //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
       //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-      loadRegIn(1).lmul      := 4.U
+      loadRegIn(1).lmul      := "b010".U
       //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
       //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
       //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
@@ -223,7 +223,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
       //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
       //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-      loadRegIn(1).lmul      := 4.U
+      loadRegIn(1).lmul      := "b010".U
       //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
       //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
       //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
