@@ -558,29 +558,30 @@ package object xiangshan {
   }
 
   object UopDivType {
-    def SCA_SIM        = "b00000".U // 
-    def DIR            = "b10001".U // dirty: vset
-    def VEC_VVV        = "b10010".U // VEC_VVV
-    def VEC_VXV        = "b10011".U // VEC_VXV
-    def VEC_0XV        = "b10100".U // VEC_0XV
-    def VEC_VVW        = "b10101".U // VEC_VVW
-    def VEC_WVW        = "b10110".U // VEC_WVW
-    def VEC_VXW        = "b10111".U // VEC_VXW
-    def VEC_WXW        = "b11000".U // VEC_WXW
-    def VEC_WVV        = "b11001".U // VEC_WVV
-    def VEC_WXV        = "b11010".U // VEC_WXV
-    def VEC_EXT2       = "b11011".U // VF2 0 -> V
-    def VEC_EXT4       = "b11100".U // VF4 0 -> V
-    def VEC_EXT8       = "b11101".U // VF8 0 -> V
-    def VEC_VVM        = "b11110".U // VEC_VVM
-    def VEC_VXM        = "b11111".U // VEC_VXM
-    def VEC_MMM        = "b00000".U // VEC_MMM
-    def dummy = "b11111".U
+    def SCA_SIM        = "b000000".U //
+    def DIR            = "b010001".U // dirty: vset
+    def VEC_VVV        = "b010010".U // VEC_VVV
+    def VEC_VXV        = "b010011".U // VEC_VXV
+    def VEC_0XV        = "b010100".U // VEC_0XV
+    def VEC_VVW        = "b010101".U // VEC_VVW
+    def VEC_WVW        = "b010110".U // VEC_WVW
+    def VEC_VXW        = "b010111".U // VEC_VXW
+    def VEC_WXW        = "b011000".U // VEC_WXW
+    def VEC_WVV        = "b011001".U // VEC_WVV
+    def VEC_WXV        = "b011010".U // VEC_WXV
+    def VEC_EXT2       = "b011011".U // VF2 0 -> V
+    def VEC_EXT4       = "b011100".U // VF4 0 -> V
+    def VEC_EXT8       = "b011101".U // VF8 0 -> V
+    def VEC_VVM        = "b011110".U // VEC_VVM
+    def VEC_VXM        = "b011111".U // VEC_VXM
+    def VEC_SLIDE1UP   = "b100000".U // slide1up.vx
+    def VEC_MMM        = "b000000".U // VEC_MMM
+    def dummy     = "b111111".U
 
-    def X = BitPat("b00000")
+    def X = BitPat("b000000")
 
-    def apply() = UInt(5.W)
-    def needSplit(UopDivType: UInt) = UopDivType(4)
+    def apply() = UInt(6.W)
+    def needSplit(UopDivType: UInt) = UopDivType(4) || UopDivType(5)
   }
 
   object ExceptionNO {
