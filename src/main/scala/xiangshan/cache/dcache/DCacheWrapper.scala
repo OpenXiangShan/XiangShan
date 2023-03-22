@@ -308,6 +308,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
   val replayCarry = new ReplayCarry
+  val vec128bit = Bool()
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -647,6 +648,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
+  //val load128Req = Vec(LoadPipelineWidth,Bool())
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
@@ -851,7 +853,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // only lsu uses this, replay never kills
   for (w <- 0 until LoadPipelineWidth) {
     ldu(w).io.lsu <> io.lsu.load(w)
-    ldu(w).io.load128Req := false.B////TODO:when have load128Req
+    //ldu(w).io.load128Req := io.lsu.load128Req(w)////TODO:when have load128Req
     // replay and nack not needed anymore
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B

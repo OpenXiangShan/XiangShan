@@ -239,6 +239,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   }
+  io.dcacheReq.bits.vec128bit := lfsrc_vecloadFirstIssue_select
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
@@ -260,7 +261,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // load flow priority mux
   when(lfsrc_loadReplay_select) {
     s0_vaddr := io.replay.bits.vaddr
-    s0_mask := genWmask(io.replay.bits.vaddr, io.replay.bits.uop.ctrl.fuType(1, 0))
+    s0_mask := genVWmask(io.replay.bits.vaddr, io.replay.bits.uop.ctrl.fuOpType(1,0))
     s0_uop := io.replay.bits.uop
     s0_isFirstIssue := io.replay.bits.isFirstIssue
     s0_sqIdx := io.replay.bits.uop.sqIdx

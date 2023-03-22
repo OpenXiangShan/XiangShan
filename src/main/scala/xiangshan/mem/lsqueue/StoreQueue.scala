@@ -648,6 +648,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
+    io.sbuffer(i).bits.vec128bit := DontCare
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
     io.sbuffer(i).bits.replayCarry := DontCare
