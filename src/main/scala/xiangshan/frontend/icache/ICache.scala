@@ -42,15 +42,15 @@ case class ICacheParameters(
     nMissEntries: Int = 2,
     nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
-    nPrefetchEntries: Int = 4,
-    nPrefBufferEntries: Int = 8,
-    hasPrefetch: Boolean = false,
+    nPrefetchEntries: Int = 12,
+    nPrefBufferEntries: Int = 64,
+    hasPrefetch: Boolean = true,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
 
   val setBytes = nSets * blockBytes
-  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val aliasBitsOpt = DCacheParameters().aliasBitsOpt //if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
