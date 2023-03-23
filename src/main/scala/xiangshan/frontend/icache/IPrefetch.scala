@@ -25,6 +25,7 @@ import utils._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import utility._
+import xiangshan.XSCoreParamsKey
 
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
@@ -85,6 +86,43 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
 
 /** Prefetch Buffer **/
 
+class IPFWritePtrQueue(implicit p: Parameters) extends IPrefetchModule with HasCircularQueuePtrHelper
+{
+  val io = IO(new Bundle{
+    val free_ptr = DecoupledIO(UInt(log2Ceil(nIPFBufferSize).W))
+    val release_ptr = Flipped(ValidIO(UInt(log2Ceil(nIPFBufferSize).W)))
+  })
+  /* define ptr */
+  class IPFPtr(implicit p: Parameters) extends CircularQueuePtr[IPFPtr](
+    p => p(XSCoreParamsKey).icacheParameters.nPrefBufferEntries
+  ){
+  }
+
+  object IPFPtr {
+    def apply(f: Bool, v: UInt)(implicit p: Parameters): IPFPtr = {
+      val ptr = Wire(new IPFPtr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
+
+  val queue = RegInit(VecInit((0 until nIPFBufferSize).map(i => i.U(log2Ceil(nIPFBufferSize).W))))
+  val enq_ptr = RegInit(IPFPtr(true.B, 0.U))
+  val deq_ptr = RegInit(IPFPtr(false.B, 0.U))
+
+  io.free_ptr.valid := !isEmpty(enq_ptr, deq_ptr)
+  io.free_ptr.bits := queue(deq_ptr.value)
+  deq_ptr := deq_ptr + io.free_ptr.fire
+
+  when (io.release_ptr.valid) {
+    queue(enq_ptr.value) := io.release_ptr.bits
+    enq_ptr := enq_ptr + 1.U
+  }
+
+  XSError(isBefore(enq_ptr, deq_ptr) && !isFull(enq_ptr, deq_ptr), "enq_ptr should not before deq_ptr\n")
+}
+
 
 class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 {
@@ -127,6 +165,8 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nIPFBufferSize)
   val data_buffer = InitQueue(new IPFBufferEntryData, size = nIPFBufferSize)
 
+  val ipf_write_ptr_queue = Module(new IPFWritePtrQueue())
+
   val meta_buffer_empty_oh = WireInit(VecInit(Seq.fill(nIPFBufferSize)(false.B)))
   (0 until nIPFBufferSize).foreach { i =>
     meta_buffer_empty_oh(i) := !meta_buffer(i).valid
@@ -156,7 +196,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     ))))
   val r_buffer_hit = VecInit(r_hit_oh.map(_.reduce(_||_)))
   val r_buffer_hit_idx = VecInit(r_hit_oh.map(PriorityEncoder(_)))
-  val r_buffer_hit_data = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh(i), data_buffer.map(_.cachline))))
+  val r_buffer_hit_data = VecInit((0 until PortNumber).map(i => Mux1H(r_hit_oh(i), data_buffer.map(_.cachline)))) // TODO : be careful of Mux1H
 
   /** "read" also check data in move pipeline */
   val r_moves1pipe_hit_s1, r_moves1pipe_hit_s2, r_moves1pipe_hit_s3 = WireInit(VecInit(Seq.fill(PortNumber)(false.B)))
@@ -264,7 +304,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val s0_move_jump = !move_queue_empty && !meta_buffer(move_queue(curr_move_ptr)).move
   when (s0_fire) {
     curr_move_ptr := curr_move_ptr + 1.U
-    meta_buffer(s0_move_idx).valid := false.B
+    meta_buffer(s0_move_idx).valid := false.B // TODO : maybe should not invalid
     meta_buffer(s0_move_idx).move  := false.B
     meta_buffer(s0_move_idx).confidence := 0.U
   }.elsewhen(s0_move_jump) {
@@ -378,9 +418,20 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
   /** write logic */
   val replacer = ReplacementPolicy.fromString(Some("random"), nIPFBufferSize)
-  val curr_write_ptr = RegInit(0.U(log2Ceil(nIPFBufferSize).W))
-  val victim_way = curr_write_ptr + 1.U//replacer.way
+  val curr_write_ptr = Wire(UInt(log2Ceil(nIPFBufferSize).W))
+  when (ipf_write_ptr_queue.io.free_ptr.valid) {
+    curr_write_ptr := ipf_write_ptr_queue.io.free_ptr.bits
+  }.otherwise {
+    curr_write_ptr := replacer.way
+    when (io.write.valid) {
+      replacer.miss
+    }
+  }
 
+  ipf_write_ptr_queue.io.release_ptr.valid := s0_fire
+  ipf_write_ptr_queue.io.release_ptr.bits := s0_move_idx
+
+  ipf_write_ptr_queue.io.free_ptr.ready := io.write.valid
   when(io.write.valid) {
     meta_buffer(curr_write_ptr).tag := io.write.bits.meta.tag
     meta_buffer(curr_write_ptr).index := io.write.bits.meta.index
@@ -391,10 +442,6 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     meta_buffer(curr_write_ptr).has_been_hit := false.B
 
     data_buffer(curr_write_ptr).cachline := io.write.bits.data
-
-    //update replacer
-    replacer.access(curr_write_ptr)
-    curr_write_ptr := victim_way
 
   }
 
