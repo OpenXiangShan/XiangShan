@@ -24,7 +24,7 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP  = top.SimTop
 IMAGE  ?= temp
-CONFIG ?= DefaultConfig
+CONFIG ?= TutorialConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
