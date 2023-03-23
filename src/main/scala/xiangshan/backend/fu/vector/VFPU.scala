@@ -38,6 +38,7 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   val ctrl = io.in.bits.uop.ctrl
   val vtype = ctrl.vconfig.vtype
   val src1Type = io.in.bits.uop.ctrl.srcType
+  val uopIdx = ctrl.uopIdx
 
 // def some signal
   val fflagsReg = RegInit(0.U(5.W))
@@ -82,6 +83,7 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfalu.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfalu.io.in.bits.round_mode := rm
   vfalu.io.in.bits.fp_format := vtype.vsew(1,0)
+  vfalu.io.in.bits.uopIdx := uopIdx(0) //TODO
   vfalu.io.in.bits.opb_widening := false.B // TODO
   vfalu.io.in.bits.res_widening := false.B // TODO
   vfalu.io.in.bits.op_code := ctrl.fuOpType
@@ -94,6 +96,7 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfmacc.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfmacc.io.in.bits.round_mode := rm
   vfmacc.io.in.bits.fp_format := vtype.vsew(1, 0)
+  vfmacc.io.in.bits.uopIdx := uopIdx(0) //TODO
   vfmacc.io.in.bits.opb_widening := DontCare // TODO
   vfmacc.io.in.bits.res_widening := false.B // TODO
   vfmacc.io.in.bits.op_code := DontCare
@@ -106,6 +109,7 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfdiv.io.in.bits.srcType <> in.uop.ctrl.srcType
   vfdiv.io.in.bits.round_mode := rm
   vfdiv.io.in.bits.fp_format := vtype.vsew(1, 0)
+  vfdiv.io.in.bits.uopIdx := uopIdx(0) // TODO
   vfdiv.io.in.bits.opb_widening := DontCare // TODO
   vfdiv.io.in.bits.res_widening := DontCare // TODO
   vfdiv.io.in.bits.op_code := DontCare
@@ -151,6 +155,7 @@ class VFPUWraaperBundle (implicit p: Parameters)  extends XSBundle{
 
     val round_mode = UInt(3.W)
     val fp_format = UInt(2.W) // vsew
+    val uopIdx = Bool()
     val opb_widening = Bool()
     val res_widening = Bool()
     val op_code = FuOpType()
@@ -298,6 +303,10 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
   for (i <- 0 until NumAdder) {
     vfalu(i).io.fp_b := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfalu(i).io.fp_a := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfalu(i).io.widen_b := Mux(inHs, Cat(src1((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src1((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfalu(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfalu(i).io.mask := 0.U //TODO
+    vfalu(i).io.uop_idx := in.uopIdx //TODO
     vfalu(i).io.is_vec := true.B // If you can enter, it must be vector
     vfalu(i).io.round_mode := in.round_mode
     vfalu(i).io.fp_format := Mux(inHs, in.fp_format, 3.U(2.W))
