@@ -76,7 +76,7 @@ object genDataSizeMask {
 object genVecMask {
   def apply (instType: UInt, dataSize: UInt, offset: UInt, lmul: UInt): UInt = {
     (LookupTree(instType,List(
-      "b000001".U ->lmulDataSize(lmul), //unit-stride
+      "b000001".U -> (UIntToOH(lmulDataSize(lmul)) - 1.U), //unit-stride
       "b000010".U -> 16.U,//strided
       "b000100".U -> 16.U,//index
       "b001000".U -> 16.U,//segment unit-stride
@@ -149,7 +149,6 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val loadInstDec = Wire(Vec(2,new VecDecode()))
   val cross128    = Wire(Vec(2, Bool()))
   val startRobIdx = Wire(Vec(2,UInt(log2Ceil(RobSize).W)))
-  val vaddr       = Wire(Vec(2, UInt(VAddrBits.W)))
 
   val validCount = Wire(Vec(2, UInt(4.W)))
   val allowEnqueue = Wire(Vec(2, Bool()))
@@ -179,7 +178,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     }
   }
 
-  for(i <- 0 until exuParameters.LduCnt) {
+  for(i <- 0 until 2) {
     validCount(i) := PopCount(flow_entry_valid(i))
     allowEnqueue(i) := validCount(i) <= 16.U
     io.loadRegIn(i).ready := allowEnqueue(i)
@@ -187,31 +186,31 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   for (i <- 0 until LoadPipelineWidth) {
     startRobIdx(i) := DontCare
-    vaddr(i) := DontCare
     when (needAlloc(i)) {
       startRobIdx(i) := io.loadRegIn(i).bits.uop.robIdx.value - io.loadRegIn(i).bits.inner_idx
       for (j <- 0 until 9) {
         when (j.U < realFlowNum(i)) {
           val index = Wire(UInt(5.W))
+          val vaddr = Wire(UInt(VAddrBits.W))
           index := enqPtr(i).value + j.U
           flow_entry(i)(index) := DontCare
           flow_entry_valid(i)(index)           := true.B
           flow_entry(i)(index).uop             := io.loadRegIn(i).bits.uop
           flow_entry(i)(index).unit_stride_fof := LoadInstDec(i).uop_unit_stride_fof
           //flow_entry(i)(index).dataSize        := genDataSize("b000001".U,io.loadRegIn(i).bits.lmul)
-          vaddr(i)                                := genVecAddr(baseAddr(i),"b000001".U,j.U)
+          vaddr                                := genVecAddr(baseAddr(i),"b000001".U,j.U)
           flow_entry(i)(index).mask            := genVecMask(instType = "b000001".U, dataSize = 0.U, offset = 0.U, lmul = io.loadRegIn(i).bits.lmul)
-          flow_entry(i)(index).vaddr           := vaddr(i)
+          flow_entry(i)(index).vaddr           := vaddr
 
           when (j.U =/= realFlowNum(i) - 1.U) {
             flow_entry(i)(index).rob_idx_valid(0)     := true.B
             flow_entry(i)(index).rob_idx(0)           := startRobIdx(i) + j.U
-            flow_entry(i)(index).offset(0)            := vaddr(i)(3,0)
+            flow_entry(i)(index).offset(0)            := vaddr(3,0)
             flow_entry(i)(index).reg_offset(0)        := 0.U
           }.elsewhen(j.U === realFlowNum(i) - 1.U && !cross128(i)) {
             flow_entry(i)(index).rob_idx_valid(0)     := true.B
             flow_entry(i)(index).rob_idx(0)           := startRobIdx(i) + j.U
-            flow_entry(i)(index).offset(0)            := vaddr(i)(3,0)
+            flow_entry(i)(index).offset(0)            := vaddr(3,0)
             flow_entry(i)(index).reg_offset(0)        := 0.U
           }.elsewhen(j.U === realFlowNum(i) - 1.U && cross128(i)) {
             flow_entry(i)(index).rob_idx_valid(0)     := false.B
@@ -248,6 +247,7 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       io.loadPipeOut(i).bits.rob_idx             := flow_entry(i)(deqPtr(i).value).rob_idx
       io.loadPipeOut(i).bits.offset              := flow_entry(i)(deqPtr(i).value).offset
       io.loadPipeOut(i).bits.reg_offset          := flow_entry(i)(deqPtr(i).value).reg_offset
+      io.loadPipeOut(i).bits.uop.lqIdx           := flow_entry(i)(deqPtr(i).value).uop.lqIdx
     }
   }
 

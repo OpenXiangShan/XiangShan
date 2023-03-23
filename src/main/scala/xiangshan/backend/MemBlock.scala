@@ -572,17 +572,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
-  // Vector Load/Store Queue
+  //Vector Load/Store Queue
   //vlflowqueue.io.loadRegIn <> io.VecloadRegIn
-  vlflowqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   //vluopqueue.io.loadRegIn <> io.VecloadRegIn
-  vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
-  //vlflowqueue.io.loadFlow2UopOut <> vluopqueue.io.loadFlow2UopOut
-  vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
-  //vluopqueue.io.vecLoadWriteback <> io.Vecwriteback
-  vluopqueue.io.vecLoadWriteback <> vlExcSignal.io.vecwriteback
+  //vluopqueue.io.vecLoadWriteback <> io.Vecwritebac
   //io.vecFeedback := vluopqueue.io.vecFeedback
+  vlflowqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
+  vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
+  vluopqueue.io.vecLoadWriteback <> vlExcSignal.io.vecwriteback
   vlExcSignal.io.vecFeedback := vluopqueue.io.vecFeedback
+
+  vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline

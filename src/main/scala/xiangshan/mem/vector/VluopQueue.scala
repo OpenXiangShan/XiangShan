@@ -259,7 +259,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   for (i <- 0 until exuParameters.LduCnt) {
     when (io.loadPipeIn(i).fire) {
       buffer_valid_s0(i)  := true.B  //TODO: condition
-      data_buffer_s0(i)   := io.loadPipeIn(i).bits.data
+      data_buffer_s0(i)   := io.loadPipeIn(i).bits.vecdata
       mask_buffer_s0(i)   := io.loadPipeIn(i).bits.mask
       rob_idx_s0(i)       := io.loadPipeIn(i).bits.rob_idx
       rob_idx_valid_s0(i) := io.loadPipeIn(i).bits.rob_idx_valid

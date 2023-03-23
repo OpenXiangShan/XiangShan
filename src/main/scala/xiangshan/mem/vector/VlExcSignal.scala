@@ -47,6 +47,8 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
   val baseaddr_1 = 0x80000000L.U + 0x1100.U
   val robIdx_0 = 16.U
   val robIdx_1 = 32.U
+  val lqIdx_0 = 0.U
+  val lqIdx_1 = 4.U
   val counter = RegInit(0.U(8.W))
 
   loadRegIn(0) := DontCare
@@ -59,88 +61,92 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
 
   switch (state_0) {
     is (s_idle) {
-        when (counter === 254.U) {
-          loadRegIn_valid(0)     := true.B
-        }.otherwise {
-          loadRegIn_valid(0)     := false.B
-        }
-        //loadRegIn(0).vmask     := LFSR64(seed = Some(23L))(63,0)
-        loadRegIn(0).baseaddr  := baseaddr_0
-        //loadRegIn(0).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
-        //loadRegIn(0).index     := LFSR64(seed = Some(12L))(63,0)
-        //loadRegIn(0).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := "b010".U
-        //loadRegIn(0).sew       := LFSR64(seed = Some(41L))(1,0)
-        //loadRegIn(0).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
-        //loadRegIn(0).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
-        loadRegIn(0).inner_idx := 0.U
-        loadRegIn(0).vl        := (16 * 4).U
-        loadRegIn(0).total_num := 4.U
-        loadRegIn(0).uop.robIdx.value := robIdx_0
-        loadRegIn(0).uop.cf.instr     := 0x00000000.U
-        loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
+      when (counter === 254.U) {
+        loadRegIn_valid(0)     := true.B
+      }.otherwise {
+        loadRegIn_valid(0)     := false.B
+      }
+      //loadRegIn(0).vmask     := LFSR64(seed = Some(23L))(63,0)
+      loadRegIn(0).baseaddr  := baseaddr_0
+      //loadRegIn(0).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
+      //loadRegIn(0).index     := LFSR64(seed = Some(12L))(63,0)
+      //loadRegIn(0).pvd       := LFSR64(seed = Some(11L))(4,0)
+      loadRegIn(0).lmul      := "b010".U
+      //loadRegIn(0).sew       := LFSR64(seed = Some(41L))(1,0)
+      //loadRegIn(0).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
+      //loadRegIn(0).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
+      loadRegIn(0).inner_idx := 0.U
+      loadRegIn(0).vl        := (16 * 4).U
+      loadRegIn(0).total_num := 4.U
+      loadRegIn(0).uop.robIdx.value := robIdx_0
+      loadRegIn(0).uop.lqIdx.value := lqIdx_0
+      loadRegIn(0).uop.cf.instr     := 0x00000000.U
+      loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       when (counter === 255.U) {
         state_0 := s_1
       }
     }
     is (s_1) {
-        //loadRegIn(0).uop       := DontCare
-        loadRegIn_valid(0)     := true.B
-        loadRegIn(0).vmask     := LFSR64(seed = Some(23L))(63,0)
-        loadRegIn(0).baseaddr  := baseaddr_0 + 16.U
-        //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
-        //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
-        //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := "b010".U
-        //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
-        //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
-        //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
-        loadRegIn(0).inner_idx := 1.U
-        loadRegIn(0).vl        := ((16 * 4)).U
-        loadRegIn(0).total_num := 4.U
-        loadRegIn(0).uop.robIdx.value := robIdx_0 + 1.U
-        loadRegIn(0).uop.cf.instr     := 0x10000000.U
-        loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
+      //loadRegIn(0).uop       := DontCare
+      loadRegIn_valid(0)     := true.B
+      loadRegIn(0).vmask     := LFSR64(seed = Some(23L))(63,0)
+      loadRegIn(0).baseaddr  := baseaddr_0 + 16.U
+      //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
+      //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
+      //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
+      loadRegIn(0).lmul      := "b010".U
+      //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
+      //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
+      //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
+      loadRegIn(0).inner_idx := 1.U
+      loadRegIn(0).vl        := ((16 * 4)).U
+      loadRegIn(0).total_num := 4.U
+      loadRegIn(0).uop.robIdx.value := robIdx_0 + 1.U
+      loadRegIn(0).uop.lqIdx.value := lqIdx_0
+      loadRegIn(0).uop.cf.instr     := 0x10000000.U
+      loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_0 := s_2
     }
     is (s_2) {
-        //loadRegIn(0).uop       := DontCare
-        loadRegIn_valid(0)     := true.B
-        //loadRegIn(i).vmask     := LFSR64(seed = Some(23L))(63,0)
-        loadRegIn(0).baseaddr  := baseaddr_0 + 32.U
-        //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
-        //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
-        //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := "b010".U
-        //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
-        //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
-        //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
-        loadRegIn(0).inner_idx := 2.U
-        loadRegIn(0).vl        := ((16 * 4)).U
-        loadRegIn(0).total_num := 4.U
-        loadRegIn(0).uop.robIdx.value := robIdx_0 + 2.U
-        loadRegIn(0).uop.cf.instr     := 0x20000000.U
-        loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
+      //loadRegIn(0).uop       := DontCare
+      loadRegIn_valid(0)     := true.B
+      //loadRegIn(i).vmask     := LFSR64(seed = Some(23L))(63,0)
+      loadRegIn(0).baseaddr  := baseaddr_0 + 32.U
+      //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
+      //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
+      //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
+      loadRegIn(0).lmul      := "b010".U
+      //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
+      //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
+      //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
+      loadRegIn(0).inner_idx := 2.U
+      loadRegIn(0).vl        := ((16 * 4)).U
+      loadRegIn(0).total_num := 4.U
+      loadRegIn(0).uop.robIdx.value := robIdx_0 + 2.U
+      loadRegIn(0).uop.lqIdx.value := lqIdx_0
+      loadRegIn(0).uop.cf.instr     := 0x20000000.U
+      loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_0 := s_3
     }
     is (s_3) {
-        //loadRegIn(0).uop       := DontCare
-        loadRegIn_valid(0)     := true.B
-        //loadRegIn(i).vmask     := LFSR64(seed = Some(23L))(63,0)
-        loadRegIn(0).baseaddr  := baseaddr_0 + 48.U
-        //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
-        //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
-        //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
-        loadRegIn(0).lmul      := "b010".U
-        //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
-        //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
-        //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
-        loadRegIn(0).inner_idx := 3.U
-        loadRegIn(0).vl        := ((16 * 4)).U
-        loadRegIn(0).total_num := 4.U
-        loadRegIn(0).uop.robIdx.value := robIdx_0 + 3.U
-        loadRegIn(0).uop.cf.instr     := 0x30000000.U
-        loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
+      //loadRegIn(0).uop       := DontCare
+      loadRegIn_valid(0)     := true.B
+      //loadRegIn(i).vmask     := LFSR64(seed = Some(23L))(63,0)
+      loadRegIn(0).baseaddr  := baseaddr_0 + 48.U
+      //loadRegIn(i).stride    := LFSR64(seed = Some(3L))(XLEN-1,0)
+      //loadRegIn(i).index     := LFSR64(seed = Some(12L))(63,0)
+      //loadRegIn(i).pvd       := LFSR64(seed = Some(11L))(4,0)
+      loadRegIn(0).lmul      := "b010".U
+      //loadRegIn(i).sew       := LFSR64(seed = Some(41L))(1,0)
+      //loadRegIn(i).vma       := LFSR64(seed = Some(52L))(5,0) === 0.U
+      //loadRegIn(i).vta       := LFSR64(seed = Some(47L))(4,0) === 0.U
+      loadRegIn(0).inner_idx := 3.U
+      loadRegIn(0).vl        := ((16 * 4)).U
+      loadRegIn(0).total_num := 4.U
+      loadRegIn(0).uop.robIdx.value := robIdx_0 + 3.U
+      loadRegIn(0).uop.lqIdx.value := lqIdx_0
+      loadRegIn(0).uop.cf.instr     := 0x30000000.U
+      loadRegIn(0).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_0 := s_idle
     }
   }
@@ -169,6 +175,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       loadRegIn(1).vl        := ((16 * 4)).U
       loadRegIn(1).total_num := 4.U
       loadRegIn(1).uop.robIdx.value := robIdx_1 + 2.U
+      loadRegIn(1).uop.lqIdx.value := lqIdx_1
       loadRegIn(1).uop.cf.instr     := 0x00000000.U
       loadRegIn(1).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       when (counter === 255.U) {
@@ -191,6 +198,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       loadRegIn(1).vl        := ((16 * 4)).U
       loadRegIn(1).total_num := 4.U
       loadRegIn(1).uop.robIdx.value := robIdx_1 + 1.U
+      loadRegIn(1).uop.lqIdx.value := lqIdx_1
       loadRegIn(1).uop.cf.instr     := 0x10000000.U
       loadRegIn(1).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_1 := s_2
@@ -211,6 +219,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       loadRegIn(1).vl        := ((16 * 4)).U
       loadRegIn(1).total_num := 4.U
       loadRegIn(1).uop.robIdx.value := robIdx_1 + 0.U
+      loadRegIn(1).uop.lqIdx.value := lqIdx_1
       loadRegIn(1).uop.cf.instr     := 0x20000000.U
       loadRegIn(1).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_1 := s_3
@@ -231,6 +240,7 @@ class VlExcSignal(implicit p: Parameters) extends XSModule{
       loadRegIn(1).vl        := (16 * 4).U
       loadRegIn(1).total_num := 4.U
       loadRegIn(1).uop.robIdx.value := robIdx_1 + 3.U
+      loadRegIn(1).uop.lqIdx.value := lqIdx_1
       loadRegIn(1).uop.cf.instr     := 0x30000000.U
       loadRegIn(1).uop.pdest        := LFSR64(seed = Some(99L))(PhyRegIdxWidth-1,0)
       state_1 := s_idle
