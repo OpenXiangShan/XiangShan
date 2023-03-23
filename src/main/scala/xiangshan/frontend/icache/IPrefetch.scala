@@ -546,13 +546,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   p2_ready :=   p2_fire || p2_discard || !p2_valid
   p2_fire  :=   p2_valid && !p2_exception && p3_ready && p2_pmp_fire
-  p2_discard := p2_valid && (p2_exception && p2_pmp_fire || io.fencei)
+  p2_discard := p2_valid && (p2_exception && p2_pmp_fire || io.fencei || p2_check_in_mshr)
 
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p3_valid =  generatePipeControl(lastFire = p2_fire, thisFire = p3_fire || p3_discard, thisFlush = false.B, lastFlush = false.B)
 
   val p3_paddr = RegEnable(p2_paddr,  p2_fire)
-  val p3_check_in_mshr = RegEnable(p2_check_in_mshr,  p2_fire)
+  val p3_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p3_paddr, blockBytes, PAddrBits))).reduce(_||_)
   val p3_vaddr   =  RegEnable(p2_vaddr,    p2_fire)
   val p3_vidx = get_idx(p3_vaddr)
   // check in prefetch buffer
