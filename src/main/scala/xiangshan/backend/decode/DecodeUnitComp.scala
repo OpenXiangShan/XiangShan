@@ -123,7 +123,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
   switch(typeOfDiv) {
     is(UopDivType.DIR) {
       when(isVset_u) {
-        csBundle(0).ctrl.flushPipe := ALUOpType.isVsetvli(cf_ctrl_u.ctrl.fuOpType) && cf_ctrl_u.ctrl.lsrc(0).orR
+        csBundle(0).ctrl.flushPipe := ALUOpType.isVsetvli(cf_ctrl_u.ctrl.fuOpType) && cf_ctrl_u.ctrl.lsrc(0).orR || ALUOpType.isVsetvl(cf_ctrl_u.ctrl.fuOpType)
         csBundle(0).ctrl.fuOpType := ALUOpType.vsetExchange(cf_ctrl_u.ctrl.fuOpType)
         csBundle(1).ctrl.ldest := INT_VCONFIG.U
         csBundle(1).ctrl.flushPipe := false.B
