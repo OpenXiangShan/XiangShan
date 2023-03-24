@@ -49,7 +49,7 @@ class VluopBundle(implicit p: Parameters) extends XSBundle {
       this.rob_idx := uop.uop.robIdx.value
       this.lmul    := uop.lmul
     }.elsewhen (is_allo) {
-      this.wb_dest := uop.uop.pdest
+      this.wb_dest := uop.uop.pdest  // TODO: this is scalar reg,we need vector reg
     }.otherwise {
       this.rob_idx := uop.uop.robIdx.value
       this.wb_dest := uop.uop.pdest
@@ -63,7 +63,8 @@ class VluopQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadRegIn   = Vec(2, Flipped(Decoupled(new VecOperand())))
   val loadPipeIn  = Vec(exuParameters.LduCnt, Flipped(Decoupled(new VecExuOutput)))
   val vecFeedback = Vec(2,Output(Bool()))
-  val vecLoadWriteback = Vec(2,DecoupledIO(new VecWriteback))
+  val vecLoadWriteback = Vec(2,DecoupledIO(new ExuOutput))
+  val vecData = Vec(2,DecoupledIO(UInt(VLEN.W)))
 }
 
 class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
@@ -73,7 +74,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   println("LoadUopQueue: size:" + VlUopSize)
 
   val VluopEntry = Reg(Vec(VlUopSize, new VluopBundle))
-  val Vluop2robEntry = Reg(Vec(VlUopSize, new VecWriteback))
+  val Vluop2robEntry = Reg(Vec(VlUopSize, new ExuOutput))
   // For example, an inst -> 4 uops,
   // When first uop comes, 4 entries are all valid and pre_allocated
   val valid = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
@@ -304,13 +305,17 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   //eg: if 0-port is not fire, 1-port‘s valid signal must be invalid
   io.vecLoadWriteback(0).valid := valid(deqPtr.value) && finished(deqPtr.value)
   io.vecLoadWriteback(1).valid := io.vecLoadWriteback(0).fire && valid(deqPtr.value + 1.U) && finished(deqPtr.value + 1.U)
+  io.vecData(0).valid := valid(deqPtr.value) && finished(deqPtr.value)
+  io.vecData(1).valid := io.vecLoadWriteback(0).fire && valid(deqPtr.value + 1.U) && finished(deqPtr.value + 1.U)
   for (i <- 0 until 2) {
     io.vecLoadWriteback(i).bits := DontCare
+    io.vecData(i).bits := DontCare
     val deq_index = deqPtr.value + i.U
     when (valid(deq_index) && finished(deq_index)) {//TODO:need optimization?
       io.vecLoadWriteback(i).bits                  := RegEnable(Vluop2robEntry(deq_index),io.vecLoadWriteback(i).fire)
       io.vecLoadWriteback(i).bits.uop.robIdx.value := RegEnable(VluopEntry(deq_index).rob_idx,io.vecLoadWriteback(i).fire)
-      io.vecLoadWriteback(i).bits.vecdata          := RegEnable(VluopEntry(deq_index).data.asUInt,io.vecLoadWriteback(i).fire)
+      io.vecData(i).bits                           := RegEnable(VluopEntry(deq_index).data.asUInt,io.vecData(i).fire)
+      //io.vecLoadWriteback(i).bits.vecdata          := RegEnable(VluopEntry(deq_index).data.asUInt,io.vecLoadWriteback(i).fire)
       io.vecLoadWriteback(i).bits.uop.pdest        := RegEnable(VluopEntry(deq_index).wb_dest,io.vecLoadWriteback(i).fire)
       valid(deq_index)                             := RegEnable(false.B,io.vecLoadWriteback(i).fire)
       allocated(deq_index)                         := RegEnable(false.B,io.vecLoadWriteback(i).fire)

@@ -80,7 +80,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val VecloadRegIn = Vec(2, Flipped(Decoupled(new VecOperand())))
     // out
     val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-    val Vecwriteback = Vec(2,DecoupledIO(new VecWriteback))
+    val vecData = Vec(2,ValidIO(UInt(VLEN.W)))
+    //val Vecwriteback = Vec(2,DecoupledIO(new VecWriteback))
     val vecFeedback = Vec(2,Output(Bool()))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
@@ -172,6 +173,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   correctTable.io.csrCtrl := csrCtrl
   val atomicsUnit = Module(new AtomicsUnit)
+  val vlflowqueue = Module(new VlflowQueue)
+  val vluopqueue = Module(new VluopQueue)
+  val vlExcSignal = Module(new VlExcSignal)
 
   // Atom inst comes from sta / std, then its result
   // will be writebacked using load writeback port
@@ -180,20 +184,27 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // using store writeback port
 
   //val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.loadOut.bits)
-  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits,
-    Mux(loadUnits.head.io.loadOut.valid, loadUnits.head.io.loadOut.bits, vluopqueue.io.vecLoadWriteback.head.bits))
+  val loadWritebackOverride = Mux(atomicsUnit.io.out.valid,atomicsUnit.io.out.bits,
+    Mux(loadUnits.head.io.loadOut.valid,loadUnits.head.io.loadOut.bits,vluopqueue.io.vecLoadWriteback.head.bits))
   val loadOut0 = Wire(Decoupled(new ExuOutput))
   loadOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.loadOut.valid || vluopqueue.io.vecLoadWriteback.head.valid
   loadOut0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := loadOut0.ready
   loadUnits.head.io.loadOut.ready := loadOut0.ready
-  vluopqueue.io.vecLoadWriteback.head.ready := loadOut0.ready
+  vluopqueue.io.vecLoadWriteback.head.ready := Mux(atomicsUnit.io.out.valid || loadUnits.head.io.loadOut.valid,false.B,loadOut0.ready)
+  vluopqueue.io.vecData.head.ready := Mux(atomicsUnit.io.out.valid || loadUnits.head.io.loadOut.valid,false.B,loadOut0.ready)
   when(atomicsUnit.io.out.valid){
     loadOut0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
   }
 
   //val ldExeWbReqs = loadOut0 +: loadUnits.tail.map(_.io.loadOut)
-  val ldExeWbReqs = loadOut0 +: (1 until LoadPipelineWidth).map(i => Mux(loadUnits(i).io.loadOut.valid, loadUnits(i).io.loadOut, vluopqueue.io.vecLoadWriteback(i)))
+  val loadOut1 = Wire(Decoupled(new ExuOutput))
+  loadOut1.valid := loadUnits(1).io.loadOut.valid || vluopqueue.io.vecLoadWriteback(1).valid
+  loadOut1.bits := Mux(loadUnits(1).io.loadOut.valid,loadUnits(1).io.loadOut.bits,vluopqueue.io.vecLoadWriteback(1).bits)
+  loadUnits(1).io.loadOut.ready := loadOut1.ready
+  vluopqueue.io.vecLoadWriteback(1).ready := Mux(loadUnits(1).io.loadOut.valid,false.B,loadOut1.ready)
+  vluopqueue.io.vecData(1).ready := Mux(loadUnits(1).io.loadOut.valid,false.B,loadOut1.ready)
+  val ldExeWbReqs = Seq(loadOut0,loadOut1)
   io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
@@ -226,10 +237,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     fuzzer.io.req.ready := l1_pf_req.ready
   }
-
-  val vlflowqueue = Module(new VlflowQueue)
-  val vluopqueue= Module(new VluopQueue)
-  val vlExcSignal = Module(new VlExcSignal)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrapper)
@@ -579,12 +586,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   //Vector Load/Store Queue
   vlflowqueue.io.loadRegIn <> io.VecloadRegIn
   vluopqueue.io.loadRegIn <> io.VecloadRegIn
-  vluopqueue.io.vecLoadWriteback <> io.Vecwriteback
+  for (i <- 0 until 2) {
+    io.vecData(i).valid :=  vluopqueue.io.vecData(i).valid
+    io.vecData(i).bits := vluopqueue.io.vecData(i).bits
+  }
   io.vecFeedback := vluopqueue.io.vecFeedback
+  vlExcSignal.io.vecloadRegIn.map(_.ready := false.B)
+  vlExcSignal.io.vecwriteback := DontCare
+  vlExcSignal.io.vecFeedback := DontCare
+
   //vlflowqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   //vluopqueue.io.loadRegIn <> vlExcSignal.io.vecloadRegIn
   //vluopqueue.io.vecLoadWriteback <> vlExcSignal.io.vecwriteback
-  //vlExcSignal.io.vecFeedback := vluopqueue.io.vecFeedback
+  //vlExcSignal.io.vecFeedback := vluopqueue.io.vecFeedbac
 
   vluopqueue.io.loadPipeIn <> VecInit(loadUnits.map(_.io.VecloadOut))
 
