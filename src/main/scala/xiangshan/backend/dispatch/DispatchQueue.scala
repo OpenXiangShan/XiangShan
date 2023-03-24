@@ -269,11 +269,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     ("dispatchq_in",         numEnq                                                          ),
     ("dispatchq_out",        PopCount(io.deq.map(_.fire))                                    ),
     ("dispatchq_out_try",    PopCount(io.deq.map(_.valid))                                   ),
-    ("dispatchq_fake_block", fake_block                                                      ),
-    ("dispatchq_1_4_valid ", validEntries <  (size / 4).U                                    ),
-    ("dispatchq_2_4_valid ", validEntries >= (size / 4).U && validEntries <= (size / 2).U    ),
-    ("dispatchq_3_4_valid ", validEntries >= (size / 2).U && validEntries <= (size * 3 / 4).U),
-    ("dispatchq_4_4_valid ", validEntries >= (size * 3 / 4).U                                )
+    ("dispatchq_fake_block", fake_block                                                      )
+    //("dispatchq_1_4_valid ", validEntries <  (size / 4).U                                    ),
+    //("dispatchq_2_4_valid ", validEntries >= (size / 4).U && validEntries <= (size / 2).U    ),
+    //("dispatchq_3_4_valid ", validEntries >= (size / 2).U && validEntries <= (size * 3 / 4).U),
+    //("dispatchq_4_4_valid ", validEntries >= (size * 3 / 4).U                                )
   )
   generatePerfEvent()
 }

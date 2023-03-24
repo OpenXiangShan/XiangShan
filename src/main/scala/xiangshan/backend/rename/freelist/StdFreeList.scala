@@ -116,9 +116,9 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   val freeRegCntReg = RegNext(freeRegCnt)
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                    ),
-    ("std_freelist_2_4_valid", freeRegCntReg >= (size / 4).U && freeRegCntReg < (size / 2).U    ),
-    ("std_freelist_3_4_valid", freeRegCntReg >= (size / 2).U && freeRegCntReg < (size * 3 / 4).U),
+    //("std_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                    ),
+    //("std_freelist_2_4_valid", freeRegCntReg >= (size / 4).U && freeRegCntReg < (size / 2).U    ),
+    //("std_freelist_3_4_valid", freeRegCntReg >= (size / 2).U && freeRegCntReg < (size * 3 / 4).U),
     ("std_freelist_4_4_valid", freeRegCntReg >= (size * 3 / 4).U                                )
   )
   generatePerfEvent()

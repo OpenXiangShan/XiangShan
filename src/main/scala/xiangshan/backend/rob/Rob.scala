@@ -1309,9 +1309,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegNext(commitStoreVec)))                        ),
     ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)           ),
     ("rob_walkCycle          ", (state === s_walk)                                                    ),
-    ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                       ),
-    ("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U    ),
-    ("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),
+    //("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                       ),
+    //("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U    ),
+    //("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),
     ("rob_4_4_valid          ", validEntries >  (RobSize * 3 / 4).U                                   ),
   )
   generatePerfEvent()

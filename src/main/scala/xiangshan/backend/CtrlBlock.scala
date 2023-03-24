@@ -582,8 +582,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   val perfinfo = IO(new Bundle(){
     val perfEventsRs      = Input(Vec(NumRs, new PerfEvent))
-    val perfEventsEu0     = Input(Vec(6, new PerfEvent))
-    val perfEventsEu1     = Input(Vec(6, new PerfEvent))
+    val perfEventsEu0     = Input(Vec(3, new PerfEvent))
+    val perfEventsEu1     = Input(Vec(3, new PerfEvent))
   })
 
   val allPerfEvents = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerf)

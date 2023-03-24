@@ -69,9 +69,9 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", busyCount < (NRPhyRegs / 4).U                                      ),
-    ("std_freelist_2_4_valid", busyCount > (NRPhyRegs / 4).U && busyCount <= (NRPhyRegs / 2).U    ),
-    ("std_freelist_3_4_valid", busyCount > (NRPhyRegs / 2).U && busyCount <= (NRPhyRegs * 3 / 4).U),
+    //("std_freelist_1_4_valid", busyCount < (NRPhyRegs / 4).U                                      ),
+    //("std_freelist_2_4_valid", busyCount > (NRPhyRegs / 4).U && busyCount <= (NRPhyRegs / 2).U    ),
+    //("std_freelist_3_4_valid", busyCount > (NRPhyRegs / 2).U && busyCount <= (NRPhyRegs * 3 / 4).U),
     ("std_freelist_4_4_valid", busyCount > (NRPhyRegs * 3 / 4).U                                  )
   )
   generatePerfEvent()

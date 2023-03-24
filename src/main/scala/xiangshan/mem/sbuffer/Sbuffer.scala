@@ -818,11 +818,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire()                                                                         ),
     ("refill_resp_valid ", io.dcache.refill_hit_resp.fire()                                                                            ),
     ("replay_resp_valid ", io.dcache.replay_resp.fire()                                                                                ),
-    ("coh_timeout       ", cohHasTimeOut                                                                                               ),
-    ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
-    ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
-    ("sbuffer_3_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
-    ("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
+    ("coh_timeout       ", cohHasTimeOut                                                                                               )
+    //("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
+    //("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
+    //("sbuffer_3_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
+    //("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
   )
   generatePerfEvent()
 
