@@ -640,7 +640,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
   val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
   val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
-  val sta_missQueue = DecoupledIO(new MissReq)
+  val sta_missQueue = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {

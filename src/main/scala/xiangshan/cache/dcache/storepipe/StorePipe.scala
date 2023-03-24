@@ -54,6 +54,7 @@ class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
   *
   *  Associated with STA Pipeline
   *  Issue a store write intent to Dcache if miss
+  *  NOTE: Now, only prefetch store will enter this pipeline associatively, normal store will not.
   */
 class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents{
   val io = IO(new DCacheBundle {
@@ -73,7 +74,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPe
     val miss_req = DecoupledIO(new MissReq)
 
     // send dcache unhandled miss request to store prefetch miss queue
-    val to_store_pf_miss_queue = DecoupledIO(new MissReq)
+    val to_store_pf_miss_queue = DecoupledIO(new StorePrefetchReq)
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -163,7 +164,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPe
 
 
   /** 
-    * send req to MissQueue
+    * send req to Dcache MissQueue
     */
   io.miss_req.valid := s2_valid && !s2_hit
   io.miss_req.bits := DontCare
@@ -187,7 +188,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPe
   io.lsu.resp.bits.tag_error := false.B
 
   io.to_store_pf_miss_queue.valid := s2_valid && !s2_hit && !io.lsu.s2_kill && io.lsu.resp.bits.replay
-  io.to_store_pf_miss_queue.bits  := io.miss_req.bits
+  io.to_store_pf_miss_queue.bits.vaddr  := io.miss_req.bits.vaddr
+  io.to_store_pf_miss_queue.bits.paddr  := io.miss_req.bits.addr
 
   /** 
     * update replacer when hited

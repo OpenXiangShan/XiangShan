@@ -26,14 +26,17 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, MissReq}
+import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
 class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
-    val sta_missQueue = Flipped(DecoupledIO(new MissReq))
+    // prefetch req issued by store buffer
+    val sb_prefetch = Flipped(DecoupledIO(new StorePrefetchReq))
+    // prefetch req replayed by sta missQueue
+    val sta_missQueue = Flipped(DecoupledIO(new StorePrefetchReq))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
@@ -50,13 +53,19 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
     Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
-  val use_flow_fromRS = io.in.valid
-  val use_flow_fromStaMissQueue = !use_flow_fromRS && io.sta_missQueue.valid
-  val fake_sta_missqueue_data = WireInit(0.U.asTypeOf(new ExuInput))
-  val fake_sta_missqueue_uop = fake_sta_missqueue_data.uop
 
-  io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
-  io.dtlbReq.valid := use_flow_fromRS || use_flow_fromStaMissQueue
+  val use_flow_fromRS = io.in.valid
+  val use_flow_fromPrefetch = !use_flow_fromRS && (io.sta_missQueue.valid || io.sb_prefetch.valid)
+  val use_flow_fromStoreBuffer = !use_flow_fromRS && io.sb_prefetch.valid
+  val use_flow_fromStaMissQueue = !use_flow_fromRS && io.sta_missQueue.valid && !io.sb_prefetch.valid
+
+  val prefetch_vaddr = Mux(use_flow_fromStoreBuffer, io.sb_prefetch.bits.vaddr, io.sta_missQueue.bits.vaddr)
+  val fake_prefetch_exinput = WireInit(0.U.asTypeOf(new ExuInput))
+  val fake_prefetch_exinput_uop = fake_prefetch_exinput.uop
+
+  // request to tlb
+  io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
+  io.dtlbReq.valid := use_flow_fromRS || use_flow_fromPrefetch
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.size := Mux(use_flow_fromRS, LSUOpType.size(io.in.bits.uop.ctrl.fuOpType), 3.U)
   io.dtlbReq.bits.kill := DontCare
@@ -68,31 +77,33 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
   io.dtlbReq.bits.debug.pc := Mux(use_flow_fromRS, io.in.bits.uop.cf.pc, DontCare)
   io.dtlbReq.bits.debug.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
 
-  io.sta_missQueue.ready := io.out.ready && io.dcache.ready && !io.in.valid
+  // ready for prefetch sources
+  io.sb_prefetch.ready   := io.out.ready && io.dcache.ready && !io.in.valid
+  io.sta_missQueue.ready := io.out.ready && io.dcache.ready && !io.in.valid && !io.sb_prefetch.valid
+
   // not real dcache write
-  // just a write intent
-  io.dcache.valid           := use_flow_fromRS || use_flow_fromStaMissQueue
+  // just triger a write intent to dcache by prefetch req
+  io.dcache.valid           := use_flow_fromPrefetch
   io.dcache.bits.cmd        := MemoryOpConstants.M_PFW
-  io.dcache.bits.vaddr      := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
+  io.dcache.bits.vaddr      := prefetch_vaddr
   io.dcache.bits.mask       := DontCare
   io.dcache.bits.instrtype  := DCACHE_PREFETCH_SOURCE.U
 
-
   io.out.bits := DontCare
-  io.out.bits.vaddr := Mux(use_flow_fromRS, saddr, io.sta_missQueue.bits.vaddr)
+  io.out.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
 
   // Now data use its own io
   // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_sta_missqueue_uop)
+  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_prefetch_exinput_uop)
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := Mux(use_flow_fromRS, io.rsIdx, DontCare)
   io.out.bits.mask := Mux(use_flow_fromRS, genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0)), 3.U)
   io.out.bits.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
   io.out.bits.wlineflag := Mux(use_flow_fromRS, io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero, false.B)
-  io.out.bits.isHWPrefetch := use_flow_fromStaMissQueue
-  io.out.valid := (use_flow_fromRS || use_flow_fromStaMissQueue) && io.dcache.fire
-  io.in.ready := io.out.ready && io.dcache.ready
+  io.out.bits.isHWPrefetch := use_flow_fromPrefetch
+  io.out.valid := Mux(use_flow_fromRS, true.B, use_flow_fromPrefetch && io.dcache.fire)
+  io.in.ready := io.out.ready
   when(io.in.valid && io.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -255,7 +266,8 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
-    val sta_missQueue = Flipped(DecoupledIO(new MissReq))
+    val sb_prefetch = Flipped(DecoupledIO(new StorePrefetchReq))
+    val sta_missQueue = Flipped(DecoupledIO(new StorePrefetchReq))
     val redirect = Flipped(ValidIO(new Redirect))
     val dcache = new DCacheStoreIO
     val feedbackSlow = ValidIO(new RSFeedback)
@@ -282,14 +294,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.dcache <> io.dcache.req
   store_s0.io.sta_missQueue <> io.sta_missQueue
+  store_s0.io.sb_prefetch <> io.sb_prefetch
   io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
   io.dcache.s1_paddr := store_s1.io.out.bits.paddr
-  // if redirect, also kill store write prefetch
-  io.dcache.s1_kill := store_s1.io.s1_kill || RegNext(store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
-  io.dcache.s2_kill := store_s2.io.s2_kill || RegNext(store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  // Note: now, store prefetch will be issued after store commit, so don't case about redirect
+  io.dcache.s1_kill := store_s1.io.s1_kill
+  io.dcache.s2_kill := store_s2.io.s2_kill
   io.dcache.s2_pc := store_s2.io.out.bits.uop.cf.pc
 
   // TODO: dcache resp
