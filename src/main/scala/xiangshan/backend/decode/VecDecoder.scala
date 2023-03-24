@@ -37,7 +37,7 @@ case class OPIVX(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWe
   }
 }
 
-case class OPIVI(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat, uopDivType: BitPat = UopDivType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPIVI(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat = SelImm.IMM_OPIVIU, uopDivType: BitPat = UopDivType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm, uopDivType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
@@ -224,52 +224,52 @@ object VecDecoder extends DecodeConstants {
   )
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
-    VADD_VI       -> OPIVI(FuType.vialuF, VialuFixType.vadd_vv,   T, F, F, SelImm.IMM_OPIVIS),
-    VRSUB_VI      -> OPIVI(FuType.vialuF, VialuFixType.vrsub_vv, T, F, F, SelImm.IMM_OPIVIS),
+    VADD_VI       -> OPIVI(FuType.vialuF, VialuFixType.vadd_vv,   T, F, F),
+    VRSUB_VI      -> OPIVI(FuType.vialuF, VialuFixType.vrsub_vv, T, F, F),
 
-    VAND_VI       -> OPIVI(FuType.vialuF, VialuFixType.vand_vv, T, F, F, SelImm.IMM_OPIVIS),
-    VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F, SelImm.IMM_OPIVIS),
-    VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F, SelImm.IMM_OPIVIS),
+    VAND_VI       -> OPIVI(FuType.vialuF, VialuFixType.vand_vv, T, F, F),
+    VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
+    VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
+    VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
 
-    VSLIDEUP_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
-    VSLIDEDOWN_VI -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIU),
+    VSLIDEUP_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VSLIDEDOWN_VI -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
 
-    VADC_VIM      -> OPIVI(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F, SelImm.IMM_OPIVIS),
-    VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
+    VADC_VIM      -> OPIVI(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
+    VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopDivType = UopDivType.VEC_VVM),
+    VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, uopDivType = UopDivType.VEC_VVM),
 
-    VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F, SelImm.IMM_OPIVIS),
+    VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F, uopDivType = SelImm.IMM_OPIVIS),
     
-    VMV_V_I    -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, SelImm.IMM_OPIVIS),
+    VMV_V_I    -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F),
 
-    VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
-    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, SelImm.IMM_OPIVIS, UopDivType.VEC_VVM),
+    VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
+    VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
+    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
+    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_VVM),
+    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
+    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_VVM),
 
-    VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F, SelImm.IMM_OPIVIU),
-    VSRL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsrl_vv, T, F, F, SelImm.IMM_OPIVIU),
-    VSRA_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsra_vv, T, F, F, SelImm.IMM_OPIVIU),
-    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, SelImm.IMM_OPIVIU, UopDivType.VEC_WVV),
-    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, SelImm.IMM_OPIVIU, UopDivType.VEC_WVV),
+    VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F),
+    VSRL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsrl_vv, T, F, F),
+    VSRA_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsra_vv, T, F, F),
+    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, uopDivType = UopDivType.VEC_WVV),
+    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, uopDivType = UopDivType.VEC_WVV),
 
-    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T, SelImm.IMM_OPIVIS),
-    VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T, SelImm.IMM_OPIVIS),
+    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T),
+    VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T, selImm = SelImm.IMM_OPIVIS),
 
-    VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F, SelImm.IMM_OPIVIU),
-    VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F, SelImm.IMM_OPIVIU),
+    VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F),
+    VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F),
 
-    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, SelImm.IMM_OPIVIU, UopDivType.VEC_WVV),
-    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, SelImm.IMM_OPIVIU, UopDivType.VEC_WVV),
+    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, uopDivType = UopDivType.VEC_WVV),
+    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_WVV),
 
-    VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
-    VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
-    VMV4R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
-    VMV8R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, SelImm.IMM_OPIVIS),
+    VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VMV4R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VMV8R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
   )
 
   val opmvv: Array[(BitPat, XSDecodeBase)] = Array(
