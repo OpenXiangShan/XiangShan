@@ -59,8 +59,8 @@ import math
 # parameters according to noop
 NOOP_HOME = os.getenv("NOOP_HOME")
 DIFF_PATH = os.path.join(NOOP_HOME, "ready-to-run", "riscv64-nemu-interpreter-so")
-BUILD_PATH = os.path.join(NOOP_HOME, "build")
-EMU_PATH = os.path.join(BUILD_PATH, "emu")
+BUILD_PATH = os.path.join(NOOP_HOME, "../tutorial")
+EMU_PATH = os.path.join(BUILD_PATH, "emu-constantin")
 
 CONFIG_FILE_PREFIX = ".constant_result_"
 PERF_FILE_POSTFIX = "tmp"
