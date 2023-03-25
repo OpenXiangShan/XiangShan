@@ -126,7 +126,7 @@ class RunContext:
         coreStart = (id % self.config.concurrent_emu) * self.config.emu_threads
         coreEnd = ((id % self.config.concurrent_emu) + 1) * self.config.emu_threads - 1
         stdinStr = self.getStdIn(population, id)
-        return "{} | numactl -m 1 -C {}-{} {} --i {} --diff {} -I {} -s {} 2>{}.{}".format(stdinStr, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed, os.path.join(BUILD_PATH, CONFIG_FILE_PREFIX + str(id)), PERF_FILE_POSTFIX)
+        return "{} | {} --i {} --diff {} -I {} -s {} 2>{}.{}".format(stdinStr, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed, os.path.join(BUILD_PATH, CONFIG_FILE_PREFIX + str(id)), PERF_FILE_POSTFIX)
 
 class Solution:
     def __init__(self, config: Config) -> None:
