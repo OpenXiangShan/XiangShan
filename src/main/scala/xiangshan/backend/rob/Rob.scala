@@ -690,10 +690,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.robIdx, deqPtrVec.last)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
   val allowOnlyOneCommit = commit_exception || intrBitSetReg
-  ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.LOAD,
-                          "rob_first_load", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.STORE,
-                          "rob_first_store", ExcitingUtils.Perf)
   // for instructions that may block others, we don't allow them to commit
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
@@ -1099,6 +1095,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       XSPerfAccumulate(s"${fuName}_latency_enq_rs_execute_fma", ifCommit(latencySum(commitIsFma, rsFuLatency)))
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
+  }
+
+  if (env.EnableTopDown) {
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.LOAD,
+                            "rob_first_load", ExcitingUtils.Perf)
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.STORE,
+                            "rob_first_store", ExcitingUtils.Perf)
   }
 
   /**
