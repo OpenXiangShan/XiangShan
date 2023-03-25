@@ -112,9 +112,7 @@ class RunContext:
         if acc < (0.1 * (100 * self.config.concurrent_emu * self.config.emu_threads)):
             return True
         else:
-            print("no free {} core, core usage:".format(self.config.concurrent_emu * self.config.emu_threads))
-            print(percent_per_core)
-            return False
+            return True
     def getStdIn(self, population: list, id: int) -> str:
         res = 'echo \"'
         res += str(len(population[id]))
