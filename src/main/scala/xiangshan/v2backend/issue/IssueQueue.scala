@@ -207,8 +207,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     s0_enqSelOHVec     := ep.io.enqSelOHVec.map(oh => oh.bits)
   }
 
+  protected val commonAccept: UInt = Cat(fuTypeRegVec.map(fuType =>
+    Cat(commonFuCfgs.map(_.fuType.U === fuType)).orR
+  ).reverse)
+
   mainDeqPolicy match { case dp =>
-    dp.io.request       := canIssueVec.asUInt
+    dp.io.request       := canIssueVec.asUInt & commonAccept
     mainDeqSelValidVec  := dp.io.deqSelOHVec.map(oh => oh.valid)
     mainDeqSelOHVec     := dp.io.deqSelOHVec.map(oh => oh.bits)
   }
@@ -239,12 +243,16 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     (deqOH & accept).orR
   }
 
-  subDeqPolicies.zipWithIndex.map{case (x, i) => x.map(_ => {
-    when (!mainDeqCanAccept(i)) {
-      finalDeqSelValidVec(i)  := subDeqSelValidVec(i).get.head
-      finalDeqSelOHVec(i)     := subDeqSelOHVec(i).get.head
-    }
-  })}
+  subDeqPolicies.zipWithIndex.foreach {
+    case (x: Option[DeqPolicy], i) =>
+      x.map(_ => {
+        // If the inst selected by mainDeqPolicy cannot be accepted, use specialDeqPolicy instead
+        when (!mainDeqCanAccept(i)) {
+          finalDeqSelValidVec(i)  := subDeqSelValidVec(i).get.head
+          finalDeqSelOHVec(i)     := subDeqSelOHVec(i).get.head
+        }
+      })
+  }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i)

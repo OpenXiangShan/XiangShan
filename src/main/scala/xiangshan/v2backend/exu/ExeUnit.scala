@@ -139,7 +139,8 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
 
   private val acceptVec: Seq[Bool] = acceptCond(io.in.bits)
 
-  XSError(PopCount(acceptVec) > 1.U, "accept vec should no more than 1")
+  XSError(PopCount(acceptVec) > 1.U, "[ExeUnit] accept vec should no more than 1")
+  XSError(io.in.valid && PopCount(acceptVec) === 0.U, "[ExeUnit] there is a inst not dispatched to any fu")
 
   io.out.zipWithIndex.foreach { case (out, i) =>
     out.valid := acceptVec(i) && io.in.valid && out.ready
