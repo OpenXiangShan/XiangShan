@@ -1097,6 +1097,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
   }
 
+  if (env.EnableTopDown) {
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.LOAD,
+                            "rob_first_load", ExcitingUtils.Perf)
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.STORE,
+                            "rob_first_store", ExcitingUtils.Perf)
+  }
+
   /**
     * DataBase info:
     * log trigger is at writeback valid
