@@ -97,7 +97,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   val data_buffer_s1   = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(VLEN.W))))))
   val mask_buffer_s1   = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U((VLEN/8).W))))))
   val rob_idx_valid_s1 = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(false.B)))))
-  val rob_idx_s1       = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(4.W))))))
+  val rob_idx_s1       = RegInit(VecInit(Seq.fill(exuParameters.LduCnt)(VecInit(Seq.fill(2)(0.U(log2Ceil(RobSize).W))))))
 
   for (i <- 0 until exuParameters.LduCnt) {
     io.vecFeedback(i) := Cat((0 until VlUopSize).map(j => io.loadRegIn(i).bits.uop.robIdx.value === VluopEntry(j).rob_idx && pre_allocated(j))).orR
@@ -113,7 +113,7 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   val enq_valid = WireInit(VecInit(Seq.fill(2)(false.B)))
   for (i <- 0 until exuParameters.LduCnt) {
     //already_in(i) := Cat(VluopEntry.map(_.rob_idx === io.loadRegIn(i).bits.uop.robIdx.value)).orR
-    already_in(i) := Cat((0 until VlUopSize).map(j => VluopEntry(j).rob_idx === io.loadRegIn(i).bits.uop.robIdx.value && pre_allocated(j))).orR
+    already_in(i) := Cat((0 until VlUopSize).map(j => VluopEntry(j).rob_idx === io.loadRegIn(i).bits.uop.robIdx.value && io.loadRegIn(i).valid && pre_allocated(j))).orR
     enq_valid(i)  := io.loadRegIn(i).fire && !already_in(i)
   }
 
@@ -259,13 +259,14 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   // write data from loadpipe to first_level buffer
   for (i <- 0 until exuParameters.LduCnt) {
     when (io.loadPipeIn(i).fire) {
-      buffer_valid_s0(i)  := true.B  //TODO: condition
+      buffer_valid_s0(i)  := true.B
       data_buffer_s0(i)   := io.loadPipeIn(i).bits.vecdata
       mask_buffer_s0(i)   := io.loadPipeIn(i).bits.mask
       rob_idx_s0(i)       := io.loadPipeIn(i).bits.rob_idx
       rob_idx_valid_s0(i) := io.loadPipeIn(i).bits.rob_idx_valid
       reg_offset_s0(i)    := io.loadPipeIn(i).bits.reg_offset
       offset_s0(i)        := io.loadPipeIn(i).bits.offset
+      //printf{p"buffer_valid_s0 = ${data_buffer_s0(i)}"}
     }.otherwise {
       buffer_valid_s0(i)  := false.B
     }
@@ -309,19 +310,19 @@ class VluopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   io.vecData(1).valid := io.vecLoadWriteback(0).fire && valid(deqPtr.value + 1.U) && finished(deqPtr.value + 1.U)
   for (i <- 0 until 2) {
     io.vecLoadWriteback(i).bits := DontCare
+    dontTouch(io.vecData(i).bits)
     io.vecData(i).bits := DontCare
     val deq_index = deqPtr.value + i.U
-    when (valid(deq_index) && finished(deq_index)) {//TODO:need optimization?
-      io.vecLoadWriteback(i).bits                  := RegEnable(Vluop2robEntry(deq_index),io.vecLoadWriteback(i).fire)
-      io.vecLoadWriteback(i).bits.uop.robIdx.value := RegEnable(VluopEntry(deq_index).rob_idx,io.vecLoadWriteback(i).fire)
-      io.vecData(i).bits                           := RegEnable(VluopEntry(deq_index).data.asUInt,io.vecData(i).fire)
-      //io.vecLoadWriteback(i).bits.vecdata          := RegEnable(VluopEntry(deq_index).data.asUInt,io.vecLoadWriteback(i).fire)
-      io.vecLoadWriteback(i).bits.uop.pdest        := RegEnable(VluopEntry(deq_index).wb_dest,io.vecLoadWriteback(i).fire)
-      valid(deq_index)                             := RegEnable(false.B,io.vecLoadWriteback(i).fire)
-      allocated(deq_index)                         := RegEnable(false.B,io.vecLoadWriteback(i).fire)
-      pre_allocated(deq_index)                     := RegEnable(false.B,io.vecLoadWriteback(i).fire)
-      finished(deq_index)                          := RegEnable(false.B,io.vecLoadWriteback(i).fire)
-      VluopEntry(deq_index).dataVMask              := RegEnable(VecInit(Seq.fill(VLEN/8)(false.B)),io.vecLoadWriteback(i).fire)
+    when (io.vecLoadWriteback(i).fire) {//TODO:need optimization?
+      io.vecLoadWriteback(i).bits                  := Vluop2robEntry(deq_index)
+      io.vecLoadWriteback(i).bits.uop.robIdx.value := VluopEntry(deq_index).rob_idx
+      io.vecData(i).bits                           := VluopEntry(deq_index).data.asUInt
+      io.vecLoadWriteback(i).bits.uop.pdest        := VluopEntry(deq_index).wb_dest
+      valid(deq_index)                             := false.B
+      allocated(deq_index)                         := false.B
+      pre_allocated(deq_index)                     := false.B
+      finished(deq_index)                          := false.B
+      VluopEntry(deq_index).dataVMask              := VecInit(Seq.fill(VLEN/8)(false.B))
     }
   }
 

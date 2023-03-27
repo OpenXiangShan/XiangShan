@@ -139,10 +139,11 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val needAlloc       = Wire(Vec(2, Bool()))
   val baseAddr        = Wire(Vec(2, UInt(VAddrBits.W)))
   val dataWidth       = Wire(Vec(2, UInt(10.W)))
-  val vend_0          = Wire(Vec(2,UInt(5.W)))
-  val vend_1          = Wire(Vec(2,UInt(6.W)))
-  val vend_2          = Wire(Vec(2,UInt(7.W)))
-  val vend_3          = Wire(Vec(2,UInt(8.W)))
+  //val vend_0          = Wire(Vec(2,UInt(5.W)))
+  //val vend_1          = Wire(Vec(2,UInt(6.W)))
+  //val vend_2          = Wire(Vec(2,UInt(7.W)))
+  //val vend_3          = Wire(Vec(2,UInt(8.W)))
+  val vend            = Wire(Vec(2,UInt(8.W)))
   val flowWriteNumber = Wire(Vec(2, UInt(3.W)))
   val realFlowNum     = Wire(Vec(2, UInt(4.W)))
 
@@ -153,26 +154,42 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val validCount = Wire(Vec(2, UInt(4.W)))
   val allowEnqueue = Wire(Vec(2, Bool()))
 
+  val sameInst = io.loadRegIn(0).valid && io.loadRegIn(1).valid &&
+    (io.loadRegIn(0).bits.uop.robIdx.value - io.loadRegIn(0).bits.inner_idx) === (io.loadRegIn(1).bits.uop.robIdx.value - io.loadRegIn(1).bits.inner_idx)
 
   for (i <- 0 until 2) {
-    needAlloc(i)  := !(0 until 2).map(j => (0 until VlFlowSize).map(entry =>
+    when (sameInst) {
+      when (i.U === 0.U) {
+        needAlloc(i) := !(0 until 2).map(j => (0 until VlFlowSize).map(entry =>
+          flow_entry(j)(entry).rob_idx(0) === io.loadRegIn(i).bits.uop.robIdx.value && flow_entry(j)(entry).rob_idx_valid(0)).reduce(_||_)).reduce(_||_) && io.loadRegIn(i).valid
+      }.otherwise {
+        needAlloc(i) := false.B
+      }
+    }.otherwise {
+      needAlloc(i)  := !(0 until 2).map(j => (0 until VlFlowSize).map(entry =>
         flow_entry(j)(entry).rob_idx(0) === io.loadRegIn(i).bits.uop.robIdx.value && flow_entry(j)(entry).rob_idx_valid(0)).reduce(_||_)).reduce(_||_) && io.loadRegIn(i).valid
-    loadInstDec(i)  := LoadInstDec(i).apply(io.loadRegIn(i).bits.uop.cf.instr)
-    dataWidth(i)    := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)//TODO: for index inst need modify
-    vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(6,0) - 1.U
-    vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(6,0) - 1.U
-    vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(6,0) - 1.U
-    vend_3(i)       := baseAddr(i)(6,0) + dataWidth(i)(6,0) - 1.U
-    flowWriteNumber(i) := Mux(vend_3(i)(7) === 1.U, vend_3(i)(7,4), Mux(vend_2(i)(6) === 1.U, vend_2(i)(6,4), Mux(vend_1(i)(5) === 1.U, vend_1(i)(5,4), vend_0(i)(4))))
+    }
+  }
+
+  for (i <- 0 until 2) {
+    loadInstDec(i)     := LoadInstDec(i).apply(io.loadRegIn(i).bits.uop.cf.instr)
+    baseAddr(i)        := io.loadRegIn(i).bits.baseaddr
+    dataWidth(i)       := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)//TODO: for index inst need modify
+    vend(i)            := baseAddr(i)(3,0) + dataWidth(i)(6,0)
+    flowWriteNumber(i) := vend(i)(7,4)
+    realFlowNum(i)  := flowWriteNumber(i).asUInt + vend(i)(3,0) =/= 0.U
+    //vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(6,0) - 1.U
+    //vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(6,0) - 1.U
+    //vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(6,0) - 1.U
+    //vend_3(i)       := baseAddr(i)(6,0) + dataWidth(i)(6,0) - 1.U
+    //flowWriteNumber(i) := Mux(vend_3(i)(7) === 1.U, vend_3(i)(7,4), Mux(vend_2(i)(6) === 1.U, vend_2(i)(6,4), Mux(vend_1(i)(5) === 1.U, vend_1(i)(5,4), vend_0(i)(4))))
   }
 
   val enqPtr = RegInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new VlflowPtr))))
   val deqPtr = RegInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new VlflowPtr))))
 
   for(i <- 0 until 2) {
-    baseAddr(i)     := io.loadRegIn(i).bits.baseaddr
     cross128(i)     := baseAddr(i)(3, 0) =/= 0.U(4.W)
-    realFlowNum(i)  := flowWriteNumber(i).asUInt + 1.U
     when (needAlloc(i)) {
       enqPtr(i).value := enqPtr(i).value + realFlowNum(i)
     }

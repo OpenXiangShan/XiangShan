@@ -72,10 +72,6 @@ class VecExuOutput(implicit p: Parameters) extends ExuOutput {
   val reg_offset = Vec(2,UInt(4.W))
 }
 
-class VecWriteback(implicit p: Parameters) extends ExuOutput {
-  val vecdata = UInt(VLEN.W)
-}
-
 object VecGenMask {
   def apply(rob_idx_valid: Vec[Bool], reg_offset: Vec[UInt], offset: Vec[UInt], mask: UInt):Vec[UInt] = {
     val vMask = VecInit(Seq.fill(2)(0.U(16.W)))

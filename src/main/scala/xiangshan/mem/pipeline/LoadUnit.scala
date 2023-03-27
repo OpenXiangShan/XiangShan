@@ -1276,6 +1276,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     !s3_loadOutBits.vec128bit
 
   io.VecloadOut.bits := DontCare
+  dontTouch(io.VecloadOut.bits)
   io.VecloadOut.valid := s3_loadOutValid && s3_loadOutBits.vec128bit
   io.VecloadOut.bits.uop := s3_loadOutBits.uop
   io.VecloadOut.bits.uop.cf.exceptionVec(loadAccessFault) := s3_delayedLoadError && !s3_loadOutBits.tlbMiss  ||
