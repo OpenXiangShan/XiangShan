@@ -949,6 +949,7 @@ def detectRollback(i: Int) = {
 
   dataModule.io.uncache.raddr := deqPtrExtNext.value
 
+  io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
   io.uncache.req.bits.data := DontCare
