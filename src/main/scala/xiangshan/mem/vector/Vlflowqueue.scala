@@ -138,13 +138,13 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   val needAlloc       = Wire(Vec(2, Bool()))
   val baseAddr        = Wire(Vec(2, UInt(VAddrBits.W)))
-  val dataWidth       = Wire(Vec(2, UInt(10.W)))
+  val dataWidth       = Wire(Vec(2, UInt(8.W)))
   //val vend_0          = Wire(Vec(2,UInt(5.W)))
   //val vend_1          = Wire(Vec(2,UInt(6.W)))
   //val vend_2          = Wire(Vec(2,UInt(7.W)))
   //val vend_3          = Wire(Vec(2,UInt(8.W)))
   val vend            = Wire(Vec(2,UInt(8.W)))
-  val flowWriteNumber = Wire(Vec(2, UInt(3.W)))
+  //val flowWriteNumber = Wire(Vec(2, UInt(4.W)))
   val realFlowNum     = Wire(Vec(2, UInt(4.W)))
 
   val loadInstDec = Wire(Vec(2,new VecDecode()))
@@ -175,9 +175,9 @@ class VlflowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     loadInstDec(i)     := LoadInstDec(i).apply(io.loadRegIn(i).bits.uop.cf.instr)
     baseAddr(i)        := io.loadRegIn(i).bits.baseaddr
     dataWidth(i)       := io.loadRegIn(i).bits.vl << loadInstDec(i).uop_eew(1,0)//TODO: for index inst need modify
-    vend(i)            := baseAddr(i)(3,0) + dataWidth(i)(6,0)
-    flowWriteNumber(i) := vend(i)(7,4)
-    realFlowNum(i)  := flowWriteNumber(i).asUInt + vend(i)(3,0) =/= 0.U
+    vend(i)            := baseAddr(i)(3,0) + dataWidth(i)
+    //flowWriteNumber(i) := vend(i)(7,4)
+    realFlowNum(i)  := vend(i)(7,4) + (vend(i)(3,0) =/= 0.U).asUInt
     //vend_0(i)       := baseAddr(i)(3,0) + dataWidth(i)(6,0) - 1.U
     //vend_1(i)       := baseAddr(i)(4,0) + dataWidth(i)(6,0) - 1.U
     //vend_2(i)       := baseAddr(i)(5,0) + dataWidth(i)(6,0) - 1.U
