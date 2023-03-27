@@ -428,12 +428,12 @@ class TageTable
         when (taken) {
           update_wdata.ctr_up := 1.U
           update_wdata.ctr_down := 0.U
-          not_silent_update := (latest_ctr_up == 1.U && latest_ctr_down == 0.U).B
         } .otherwise {
           update_wdata.ctr_up := 0.U
           update_wdata.ctr_down := 1.U
-          not_silent_update := (latest_ctr_up == 0.U && latest_ctr_down == 1.U).B
         }
+        // Allocation need to update tag, so always update
+        not_silent_update := true.B
       } .otherwise {
         when (decay) {
           // Decay the larger counter
