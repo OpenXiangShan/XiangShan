@@ -340,7 +340,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val redirect = Input(Valid(new Redirect))
     val dispatch = Flipped(new DispatchLFSTIO)
     // when store issued, mark store as invalid
-    val storeIssue = Vec(backendParams.StuCnt, Flipped(Valid(new DynInst)))
+    val storeIssue = Vec(backendParams.StaCnt, Flipped(Valid(new DynInst)))
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
@@ -384,7 +384,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   }
 
   // when store is issued, mark it as invalid
-  (0 until backendParams.StuCnt).map(i => {
+  (0 until backendParams.StaCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
       when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){

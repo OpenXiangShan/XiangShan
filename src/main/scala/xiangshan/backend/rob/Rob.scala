@@ -25,6 +25,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.frontend.FtqPtr
+import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.v2backend.{BackendParams, FuType}
 
@@ -544,8 +545,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.debugInfo.writebackTime
 
       // debug for lqidx and sqidx
-//      debug_microOp(wbIdx).lqIdx := wb.bits.uop.lqIdx
-//      debug_microOp(wbIdx).sqIdx := wb.bits.uop.sqIdx
+      debug_microOp(wbIdx).lqIdx := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+      debug_microOp(wbIdx).sqIdx := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
 
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,

@@ -30,7 +30,7 @@ import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
-import xiangshan.frontend.Ftq_RF_Components
+import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 import xiangshan.v2backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.v2backend.{BackendParams, VAddrData}
 
@@ -50,17 +50,6 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
 
   lazy val module = new CtrlBlockImp(this)(p, params)
 
-//  override lazy val writebackSourceParams: Seq[WritebackSourceParams] = {
-//    writebackSinksParams
-//  }
-//  override lazy val writebackSourceImp: HasWritebackSourceImp = module
-//
-//  override def generateWritebackIO(
-//    thisMod: Option[HasWritebackSource] = None,
-//    thisModImp: Option[HasWritebackSourceImp] = None
-//  ): Unit = {
-//    module.io.writeback.zip(writebackSinksImp(thisMod, thisModImp)).foreach(x => x._1 := x._2)
-//  }
 }
 
 class CtrlBlockImp(
@@ -73,32 +62,24 @@ class CtrlBlockImp(
   with HasCircularQueuePtrHelper
   with HasPerfEvents
 {
-  // bjIssueQueue.enq(4) + redirects (1) + loadPredUpdate (1) + robFlush (1)
+  val pcMemRdIndexes = new NamedIndexes(Seq(
+    "exu"       -> params.numPcReadPort,
+    "redirect"  -> 1,
+    "memPred"   -> 1,
+    "robFlush"  -> 1,
+    "load"      -> params.LduCnt,
+  ))
+
   private val numPcMemReadForExu = params.numPcReadPort
-  private val numPcMemRead = params.numPcReadPort + 1 + 1 + 1
+  private val numPcMemRead = pcMemRdIndexes.maxIdx
+
   private val numTargetMemRead = numPcMemReadForExu
-  private val pcMemReadIdxForRedirect = numPcMemReadForExu
-  private val pcMemReadIdxForMemPred = numPcMemReadForExu + 1
-  private val pcMemReadIdxForRobFlush = numPcMemReadForExu + 2
 
   println(s"pcMem read num: $numPcMemRead")
   println(s"pcMem read num for exu: $numPcMemReadForExu")
   println(s"targetMem read num: $numTargetMemRead")
 
   val io = IO(new CtrlBlockIO())
-
-//  override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
-//    Some(io.writeback.map(writeback => {
-//      val exuOutput = WireInit(writeback)
-//      val timer = GTimer()
-//      for ((wb_next, wb) <- exuOutput.zip(writeback)) {
-//        wb_next.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)))
-//        wb_next.bits := RegNext(wb.bits)
-//        wb_next.bits.uop.debugInfo.writebackTime := timer
-//      }
-//      exuOutput
-//    }))
-//  }
 
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
@@ -121,8 +102,8 @@ class CtrlBlockImp(
   s1_robFlushRedirect.valid := RegNext(s0_robFlushRedirect.valid)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
 
-  pcMem.io.raddr(pcMemReadIdxForRobFlush) := s0_robFlushRedirect.bits.ftqIdx.value
-  private val s1_robFlushPc = pcMem.io.rdata(pcMemReadIdxForRobFlush).getPc(RegNext(s0_robFlushRedirect.bits.ftqOffset))
+  pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
+  private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).getPc(RegNext(s0_robFlushRedirect.bits.ftqOffset))
   private val s3_redirectGen = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
@@ -172,10 +153,16 @@ class CtrlBlockImp(
 //  decode.io.vconfig := io.vconfigReadPort.data
 //  decode.io.isVsetFlushPipe := rob.io.isVsetFlushPipe
 
-  pcMem.io.raddr(pcMemReadIdxForRedirect) := redirectGen.io.redirectPcRead.ptr.value
-  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemReadIdxForRedirect).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
-  pcMem.io.raddr(pcMemReadIdxForMemPred) := redirectGen.io.memPredPcRead.ptr.value
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemReadIdxForMemPred).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
+  pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
+  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
+  pcMem.io.raddr(pcMemRdIndexes("memPred").head) := redirectGen.io.memPredPcRead.ptr.value
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
+
+  for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
+    pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
+    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memLdPcRead(i).offset))
+  }
+
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.exuRedirect := exuRedirects
   redirectGen.io.exuOutPredecode := exuPredecode // garded by exuRedirect.valid
@@ -389,9 +376,9 @@ class CtrlBlockImp(
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect
 
-  for (i <- 0 until params.numPcReadPort) {
-    pcMem.io.raddr(i) := intDq.io.deqNext(i).ftqPtr.value
-    jumpPcVec(i) := pcMem.io.rdata(i).getPc(RegNext(intDq.io.deqNext(i).ftqOffset))
+  for ((pcMemIdx, i) <- pcMemRdIndexes("exu").zipWithIndex) {
+    pcMem.io.raddr(pcMemIdx) := intDq.io.deqNext(i).ftqPtr.value
+    jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq.io.deqNext(i).ftqOffset))
   }
 
   val dqOuts = Seq(io.toIssueBlock.intUops) ++ Seq(io.toIssueBlock.vfUops) ++ Seq(io.toIssueBlock.memUops)
@@ -495,9 +482,10 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {
-    val stIn = Vec(params.StuCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
+    val stIn = Vec(params.StaCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
     val violation = Flipped(ValidIO(new Redirect))
   }
+  val memLdPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val robio = new Bundle {
     val csr = new RobCSRIO
@@ -518,4 +506,20 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W))) // TODO: use me
   val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
 
+}
+
+class NamedIndexes(namedCnt: Seq[(String, Int)]) {
+  require(namedCnt.map(_._1).distinct.size == namedCnt.size, "namedCnt should not have the same name")
+
+  val maxIdx = namedCnt.map(_._2).sum
+  val nameRangeMap: Map[String, (Int, Int)] = namedCnt.indices.map { i =>
+    val begin = namedCnt.slice(0, i).map(_._2).sum
+    val end = begin + namedCnt(i)._2
+    (namedCnt(i)._1, (begin, end))
+  }.toMap
+
+  def apply(name: String): Seq[Int] = {
+    require(nameRangeMap.contains(name))
+    nameRangeMap(name)._1 until nameRangeMap(name)._2
+  }
 }

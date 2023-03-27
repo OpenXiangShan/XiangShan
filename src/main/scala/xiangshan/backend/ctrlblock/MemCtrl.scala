@@ -35,7 +35,7 @@ class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
 class MemCtrlIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val csrCtrl = Input(new CustomCSRCtrlIO)
-  val stIn = Vec(params.StuCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
+  val stIn = Vec(params.StaCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
   val memPredUpdate = Input(new MemPredUpdateReq)
   val mdpFlodPcVec = Input(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
   val dispatchLFSTio = Flipped(new DispatchLFSTIO)

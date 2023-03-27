@@ -110,9 +110,10 @@ case class BackendParams(
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
 
   def AluCnt = allSchdParams.map(_.AluCnt).sum
-  def StuCnt = allSchdParams.map(_.StuCnt).sum
+  def StaCnt = allSchdParams.map(_.StaCnt).sum
+  def StdCnt = allSchdParams.map(_.StdCnt).sum
   def LduCnt = allSchdParams.map(_.LduCnt).sum
-  def LsExuCnt = StuCnt + LduCnt
+  def LsExuCnt = StaCnt + LduCnt
   def JmpCnt = allSchdParams.map(_.JmpCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
@@ -260,6 +261,10 @@ case class SchdBlockParams(
   rfDataWidth     : Int,
   numUopIn        : Int,
 ) {
+  def isMemSchd   : Boolean = schdType == MemScheduler()
+  def isIntSchd   : Boolean = schdType == IntScheduler()
+  def isVfSchd    : Boolean = schdType == VfScheduler()
+
   def JmpCnt      :Int = issueBlockParams.map(_.JmpCnt).sum
   def BrhCnt      :Int = issueBlockParams.map(_.BrhCnt).sum
   def I2fCnt      :Int = issueBlockParams.map(_.I2fCnt).sum
@@ -276,7 +281,8 @@ case class SchdBlockParams(
   def FDivSqrtCnt :Int = issueBlockParams.map(_.fDivSqrtCnt).sum
 
   def LduCnt      :Int = issueBlockParams.map(_.LduCnt).sum
-  def StuCnt      :Int = issueBlockParams.map(_.StuCnt).sum
+  def StaCnt      :Int = issueBlockParams.map(_.StaCnt).sum
+  def StdCnt      :Int = issueBlockParams.map(_.StdCnt).sum
   def MouCnt      :Int = issueBlockParams.map(_.MouCnt).sum
 
   def VipuCnt     :Int = issueBlockParams.map(_.VipuCnt).sum
@@ -315,8 +321,7 @@ case class SchdBlockParams(
 //  def numTotalVfRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.).sum).sum
 
   // Todo: 14R8W
-  def numRfRead : Int = numTotalIntRfRead
-  def numRfWrite: Int = numWriteIntRf
+  def numIntRfRead : Int = numTotalIntRfRead
 
   def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
@@ -354,6 +359,13 @@ case class IssueBlockParams(
   // top down
   val schdType       : SchedulerType,
 ) {
+  def inMemSchd     : Boolean = schdType == MemScheduler()
+  def inIntSchd     : Boolean = schdType == IntScheduler()
+  def inVfSchd      : Boolean = schdType == VfScheduler()
+  def isMemAddrIQ   : Boolean = inMemSchd && StdCnt == 0
+  def isLdAddrIQ    : Boolean = inMemSchd && LduCnt > 0
+  def isStAddrIQ    : Boolean = inMemSchd && StaCnt > 0
+
   def numExu        : Int = exuBlockParams.length
   def numIntSrc     : Int = exuBlockParams.map(_.numIntSrc).max
   def numFpSrc      : Int = exuBlockParams.map(_.numFpSrc ).max
@@ -400,8 +412,9 @@ case class IssueBlockParams(
   def fDivSqrtCnt :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
   def LduCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "ldu")).sum
-  def StuCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "sta")).sum
+  def StaCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "sta")).sum
   def MouCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.mou)).sum
+  def StdCnt      :Int = exuBlockParams.map(_.fuConfigs.count(_.name == "std")).sum
 
   def VipuCnt     :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
   def VfpuCnt     :Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vfpu)).sum
@@ -455,6 +468,10 @@ case class IssueBlockParams(
 
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
     MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
+  }
+
+  def getIQName = {
+    "IssueQueue" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
   }
 }
 
@@ -533,9 +550,11 @@ case class ExeUnitParams(
 
   def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
 
-  def hasStoreFu = fuConfigs.map(_.fuType == FuType.stu).reduce(_ || _)
+  def hasStoreFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
-  def hasStdFu = fuConfigs.map(x => x.fuType == FuType.stu && x.latency.latencyVal.nonEmpty).reduce(_ || _)
+  def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
+
+  def isMemAddrFu = hasLoadFu || hasStoreFu
 
   def immType: Set[UInt] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
 

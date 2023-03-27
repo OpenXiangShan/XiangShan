@@ -293,6 +293,8 @@ object Bundles {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
+    val sqIdx = if (params.isMemAddrFu) Some(new SqPtr) else None
+    val lqIdx = if (params.isMemAddrFu) Some(new LqPtr) else None
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
@@ -312,6 +314,8 @@ object Bundles {
       this.ftqIdx     .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset  .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo.foreach(_ := source.common.predictInfo.get)
+      this.lqIdx      .foreach(_ := source.common.lqIdx.get)
+      this.sqIdx      .foreach(_ := source.common.sqIdx.get)
     }
   }
 
@@ -332,6 +336,8 @@ object Bundles {
     val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None
+    val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
+    val sqIdx        = if (params.hasStoreFu)   Some(new SqPtr())             else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     val debug = new DebugBundle
@@ -390,7 +396,7 @@ object Bundles {
 
     def asVfRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
       val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, this.params.pregIdxWidth)))
-      rfWrite.wen := this.fpWen || this.vecWen
+      rfWrite.wen := (this.fpWen || this.vecWen) && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
       rfWrite

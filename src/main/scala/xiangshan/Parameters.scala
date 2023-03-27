@@ -324,17 +324,17 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(5, 0), VecWB(4, 0))),
         ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(5, 0))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(StaCfg), WBSeq()),
         ExeUnitParams(Seq(StaCfg), WBSeq()),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(StdCfg), WBSeq()),
         ExeUnitParams(Seq(StdCfg), WBSeq()),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
     ),
-      numPregs = 0,
+      numPregs = intPreg.numEntries max vfPreg.numEntries,
       numRfReadWrite = None,
       numDeqOutside = 0,
       schdType = schdType,

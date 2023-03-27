@@ -21,13 +21,23 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val io = IO(new DataPathIO())
 
   private val (fromIntIQ, toIntExu) = (io.fromIntIQ, io.toIntExu)
+  private val (fromMemIQ, toMemExu) = (io.fromMemIQ, io.toMemExu)
   private val (fromVfIQ, toVfExu) = (io.fromVfIQ, io.toFpExu)
-  private val fromMemIQ = io.fromMemIQ
+
+  println(s"[DataPath] IntIQ(${fromIntIQ.size}), MemIQ(${fromMemIQ.size})")
+  println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
+
+  // just refences for convience
+  private val fromIQ = fromIntIQ ++ fromMemIQ ++ fromVfIQ
+  private val fromMemIntIQ = fromIntIQ ++ fromMemIQ
+  private val fromMemVfIQ = fromVfIQ ++ fromMemIQ
+  private val toExu = toIntExu ++ toMemExu ++ toVfExu
+  private val toMemIntExu = toIntExu ++ toMemExu
 
   private val intSchdParams = params.schdParams(IntScheduler())
   private val vfSchdParams = params.schdParams(VfScheduler())
   private val memSchdParams = params.schdParams(MemScheduler())
-  private val numIntR = intSchdParams.numRfRead + memSchdParams.numTotalIntRfRead
+  private val numIntR = intSchdParams.numIntRfRead + memSchdParams.numTotalIntRfRead
   println(s"number of total read req of int regfile: ${numIntR}")
 //  private val numVfR = vfSchdParams.numRfRead + memSchdParams.numTotalVfRfRead
 
@@ -61,12 +71,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   intRfWdata := io.fromIntWb.map(_.data)
   intRfWen := io.fromIntWb.map(_.wen)
 
-  private val addrFromIntIQ = fromIntIQ.map(_.map(_.bits.getIntRfReadBundle.map(_.addr)))
-  private val addrFromMemIQ = fromMemIQ.map(_.map(_.bits.getIntRfReadBundle.map(_.addr)))
-  private val addrFromIQ: IndexedSeq[IndexedSeq[Seq[UInt]]] = addrFromIntIQ ++ addrFromMemIQ
-  private val fromIQFire: IndexedSeq[IndexedSeq[Bool]] = fromIntIQ.map(_.map(_.fire)) ++ fromMemIQ.map(_.map(_.fire))
+  private val intAddrFromIQ: IndexedSeq[IndexedSeq[Seq[UInt]]] = fromMemIntIQ.map(_.map(_.bits.getIntRfReadBundle.map(_.addr)))
+  private val intFromIQFire: IndexedSeq[IndexedSeq[Bool]] = fromMemIntIQ.map(_.map(_.fire))
   // hold read addr until new fromIQ.fire
-  addrFromIQ.zip(fromIQFire).map { case (addrVec2, fireVec) =>
+  intAddrFromIQ.zip(intFromIQFire).map { case (addrVec2, fireVec) =>
     addrVec2.zip(fireVec).map { case (addrVec, fire) =>
       addrVec.map(addr => (addr, fire))
     }
@@ -81,19 +89,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 //  }
   println(s"intDebugRead: ${intDebugRead}")
 
-  val s1_toIntExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(toIntExu.map(x => MixedVec(x.map(_.valid.cloneType)))))
-  val s1_toIntExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toIntExu.map(x => MixedVec(x.map(_.bits.cloneType)))))
-  val s1_toIntExuReady = Wire(MixedVec(toIntExu.map(x => MixedVec(x.map(_.ready.cloneType)))))
-  val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIntIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)))))
-  val s1_pregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toIntExu.map(x => MixedVec(x.map(_.bits.src.cloneType)))))
-  s1_pregRData.flatten.flatten.zip(intRfRdata).foreach { case (sink, source) => sink := source }
+  val s1_toExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(
+    toExu.map(x => MixedVec(x.map(_.valid.cloneType)))
+  ))
+  val s1_toExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType)))))
+  val s1_toExuReady = Wire(MixedVec(toMemIntExu.map(x => MixedVec(x.map(_.ready.cloneType))))) // Todo
+  val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)))))
+  val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toMemIntExu.map(x => MixedVec(x.map(_.bits.src.cloneType)))))
+  println(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
+  s1_intPregRData.flatten.flatten.zip(intRfRdata).foreach { case (sink, source) => sink := source }
 
-  for (i <- fromIntIQ.indices) {
-    for (j <- fromIntIQ(i).indices) {
-      val s1_valid = s1_toIntExuValid(i)(j)
-      val s1_ready = s1_toIntExuReady(i)(j)
-      val s1_data = s1_toIntExuData(i)(j)
-      val s0 = fromIntIQ(i)(j) // s0
+  for (i <- fromMemIntIQ.indices) {
+    for (j <- fromMemIntIQ(i).indices) {
+      val s1_valid = s1_toExuValid(i)(j)
+      val s1_ready = s1_toExuReady(i)(j)
+      val s1_data = s1_toExuData(i)(j)
+      val s0 = fromMemIntIQ(i)(j) // s0
       val block = false.B // Todo: read arbiter
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       when (s0.fire && !s1_flush && !block) {
@@ -107,7 +118,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
       // imm extract
       when (s0.fire && !s1_flush && !block) {
-        if (s1_data.params.immType.nonEmpty) {
+        if (s1_data.params.immType.nonEmpty && s1_data.src.size > 1) {
           // rs1 is always int reg, rs2 may be imm
           when(SrcType.isImm(s0.bits.srcType(1))) {
             s1_data.src(1) := ImmExtractor(
@@ -127,28 +138,24 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-//  // over write data
-//  io.connectWithExuIntRdataVec(intRfRdata)
-
-  Queue
-  for (i <- toIntExu.indices) {
-    for (j <- toIntExu(i).indices) {
-      val sinkData = toIntExu(i)(j).bits
-      toIntExu(i)(j).valid := s1_toIntExuValid(i)(j)
-      s1_toIntExuReady(i)(j) := toIntExu(i)(j).ready // wire assign
-      sinkData := s1_toIntExuData(i)(j)
+  for (i <- toMemIntExu.indices) {
+    for (j <- toMemIntExu(i).indices) {
+      val sinkData = toMemIntExu(i)(j).bits
+      toMemIntExu(i)(j).valid := s1_toExuValid(i)(j)
+      s1_toExuReady(i)(j) := toMemIntExu(i)(j).ready // wire assign
+      sinkData := s1_toExuData(i)(j)
       // preg read data
-      sinkData.src := s1_pregRData(i)(j)
+      sinkData.src := s1_intPregRData(i)(j)
 
       // extracted imm and pc
-      if (sinkData.params.immType.nonEmpty) {
+      if (sinkData.params.immType.nonEmpty && sinkData.src.size > 1) {
         when(SrcType.isImm(s1_srcType(i)(j)(1))) {
-          sinkData.src(1) := s1_toIntExuData(i)(j).src(1)
+          sinkData.src(1) := s1_toExuData(i)(j).src(1)
         }
       }
       if (sinkData.params.hasJmpFu) {
         when(SrcType.isPc(s1_srcType(i)(j)(0))) {
-          sinkData.src(0) := s1_toIntExuData(i)(j).src(0)
+          sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
       }
     }
@@ -218,6 +225,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 
   val toFpExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(vfSchdParams.genExuInputBundle)
+
+  val toMemExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = memSchdParams.genExuInputBundle
 
   val fromIntWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genIntWriteBackBundle)
 

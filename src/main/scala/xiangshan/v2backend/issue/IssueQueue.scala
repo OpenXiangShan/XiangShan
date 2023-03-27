@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utility.HasCircularQueuePtrHelper
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
@@ -37,17 +38,18 @@ case class IssueQueueParams(
 
 object DummyIQParams {
   def apply()(implicit p: Parameters): IssueBlockParams = {
-    SchdBlockParams.dummyIntParams().issueBlockParams(0)
+    SchdBlockParams.dummyMemParams().issueBlockParams(0)
   }
 }
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   implicit val iqParams = params
-
   lazy val module = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case VfScheduler() => new IssueQueueImp(this)
-    case _ => new IssueQueueImp(this)
+    case MemScheduler() => if (iqParams.StdCnt == 0) new IssueQueueMemAddrImp(this)
+      else new IssueQueueIntImp(this)
+    case _ => null
   }
 }
 
@@ -88,7 +90,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   dontTouch(io.deq)
   dontTouch(io.deqResp)
   // Modules
-  val statusArray   = Module(new StatusArray)
+  val statusArray   = Module(StatusArray(p, params))
   val immArray      = Module(new DataArray(UInt(XLEN.W), params.numDeq, params.numEnq, params.numEntries))
   val payloadArray  = Module(new DataArray(Output(new DynInst), params.numDeq, params.numEnq, params.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
@@ -100,6 +102,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
   val s0_enqSelOHVec = Wire(Vec(params.numEnq, UInt(params.numEntries.W)))
   val s0_enqNotFlush = !io.flush.valid
+  val s0_enqBits = WireInit(VecInit(io.enq.map(_.bits)))
   val s0_doEnqSelValidVec = s0_enqSelValidVec.map(_ && s0_enqNotFlush)
   val s0_doEnqOH: IndexedSeq[UInt] = (s0_doEnqSelValidVec zip s0_enqSelOHVec).map { case (valid, oh) =>
     Mux(valid, oh, 0.U)
@@ -130,9 +133,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   val wakeupEnqSrcStateBypass = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
   for (i <- io.enq.indices) {
-    for (j <- io.enq(i).bits.srcType.indices) {
+    for (j <- s0_enqBits(i).srcType.indices) {
       wakeupEnqSrcStateBypass(i)(j) := Cat(
-        io.wakeup.map(x => x.valid && x.bits.wakeUp(Seq((io.enq(i).bits.psrc(j), io.enq(i).bits.srcType(j)))).head)
+        io.wakeup.map(x => x.valid && x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j)))).head)
       ).orR
     }
   }
@@ -143,13 +146,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       enq.valid                 := s0_doEnqSelValidVec(i)
       enq.bits.addrOH           := s0_enqSelOHVec(i)
-      val numLSrc = io.enq(i).bits.srcType.size.min(enq.bits.data.srcType.size)
+      val numLSrc = s0_enqBits(i).srcType.size.min(enq.bits.data.srcType.size)
       for (j <- 0 until numLSrc) {
-        enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j) | wakeupEnqSrcStateBypass(i)(j)
-        enq.bits.data.psrc(j)     := io.enq(i).bits.psrc(j)
-        enq.bits.data.srcType(j)  := io.enq(i).bits.srcType(j)
+        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
+        enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
+        enq.bits.data.srcType(j)  := s0_enqBits(i).srcType(j)
       }
-      enq.bits.data.robIdx      := io.enq(i).bits.robIdx
+      enq.bits.data.robIdx      := s0_enqBits(i).robIdx
       enq.bits.data.ready       := false.B
       enq.bits.data.issued      := false.B
       enq.bits.data.firstIssue  := false.B
@@ -158,11 +161,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.deq.zipWithIndex.foreach { case (deq, i) =>
       deq.deqSelOH.valid  := finalDeqSelValidVec(i)
       deq.deqSelOH.bits   := finalDeqSelOHVec(i)
-      deq.resp.valid      := io.deqResp(i).valid
-      deq.resp.bits.addrOH := io.deqResp(i).bits.addrOH
-      deq.resp.bits.success := io.deqResp(i).bits.success
-      deq.resp.bits.dataInvalidSqIdx := 0.U.asTypeOf(deq.resp.bits.dataInvalidSqIdx)
-      deq.resp.bits.respType := 0.U.asTypeOf(deq.resp.bits.respType)
+    }
+    statusArrayIO.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
+      deqResp.valid      := io.deqResp(i).valid
+      deqResp.bits.addrOH := io.deqResp(i).bits.addrOH
+      deqResp.bits.success := io.deqResp(i).bits.success
+      deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
+      deqResp.bits.respType := io.deqResp(i).bits.respType
     }
   }
 
@@ -183,7 +188,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     payloadArrayIO.write.zipWithIndex.foreach { case (w, i) =>
       w.en := s0_doEnqSelValidVec(i)
       w.addr := s0_enqSelOHVec(i)
-      w.data := io.enq(i).bits
+      w.data := s0_enqBits(i)
     }
     payloadArrayIO.read.zipWithIndex.foreach { case (r, i) =>
       r.addr := finalDeqOH(i)
@@ -197,7 +202,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   s0_doEnqSelValidVec.zip(s0_enqSelOHVec).zipWithIndex.foreach { case ((valid, oh), i) =>
     when (valid) {
-      fuTypeNextVec(OHToUInt(oh)) := io.enq(i).bits.fuType
+      fuTypeNextVec(OHToUInt(oh)) := s0_enqBits(i).fuType
     }
   }
 
@@ -299,16 +304,7 @@ class IssueQueueJumpBundle extends Bundle {
   val target = UInt(VAddrData().dataWidth.W)
 }
 
-class IssueQueueMemBundle()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
-  val feedback = Vec(params.numDeq, new MemRSFeedbackIO)
-  val checkwait = new Bundle {
-    val stIssuePtr = Input(new SqPtr)
-//    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput(params.exuParams))))
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
-  }
-}
-
-class IssueQueueLoadBundle()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
   val fastMatch = UInt(backendParams.LduCnt.W)
   val fastImm = UInt(12.W)
 }
@@ -378,11 +374,11 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       for (j <- 0 until numPSrc) {
-        enq.bits.data.srcState(j) := io.enq(i).bits.srcState(j)
-        enq.bits.data.psrc(j)     := io.enq(i).bits.psrc(j)
+        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j)
+        enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
       }
       for (j <- 0 until numLSrc) {
-        enq.bits.data.srcType(j) := io.enq(i).bits.srcType(j)
+        enq.bits.data.srcType(j) := s0_enqBits(i).srcType(j)
       }
       enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
       enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
@@ -390,3 +386,82 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   }
 }
 
+class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
+  val feedbackIO = Flipped(Vec(params.numDeq, new MemRSFeedbackIO))
+  val checkWait = new Bundle {
+    val stIssuePtr = Input(new SqPtr)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+  }
+  val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
+}
+
+class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO {
+  val memIO = Some(new IssueQueueMemBundle)
+}
+
+class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
+  extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
+
+  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ")
+
+  io.suggestName("none")
+  override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
+  private val memIO = io.memIO.get
+
+  for (i <- io.enq.indices) {
+    val blockNotReleased = isAfter(io.enq(i).bits.sqIdx, memIO.checkWait.stIssuePtr)
+    val storeAddrWaitForIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
+      memIO.checkWait.memWaitUpdateReq.staIssue(i).valid &&
+        memIO.checkWait.memWaitUpdateReq.staIssue(i).bits.uop.robIdx.value === io.enq(i).bits.waitForRobIdx.value
+    })).asUInt.orR && !io.enq(i).bits.loadWaitStrict // is waiting for store addr ready
+    s0_enqBits(i).loadWaitBit := io.enq(i).bits.loadWaitBit && !storeAddrWaitForIsIssuing && blockNotReleased
+  }
+
+  for (i <- statusArray.io.enq.indices) {
+    statusArray.io.enq(i).bits.data match { case enqData =>
+      enqData.blocked := s0_enqBits(i).loadWaitBit
+      enqData.mem.get.strictWait := s0_enqBits(i).loadWaitStrict
+      enqData.mem.get.waitForStd := false.B
+      enqData.mem.get.waitForRobIdx := s0_enqBits(i).waitForRobIdx
+      enqData.mem.get.waitForSqIdx := 0.U.asTypeOf(enqData.mem.get.waitForSqIdx) // generated by sq, will be updated later
+      enqData.mem.get.sqIdx := s0_enqBits(i).sqIdx
+    }
+
+    statusArray.io.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
+      deqResp.valid        := io.deqResp(i).valid
+      deqResp.bits.addrOH  := io.deqResp(i).bits.addrOH
+      deqResp.bits.success := io.deqResp(i).bits.success
+      deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
+      deqResp.bits.respType := io.deqResp(i).bits.respType
+    }
+
+    statusArray.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
+      slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
+      slowResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackSlow.bits.rsIdx)
+      slowResp.bits.success          := memIO.feedbackIO(i).feedbackSlow.bits.hit
+      slowResp.bits.respType         := memIO.feedbackIO(i).feedbackSlow.bits.sourceType
+      slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
+    }
+
+    statusArray.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
+      fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
+      fastResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackFast.bits.rsIdx)
+      fastResp.bits.success          := false.B
+      fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
+      fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
+    }
+
+    statusArray.io.fromMem.get.memWaitUpdateReq := memIO.checkWait.memWaitUpdateReq
+    statusArray.io.fromMem.get.stIssuePtr := memIO.checkWait.stIssuePtr
+  }
+
+  for (i <- 0 until params.numDeq) {
+    memIO.feedbackIO(i).rsIdx := OHToUInt(finalDeqOH(i))
+    memIO.feedbackIO(i).isFirstIssue := deqFirstIssueVec(i)
+  }
+
+  io.deq.zipWithIndex.foreach { case (deq, i) =>
+    deq.bits.common.sqIdx.get := payloadArrayRdata(i).sqIdx
+    deq.bits.common.lqIdx.get := payloadArrayRdata(i).lqIdx
+  }
+}

@@ -177,7 +177,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val ptw = outer.ptw.module
   val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
 
-  val csrioIn = backend.io.csr
   val fenceio = backend.io.fenceio
 
   frontend.io.hartId  := io.hartId
@@ -188,17 +187,30 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei <> fenceio.fencei
 
   backend.io.fromTop.hartId := io.hartId
-  backend.io.mem.stIn := 0.U.asTypeOf(backend.io.mem.stIn) // Todo <> memBlock.io.stIn
+  backend.io.fromTop.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  backend.io.fromTop.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  backend.io.fromTop.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  backend.io.fromTop.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
+  backend.io.fromTop.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+
+  backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
+
+  backend.io.mem.stIn.zip(memBlock.io.stIn).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := 0.U.asTypeOf(sink.bits)
+    sink.bits.robIdx := source.bits.uop.robIdx
+    sink.bits.ssid := source.bits.uop.ssid
+    sink.bits.storeSetHit := source.bits.uop.storeSetHit
+    // The other signals have not been used
+  }
   backend.io.mem.memoryViolation <> memBlock.io.memoryViolation
-  backend.io.mem.enqLsq <> memBlock.io.enqLsq
+  backend.io.mem.lsqEnqIO <> memBlock.io.enqLsq
   backend.io.mem.sqDeq := memBlock.io.sqDeq
   backend.io.mem.lqCancelCnt := memBlock.io.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.sqCancelCnt
   backend.io.mem.otherFastWakeup := memBlock.io.otherFastWakeup
+  backend.io.mem.writeBack <> memBlock.io.writeback
 
-  memBlock.io.issue <> 0.U.asTypeOf(memBlock.io.issue)
-
-  memBlock.io.hartId := io.hartId
   frontend.io.reset_vector := io.reset_vector
 
   io.cpu_halt := backend.io.toTop.cpuHalted
@@ -209,13 +221,22 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
+  memBlock.io.hartId := io.hartId
   memBlock.io.issue <> backend.io.mem.issueUops
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   backend.io.mem.loadFastMatch <> memBlock.io.loadFastMatch
   backend.io.mem.loadFastImm <> memBlock.io.loadFastImm
+  backend.io.mem.exceptionVAddr := memBlock.io.lsqio.exceptionAddr.vaddr
+  backend.io.mem.csrDistributedUpdate := memBlock.io.csrUpdate
 
-//  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
+  backend.io.perf.frontendInfo := frontend.io.frontendInfo
+  backend.io.perf.memInfo := memBlock.io.memInfo
+  backend.io.perf.perfEventsFrontend := frontend.getPerf
+  backend.io.perf.perfEventsLsu := memBlock.getPerf
+  backend.io.perf.perfEventsHc := io.perfEvents
+
+  //  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
 //  XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
 //  ctrlBlock.perfinfo.perfEventsEu0 := intExuBlock.getPerf.dropRight(outer.intExuBlock.scheduler.numRs)
@@ -227,45 +248,26 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
 //  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
-  csrioIn.perf.memInfo <> memBlock.io.memInfo
-  csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
-
-  csrioIn.perf.perfEventsFrontend <> frontend.getPerf
-  csrioIn.perf.perfEventsLsu      <> memBlock.getPerf
-  csrioIn.perf.perfEventsHc       <> io.perfEvents
-  csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
-
-  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
-
-  csrioIn.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
-  csrioIn.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
-  csrioIn.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
-  csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
-
   memBlock.io.sfence <> backend.io.mem.sfence
   memBlock.io.fenceToSbuffer <> backend.io.mem.toSbuffer
 
-  memBlock.io.redirect <> backend.io.redirect
+  memBlock.io.redirect <> backend.io.mem.redirect
   memBlock.io.rsfeedback <> backend.io.mem.rsFeedBack
   memBlock.io.csrCtrl <> backend.io.mem.csrCtrl
   memBlock.io.tlbCsr <> backend.io.mem.tlbCsr
-  memBlock.io.lsqio.rob <> backend.io.mem.lsq
+  memBlock.io.lsqio.rob <> backend.io.mem.robLsqIO
   memBlock.io.lsqio.exceptionAddr.isStore := backend.io.mem.isStoreException
 
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
-  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
-  val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.dfilterSize)
-  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)
+  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, backend.io.tlb, l2tlbParams.ifilterSize)
+  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, backend.io.tlb)
+  val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, memBlock.io.ptw, fenceio.sfence, backend.io.tlb, l2tlbParams.dfilterSize)
+  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, backend.io.tlb)
   ptw.io.sfence <> fenceio.sfence
-  ptw.io.csr.tlb <> csrioIn.tlb
-  ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
+  ptw.io.csr.tlb <> backend.io.tlb
+  ptw.io.csr.distribute_csr <> backend.io.csrCustomCtrl.distribute_csr
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+  io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

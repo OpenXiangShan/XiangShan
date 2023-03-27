@@ -8,10 +8,10 @@ import utility.PipelineConnect
 import xiangshan._
 import xiangshan.backend.CtrlBlock
 import xiangshan.backend.exu.FenceIO
-import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer}
+import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer, PerfCounterIO}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.FtqRead
-import xiangshan.mem.{LsqEnqIO, SqPtr}
+import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
@@ -31,14 +31,12 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   }
 
   println(s"Function Unit: Alu(${params.AluCnt}), Brh(${params.BrhCnt}), Jmp(${params.JmpCnt}), " +
-    s"Ldu(${params.LduCnt}), Stu(${params.StuCnt})")
-
-
-  val numMemRsEntryMax = 16 // Todo: fix it
+    s"Ldu(${params.LduCnt}), Sta(${params.StaCnt}), Std(${params.StdCnt})")
 
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
 //  val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val memScheduler = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
   val dataPath = LazyModule(new DataPath(params))
   val intExuBlock = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
 //  val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
@@ -47,13 +45,13 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 }
 
 class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-//  implicit val numMemRsEntryMax = wrapper.numMemRsEntryMax
   implicit private val params = wrapper.params
   val io = IO(new BackendIO()(p, wrapper.params))
 
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val intScheduler = wrapper.intScheduler.get.module
 //  private val vfScheduler = wrapper.vfScheduler.module
+  private val memScheduler = wrapper.memScheduler.get.module
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
 //  private val fpExuBlock = wrapper.vfExuBlock.get.module
@@ -69,7 +67,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
-  ctrlBlock.io.robio.lsq <> io.mem.lsq
+  ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -78,6 +76,22 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
   intScheduler.io.writeback := wbDataPath.io.toIntPreg.map(_.toWakeUpBundle)
+
+  memScheduler.io.fromTop.hartId := io.fromTop.hartId
+  memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
+  memScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
+  memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
+  memScheduler.io.writeback := wbDataPath.io.toIntPreg.map(_.toWakeUpBundle) ++ wbDataPath.io.toVfPreg.map(_.toWakeUpBundle)
+  memScheduler.io.fromMem.get.scommit := ctrlBlock.io.robio.lsq.scommit
+  memScheduler.io.fromMem.get.lcommit := ctrlBlock.io.robio.lsq.lcommit
+  memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
+  memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
+  memScheduler.io.fromMem.get.stIssuePtr := io.mem.stIssuePtr
+  memScheduler.io.fromMem.get.memWaitUpdateReq.staIssue.zip(io.mem.stIn).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits.uop := 0.U.asTypeOf(sink.bits.uop)
+    sink.bits.uop.robIdx := source.bits.robIdx
+  }
 
 //  vfScheduler.io.fromTop.hartId := io.fromTop.hartId
 //  vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.redirect
@@ -95,8 +109,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   dataPath.io.fromVfIQ <> 0.U.asTypeOf(dataPath.io.fromVfIQ)
-  dataPath.io.fromMemIQ <> 0.U.asTypeOf(dataPath.io.fromMemIQ)
+  dataPath.io.fromMemIQ <> memScheduler.io.toDataPath
+
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
+  println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromFpWb.size}")
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
   dataPath.io.fromFpWb := wbDataPath.io.toVfPreg
   dataPath.io.debugIntRat := ctrlBlock.io.debug_int_rat
@@ -122,8 +138,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionVAddr
-  csrio.externalInterrupt := io.csr.externalInterrupt
-  csrio.distributedUpdate := io.csr.distributedUpdate
+  csrio.externalInterrupt := io.fromTop.externalInterrupt
+  csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
+  csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
+  csrio.perf <> io.perf
   private val fenceio = intExuBlock.io.fenceio.get
   fenceio.disableSfence := csrio.disableSfence
   io.fenceio <> fenceio
@@ -135,20 +153,75 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.flush := ctrlBlock.io.redirect
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> 0.U.asTypeOf(wbDataPath.io.fromVfExu) // fpExuBlock.io.out
-  wbDataPath.io.fromMemExu <> 0.U.asTypeOf(wbDataPath.io.fromMemExu) // Todo
+  wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    source.ready := sink.ready
+    sink.bits.data   := source.bits.data
+    sink.bits.pdest  := source.bits.uop.pdest
+    sink.bits.robIdx := source.bits.uop.robIdx
+    sink.bits.intWen.foreach(_ := source.bits.uop.rfWen)
+    sink.bits.fpWen.foreach(_ := source.bits.uop.fpWen)
+    sink.bits.vecWen.foreach(_ := source.bits.uop.vecWen)
+    sink.bits.exceptionVec.foreach(_ := source.bits.uop.exceptionVec)
+    sink.bits.flushPipe.foreach(_ := source.bits.uop.flushPipe)
+    sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
+    sink.bits.debug := 0.U.asTypeOf(sink.bits.debug)
+    sink.bits.debugInfo := 0.U.asTypeOf(sink.bits.debugInfo)
+    sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
+    sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
+  }
 
-  io.mem.loadFastMatch := DontCare
-  io.mem.loadFastImm := DontCare
-  io.mem.flush := ctrlBlock.io.redirect
-  io.mem.lsq <> ctrlBlock.io.robio.lsq
-  io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  // to mem
+  io.mem.redirect := ctrlBlock.io.redirect
+  io.mem.issueUops.zip(dataPath.io.toMemExu.flatten).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    source.ready := sink.ready
+    sink.bits.uop := 0.U.asTypeOf(sink.bits.uop)
+    sink.bits.src := 0.U.asTypeOf(sink.bits.src)
+    sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
+    sink.bits.uop.fuType    := source.bits.fuType
+    sink.bits.uop.fuOpType  := source.bits.fuOpType
+    sink.bits.uop.imm       := source.bits.imm
+    sink.bits.uop.robIdx    := source.bits.robIdx
+    sink.bits.uop.pdest     := source.bits.pdest
+    sink.bits.uop.rfWen     := source.bits.rfWen.getOrElse(false.B)
+    sink.bits.uop.fpWen     := source.bits.fpWen.getOrElse(false.B)
+    sink.bits.uop.vecWen    := source.bits.vecWen.getOrElse(false.B)
+    sink.bits.uop.flushPipe := source.bits.flushPipe.getOrElse(false.B)
+    sink.bits.uop.pc        := source.bits.pc.getOrElse(0.U)
+    sink.bits.uop.lqIdx     := source.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+    sink.bits.uop.sqIdx     := source.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+  }
+  io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
+  io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
   io.mem.tlbCsr := csrio.tlb
+  io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
+  io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  require(io.mem.loadPcRead.size == params.LduCnt)
+  io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
+    loadPcRead.data := ctrlBlock.io.memLdPcRead(i).data
+    ctrlBlock.io.memLdPcRead(i).ptr := loadPcRead.ptr
+    ctrlBlock.io.memLdPcRead(i).offset := loadPcRead.offset
+  }
+  // mem io
+  io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
+  io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
   io.mem.toSbuffer <> fenceio.sbuffer
+  io.mem.rsFeedBack <> memScheduler.io.memIO.get.feedbackIO
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
   io.frontendCsrCtrl := csrio.customCtrl
+
+  io.tlb <> csrio.tlb
+
+  io.csrCustomCtrl := csrio.customCtrl
+
+  dontTouch(memScheduler.io)
+  dontTouch(io.mem)
+  dontTouch(dataPath.io.toMemExu)
+  dontTouch(wbDataPath.io.fromMemExu)
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -157,54 +230,66 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
       IssQueSize = 16 // Todo
     )
   })
+  // In/Out // Todo: split it into one-direction bundle
+  val lsqEnqIO = Flipped(new LsqEnqIO)
+  val robLsqIO = new RobLsqIO
+  val toSbuffer = new FenceToSbuffer
+  val rsFeedBack = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO()(rsParameters)))
+  val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
-  val writeBack = Vec(params.LduCnt + params.StuCnt * 2, Flipped(DecoupledIO(new MemExuOutput())))
+  // Input
+  val writeBack = Vec(params.LduCnt + params.StaCnt * 2, Flipped(DecoupledIO(new MemExuOutput())))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
-  val stIn = Input(Vec(params.StuCnt, ValidIO(new DynInst())))
+  val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionVAddr = Input(UInt(VAddrBits.W))
-  val enqLsq = Flipped(new LsqEnqIO)
-  val sqDeq = Input(UInt(params.StuCnt.W))
+  val sqDeq = Input(UInt(params.StaCnt.W))
 
   val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
   val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
 
-  val otherFastWakeup = Flipped(Vec(params.LduCnt + 2 * params.StuCnt, ValidIO(new DynInst)))
-  val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val otherFastWakeup = Flipped(Vec(params.LduCnt + 2 * params.StaCnt, ValidIO(new DynInst)))
+  val stIssuePtr = Input(new SqPtr())
 
-  val issueUops = Vec(params.LduCnt + 2 * params.StuCnt, DecoupledIO(new MemExuInput()))
+  val csrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
+
+  // Output
+  val redirect = ValidIO(new Redirect)   // rob flush MemBlock
+  val issueUops = Vec(params.LduCnt + 2 * params.StaCnt, DecoupledIO(new MemExuInput()))
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
 
-  val stIssuePtr = Input(new SqPtr()) // where is valid signal
-  val flush = ValidIO(new Redirect)   // rob flush MemBlock
-  val rsFeedBack = Vec(params.StuCnt, Flipped(new MemRSFeedbackIO()(rsParameters)))
-  val lsq = new RobLsqIO
   val tlbCsr = Output(new TlbCsrBundle)
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
-  val toSbuffer = new FenceToSbuffer
   val isStoreException = Output(Bool())
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
+    val externalInterrupt = new ExternalInterruptIO
   }
 
   val toTop = new Bundle {
     val cpuHalted = Output(Bool())
   }
 
-  val csr = new CSRFileIO
   val fenceio = new FenceIO
   // Todo: merge these bundles into BackendFrontendIO
   val frontend = Flipped(new FrontendToCtrlIO)
   val frontendSfence = Output(new SfenceBundle)
   val frontendCsrCtrl = Output(new CustomCSRCtrlIO)
   val frontendTlbCsr = Output(new TlbCsrBundle)
+  // distributed csr write
+  val frontendCsrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
+
   val mem = new BackendMemIO
 
-  val redirect = ValidIO(new Redirect)
+  val perf = Input(new PerfCounterIO)
+
+  val tlb = Output(new TlbCsrBundle)
+
+  val csrCustomCtrl = Output(new CustomCSRCtrlIO)
 }

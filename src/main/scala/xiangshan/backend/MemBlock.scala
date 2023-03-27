@@ -63,7 +63,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasPerfEvents
 {
   private val LduCnt = backendParams.LduCnt
-  private val StuCnt = backendParams.StuCnt
+  private val StuCnt = backendParams.StaCnt
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -111,6 +111,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   })
+  dontTouch(io)
 
   val redirect = RegNextWithEnable(io.redirect)
 

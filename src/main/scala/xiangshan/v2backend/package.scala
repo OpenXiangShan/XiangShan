@@ -129,6 +129,8 @@ package object v2backend {
 
     def isLoadStore(fuType: UInt): Bool = fuType(14, 13).orR
 
+    def isLoad(fuType: UInt): Bool = fuType(13)
+
     def isStore(fuType: UInt): Bool = fuType(14).orR
 
     def isAMO(fuType: UInt): Bool = fuType(15).orR
@@ -446,7 +448,8 @@ package object v2backend {
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
     replayInst = true,
-    hasLoadError = true
+    hasLoadError = true,
+    immType = Set(SelImm.IMM_I),
   )
 
   val StaCfg: FuConfig = FuConfig (
@@ -459,7 +462,8 @@ package object v2backend {
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    immType = Set(SelImm.IMM_S),
   )
 
   val StdCfg: FuConfig = FuConfig (

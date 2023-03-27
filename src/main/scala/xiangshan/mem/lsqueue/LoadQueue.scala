@@ -66,7 +66,7 @@ trait HasLoadHelper { this: XSModule =>
 }
 
 class LqEnqIO(implicit p: Parameters) extends XSBundle {
-  private val LsExuCnt = backendParams.StuCnt + backendParams.LduCnt
+  private val LsExuCnt = backendParams.StaCnt + backendParams.LduCnt
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
   val needAlloc = Vec(LsExuCnt, Input(Bool()))

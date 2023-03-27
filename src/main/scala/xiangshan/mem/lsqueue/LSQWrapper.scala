@@ -286,7 +286,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   }
 
 
-  val maxAllocate = Seq(backendParams.LduCnt, backendParams.StuCnt).max
+  val maxAllocate = Seq(backendParams.LduCnt, backendParams.StaCnt).max
   val ldCanAccept = lqCounter >= loadEnqNumber +& maxAllocate.U
   val sqCanAccept = sqCounter >= storeEnqNumber +& maxAllocate.U
   // It is possible that t3_update and enq are true at the same clock cycle.
