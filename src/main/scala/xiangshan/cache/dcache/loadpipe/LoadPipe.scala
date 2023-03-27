@@ -335,6 +335,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // resp.bits.miss := real_miss
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := resp.bits.replay
@@ -343,6 +344,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.meta_access := s2_hit_access
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
+  resp.bits.debug_robIdx := s2_req.debug_robIdx
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss)

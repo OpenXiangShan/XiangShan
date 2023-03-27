@@ -19,6 +19,7 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
@@ -37,7 +38,7 @@ jobs:
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig --release
+            --threads 4 --config MinimalConfig --release --with-constantin
       - name: run MinimalConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
@@ -54,6 +55,7 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -65,7 +67,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8 --with-constantin
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
@@ -110,6 +112,7 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -123,7 +126,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3            \
-            --with-dramsim3 --threads 16
+            --with-dramsim3 --threads 16 --with-constantin
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
@@ -172,6 +175,7 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -186,7 +190,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --num-cores 2 \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-            --with-dramsim3 --threads 16
+            --with-dramsim3 --threads 16 --with-constantin
       - name: MC Test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
@@ -205,6 +209,7 @@ jobs:
   #     - name: set env
   #       run: |
   #         export HEAD_SHA=${{ github.run_number }}
+  #         echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
   #         echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
   #         echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
   #         echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
