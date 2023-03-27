@@ -453,7 +453,7 @@ class TageTable
         } .otherwise {
           update_wdata.ctr_up := ctrUpdate(latest_ctr_up, taken)
           update_wdata.ctr_down := ctrUpdate(latest_ctr_down, !taken)
-          not_silent_update := silentUpdate(latest_ctr_up, taken) && silentUpdate(latest_ctr_down, !taken)
+          not_silent_update := !silentUpdate(latest_ctr_up, taken) || !silentUpdate(latest_ctr_down, !taken)
         }
       }
       update_wdata.tag   := update_tag
