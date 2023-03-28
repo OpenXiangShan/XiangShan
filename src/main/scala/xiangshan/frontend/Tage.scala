@@ -615,12 +615,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     s1_providerResps(i) := providerInfo.resp
     s1_providerConf(i) := providerInfo.conf
 
-    resp_meta.providers(i).valid := RegEnable(s2_provideds(i), io.s2_fire(1))
-    resp_meta.providers(i).bits := RegEnable(s2_providers(i), io.s2_fire(1))
-    resp_meta.tagResps(i) := RegEnable(s2_taggedResps(i), io.s2_fire(1))
-    resp_meta.tagConf(i) := RegEnable(s2_providerConf(i), io.s2_fire(1))
-    resp_meta.pred_cycle.foreach(_ := RegEnable(GTimer(), io.s2_fire(1)))
-
     val s1_bimCtr = baseTable.io.s1_cnt(i)
     s1_tageTakens(i) :=
       Mux(!provided,
@@ -629,6 +623,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
       )
     s1_basecnts(i) := s1_bimCtr
 
+    // Stage 3
+    resp_meta.providers(i).valid := RegEnable(s2_provideds(i), io.s2_fire(1))
+    resp_meta.providers(i).bits := RegEnable(s2_providers(i), io.s2_fire(1))
+    resp_meta.tagResps(i) := RegEnable(s2_taggedResps(i), io.s2_fire(1))
+    resp_meta.tagConf(i) := RegEnable(s2_providerConf(i), io.s2_fire(1))
+    resp_meta.pred_cycle.foreach(_ := RegEnable(GTimer(), io.s2_fire(1)))
     resp_meta.takens(i) := RegEnable(s2_tageTakens(i), io.s2_fire(1))
     resp_meta.basecnts(i) := RegEnable(s2_basecnts(i), io.s2_fire(1))
 
@@ -703,12 +703,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt))
     val canAllocMask = allocatableMask & longerHistoryTableMask
     val allocFailureMask = ~allocatableMask & longerHistoryTableMask
-    val tickInc = PopCount(allocFailureMask) > PopCount(canAllocMask)
-    val tickDec = PopCount(canAllocMask) > PopCount(allocFailureMask)
-    val tickIncVal = PopCount(allocFailureMask) - PopCount(canAllocMask)
-    val tickDecVal = PopCount(canAllocMask) - PopCount(allocFailureMask)
-    val tickToPosSat = tickIncVal >= bankTickCtrDistanceToTops(i) && tickInc
-    val tickToNegSat = tickDecVal >= bankTickCtrs(i) && tickDec
 
     val firstEntry = PriorityEncoder(canAllocMask)
     val maskedEntry = PriorityEncoder(canAllocMask & allocLFSR)
@@ -717,23 +711,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     when (needToAllocate) {
       // val allocate = updateMeta.allocates(i).bits
-      when (tickInc) {
-        when (tickToPosSat) {
-          bankTickCtrs(i) := ((1 << TickWidth) - 1).U
-          bankTickCtrDistanceToTops(i) := 0.U
-        }.otherwise {
-          bankTickCtrs(i) := bankTickCtrs(i) + tickIncVal
-          bankTickCtrDistanceToTops(i) := bankTickCtrDistanceToTops(i) - tickIncVal
-        }
-      }.elsewhen (tickDec) {
-        when (tickToNegSat) {
-          bankTickCtrs(i) := 0.U
-          bankTickCtrDistanceToTops(i) := ((1 << TickWidth) - 1).U
-        }.otherwise {
-          bankTickCtrs(i) := bankTickCtrs(i) - tickDecVal
-          bankTickCtrDistanceToTops(i) := bankTickCtrDistanceToTops(i) + tickDecVal
-        }
-      }
+
       when (canAllocate) {
         updateMask(i)(allocate) := true.B
         updateTakens(i)(allocate) := updateTaken
@@ -741,20 +719,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
         updateUMask(i)(allocate) := true.B
         updateU(i)(allocate) := false.B
       }
-      when (bankTickCtrs(i) === ((1 << TickWidth) - 1).U) {
-        bankTickCtrs(i) := 0.U
-        bankTickCtrDistanceToTops(i) := ((1 << TickWidth) - 1).U
-        updateResetU(i) := true.B
-      }
+
     }
     XSPerfAccumulate(f"tage_bank_${i}_update_allocate_failure", needToAllocate && !canAllocate)
     XSPerfAccumulate(f"tage_bank_${i}_update_allocate_success", needToAllocate &&  canAllocate)
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && updateMispred)
     XSPerfAccumulate(s"tage_bank_${i}_reset_u", updateResetU(i))
-    for (t <- 0 to TageNTables) {
-      XSPerfAccumulate(f"tage_bank_${i}_tick_inc_${t}", needToAllocate && tickInc && tickIncVal === t.U)
-      XSPerfAccumulate(f"tage_bank_${i}_tick_dec_${t}", needToAllocate && tickDec && tickDecVal === t.U)
-    }
   }
 
   for (w <- 0 until TageBanks) {
@@ -823,31 +793,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
     )
   }
 
-  for (b <- 0 until TageBanks) {
-    val m = updateMeta
-    // val bri = u.metas(b)
-    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
-      b.U, update.pc, 0.U, update.br_taken_mask(b), update.mispred_mask(b),
-      0.U, m.providers(b).valid, m.providers(b).bits, m.altDiffers(b), m.providerResps(b).u,
-      m.providerResps(b).ctr, m.allocates(b)
-    )
-  }
   val s2_resps = RegEnable(s1_resps, io.s1_fire(1))
-  XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(1), s0_pc_dup(1))
-  XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(1), debug_pc_s1)
-  XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hits=%b, takens=%b\n",
-    debug_pc_s2, io.out.s2.getTarget(1), s2_provideds.asUInt, s2_tageTakens_dup(0).asUInt)
 
-  for (b <- 0 until TageBanks) {
-    for (i <- 0 until TageNTables) {
-      XSDebug("bank(%d)_tage_table(%d): valid:%b, resp_ctr:%d, resp_us:%d\n",
-        b.U, i.U, s2_resps(i)(b).valid, s2_resps(i)(b).bits.ctr, s2_resps(i)(b).bits.u)
-    }
-  }
-
-  val debug_pc_s0 = s0_pc
-  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
+  val debug_pc_s0 = s0_pc_dup(1)
+  val debug_pc_s1 = RegEnable(s0_pc_dup(1), io.s0_fire(1))
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(1))
 
 }
 
