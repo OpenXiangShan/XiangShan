@@ -194,6 +194,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     stdIQ.io.enq.zip(staIQ.io.enq).foreach { case (stdIQEnq, staIQEnq) =>
       stdIQEnq.valid := staIQEnq.valid
       stdIQEnq.bits  := staIQEnq.bits
+      stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
+      stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
+      stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
     stdIQ.io.wakeup <> io.writeback
 

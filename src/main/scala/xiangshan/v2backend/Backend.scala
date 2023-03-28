@@ -10,7 +10,7 @@ import xiangshan.backend.CtrlBlock
 import xiangshan.backend.exu.FenceIO
 import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer, PerfCounterIO}
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.frontend.FtqRead
+import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
@@ -169,6 +169,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.debugInfo := 0.U.asTypeOf(sink.bits.debugInfo)
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
+    sink.bits.ftqIdx.foreach(_ := source.bits.uop.ftqPtr)
+    sink.bits.ftqOffset.foreach(_ := source.bits.uop.ftqOffset)
   }
 
   // to mem
@@ -191,6 +193,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.pc        := source.bits.pc.getOrElse(0.U)
     sink.bits.uop.lqIdx     := source.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
     sink.bits.uop.sqIdx     := source.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+    sink.bits.uop.ftqPtr    := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
+    sink.bits.uop.ftqOffset := source.bits.ftqOffset.getOrElse(0.U)
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)

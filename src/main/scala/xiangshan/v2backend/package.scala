@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CertainLatency, HasFuLatency, UncertainLatency, CSR, Fence, Bku}
+import xiangshan.backend.Std
 import xiangshan.v2backend.fu._
 
 // Todo: split it into other config files
@@ -469,7 +470,7 @@ package object v2backend {
   val StdCfg: FuConfig = FuConfig (
     name = "std",
     fuType = FuType.stu,
-    fuGen = null, // Todo
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new Std(cfg)(p).suggestName("Std")),
     srcData = Seq(
       Seq(IntData()),
       Seq(FpData()),

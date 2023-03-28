@@ -25,9 +25,10 @@ class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flushPipe = if (cfg.flushPipe)    Some(Bool())                        else None
   val pc        = if (cfg.needPc)       Some(UInt(VAddrData().dataWidth.W)) else None
   val preDecode = if (cfg.hasPredecode) Some(new PreDecodeInfo)             else None
-  val ftqIdx    = if (cfg.needPc)       Some(new FtqPtr)                    else None
-  val ftqOffset = if (cfg.needPc)       Some(UInt(log2Up(PredictWidth).W))  else None
-
+  val ftqIdx    = if (cfg.needPc || cfg.replayInst)
+                                        Some(new FtqPtr)                    else None
+  val ftqOffset = if (cfg.needPc || cfg.replayInst)
+                                        Some(UInt(log2Up(PredictWidth).W))  else None
   val predictInfo = if (cfg.hasRedirect)Some(new Bundle {
     val target = UInt(VAddrData().dataWidth.W)
     val taken = Bool()
@@ -36,7 +37,7 @@ class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
 
 class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val data         = UInt(cfg.dataBits.W)
-  val pdest        = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of vary with different preg
+  val pdest        = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
   val robIdx       = new RobPtr
   val redirect     = if (cfg.hasRedirect) Some(ValidIO(new Redirect))        else None
   val fflags       = if (cfg.writeFflags) Some(UInt(5.W))                    else None

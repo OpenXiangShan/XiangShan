@@ -158,9 +158,28 @@ class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
 
 class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemExeUnitIO)
-  io.out.valid := io.in.valid
-  io.in.ready := io.out.ready
-  io.out.bits.data := io.in.bits.src(0)
-  io.out.bits.uop := io.in.bits.uop
-  io.out.bits.debug := 0.U.asTypeOf(io.out.bits.debug)
+  require(exuParams.fuConfigs.size == 1, "[MemExeUnit] only support one fu yet")
+  val fu = exuParams.fuConfigs.head.fuGen(p, exuParams.fuConfigs.head)
+  fu.io.flush             := io.flush
+  fu.io.in.valid          := io.in.valid
+  io.in.ready             := fu.io.in.ready
+
+  fu.io.in.bits.robIdx    := io.in.bits.uop.robIdx
+  fu.io.in.bits.pdest     := io.in.bits.uop.pdest
+  fu.io.in.bits.fuOpType  := io.in.bits.uop.fuOpType
+  fu.io.in.bits.imm       := io.in.bits.uop.imm
+  fu.io.in.bits.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
+
+  io.out.valid            := fu.io.out.valid
+  fu.io.out.ready         := io.out.ready
+
+  io.out.bits             := 0.U.asTypeOf(io.out.bits) // dontCare other fields
+  io.out.bits.data        := fu.io.out.bits.data
+  io.out.bits.uop.robIdx  := fu.io.out.bits.robIdx
+  io.out.bits.uop.pdest   := fu.io.out.bits.pdest
+  io.out.bits.uop.fuType  := io.in.bits.uop.fuType
+  io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
+  io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx
+
+  io.out.bits.debug       := 0.U.asTypeOf(io.out.bits.debug)
 }

@@ -550,11 +550,11 @@ case class ExeUnitParams(
 
   def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
 
-  def hasStoreFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
+  def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
 
-  def isMemAddrFu = hasLoadFu || hasStoreFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu
 
   def immType: Set[UInt] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
 

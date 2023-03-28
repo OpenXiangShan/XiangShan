@@ -20,7 +20,12 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
   val numIn = schdBlockParams.numUopIn
   require(issueBlockParams.size > 0 && issueBlockParams.forall(_.numEnq == issueBlockParams.head.numEnq), "issueBlock is null or the enq size of all issueBlock not be the same all\n")
   val numOut = issueBlockParams.head.numEnq
-  val numIntSrc = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).max)
+
+  // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.
+  val numIntSrc = issueBlockParams.map(_.exuBlockParams.map(
+    x => if (x.hasStoreAddrFu) x.numIntSrc + 1 else x.numIntSrc
+  ).max)
+
   val numIntStateRead = numIntSrc.max * numIn
 
   val numFpSrc = issueBlockParams.map(_.exuBlockParams.map(_.numFpSrc).max)
@@ -258,6 +263,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     (Seq(stu), 2),
   )
 
+  println(s"[Dispatch2IqMemImp] numIntSrc: ${numIntSrc}")
+
   private val enqLsqIO = io.enqLsqIO.get
 
   private val numLoadDeq = LoadPipelineWidth
@@ -270,6 +277,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val selectOut = dispatchSelect.io.out
   private val selectIdxOH = dispatchSelect.io.mapIdxOH
 
+  private val s0_in = Wire(io.in.cloneType)
   private val s0_enqLsq_resp = Wire(enqLsqIO.resp.cloneType)
   private val s0_out = Wire(io.out.cloneType)
   private val s0_blockedVec = Wire(Vec(io.in.size, Bool()))
@@ -290,6 +298,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   dontTouch(lsStructBlockVec)
   dontTouch(isLoadVec)
   dontTouch(loadCntVec)
+
+  s0_in <> io.in
 
   for (i <- 0 until numEnq) {
     if (i >= numDeq) {
@@ -324,6 +334,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   // srcState is read from outside and connected directly
   io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
+  s0_in.flatMap(x => x.bits.srcState.take(numIntSrc)).zip(intSrcStateVec.flatten).foreach(x => x._1 := x._2)
 
   val iqNotAllReady = !Cat(s0_out.map(_.map(_.ready)).flatten).andR
   val lsqCannotAccept = !enqLsqIO.canAccept
@@ -336,19 +347,20 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         s0_out.foreach(_.foreach(x => x.bits := 0.U.asTypeOf(x.bits)))
       }.otherwise {
         s0_out(iqIdx)(portIdx).valid := selectOut(iqIdx)(portIdx).valid && !Mux1H(selectIdxOH(iqIdx)(portIdx), s0_blockedVec)
-        s0_out(iqIdx)(portIdx).bits := selectOut(iqIdx)(portIdx).bits // the same as Mux1H(selectIdxOH(iqIdx)(portIdx), io.in.map(_.bits))
+        s0_out(iqIdx)(portIdx).bits := selectOut(iqIdx)(portIdx).bits // the same as Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits))
+        s0_out(iqIdx)(portIdx).bits.srcState := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.srcState))
         s0_out(iqIdx)(portIdx).bits.lqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.lqIdx))
         s0_out(iqIdx)(portIdx).bits.sqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.sqIdx))
       }
     }
   }
 
-  s0_out.flatten.flatMap(_.bits.srcState.take(numIntSrc)).zip(intSrcStateVec.flatten).foreach(x => x._1 := x._2)
+//  s0_out.flatten.flatMap(x => x.bits.srcState.take(numIntSrc)).zip(intSrcStateVec.flatten).foreach(x => x._1 := x._2)
 
   // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
   val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x)))
   val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten)
-  io.in.zipWithIndex.zip(outToInMap).foreach { case ((in, inIdx), outVec) =>
+  s0_in.zipWithIndex.zip(outToInMap).foreach { case ((in, inIdx), outVec) =>
     when (iqNotAllReady || lsqCannotAccept) {
       in.ready := false.B
     }.otherwise {

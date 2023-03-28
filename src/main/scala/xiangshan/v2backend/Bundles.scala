@@ -287,14 +287,16 @@ object Bundles {
     val pc        = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val jalrTarget= if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None
     val preDecode = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
-    val ftqIdx    = if (params.needPc)        Some(new FtqPtr)                    else None
-    val ftqOffset = if (params.needPc)        Some(UInt(log2Up(PredictWidth).W))  else None
+    val ftqIdx    = if (params.needPc || params.replayInst)
+                                              Some(new FtqPtr)                    else None
+    val ftqOffset = if (params.needPc || params.replayInst)
+                                              Some(UInt(log2Up(PredictWidth).W))  else None
     val predictInfo = if (params.hasPredecode) Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
-    val sqIdx = if (params.isMemAddrFu) Some(new SqPtr) else None
-    val lqIdx = if (params.isMemAddrFu) Some(new LqPtr) else None
+    val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
+    val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
@@ -323,8 +325,8 @@ object Bundles {
   class ExuOutput(
     val params: ExeUnitParams,
   )(implicit
-    p: Parameters
-  ) extends Bundle with BundleSource {
+    val p: Parameters
+  ) extends Bundle with BundleSource with HasXSParameter {
     val data         = UInt(params.dataBitsMax.W)
     val pdest        = UInt(params.wbPregIdxWidth.W)
     val robIdx       = new RobPtr
@@ -337,7 +339,12 @@ object Bundles {
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
-    val sqIdx        = if (params.hasStoreFu)   Some(new SqPtr())             else None
+    val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
+                                                Some(new SqPtr())             else None
+    val ftqIdx    = if (params.needPc || params.replayInst)
+                                                Some(new FtqPtr)                    else None
+    val ftqOffset = if (params.needPc || params.replayInst)
+                                                Some(UInt(log2Up(PredictWidth).W))  else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     val debug = new DebugBundle

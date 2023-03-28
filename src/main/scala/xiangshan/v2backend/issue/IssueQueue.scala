@@ -30,7 +30,7 @@ case class IssueQueueParams(
   def hasBrhFu = exuParams.map(_.hasBrhFu).reduce(_ || _)
   def hasJmpFu = exuParams.map(_.hasJmpFu).reduce(_ || _)
   def hasLoadFu = exuParams.map(_.hasLoadFu).reduce(_ || _)
-  def hasStoreFu = exuParams.map(_.hasStoreFu).reduce(_ || _)
+  def hasStoreFu = exuParams.map(_.hasStoreAddrFu).reduce(_ || _)
   def hasLoadStore = hasLoadFu || hasStoreFu
   def hasRedirectOut = hasBrhFu || hasJmpFu
   def numAllWakeup: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
@@ -362,6 +362,8 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
       x.target := targetArray.get.io.read(i).data
       x.taken := payloadArrayRdata(i).pred_taken
     })
+    // for std
+    deq.bits.common.sqIdx.foreach(_ := payloadArrayRdata(i).sqIdx)
   }}
 }
 
@@ -463,5 +465,9 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   io.deq.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.get := payloadArrayRdata(i).sqIdx
     deq.bits.common.lqIdx.get := payloadArrayRdata(i).lqIdx
+    if (params.isLdAddrIQ) {
+      deq.bits.common.ftqIdx.get := payloadArrayRdata(i).ftqPtr
+      deq.bits.common.ftqOffset.get := payloadArrayRdata(i).ftqOffset
+    }
   }
 }
