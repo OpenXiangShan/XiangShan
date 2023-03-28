@@ -597,6 +597,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.singleStep := false.B
   cs.replayInst := false.B
   cs.debug_globalID := DontCare
+  cs.isFirstIssue := DontCare
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr

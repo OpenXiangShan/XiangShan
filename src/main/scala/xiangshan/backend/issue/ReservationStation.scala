@@ -98,10 +98,8 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     }
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
       params.lsqFeedback = true
-      params.checkWaitBit = true
-    }
-    if(cfg == StaExeUnitCfg) {
       params.hasFeedback = true
+      params.checkWaitBit = false
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
@@ -748,6 +746,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     io.deq(i).valid := s2_deq(i).valid
     io.deq(i).bits := s2_deq(i).bits
     io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
+    io.deq(i).bits.uop.ctrl.isFirstIssue := s2_first_issue(i)
 
     // data: send to bypass network
     // TODO: these should be done outside RS
