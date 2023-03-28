@@ -18,8 +18,8 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
-import xiangshan.backend.fu.{FunctionUnit}
+import chisel3.util.{Mux1H, _}
+import xiangshan.backend.fu.FunctionUnit
 import xiangshan.{SelImm, SrcType}
 import utility._
 
@@ -59,7 +59,8 @@ abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends Func
   val vxrm = IO(Input(UInt(2.W)))
   val vxsat = IO(Output(UInt(1.W)))
 
-  val dataModule: VPUDataModule
+  val dataModule: Seq[VPUDataModule]
+  val select : Seq[Bool]
 
   def connectDataModule = {
   // def some signal
@@ -68,15 +69,16 @@ abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends Func
     val s_idle :: s_compute :: s_finish :: Nil = Enum(3)
     val state = RegInit(s_idle)
 
-    val outValid = dataModule.io.out.valid
-    val outFire = dataModule.io.out.fire()
-
+    val outValid = dataModule.map(_.io.out.valid).reduce(_||_)
+    val outFire = dataModule.map(_.io.out.fire()).reduce(_||_)
   // reg input signal
     val s0_uopReg = Reg(io.in.bits.uop.cloneType)
+    val s0_selectReg = Reg(VecInit(select).asUInt().cloneType)
     val inHs = io.in.fire()
     when(inHs && state === s_idle){
-      s0_uopReg := io.in.bits.uop
-    }
+        s0_uopReg := io.in.bits.uop
+        s0_selectReg := VecInit(select).asUInt()
+      }
     dataReg := Mux(outValid, dataWire, dataReg)
 
   // fsm
@@ -93,19 +95,21 @@ abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends Func
       }
     }
 
-  // connect VIAlu
-    dataWire := dataModule.io.out.bits.data
-    dataModule.io.in.bits <> io.in.bits
-    dataModule.io.redirectIn := DontCare  // TODO :
-    dataModule.vxrm := vxrm
-    dataModule.vstart := vstart
+  // connect
+    dataWire := Mux1H(s0_selectReg, dataModule.map(_.io.out.bits.data))
+    dataModule.zipWithIndex.foreach{ case(l, i) =>
+      l.io.in.bits <> io.in.bits
+      l.io.redirectIn := DontCare
+      l.vxrm := vxrm
+      l.vstart := vstart
+      l.io.in.valid := io.in.valid && state === s_idle && select(i)
+      l.io.out.ready := io.out.ready
+    }
+    vxsat := Mux1H(s0_selectReg, dataModule.map(_.vxsat))
+
     io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
     io.out.bits.uop := s0_uopReg
-    vxsat := dataModule.vxsat
-
-    dataModule.io.in.valid := io.in.valid && state === s_idle
     io.out.valid := state === s_compute && outValid || state === s_finish
-    dataModule.io.out.ready := io.out.ready
     io.in.ready := state === s_idle
   }
 }

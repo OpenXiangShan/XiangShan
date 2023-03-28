@@ -20,12 +20,10 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
 import utils._
-import utility._
-import yunsuan.vector.alu.{VAluOpcode, VIAlu, VIntFixpAlu}
-import yunsuan.{VectorElementFormat, VialuFixType}
-import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule}
+import yunsuan.vector.alu.VIntFixpAlu
+import yunsuan.VialuFixType
+import xiangshan.{XSCoreParamsKey, FuType}
 import yunsuan.vector.{SewOH, MaskExtract}
 
 
@@ -37,7 +35,7 @@ class VIAluFixWrapper(implicit p: Parameters)  extends VPUDataModule {
 
   // connect VIAlu
   val vIntFixpAlu = Module(new VIntFixpAlu)
-  vIntFixpAlu.io.in.opcode := VialuFixType.getOpcode(in.uop.ctrl.fuOpType)
+  vIntFixpAlu.io.in.opcode := VialuFixType.getOpcode(in.uop.ctrl.fuOpType).asTypeOf(vIntFixpAlu.io.in.opcode)
   vIntFixpAlu.io.in.info.vm := in.uop.ctrl.vm
   vIntFixpAlu.io.in.info.ma := in.uop.ctrl.vconfig.vtype.vma
   vIntFixpAlu.io.in.info.ta := in.uop.ctrl.vconfig.vtype.vta
@@ -81,6 +79,9 @@ class VIAluFixWrapper(implicit p: Parameters)  extends VPUDataModule {
 
 class VIAluFix(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN) {
   XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
-  override val dataModule = Module(new VIAluFixWrapper)
+  override val dataModule = Seq(Module(new VIAluFixWrapper))
+  override val select = Seq(
+    io.in.bits.uop.ctrl.fuType === FuType.vialuF
+  )
   connectDataModule
 }

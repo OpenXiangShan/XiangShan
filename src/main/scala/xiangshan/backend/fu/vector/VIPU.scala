@@ -25,7 +25,7 @@ import utils._
 import utility._
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
 import yunsuan.{VectorElementFormat, VipuType}
-import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule}
+import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule,FuType}
 
 import scala.collection.Seq
 
@@ -79,8 +79,7 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vmsof_m -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt(),
 
     VipuType.viota_m -> Cat(VAluOpcode.viota, mask, mask, uSew).asUInt(),
-    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt(),
-    VipuType.vslide1up -> Cat(VAluOpcode.vslide1up, uSew, uSew, uSew).asUInt()
+    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt()
 
   )).asTypeOf(new VIAluDecodeResultBundle)
 
@@ -98,7 +97,7 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUDataModule{
   decoder.io.in.fuOpType := in.uop.ctrl.fuOpType
   decoder.io.in.sew := in.uop.ctrl.vconfig.vtype.vsew(1,0)
 
-  vialu.io.in.bits.opcode := decoder.io.out.opcode
+  vialu.io.in.bits.opcode := decoder.io.out.opcode.asTypeOf(vialu.io.in.bits.opcode.cloneType)
   vialu.io.in.bits.info.vm := in.uop.ctrl.vm
   vialu.io.in.bits.info.ma := in.uop.ctrl.vconfig.vtype.vma
   vialu.io.in.bits.info.ta := in.uop.ctrl.vconfig.vtype.vta
@@ -127,6 +126,9 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUDataModule{
 
 class VIPU(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN) {
   XSError(io.in.valid && io.in.bits.uop.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
-  override val dataModule = Module(new VIAluWrapper)
+  override val dataModule = Seq(Module(new VIAluWrapper))
+  override val select = Seq(
+    io.in.bits.uop.ctrl.fuType === FuType.vipu
+  )
   connectDataModule
 }

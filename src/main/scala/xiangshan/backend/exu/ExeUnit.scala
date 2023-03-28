@@ -26,7 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
-import xiangshan.backend.fu.vector.{VFPU, VPPU, VPUSubModule}
+import xiangshan.backend.fu.vector.{VFPU, VPUSubModule}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
