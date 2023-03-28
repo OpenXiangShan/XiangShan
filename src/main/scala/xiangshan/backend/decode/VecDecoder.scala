@@ -9,7 +9,7 @@ import freechips.rocketchip.rocket.Instructions._
 import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import yunsuan.{VfpuType, VipuType, VppuType, VialuFixType}
+import yunsuan.{VfpuType, VipuType, VpermType, VialuFixType}
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -37,7 +37,7 @@ case class OPIVX(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWe
   }
 }
 
-case class OPIVI(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat = SelImm.IMM_OPIVIU, uopDivType: BitPat = UopDivType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPIVI(fu: BitPat, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat = SelImm.IMM_OPIVIS, uopDivType: BitPat = UopDivType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm, uopDivType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
@@ -231,40 +231,40 @@ object VecDecoder extends DecodeConstants {
     VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
-    VSLIDEUP_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
-    VSLIDEDOWN_VI -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VSLIDEUP_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VSLIDEDOWN_VI -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
     VADC_VIM      -> OPIVI(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
     VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopDivType = UopDivType.VEC_VVM),
     VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, uopDivType = UopDivType.VEC_VVM),
 
-    VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F, uopDivType = SelImm.IMM_OPIVIS),
+    VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
     
     VMV_V_I    -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F),
 
     VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
     VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
-    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
-    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_VVM),
-    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
-    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_VVM),
+    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_VVM),
+    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
+    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_VVM),
+    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, uopDivType = UopDivType.VEC_VVM),
 
-    VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F),
-    VSRL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsrl_vv, T, F, F),
-    VSRA_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsra_vv, T, F, F),
-    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, uopDivType = UopDivType.VEC_WVV),
-    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, uopDivType = UopDivType.VEC_WVV),
+    VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VSRL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsrl_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VSRA_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsra_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_WVV),
+    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_WVV),
 
-    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T),
-    VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T, selImm = SelImm.IMM_OPIVIS),
+    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T, selImm = SelImm.IMM_OPIVIU),
+    VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T),
 
-    VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F),
-    VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F),
+    VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
-    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, uopDivType = UopDivType.VEC_WVV),
-    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, selImm = SelImm.IMM_OPIVIS, uopDivType = UopDivType.VEC_WVV),
+    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_WVV),
+    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopDivType = UopDivType.VEC_WVV),
 
     VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
     VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
@@ -360,7 +360,7 @@ object VecDecoder extends DecodeConstants {
     VREMU_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
 
     VSLIDE1DOWN_VX -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VSLIDE1UP_VX   -> OPMVX(T, FuType.vipu, VipuType.vslide1up, F, T, F, UopDivType.VEC_SLIDE1UP),
+    VSLIDE1UP_VX   -> OPMVX(T, FuType.vppu, VpermType.vslide1up, F, T, F, UopDivType.VEC_SLIDE1UP),
     VWADD_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vwadd_vv, F, T, F, UopDivType.VEC_VXW),
     VWADD_WX       -> OPMVX(T, FuType.vialuF, VialuFixType.vwadd_wv, F, T, F, UopDivType.VEC_WXW),
     VWADDU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vwaddu_vv, F, T, F, UopDivType.VEC_VXW),
@@ -545,10 +545,10 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// src2=SrcType.X
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VppuType.f2s  , F, T, F),// vs2=0 // vs3 = vd
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VpermType.vfmv_s_f, F, T, F),// vs2=0 // vs3 = vd
 
     // 16.3.3. Vector Slide1up
-    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.X , FuType.vppu, VppuType.vslide1up, F, T, F),// vd[0]=f[rs1], vd[i+1] = vs2[i]
+    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.X , FuType.vppu, VpermType.vfslide1up, F, T, F),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 
     // 16.3.4. Vector Slide1down Instruction
     // vslide1down.vx vd, vs2, rs1, vm # vd[i] = vs2[i+1], vd[vl-1]=x[rs1]
