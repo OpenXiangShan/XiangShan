@@ -218,6 +218,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+      mmio(index) := false.B
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
