@@ -653,7 +653,7 @@ package object xiangshan {
   def mouDataGen(p: Parameters) = new Std()(p)
   def vipuGen(p: Parameters) = new VIPU()(p)
   def vialuFGen(p: Parameters) = new VIAluFix()(p)
-  def vppuGen(p: Parameters) = new VPPU()(p)
+  def vppuGen(p: Parameters) = new VPerm()(p)
   def vfpuGen(p: Parameters) = new VFPU()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
