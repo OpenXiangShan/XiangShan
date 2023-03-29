@@ -477,6 +477,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
   io.uncache.req.valid := uncacheState === s_req
 
+  io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
   io.uncache.req.bits.data := dataModule.io.rdata(0).data
@@ -493,9 +494,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.uncache.req.bits.mask := DontCare // TODO
   }
 
-  io.uncache.req.bits.id   := DontCare
-  io.uncache.req.bits.instrtype   := DontCare
-  io.uncache.req.bits.replayCarry := DontCare
   io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
 
   when(io.uncache.req.fire()){
@@ -582,15 +580,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
     // Write line request should have all 1 mask
     assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
+    io.sbuffer(i).bits := DontCare
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
     io.sbuffer(i).bits.vaddr := dataBuffer.io.deq(i).bits.vaddr
     io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
-    io.sbuffer(i).bits.id    := DontCare
-    io.sbuffer(i).bits.instrtype    := DontCare
-    io.sbuffer(i).bits.replayCarry := DontCare
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load

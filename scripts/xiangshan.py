@@ -73,6 +73,7 @@ class XSArgs(object):
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
+        self.with_constantin = 1 if args.with_constantin else None
         self.is_release = 1 if args.release else None
         self.is_spike = "spike" if args.spike else None
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
@@ -118,6 +119,7 @@ class XSArgs(object):
         makefile_args = [
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
+            (self.with_constantin, "WITH_CONSTANTIN"),
             (self.is_release,    "RELEASE"),
             (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
@@ -477,6 +479,7 @@ if __name__ == "__main__":
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
+    parser.add_argument('--with-constantin', action='store_true', help='enable constantin')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
