@@ -199,7 +199,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   //  Specific cycles to block
   val blockCyclesTlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   blockCyclesTlb := io.tlbReplayDelayCycleCtrl
-  val blockCyclesCache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val blockCyclesCache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
   val blockCyclesOthers = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val blockSqIdx = Reg(Vec(LoadQueueReplaySize, new SqPtr))
   // block causes
@@ -400,7 +400,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.isLoadReplay := true.B
     io.replay(i).bits.replayCarry := s2_replayCarry
     io.replay(i).bits.mshrid := s2_replayMSHRId
-    io.replay(i).bits.forward_tlDchannel := s2_replayCacheMissReplay
+    io.replay(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.dcacheMiss)
     io.replay(i).bits.sleepIndex := s2_oldestSel(i).bits
 
     when (io.replay(i).fire) {
