@@ -39,12 +39,11 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageCATMAX: Int = 65536 * 16
   val TageMINAP: Int = 4 // Minimum allocation probability, MINAP = 4 mean at lease 1/4 probability
 
-  private val TageTotalBits: Int = TageTableInfos.map {
+  val TageTotalBits: Int = TageTableInfos.map {
     case (sets, h, tag_width) => {
       sets * (tag_width + TageCtrBits * 2)
     }
   }.sum
-  println(s"TAGE Total Bits: ${TageTotalBits}B")
 
   def posUnconf(ctr: UInt): Bool = ctr === (1 << (ctr.getWidth - 1)).U
   def negUnconf(ctr: UInt): Bool = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
@@ -538,6 +537,8 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 
 @chiselName
 class Tage(implicit p: Parameters) extends BaseTage {
+
+  println(s"TAGE Total Bits: ${TageTotalBits / 8}B")
 
   val CAT: UInt = RegInit(0.U(log2Ceil(TageCATMAX).W))
 
