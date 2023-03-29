@@ -87,22 +87,23 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
   ))
   //number of uop
   val numOfUop = MuxLookup(typeOfDiv, 1.U, Array(
-    UopDivType.VEC_0XV -> 2.U,
-    UopDivType.DIR -> 2.U,
-    UopDivType.VEC_VVV -> lmul,
-    UopDivType.VEC_EXT2 -> lmul,
-    UopDivType.VEC_EXT4 -> lmul,
-    UopDivType.VEC_EXT8 -> lmul,
-    UopDivType.VEC_VVM -> lmul,
-    UopDivType.VEC_VXM -> (lmul + 1.U),
-    UopDivType.VEC_VXV -> (lmul + 1.U),
-    UopDivType.VEC_VVW -> (lmul + lmul),           // lmul <= 4
-    UopDivType.VEC_WVW -> (lmul + lmul),           // lmul <= 4
-    UopDivType.VEC_VXW -> (lmul + lmul + 1.U),     // lmul <= 4
-    UopDivType.VEC_WXW -> (lmul + lmul + 1.U),     // lmul <= 4
-    UopDivType.VEC_WVV -> (lmul + lmul),           // lmul <= 4
-    UopDivType.VEC_WXV -> (lmul + lmul + 1.U),     // lmul <= 4
-    UopDivType.VEC_SLIDE1UP -> (lmul + 1.U)
+    UopDivType.VEC_0XV       -> 2.U,
+    UopDivType.DIR           -> 2.U,
+    UopDivType.VEC_VVV       -> lmul,
+    UopDivType.VEC_EXT2      -> lmul,
+    UopDivType.VEC_EXT4      -> lmul,
+    UopDivType.VEC_EXT8      -> lmul,
+    UopDivType.VEC_VVM       -> lmul,
+    UopDivType.VEC_VXM       -> (lmul + 1.U),
+    UopDivType.VEC_VXV       -> (lmul + 1.U),
+    UopDivType.VEC_VVW       -> (lmul + lmul),           // lmul <= 4
+    UopDivType.VEC_WVW       -> (lmul + lmul),           // lmul <= 4
+    UopDivType.VEC_VXW       -> (lmul + lmul + 1.U),     // lmul <= 4
+    UopDivType.VEC_WXW       -> (lmul + lmul + 1.U),     // lmul <= 4
+    UopDivType.VEC_WVV       -> (lmul + lmul),           // lmul <= 4
+    UopDivType.VEC_WXV       -> (lmul + lmul + 1.U),     // lmul <= 4
+    UopDivType.VEC_SLIDE1UP  -> (lmul + 1.U),
+    UopDivType.VEC_FSLIDE1UP -> lmul
   ))
 
   val src1 = ctrl_flow.instr(19, 15)
@@ -486,6 +487,23 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i + 1).ctrl.lsrc(2) := dest + i.U
         csBundle(i + 1).ctrl.ldest := dest + i.U
         csBundle(i + 1).ctrl.uopIdx := i.U
+      }
+    }
+    is(UopDivType.VEC_FSLIDE1UP) {
+      //LMUL
+      csBundle(0).ctrl.srcType(0) := SrcType.fp
+      csBundle(0).ctrl.lsrc(0) := src1
+      csBundle(0).ctrl.lsrc(1) := src2
+      csBundle(0).ctrl.lsrc(2) := dest
+      csBundle(0).ctrl.ldest := dest
+      csBundle(0).ctrl.uopIdx := 0.U
+      for (i <- 1 until MAX_VLMUL) {
+        csBundle(i).ctrl.srcType(0) := SrcType.vp
+        csBundle(i).ctrl.lsrc(0) := src2 + (i - 1).U
+        csBundle(i).ctrl.lsrc(1) := src2 + i.U
+        csBundle(i).ctrl.lsrc(2) := dest + i.U
+        csBundle(i).ctrl.ldest := dest + i.U
+        csBundle(i).ctrl.uopIdx := i.U
       }
     }
   }

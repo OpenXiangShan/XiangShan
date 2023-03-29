@@ -574,7 +574,8 @@ package object xiangshan {
     def VEC_EXT8       = "b011101".U // VF8 0 -> V
     def VEC_VVM        = "b011110".U // VEC_VVM
     def VEC_VXM        = "b011111".U // VEC_VXM
-    def VEC_SLIDE1UP   = "b100000".U // slide1up.vx
+    def VEC_SLIDE1UP   = "b100000".U // vslide1up.vx
+    def VEC_FSLIDE1UP  = "b100001".U // vfslide1up.vf
     def VEC_MMM        = "b000000".U // VEC_MMM
     def dummy     = "b111111".U
 

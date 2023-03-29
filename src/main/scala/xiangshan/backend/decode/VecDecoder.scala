@@ -548,7 +548,7 @@ object VecDecoder extends DecodeConstants {
     VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VpermType.vfmv_s_f, F, T, F),// vs2=0 // vs3 = vd
 
     // 16.3.3. Vector Slide1up
-    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.X , FuType.vppu, VpermType.vfslide1up, F, T, F),// vd[0]=f[rs1], vd[i+1] = vs2[i]
+    VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopDivType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 
     // 16.3.4. Vector Slide1down Instruction
     // vslide1down.vx vd, vs2, rs1, vm # vd[i] = vs2[i+1], vd[vl-1]=x[rs1]

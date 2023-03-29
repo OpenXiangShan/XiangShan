@@ -108,7 +108,7 @@ class VPerm(implicit p: Parameters) extends VPUSubModule(p(XSCoreParamsKey).VLEN
     Module(new VPPUWrapper),
     Module(new VPermWrapper)
   )
-  val select0 = io.in.bits.uop.ctrl.fuOpType === VpermType.vfmv_s_f || io.in.bits.uop.ctrl.fuOpType === VpermType.vfslide1up
+  val select0 = io.in.bits.uop.ctrl.fuOpType === VpermType.vfmv_s_f
   override val select = Seq(
     io.in.bits.uop.ctrl.fuType === FuType.vppu && select0,
     io.in.bits.uop.ctrl.fuType === FuType.vppu && !select0
