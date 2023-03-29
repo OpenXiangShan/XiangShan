@@ -37,6 +37,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageNTables: Int = TageTableInfos.size
   val TageCtrBits = 3
   val TageCATMAX: Int = 65536 * 16
+  val TageMINAP: Int = 4 // Minimum allocation probability, MINAP = 4 mean at lease 1/4 probability
 
   val TageTotalBits: Int = TageTableInfos.map {
     case (sets, h, tag_width) => {
@@ -89,11 +90,23 @@ class TageResp(implicit p: Parameters) extends TageBundle {
   val ctr_up = UInt(TageCtrBits.W)
   val ctr_down = UInt(TageCtrBits.W)
 
+  // Confidence level
+  // 0: High, 1: Mid, 2: Low
   def conf(): UInt = {
     val medium: Bool = (ctr_up === Cat(ctr_down, 1.U)) || (Cat(ctr_up, 1.U) === ctr_down)
     val low: Bool = (ctr_up < Cat(ctr_down, 1.U)) && (Cat(ctr_up, 1.U) > ctr_down)
     Cat(low, medium)
   }
+
+  // Whether this is a Mid-High confidence
+  def isMHC(): Bool = {
+    // High conf but not that high
+    // See BATAGE paper for detailed definition
+    this.conf() === 0.U && (ctr_up < 4.U) && (ctr_down < 4.U)
+  }
+
+  def taken(): Bool = ctr_up >= ctr_down
+  def unconf(): Bool = this.conf() =/= 0.U
 }
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
@@ -112,13 +125,17 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
 class TageMeta(implicit p: Parameters)
   extends TageBundle with HasSCParameter
 {
-  val providers = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
-  val tagResps = Vec(numBr, Vec(TageNTables, new TageResp))
-  val tagConf = Vec(numBr, Vec(TageNTables, UInt(2.W)))
-  val basecnts = Vec(numBr, UInt(2.W))
-  val takens = Vec(numBr, Bool())
-  val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
-  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+  // Providers with longest history and highest confidence
+  val providers           = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
+  // Next longest history that matches tag
+  val nextProviders       = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
+  val tagResps            = Vec(numBr, Vec(TageNTables, new TageResp))
+  // Tag match hits
+  val tagHits             = Vec(numBr, Vec(TageNTables, Bool()))
+  val basecnts            = Vec(numBr, UInt(2.W))
+  val takens              = Vec(numBr, Bool())
+  val scMeta              = if (EnableSC) Some(new SCMeta(SCNTables)) else None
+  val pred_cycle          = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 }
 
 trait TBTParams extends HasXSParameter with TageParams {
@@ -247,7 +264,7 @@ class TageTable
     val tag2FoldedHistory = allFh.getHistWithInfo(altTagFhInfo).folded_hist
 
     // Sanity check
-    require(idxFoldedHistory.getWidth == log2Ceil(nRowsPerBr))
+    //    require(idxFoldedHistory.getWidth == log2Ceil(nRowsPerBr))
 
     val idx = (unhashedIdx ^ idxFoldedHistory)(log2Ceil(nRowsPerBr) - 1, 0)
     val tag = (unhashedIdx ^ tagFoldedHistory ^ (tag2FoldedHistory << 1).asUInt)(tagLen - 1, 0)
@@ -408,8 +425,8 @@ class TageTable
       val wrbypass_ctr_up = wrbypass_ctr(TageCtrBits * 2 - 1, TageCtrBits)
       val wrbypass_data_valid = wrbypass_hit && wrbypass_io.hit_data(0).valid
 
-      val latest_ctr_up = UInt(TageCtrBits.W)
-      val latest_ctr_down = UInt(TageCtrBits.W)
+      val latest_ctr_up = Wire(UInt(TageCtrBits.W))
+      val latest_ctr_down = Wire(UInt(TageCtrBits.W))
       when(wrbypass_data_valid) {
         latest_ctr_up := wrbypass_ctr_up
         latest_ctr_down := wrbypass_ctr_down
@@ -527,7 +544,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
   override val meta_size = resp_meta.getWidth
 
   // Util function definition
+  // This PriorityMux select the lowest value conf (highest conf) and valid T
   object BATageParallelPriorityMux {
+    // hit, conf, T
     def apply[T <: Data](in: Seq[(Bool, UInt, T)]): T = {
       ParallelOperation(in,
         (a: (Bool, UInt, T), b: (Bool, UInt, T)) => (
@@ -577,18 +596,17 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_tableHits        = Wire(Vec(numBr, Vec(TageNTables, Bool())))
   val s1_taggedResps      = Wire(Vec(numBr, Vec(TageNTables, new TageResp)))
   val s1_providerResps    = Wire(Vec(numBr, new TageResp))
-  val s1_providerConf     = Wire(Vec(numBr, Vec(TageNTables, UInt(2.W))))
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
 
-  val s2_provideds        = RegEnable(s1_provideds, io.s1_fire(1))
-  val s2_providers        = RegEnable(s1_providers, io.s1_fire(1))
-  val s2_tableHits        = RegEnable(s1_tableHits, io.s1_fire(1))
-  val s2_taggedResps      = RegEnable(s1_taggedResps, io.s1_fire(1))
-  val s2_providerResps    = RegEnable(s1_providerResps, io.s1_fire(1))
-  val s2_providerConf     = RegEnable(s1_providerConf, io.s1_fire(1))
-  val s2_tageTakens       = RegEnable(s1_tageTakens, io.s1_fire(1))
-  val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire(1))
+  val s2_provideds          = RegEnable(s1_provideds, io.s1_fire(1))
+  val s2_providers          = RegEnable(s1_providers, io.s1_fire(1))
+  val s2_tableHits          = RegEnable(s1_tableHits, io.s1_fire(1))
+  val s2_taggedResps        = RegEnable(s1_taggedResps, io.s1_fire(1))
+  val s2_tageTakens         = RegEnable(s1_tageTakens, io.s1_fire(1))
+  val s2_basecnts           = RegEnable(s1_basecnts, io.s1_fire(1))
+  val s2_nextProviders      = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
+  val s2_nextProvidersValid = Wire(Vec(numBr, Bool()))
 
   io.out := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
@@ -608,12 +626,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
       (r.valid, tableInfo.conf, tableInfo)
     }
     }
+
+    // Stage 1
+    // Select provider
     val providerInfo = BATageParallelPriorityMux(inputRes.reverse)
     val provided = inputRes.map(_._1).reduce(_ || _)
     s1_provideds(i) := provided
     s1_providers(i) := providerInfo.tableIdx
     s1_providerResps(i) := providerInfo.resp
-    s1_providerConf(i) := providerInfo.conf
 
     val s1_bimCtr = baseTable.io.s1_cnt(i)
     s1_tageTakens(i) :=
@@ -623,14 +643,21 @@ class Tage(implicit p: Parameters) extends BaseTage {
       )
     s1_basecnts(i) := s1_bimCtr
 
+    // Stage 2
+    // Calculate next longest history that hits
+    s2_nextProviders(i) := PriorityEncoder(s2_tableHits(i).asUInt ^ (1.U << s2_providers(i)).asUInt)
+    s2_nextProvidersValid(i) := s2_tableHits(i)(s2_nextProviders(i))
+
     // Stage 3
-    resp_meta.providers(i).valid := RegEnable(s2_provideds(i), io.s2_fire(1))
-    resp_meta.providers(i).bits := RegEnable(s2_providers(i), io.s2_fire(1))
-    resp_meta.tagResps(i) := RegEnable(s2_taggedResps(i), io.s2_fire(1))
-    resp_meta.tagConf(i) := RegEnable(s2_providerConf(i), io.s2_fire(1))
+    resp_meta.providers(i).valid      := RegEnable(s2_provideds(i), io.s2_fire(1))
+    resp_meta.providers(i).bits       := RegEnable(s2_providers(i), io.s2_fire(1))
+    resp_meta.tagResps(i)             := RegEnable(s2_taggedResps(i), io.s2_fire(1))
+    resp_meta.tagHits(i)              := RegEnable(s2_tableHits(i), io.s2_fire(1))
+    resp_meta.takens(i)               := RegEnable(s2_tageTakens(i), io.s2_fire(1))
+    resp_meta.basecnts(i)             := RegEnable(s2_basecnts(i), io.s2_fire(1))
+    resp_meta.nextProviders(i).valid  := RegEnable(s2_nextProvidersValid(i), io.s2_fire(1))
+    resp_meta.nextProviders(i).bits   := RegEnable(s2_nextProviders(i), io.s2_fire(1))
     resp_meta.pred_cycle.foreach(_ := RegEnable(GTimer(), io.s2_fire(1)))
-    resp_meta.takens(i) := RegEnable(s2_tageTakens(i), io.s2_fire(1))
-    resp_meta.basecnts(i) := RegEnable(s2_basecnts(i), io.s2_fire(1))
 
     when(io.ctrl.tage_enable) {
       resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
@@ -638,115 +665,141 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
 
   //---------------- Update logics below ------------------//
+  // These signals will be directly connect to TageTables and Basetable
+  val update_valid = io.update.valid
+  val update_data = io.update.bits
+  val update_misPred = update_data.mispred_mask
+  val update_meta = update_data.meta.asTypeOf(new TageMeta)
+  val update_tageResp = update_meta.tagResps
+  val update_condition = VecInit((0 until numBr).map(w =>
+    update_data.ftb_entry.brValids(w) && update_valid && !update_data.ftb_entry.always_taken(w) &&
+      !(PriorityEncoder(update_data.br_taken_mask) < w.U)))
+  val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
+  // These signal is generated below
+  val update_mask = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_takens = Wire(Vec(numBr, Vec(TageNTables, Bool())))
+  val update_allocMask = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_decayMask = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_baseCnt = Wire(Vec(numBr, UInt(2.W)))
+  val update_baseUpdateValid = WireInit(0.U.asTypeOf(Vec(numBr, Bool())))
+  val update_baseTakens = Wire(Vec(numBr, Bool()))
+
+  // Connect to submodules
   for (i <- 0 until numBr) {
-    val u_valid = io.update.valid
-    val update = io.update.bits
-    val updateValids = VecInit((0 until TageBanks).map(w =>
-      update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
-        !(PriorityEncoder(update.br_taken_mask) < w.U)))
-    val updateFHist = update.spec_info.folded_hist
+    for (compIdx <- 0 until TageNTables) {
+      taggedTables(compIdx).io.update.mask(i)         := RegNext(update_mask(i)(compIdx))
+      taggedTables(compIdx).io.update.takens(i)       := RegNext(update_takens(i)(compIdx))
+      taggedTables(compIdx).io.update.decay(i)        := RegNext(update_decayMask(i)(compIdx))
+      taggedTables(compIdx).io.update.alloc(i)        := RegNext(update_allocMask(i)(compIdx))
+      taggedTables(compIdx).io.update.old_ctr_up(i)   := RegNext(update_tageResp(i)(compIdx).ctr_up)
+      taggedTables(compIdx).io.update.old_ctr_down(i) := RegNext(update_tageResp(i)(compIdx).ctr_down)
 
-    val updateMeta = update.meta.asTypeOf(new TageMeta)
+      // use fetch pc instead of instruction pc
+      taggedTables(compIdx).io.update.pc       := RegNext(update_data.pc)
+      taggedTables(compIdx).io.update.folded_hist := RegNext(update_foldedHistory)
+      taggedTables(compIdx).io.update.ghist := RegNext(io.update.bits.ghist)
+    }
+  }
+  baseTable.io.update_mask := RegNext(update_baseUpdateValid)
+  baseTable.io.update_cnt := RegNext(update_baseCnt)
+  baseTable.io.update_pc := RegNext(update_data.pc)
+  baseTable.io.update_takens := RegNext(update_baseTakens)
 
-    val updateMask = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-    val updateUMask = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-    val updateResetU = WireInit(0.U.asTypeOf(Vec(numBr, Bool()))) // per predictor
-    val updateTakens = Wire(Vec(numBr, Vec(TageNTables, Bool())))
-    val updateAlloc = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-    val updateOldCtrs = Wire(Vec(numBr, Vec(TageNTables, UInt(TageCtrBits.W))))
-    val updateU = Wire(Vec(numBr, Vec(TageNTables, Bool())))
-    val updatebcnt = Wire(Vec(TageBanks, UInt(2.W)))
-    val baseupdate = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
-    val bUpdateTakens = Wire(Vec(TageBanks, Bool()))
-    updateTakens := DontCare
-    updateOldCtrs := DontCare
-    updateU := DontCare
+  // Generate the update signals
+  // NOTICE: Currently all the allocation and decaying decisions are made based on OLD INFO
+  for (i <- 0 until numBr) {
+    // Use no update_ prefix to distinguish internal signals
+    val hasUpdate = update_condition(i)
+    val misPred = update_data.mispred_mask(i)
+    val taken = hasUpdate && update_data.br_taken_mask(i)
+    val tableHitMask = update_meta.tagHits(i)
+    val providerValid = update_meta.providers(i).valid
+    val providerIdx = update_meta.providers(i).bits
+    val providerResp = update_tageResp(i)(providerIdx)
+    val nextProviderValid = update_meta.providers(i).valid
+    val nextProviderIdx = update_meta.providers(i).bits
+    val nextProviderResp = update_tageResp(i)(nextProviderIdx)
 
-    val updateMisPreds = update.mispred_mask
-
-    val hasUpdate = updateValids(i)
-    val updateMispred = updateMisPreds(i)
-    val updateTaken = hasUpdate && update.br_taken_mask(i)
-
-    val updateProvided     = updateMeta.providers(i).valid
-    val updateProvider     = updateMeta.providers(i).bits
-    val updateProviderResp = updateMeta.providerResps(i)
+    // Some conditions
+    val nextProviderUnconf = nextProviderValid && nextProviderResp.unconf()
+    val nextProviderWrong  = nextProviderValid && taken =/= nextProviderResp.taken()
+    val providerUnconf     = providerResp.unconf()
 
 
-    val updateProviderWeakTaken = posUnconf(updateProviderResp.ctr)
-    val updateProviderWeaknotTaken = negUnconf(updateProviderResp.ctr)
-    val updateProviderWeak = unconf(updateProviderResp.ctr)
-
-
-
+    // Update provider and longer history component
+    update_takens(i) := DontCare
     when (hasUpdate) {
-      when (updateProvided) {
-        updateMask(i)(updateProvider) := true.B
-        updateUMask(i)(updateProvider) := updateAltDiffers
-        updateU(i)(updateProvider) := updateProviderCorrect
-        updateTakens(i)(updateProvider) := updateTaken
-        updateOldCtrs(i)(updateProvider) := updateProviderResp.ctr
-        updateAlloc(i)(updateProvider) := false.B
+      for (idx <- 0 until TageNTables) {
+        when(idx.asUInt > providerIdx && tableHitMask(idx)) {
+          // Always update longer history hit component
+          // They are not selected as provider most likely because is low conf
+          update_mask(i)(idx) := true.B
+          update_takens(i)(idx) := taken
+        } .elsewhen(idx.asUInt === providerIdx && providerValid) {
+          when (nextProviderUnconf || nextProviderWrong || providerUnconf) {
+            // Update provider only under this condition
+            update_mask(i)(idx) := true.B
+            update_takens(i)(idx) := taken
+          } .otherwise {
+            // Next longer hit comp can predict well
+            // Entry in this provider is probably useless
+            // So decay
+            update_mask(i)(idx) := false.B
+            update_decayMask(i)(idx) := true.B
+          }
+        } .elsewhen(idx.asUInt === nextProviderIdx && nextProviderValid && providerUnconf) {
+          // Update next longer hit component when current provider is not confidence
+          update_mask(i)(idx) := true.B
+          update_takens(i)(idx) := taken
+        }
       }
     }
 
-    // update base table if used base table to predict
-    baseupdate(i) := hasUpdate && updateUseAlt
-    updatebcnt(i) := updateMeta.basecnts(i)
-    bUpdateTakens(i) := updateTaken
+    // Update base table if used base table to predict
+    update_baseUpdateValid(i) := hasUpdate && !providerValid
+    update_baseCnt(i) := update_meta.basecnts(i)
+    update_baseTakens(i) := taken
 
-    val needToAllocate = hasUpdate && updateMispred && !(updateUseAlt && updateProviderCorrect && updateProvided)
-    val allocatableMask = updateMeta.allocates(i)
-    val canAllocate = updateMeta.allocateValid(i)
 
-    val allocLFSR = LFSR64()(TageNTables - 1, 0)
-    val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt))
-    val canAllocMask = allocatableMask & longerHistoryTableMask
-    val allocFailureMask = ~allocatableMask & longerHistoryTableMask
-
-    val firstEntry = PriorityEncoder(canAllocMask)
-    val maskedEntry = PriorityEncoder(canAllocMask & allocLFSR)
-    val allocate = Mux(canAllocMask(maskedEntry), maskedEntry, firstEntry)
+    // Allocation logic
+    // CAT probabilty
+    val catLFSR: UInt = LFSR64()(log2Ceil(TageMINAP) - 1, 0) + 1.U
+    val catAllow = catLFSR >= (CAT >>(log2Ceil(TageCATMAX) - log2Ceil(TageMINAP))).asUInt
+    // Allocate when mispredict and CAT allowed
+    val needToAllocate = hasUpdate && misPred && catAllow
+    // Maintain CAT
+    val mhcSum = update_tageResp(i).map(r => r.isMHC().asUInt).reduce(_ + _)
+    when (needToAllocate) {
+      CAT := RegNext(CAT + 1.U - 6.U * mhcSum)
+    }
+    val longerHistoryTableMask = ~(
+      LowerMask(UIntToOH(providerIdx), TageNTables)
+        & Fill(TageNTables, providerValid.asUInt)
+      )
+    // Not high confidence is allocatable
+    val allocatableMask = VecInit(update_tageResp(i).map(r => r.unconf())).asUInt & longerHistoryTableMask.asUInt
+    val allocatable = allocatableMask.asBools.reduce(_ | _)
+    val allocateIdx: UInt = Mux(allocatable, PriorityEncoder(allocatableMask), TageNTables.asUInt)
 
 
     when (needToAllocate) {
-      // val allocate = updateMeta.allocates(i).bits
-
-      when (canAllocate) {
-        updateMask(i)(allocate) := true.B
-        updateTakens(i)(allocate) := updateTaken
-        updateAlloc(i)(allocate) := true.B
-        updateUMask(i)(allocate) := true.B
-        updateU(i)(allocate) := false.B
+      for (idx <- 0 until TageNTables) {
+        when (idx.asUInt < allocateIdx) {
+          // Do decaying
+          update_mask(i)(allocateIdx) := true.B
+          update_decayMask(i)(allocateIdx) := true.B
+        } .elsewhen(idx.asUInt === allocateIdx) {
+          // Allocate it
+          update_mask(i)(allocateIdx) := true.B
+          update_takens(i)(allocateIdx) := taken
+          update_allocMask(i)(allocateIdx) := true.B
+        }
       }
-
     }
-    XSPerfAccumulate(f"tage_bank_${i}_update_allocate_failure", needToAllocate && !canAllocate)
-    XSPerfAccumulate(f"tage_bank_${i}_update_allocate_success", needToAllocate &&  canAllocate)
-    XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && updateMispred)
-    XSPerfAccumulate(s"tage_bank_${i}_reset_u", updateResetU(i))
+    XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && misPred)
   }
 
-  for (w <- 0 until TageBanks) {
-    for (i <- 0 until TageNTables) {
-      taggedTables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
-      taggedTables(i).io.update.takens(w)  := RegNext(updateTakens(w)(i))
-      taggedTables(i).io.update.alloc(w)   := RegNext(updateAlloc(w)(i))
-      taggedTables(i).io.update.oldCtrs(w) := RegNext(updateOldCtrs(w)(i))
 
-      taggedTables(i).io.update.uMask(w)   := RegNext(updateUMask(w)(i))
-      taggedTables(i).io.update.us(w)      := RegNext(updateU(w)(i))
-      taggedTables(i).io.update.reset_u(w) := RegNext(updateResetU(w))
-      // use fetch pc instead of instruction pc
-      taggedTables(i).io.update.pc       := RegNext(update.pc)
-      taggedTables(i).io.update.folded_hist := RegNext(updateFHist)
-      taggedTables(i).io.update.ghist := RegNext(io.update.bits.ghist)
-    }
-  }
-  baseTable.io.update_mask := RegNext(baseupdate)
-  baseTable.io.update_cnt := RegNext(updatebcnt)
-  baseTable.io.update_pc := RegNext(update.pc)
-  baseTable.io.update_takens := RegNext(bUpdateTakens)
 
   // all should be ready for req
   io.s1_ready := taggedTables.map(_.io.req.ready).reduce(_&&_)
@@ -761,13 +814,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   // Debug and perf info
   for (b <- 0 until TageBanks) {
-    val updateProvided = updateMeta.providers(b).valid
-    val updateProvider = updateMeta.providers(b).bits
+    val updateProvided = update_meta.providers(b).valid
+    val updateProvider = update_meta.providers(b).bits
     for (i <- 0 until TageNTables) {
       val pred_i_provided =
         s2_provideds(b) && s2_providers(b) === i.U
       val commit_i_provided =
-        updateProvided && updateProvider === i.U && updateValids(b)
+        updateProvided && updateProvider === i.U && update_condition(b)
       tage_perf(
         s"bank_${b}_tage_table_${i}_provided",
         PopCount(pred_i_provided),
@@ -777,19 +830,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
     tage_perf(
       s"bank_${b}_tage_use_bim",
       PopCount(!s2_provideds(b)),
-      PopCount(!updateProvided && updateValids(b))
+      PopCount(!updateProvided && update_condition(b))
     )
     def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
-    tage_perf(
-      s"bank_${b}_tage_use_altpred",
-      PopCount(s2_provideds(b) && unconf(s2_providerResps(b).ctr)),
-      PopCount(updateProvided &&
-        unconf(updateMeta.providerResps(b).ctr) && updateValids(b))
-    )
+
     tage_perf(
       s"bank_${b}_tage_provided",
       PopCount(s2_provideds(b)),
-      PopCount(updateProvided && updateValids(b))
+      PopCount(updateProvided && update_condition(b))
     )
   }
 
