@@ -38,11 +38,12 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageCATMAX: Int = 65536 * 16
   val TageMINAP: Int = 4 // Minimum allocation probability, MINAP = 4 mean at lease 1/4 probability
 
-  val TageTotalBits: Int = TageTableInfos.map {
+  private val TageTotalBits: Int = TageTableInfos.map {
     case (sets, h, tag_width) => {
       sets * (tag_width + TageCtrBits * 2)
     }
   }.sum
+  println(s"TAGE Total Bits: ${TageTotalBits}B")
 
   def posUnconf(ctr: UInt): Bool = ctr === (1 << (ctr.getWidth - 1)).U
   def negUnconf(ctr: UInt): Bool = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
@@ -617,23 +618,25 @@ class Tage(implicit p: Parameters) extends BaseTage {
   //---------------- Predict logics below ------------------//
   for (i <- 0 until numBr) {
 
-    val s1_per_br_resp: Vec[ValidIO[TageResp]] = VecInit(s1_resps.map(_(i)))
-    val inputRes = s1_per_br_resp.zipWithIndex.map { case (r, idx) => {
-      val tableInfo = Wire(new TageTableInfo)
-      tableInfo.resp := r.bits
-      tableInfo.conf := r.bits.conf()
-      tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
-      (r.valid, tableInfo.conf, tableInfo)
-    }
+    val resp: Vec[ValidIO[TageResp]] = VecInit(s1_resps.map(_(i)))
+    val structuredResp = resp.zipWithIndex.map { case (r, idx) => {
+        val tableInfo = Wire(new TageTableInfo)
+        tableInfo.resp := r.bits
+        tableInfo.conf := r.bits.conf()
+        tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
+        (r.valid, tableInfo.conf, tableInfo)
+      }
     }
 
     // Stage 1
     // Select provider
-    val providerInfo = BATageParallelPriorityMux(inputRes.reverse)
-    val provided = inputRes.map(_._1).reduce(_ || _)
+    val providerInfo = BATageParallelPriorityMux(structuredResp.reverse)
+    val provided = structuredResp.map(_._1).reduce(_ || _)
     s1_provideds(i) := provided
     s1_providers(i) := providerInfo.tableIdx
     s1_providerResps(i) := providerInfo.resp
+    s1_taggedResps(i) := resp.map(r => r.bits)
+    s1_tableHits(i) := resp.map(r => r.valid)
 
     val s1_bimCtr = baseTable.io.s1_cnt(i)
     s1_tageTakens(i) :=
