@@ -359,7 +359,7 @@ object VecDecoder extends DecodeConstants {
     VREM_VX        -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VREMU_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
 
-    VSLIDE1DOWN_VX -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VSLIDE1DOWN_VX -> OPMVX(T, FuType.vppu, VpermType.vslide1down, F, T, F, UopDivType.VEC_SLIDE1DOWN),
     VSLIDE1UP_VX   -> OPMVX(T, FuType.vppu, VpermType.vslide1up, F, T, F, UopDivType.VEC_SLIDE1UP),
     VWADD_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vwadd_vv, F, T, F, UopDivType.VEC_VXW),
     VWADD_WX       -> OPMVX(T, FuType.vialuF, VialuFixType.vwadd_wv, F, T, F, UopDivType.VEC_WXW),
@@ -552,7 +552,7 @@ object VecDecoder extends DecodeConstants {
 
     // 16.3.4. Vector Slide1down Instruction
     // vslide1down.vx vd, vs2, rs1, vm # vd[i] = vs2[i+1], vd[vl-1]=x[rs1]
-    VFSLIDE1DOWN_VF    -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// vd[i] = vs2[i+1], vd[vl-1]=f[rs1]
+    VFSLIDE1DOWN_VF    -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1down, F, T, F, UopDivType.VEC_FSLIDE1DOWN),// vd[i] = vs2[i+1], vd[vl-1]=f[rs1]
   )
 
   val vset: Array[(BitPat, XSDecodeBase)] = Array(
