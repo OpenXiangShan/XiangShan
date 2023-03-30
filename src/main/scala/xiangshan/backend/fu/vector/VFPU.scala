@@ -253,6 +253,7 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
     vfmacc(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
     vfmacc(i).io.frs1 := in.src(0)(63,0)
     vfmacc(i).io.is_frs1 := false.B // TODO: support vf inst
+    vfmacc(i).io.uop_idx := in.uopIdx // TODO
     vfmacc(i).io.op_code := in.op_code
     vfmacc(i).io.is_vec := true.B // If you can enter, it must be vector
     vfmacc(i).io.round_mode := in.round_mode
