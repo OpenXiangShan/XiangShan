@@ -1091,7 +1091,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * log trigger is at writeback valid
     * */
   if(!env.FPGAPlatform){
-    val isWriteInstInfoTable = WireInit(Constantin.createRecord("isWriteInstInfoTable" + p(XSCoreParamsKey).HartId.toString))
+    val isWriteInstInfoTable = WireInit(Constantin.createRecord(env.FPGAPlatform, "isWriteInstInfoTable" + p(XSCoreParamsKey).HartId.toString))
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
     val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
