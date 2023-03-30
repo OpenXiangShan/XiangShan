@@ -557,6 +557,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
   val pred_stage = Reg(Vec(FtqSize, UInt(2.W)))
 
+  val is_replay = Reg(Vec(FtqSize, Bool()))
+
   val c_invalid :: c_valid :: c_commited :: Nil = Enum(3)
   val commitStateQueue = RegInit(VecInit(Seq.fill(FtqSize) {
     VecInit(Seq.fill(PredictWidth)(c_invalid))
@@ -575,6 +577,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val last_cycle_bpu_target = RegNext(bpu_in_resp.getTarget)
   val last_cycle_cfiIndex = RegNext(bpu_in_resp.cfiIndex)
   val last_cycle_bpu_in_stage = RegNext(bpu_in_stage)
+
+  when (last_cycle_bpu_in) {
+    is_replay(last_cycle_bpu_in_ptr.value) := false.B
+  }
+  when (backendRedirectReg.valid) {
+    // if mispred, clear replay bit, otherwise set
+    when (backendRedirectReg.bits.cfiUpdate.isMisPred) {
+      is_replay(backendRedirectReg.bits.ftqIdx.value) := false.B
+    } .otherwise {
+      is_replay(backendRedirectReg.bits.ftqIdx.value) := true.B
+    }
+  }
 
   def extra_copyNum_for_commitStateQueue = 2
   val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum+extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_fire)))
@@ -1108,7 +1122,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
 
   io.toBpu.update := DontCare
-  io.toBpu.update.valid := commit_valid && do_commit
+  io.toBpu.update.valid := commit_valid && do_commit && !is_replay(do_commit_ptr.value)
   val update = io.toBpu.update.bits
   update.false_hit   := commit_hit === h_false_hit
   update.pc          := commit_pc_bundle.startAddr
