@@ -2,7 +2,7 @@ package xiangshan.v2backend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.{Cat, ValidIO, log2Up}
+import chisel3.util._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.v2backend.Bundles.IssueQueueWakeUpBundle
 
@@ -147,14 +147,21 @@ object VfRegFile {
       require(splitNum > 1 && wdata.head.getWidth == dataWidth * splitNum)
       val wdataVec = Wire(Vec(splitNum, Vec(wdata.length, UInt(dataWidth.W))))
       val rdataVec = Wire(Vec(splitNum, Vec(raddr.length, UInt(dataWidth.W))))
+      val debugRDataVec: Option[Vec[Vec[UInt]]] = debugReadData.map(x => Wire(Vec(splitNum, Vec(x.length, UInt(dataWidth.W)))))
       for (i <- 0 until splitNum) {
         wdataVec(i) := wdata.map(_ ((i + 1) * dataWidth - 1, i * dataWidth))
         RegFile(
           name + s"Part${i}", numEntries, raddr, rdataVec(i), wen(i), waddr, wdataVec(i),
-          hasZero = false, withReset, debugReadAddr, debugReadData)
+          hasZero = false, withReset, debugReadAddr, debugRDataVec.map(_(i))
+        )
       }
       for (i <- 0 until rdata.length) {
         rdata(i) := Cat(rdataVec.map(_ (i)).reverse)
+      }
+      if (debugReadData.nonEmpty) {
+        for (i <- 0 until debugReadData.get.length) {
+          debugReadData.get(i) := Cat(debugRDataVec.get.map(_ (i)).reverse)
+        }
       }
     }
   }
