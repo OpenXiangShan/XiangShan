@@ -35,7 +35,12 @@ import os.followLink
 trait TageParams extends HasBPUConst with HasXSParameter {
   val TageNTables: Int = TageTableInfos.size
   val TageCtrBits = 3
-  val TageCATMAX: Int = 65536 * 16
+  // Controlled Allocation Throttling (CAT) is a mechanism to control TAGE entry allocation
+  // Details see BATAGE paper
+  val TageCATMAX: Int = 65536 * 16 - 1
+  val BatageCATR1: Int = 1
+  val BatageCATR2: Int = 6
+
   val TageMINAP: Int = 4 // Minimum allocation probability, MINAP = 4 mean at lease 1/4 probability
 
   val TageTotalBits: Int = TageTableInfos.map {
@@ -356,8 +361,12 @@ class TageTable
   val s1_phyHit: Vec[Bool] = Mux1H(s1_bank_req_1h, s1_phyHitRaw)
 
 
-  val s1_tablesResp: Vec[TageEntry] = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashedIdx, i), numBr), s1_phyTablesResp)))
-  val s1_hit: Vec[Bool] = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashedIdx, i), numBr), s1_phyHit)))
+  val s1_tablesResp: Vec[TageEntry] = VecInit((0 until numBr).map(
+    i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashedIdx, i), numBr), s1_phyTablesResp))
+  )
+  val s1_hit: Vec[Bool] = VecInit((0 until numBr).map(
+    i => Mux1H(UIntToOH(get_phy_br_idx(s1_unhashedIdx, i), numBr), s1_phyHit))
+  )
 
   // Generate S1 Response
   for (i <- 0 until numBr) {
@@ -540,7 +549,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   println(s"TAGE Total Bits: ${TageTotalBits / 8}B")
 
-  val CAT: UInt = RegInit(0.U(log2Ceil(TageCATMAX).W))
+  val CAT: Vec[UInt] = RegInit(VecInit(Seq.fill(numBr)(0.U(log2Ceil(TageCATMAX).W))))
 
   val resp_meta = Wire(new TageMeta)
   override val meta_size = resp_meta.getWidth
@@ -554,8 +563,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
         (a: (Bool, UInt, T), b: (Bool, UInt, T)) => (
           a._1 || b._1,
           // Left first if same confidence
-          Mux(a._2 <= b._2, a._2, b._2),
-          Mux(a._2 <= b._2, a._3, b._3)
+          Mux(a._2 <= b._2 && a._1, a._2, b._2),
+          Mux(a._2 <= b._2 && a._1, a._3, b._3)
         )
       )._3
     }
@@ -602,6 +611,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
 
+  val s2_resps              = RegEnable(s1_resps, io.s1_fire)
   val s2_provideds          = RegEnable(s1_provideds, io.s1_fire)
   val s2_providers          = RegEnable(s1_providers, io.s1_fire)
   val s2_tableHits          = RegEnable(s1_tableHits, io.s1_fire)
@@ -614,14 +624,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
   io.out := io.in.bits.resp_in(0)
   io.out.last_stage_meta := resp_meta.asUInt
 
-  val resp_s2 = io.out.s2
-
 
   //---------------- Predict logics below ------------------//
   for (i <- 0 until numBr) {
 
     val resp: Vec[ValidIO[TageResp]] = VecInit(s1_resps.map(_(i)))
-    val structuredResp = resp.zipWithIndex.map { case (r, idx) => {
+    val s1_structuredResp = resp.zipWithIndex.map { case (r, idx) => {
         val tableInfo = Wire(new TageTableInfo)
         tableInfo.resp := r.bits
         tableInfo.conf := r.bits.conf()
@@ -632,8 +640,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     // Stage 1
     // Select provider
-    val providerInfo = BATageParallelPriorityMux(structuredResp.reverse)
-    val provided = structuredResp.map(_._1).reduce(_ || _)
+    val providerInfo = BATageParallelPriorityMux(s1_structuredResp.reverse)
+    val provided = s1_structuredResp.map(_._1).reduce(_ || _)
     s1_provideds(i) := provided
     s1_providers(i) := providerInfo.tableIdx
     s1_providerResps(i) := providerInfo.resp
@@ -644,16 +652,18 @@ class Tage(implicit p: Parameters) extends BaseTage {
     s1_tageTakens(i) :=
       Mux(!provided,
         s1_bimCtr(1),
-        providerInfo.resp.ctr_up > providerInfo.resp.ctr_down
+        providerInfo.resp.taken()
       )
     s1_basecnts(i) := s1_bimCtr
 
     // Stage 2
     // Calculate next longest history that hits
-    s2_nextProviders(i) := PriorityEncoder(
-      s2_tableHits(i).asUInt &
-        ((1.U << s2_providers(i) ).asUInt - 1.U ) // provider may not be the longest history hit
-    )
+    val s2_structuredResp = VecInit(s2_resps.map(_(i))).zipWithIndex.map {
+      case (r, idx) => {
+        (r.valid && idx.asUInt < s2_providers(i), idx.U(log2Ceil(TageNTables).W))
+      }
+    }
+    s2_nextProviders(i) := ParallelPriorityMux(s2_structuredResp.reverse)
     s2_nextProvidersValid(i) := s2_tableHits(i)(s2_nextProviders(i))
 
     // Stage 3
@@ -668,7 +678,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.pred_cycle.foreach(_ := RegEnable(GTimer(), io.s2_fire))
 
     when(io.ctrl.tage_enable) {
-      resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
+      io.out.s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
     }
   }
 
@@ -752,7 +762,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
             // Next longer hit comp can predict well
             // Entry in this provider is probably useless
             // So decay
-            update_mask(i)(idx) := false.B
+            update_mask(i)(idx) := true.B
             update_decayMask(i)(idx) := true.B
           }
         } .elsewhen(idx.asUInt === nextProviderIdx && nextProviderValid && providerUnconf) {
@@ -771,15 +781,31 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     // Allocation logic
     // CAT probabilty
-    val catLFSR: UInt = LFSR64()(log2Ceil(TageMINAP) - 1, 0) + 1.U
-    val catAllow = catLFSR >= (CAT >>(log2Ceil(TageCATMAX) - log2Ceil(TageMINAP))).asUInt
+    val catLFSR: UInt = LFSR64()(log2Ceil(TageMINAP) - 1, 0)
+    val catAllow = catLFSR >= (CAT(i) >>(log2Ceil(TageCATMAX) - log2Ceil(TageMINAP))).asUInt
     // Allocate when mispredict and CAT allowed
     val needToAllocate = hasUpdate && misPred && catAllow
+
     // Maintain CAT
-    val mhcSum = update_tageResp(i).map(r => r.isMHC().asUInt).reduce(_ + _)
-    when (needToAllocate) {
-      CAT := RegNext(CAT + 1.U - 6.U * mhcSum)
+    val mhcSum: UInt = PopCount(update_tageResp(i).map(r => r.isMHC()))
+    val nextCAT = CAT(i)
+    // Perform a saturating update
+    when (CAT(i) > TageCATMAX.asUInt - BatageCATR1.asUInt) {
+      // First check overflow
+      when(mhcSum.orR) {
+        nextCAT := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
+      } .otherwise {
+        nextCAT := TageCATMAX.asUInt
+      }
+    } .elsewhen (CAT(i) + BatageCATR1.asUInt < mhcSum * BatageCATR2.asUInt) {
+      // Underflow
+      nextCAT := 0.U
+    } .otherwise {
+      // Normal
+      nextCAT := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
     }
+    CAT(i) := RegEnable(nextCAT, needToAllocate)
+
     val longerHistoryTableMask = ~(
       LowerMask(UIntToOH(providerIdx), TageNTables)
         & Fill(TageNTables, providerValid.asUInt)
@@ -794,6 +820,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       for (idx <- 0 until TageNTables) {
         when (idx.asUInt < allocateIdx) {
           // Do decaying
+          // With probability 1
           update_mask(i)(allocateIdx) := true.B
           update_decayMask(i)(allocateIdx) := true.B
         } .elsewhen(idx.asUInt === allocateIdx) {
@@ -848,8 +875,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
       PopCount(updateProvided && update_condition(b))
     )
   }
-
-  val s2_resps = RegEnable(s1_resps, io.s1_fire)
 
   val debug_pc_s0 = s0_pc
   val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
