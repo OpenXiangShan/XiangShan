@@ -49,6 +49,7 @@ case class DCacheParameters
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
   blockBytes: Int = 64,
+  nMaxPrefetchEntry: Int = 1,
   alwaysReleaseData: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
@@ -132,6 +133,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
+  val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
@@ -688,6 +690,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  DCacheSetOffset: " + DCacheSetOffset)
   println("  DCacheTagOffset: " + DCacheTagOffset)
   println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
+  println("  DcacheMaxPrefetchEntry: " + MaxPrefetchEntry)
 
   //----------------------------------------
   // core data structures

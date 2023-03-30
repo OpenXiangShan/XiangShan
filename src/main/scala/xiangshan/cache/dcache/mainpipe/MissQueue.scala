@@ -74,6 +74,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   def isFromStore = source === STORE_SOURCE.U
   def isFromAMO = source === AMO_SOURCE.U
   def isFromPrefetch = source >= DCACHE_PREFETCH_SOURCE.U
+  def isPrefetchWrite = source === DCACHE_PREFETCH_SOURCE.U && cmd === MemoryOpConstants.M_PFW
   def hit = req_coh.isValid()
 }
 
@@ -175,6 +176,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     val release_in_next_cycle = Output(Bool())
     val paddr = Output(UInt(PAddrBits.W))
+
+    val memSetPattenDetected = Input(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -395,6 +398,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
     data_not_refilled && (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
   }
+
+  // if the old req and new req are both same block prefetch write, the new req can be merged
+  def prefetch_write_can_merge(new_req: MissReqWoStoreData): Bool = {
+    req_valid && req.isPrefetchWrite && new_req.isPrefetchWrite
+  }
   
   // Note that late prefetch will be ignored
 
@@ -403,7 +411,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     block_match &&
     (
       before_req_sent_can_merge(new_req) ||
-      before_data_refill_can_merge(new_req)
+      before_data_refill_can_merge(new_req) ||
+      prefetch_write_can_merge(new_req)
     )
   }
 
@@ -421,12 +430,19 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       Mux(
         block_match,
         !before_req_sent_can_merge(new_req) &&
-          !before_data_refill_can_merge(new_req),
+          !before_data_refill_can_merge(new_req) &&
+           !prefetch_write_can_merge(new_req),
         set_match && new_req.way_en === req.way_en
       )
   }
 
-  io.primary_ready := !req_valid
+  when(io.id < cacheParams.nMaxPrefetchEntry.U) {
+    // can accept prefetch req
+    io.primary_ready := !req_valid
+  }.otherwise {
+    // cannot accept prefetch req except when a memset patten is detected
+    io.primary_ready := !req_valid && (!io.req.bits.isFromPrefetch || io.memSetPattenDetected)
+  }
   io.secondary_ready := should_merge(io.req.bits)
   io.secondary_reject := should_reject(io.req.bits)
 
@@ -648,6 +664,17 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   assert(PopCount(req_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.id := OHToUInt(req_handled_vec)
 
+  val source_except_load_cnt = RegInit(0.U(10.W))
+  when(VecInit(req_handled_vec).asUInt.orR) {
+    when(io.req.bits.isFromLoad) {
+      source_except_load_cnt := 0.U
+    }.otherwise {
+      source_except_load_cnt := source_except_load_cnt + 1.U
+    }
+  }
+  val Threshold = 16
+  val memSetPattenDetected = source_except_load_cnt >= Threshold.U
+
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {
     val id = io.forward(i).mshrid
@@ -710,6 +737,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       e.io.refill_pipe_resp := io.refill_pipe_resp.valid && io.refill_pipe_resp.bits === i.U
       e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
+
+      e.io.memSetPattenDetected := memSetPattenDetected
 
       io.debug_early_replace(i) := e.io.debug_early_replace
   }
