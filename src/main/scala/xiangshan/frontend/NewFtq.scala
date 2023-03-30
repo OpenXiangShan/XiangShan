@@ -1220,7 +1220,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
 
-  val isWriteFTQTable = WireInit(Constantin.createRecord(env.FPGAPlatform, "isWriteFTQTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteFTQTable = WireInit(Constantin.createRecord("isWriteFTQTable" + p(XSCoreParamsKey).HartId.toString))
   val ftqBranchTraceDB = ChiselDB.createTable("FTQTable" + p(XSCoreParamsKey).HartId.toString, new FtqDebugBundle)
   // Cfi Info
   for (i <- 0 until PredictWidth) {
