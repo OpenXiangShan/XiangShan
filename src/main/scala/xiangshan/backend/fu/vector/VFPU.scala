@@ -249,7 +249,9 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
     vfmacc(i).io.fp_a := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_b := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_c := Mux(inHs, src3(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
-    vfmacc(i).io.frs1 := in.src(2)(63,0)
+    vfmacc(i).io.widen_b := Mux(inHs, Cat(src1((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src1((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfmacc(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfmacc(i).io.frs1 := in.src(0)(63,0)
     vfmacc(i).io.is_frs1 := false.B // TODO: support vf inst
     vfmacc(i).io.op_code := in.op_code
     vfmacc(i).io.is_vec := true.B // If you can enter, it must be vector
@@ -308,7 +310,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
     vfalu(i).io.fp_a := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfalu(i).io.widen_b := Mux(inHs, Cat(src1((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src1((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
     vfalu(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
-    vfalu(i).io.frs1 := in.src(2)(63, 0)
+    vfalu(i).io.frs1 := in.src(0)(63, 0)
     vfalu(i).io.is_frs1 := false.B // TODO: support vf inst
     vfalu(i).io.mask := 0.U //TODO
     vfalu(i).io.uop_idx := in.uopIdx //TODO
