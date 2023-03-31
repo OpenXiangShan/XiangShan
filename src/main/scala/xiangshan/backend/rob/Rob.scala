@@ -436,8 +436,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // writeback status
 //  val writebackedCounter = Mem(RobSize, UInt(log2Up(MaxUopSize * 2).W))
 //  val realDestSize = Mem(RobSize, UInt(log2Up(MaxUopSize).W))
-  val writebackedCounter = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize).W))))
-  val realDestSize = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize).W))))
+  val writebackedCounter = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize+1).W))))
+  val realDestSize = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize+1).W))))
   val fflagsDataModule = RegInit(VecInit(Seq.fill(RobSize)(0.U(5.W))))
   val vxsatDataModule = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
@@ -1007,7 +1007,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val instCanEnqSeq = instEnqValidSeq.zip(robIdxMatchSeq).map{ case(valid, isMatch) => valid && isMatch }
     val instCanEnqFlag = Cat(instCanEnqSeq).orR
 
-    realDestSize(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), realDestSize(i) + PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map{ case(writeFlag, valid) => writeFlag && valid }), 0.U)
+    realDestSize(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), 
+                         realDestSize(i) + PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map{ case(writeFlag, valid) => writeFlag && valid }), 
+                         0.U)
 
 
     val enqCnt = ParallelPriorityMux(uopCanEnqSeq.reverse :+ true.B, enqWbSizeSumSeq.reverse :+ 0.U)
@@ -1017,7 +1019,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val canStuWbSeq = stdWriteback.map(writeback => writeback.valid && writeback.bits.uop.robIdx.value === i.U)
     val wbCnt = PopCount(canWbNoBlockSeq ++ canStuWbSeq)
 
-    writebackedCounter(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), Mux(exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U, 0.U, writebackedCounter(i) + enqCnt - wbCnt), 0.U)
+    writebackedCounter(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), 
+                              Mux(exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U, 
+                                0.U, 
+                                writebackedCounter(i) + enqCnt - wbCnt), 
+                              0.U)
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.uop.robIdx.value === i.U)
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map{ case(canWb, wb) => Mux(canWb, wb.bits.fflags, 0.U)}.reduce(_ | _)

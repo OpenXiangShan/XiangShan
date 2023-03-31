@@ -249,6 +249,9 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
     vfmacc(i).io.fp_a := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_b := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_c := Mux(inHs, src3(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
+    vfmacc(i).io.uop_idx := in.uopIdx
+    vfmacc(i).io.widen_a := 0.U // TODO :
+    vfmacc(i).io.widen_b := 0.U // TODO :
     vfmacc(i).io.frs1 := in.src(2)(63,0)
     vfmacc(i).io.is_frs1 := false.B // TODO: support vf inst
     vfmacc(i).io.op_code := in.op_code
