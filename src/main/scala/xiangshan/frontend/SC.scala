@@ -310,9 +310,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
         when (s2_sumAboveThresholds(s2_chooseBit)) {
           val pred = s2_scPreds(s2_chooseBit)
-          val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
-          s2_agree(w) := s2_tageTakens_dup(3)(w) === pred
-          s2_disagree(w) := s2_tageTakens_dup(3)(w) =/= pred
+          val debug_pc = Cat(debug_s2_pc, w.U, 0.U(instOffsetBits.W))
+          s2_agree(w) := s2_tageTakens(w) === pred
+          s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
           // io.out.s2.full_pred.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
