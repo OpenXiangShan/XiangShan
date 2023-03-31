@@ -195,6 +195,11 @@ class VfdivWrapper(implicit p: Parameters)  extends XSModule{
     vfdiv(i).io.opb_i := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfdiv(i).io.opa_i := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfdiv(i).io.is_vec_i := true.B // If you can enter, it must be vector
+    vfdiv(i).io.frs2_i    := in.src(0)(63,0) // f[rs2]
+    vfdiv(i).io.frs1_i    := in.src(1)(63,0) // f[rs1]
+    vfdiv(i).io.is_frs1_i := false.B // if true, vs2 / f[rs1]
+    vfdiv(i).io.is_frs2_i := false.B // if true, f[rs2] / vs1
+    vfdiv(i).io.is_sqrt_i := false.B // must false, not support sqrt now
     vfdiv(i).io.rm_i := in.round_mode
     vfdiv(i).io.fp_format_i := Mux(inHs, in.fp_format, 3.U(2.W))
     vfdiv(i).io.start_valid_i := io.in.valid
@@ -249,11 +254,11 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
     vfmacc(i).io.fp_a := Mux(inHs, src1(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_b := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfmacc(i).io.fp_c := Mux(inHs, src3(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
-    vfmacc(i).io.uop_idx := in.uopIdx
-    vfmacc(i).io.widen_a := 0.U // TODO :
-    vfmacc(i).io.widen_b := 0.U // TODO :
-    vfmacc(i).io.frs1 := in.src(2)(63,0)
+    vfmacc(i).io.widen_b := Mux(inHs, Cat(src1((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src1((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfmacc(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
+    vfmacc(i).io.frs1 := in.src(0)(63,0)
     vfmacc(i).io.is_frs1 := false.B // TODO: support vf inst
+    vfmacc(i).io.uop_idx := in.uopIdx // TODO
     vfmacc(i).io.op_code := in.op_code
     vfmacc(i).io.is_vec := true.B // If you can enter, it must be vector
     vfmacc(i).io.round_mode := in.round_mode
@@ -311,7 +316,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
     vfalu(i).io.fp_a := Mux(inHs, src2(AdderWidth * (i + 1) - 1, AdderWidth * i), 0.U)
     vfalu(i).io.widen_b := Mux(inHs, Cat(src1((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src1((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
     vfalu(i).io.widen_a := Mux(inHs, Cat(src2((AdderWidth / 2) * (i + 3) - 1, (AdderWidth / 2) * (i + 2)), src2((AdderWidth / 2) * (i + 1) - 1, (AdderWidth / 2) * i)), 0.U)
-    vfalu(i).io.frs1 := in.src(2)(63, 0)
+    vfalu(i).io.frs1 := in.src(0)(63, 0)
     vfalu(i).io.is_frs1 := false.B // TODO: support vf inst
     vfalu(i).io.mask := 0.U //TODO
     vfalu(i).io.uop_idx := in.uopIdx //TODO
