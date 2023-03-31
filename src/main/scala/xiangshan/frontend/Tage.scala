@@ -256,10 +256,18 @@ class TageTable
   val perBankWrbypassEntries = 8
 
   // Class definitions
+  class TageTag() extends TageBundle {
+    val value: UInt = UInt(tagLen.W)
+  }
+
+  class TageCtr() extends TageBundle {
+    val up  : UInt = UInt(TageCtrBits.W)
+    val down: UInt = UInt(TageCtrBits.W)
+  }
+
   class TageEntry() extends TageBundle {
-    val tag     : UInt = UInt(tagLen.W)
-    val ctr_up  : UInt = UInt(TageCtrBits.W)
-    val ctr_down: UInt = UInt(TageCtrBits.W)
+    val tag: TageTag = new TageTag()
+    val ctr: TageCtr = new TageCtr()
   }
 
   // Internal functions
@@ -289,16 +297,14 @@ class TageTable
     ctr.andR && taken || !ctr.orR && !taken
   }
 
-  val SRAM_SIZE = 256 // physical size
+  // Physical SRAM size
+  val SRAM_SIZE = 256
   // Sanity check
   require(nRows % SRAM_SIZE == 0)
   require(isPow2(numBr))
   val nBanks        = 8
   val bankSize      = nRowsPerBr / nBanks
   val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
-  val uFoldedWidth  = nRowsPerBr / SRAM_SIZE
-  val uWays         = uFoldedWidth * numBr
-  val uRows         = SRAM_SIZE
   if (bankSize < SRAM_SIZE) {
     println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
   }
@@ -308,12 +314,6 @@ class TageTable
 
   def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
 
-  def get_way_in_bank(idx: UInt) =
-    if (log2Ceil(bankFoldWidth) > 0)
-      (idx >> bankIdxWidth)(log2Ceil(bankFoldWidth) - 1, 0)
-    else
-      0.U(1.W)
-
 
   // FhInfo is in (original length, compressed length) form
   val idxFhInfo   : (Int, Int) = (histLen, min(log2Ceil(nRowsPerBr), histLen))
@@ -321,9 +321,20 @@ class TageTable
   val altTagFhInfo: (Int, Int) = (histLen, min(histLen, tagLen - 1))
   val allFhInfos               = Seq(idxFhInfo, tagFhInfo, altTagFhInfo)
 
-  val tableBanks = Seq.fill(nBanks)(
+  val tagBanks = Seq.fill(nBanks)(
     Module(new FoldedSRAMTemplate(
-      new TageEntry,
+      new TageTag,
+      set = bankSize,
+      width = bankFoldWidth,
+      way = numBr,
+      shouldReset = true,
+      holdRead = true,
+      singlePort = true)
+    )
+  )
+  val ctrBanks = Seq.fill(nBanks)(
+    Module(new FoldedSRAMTemplate(
+      new TageCtr,
       set = bankSize,
       width = bankFoldWidth,
       way = numBr,
@@ -354,8 +365,10 @@ class TageTable
 
   // SRAM R port
   for (b <- 0 until nBanks) {
-    tableBanks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
-    tableBanks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+    tagBanks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
+    tagBanks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+    ctrBanks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
+    ctrBanks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
   }
 
   // Predict query
@@ -365,14 +378,23 @@ class TageTable
   val s1_tag                       : UInt      = RegEnable(s0_tag, io.req.fire)
   val s1_pc                        : UInt      = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_bankReqOH                 : Vec[Bool] = RegEnable(s0_bank_req_1h, io.req.fire)
-  val s1_bank_has_write_on_this_req: Vec[Bool] = RegEnable(VecInit(tableBanks.map(_.io.w.req.valid)), io.req.valid)
+  val s1_bank_has_write_on_this_req: Vec[Bool] = RegEnable(VecInit(tagBanks.map(_.io.w.req.valid)), io.req.valid)
 
   val s1_resp_invalid_by_write: Bool = Mux1H(s1_bankReqOH, s1_bank_has_write_on_this_req)
 
   // s1_phy* signals are corresponded to physical branch Idx
-  val s1_phyTablesRespRaw: Seq[Vec[TageEntry]] = tableBanks.map(_.io.r.resp.data) // SRAM resp data
+  val s1_phyTablesRespRaw: Seq[Vec[TageEntry]] = tagBanks.zip(ctrBanks).map { case (tagEntry, ctrEntry) => {
+    val entry = Wire(Vec(numBr, new TageEntry()))
+    for (b <- 0 until numBr) {
+      entry(b).tag := tagEntry.io.r.resp.data(b)
+      entry(b).ctr := ctrEntry.io.r.resp.data(b)
+    }
+    entry
+  }
+  }
+  // SRAM resp data
   val s1_phyHitRaw       : Seq[Vec[Bool]]      = s1_phyTablesRespRaw.map(r => VecInit(r.map(e => {
-    e.tag === s1_tag && !s1_resp_invalid_by_write // Do tag compare in S1
+    e.tag.value === s1_tag && !s1_resp_invalid_by_write // Do tag compare in S1
   })))
   val s1_phyTablesResp   : Vec[TageEntry]      = Mux1H(s1_bankReqOH, s1_phyTablesRespRaw)
   val s1_phyHit          : Vec[Bool]           = Mux1H(s1_bankReqOH, s1_phyHitRaw)
@@ -388,8 +410,8 @@ class TageTable
   // Generate S1 Response
   for (i <- 0 until numBr) {
     io.resps(i).valid := s1_hit(i)
-    io.resps(i).bits.ctr_up := s1_tablesResp(i).ctr_up
-    io.resps(i).bits.ctr_down := s1_tablesResp(i).ctr_down
+    io.resps(i).bits.ctr_up := s1_tablesResp(i).ctr.up
+    io.resps(i).bits.ctr_down := s1_tablesResp(i).ctr.down
   }
 
 
@@ -401,14 +423,17 @@ class TageTable
       p"tage table $tableIdx has different fh when update," +
         p" ghist: ${Binary(update_idx_history)}, fh: ${Binary(update_idx_fh.folded_hist)}\n")
   }
-  val update_unhashedIdx       = getUnhashedIdx(io.update.pc)
-  val (update_idx, update_tag) = computeTagAndHash(update_unhashedIdx, io.update.folded_hist) // Recompute Hash
-  val update_reqBankOH         = get_bank_mask(update_idx)
-  val update_idx_in_bank       = get_bank_idx(update_idx)
+  val update_unhashedIdx            = getUnhashedIdx(io.update.pc)
+  val (update_idx, update_tag)      = computeTagAndHash(update_unhashedIdx, io.update.folded_hist) // Recompute Hash
+  val update_reqBankOH  : Vec[Bool] = get_bank_mask(update_idx)
+  val update_idx_in_bank: Bits      = get_bank_idx(update_idx)
 
-  val update_phyWData          : Vec[Vec[TageEntry]] = Wire(Vec(nBanks, Vec(numBr, new TageEntry))) // [nBanks, numBr]
-  val update_phyNotSilentUpdate: Vec[Vec[Bool]]      = Wire(Vec(nBanks, Vec(numBr, Bool()))) // [nBanks, numBr]
-  val update_phyWayMask        : Vec[UInt]           =
+  // No update on tag by default
+  val update_phyWTagValid      : Vec[Vec[Bool]]    = WireInit(0.U.asTypeOf(Vec(nBanks, Vec(numBr, Bool())))) // [nBanks, numBr]
+  val update_phyWTag           : Vec[Vec[TageTag]] = Wire(Vec(nBanks, Vec(numBr, new TageTag))) // [nBanks, numBr]
+  val update_phyWCtr           : Vec[Vec[TageCtr]] = Wire(Vec(nBanks, Vec(numBr, new TageCtr))) // [nBanks, numBr]
+  val update_phyNotSilentUpdate: Vec[Vec[Bool]]    = Wire(Vec(nBanks, Vec(numBr, Bool()))) // [nBanks, numBr]
+  val update_phyWayMask        : Vec[UInt]         =
     VecInit((0 until nBanks).map(b =>
       VecInit((0 until numBr).map(pi => {
         // whether any of the logical branches updates on each slot
@@ -420,9 +445,15 @@ class TageTable
 
   // SRAM W port
   for (b <- 0 until nBanks) {
-    tableBanks(b).io.w.apply(
+    tagBanks(b).io.w.apply(
+      valid = update_phyWayMask(b).orR && update_reqBankOH(b) && update_phyWTagValid(b).asUInt.orR,
+      data = update_phyWTag(b),
+      setIdx = update_idx_in_bank.asUInt,
+      waymask = update_phyWayMask(b)
+    )
+    ctrBanks(b).io.w.apply(
       valid = update_phyWayMask(b).orR && update_reqBankOH(b),
-      data = update_phyWData(b),
+      data = update_phyWCtr(b),
       setIdx = update_idx_in_bank.asUInt,
       waymask = update_phyWayMask(b)
     )
@@ -436,7 +467,9 @@ class TageTable
   for (b <- 0 until nBanks) {
     for (brPhyIdx <- 0 until numBr) { // physical brIdx
       val not_silent_update = update_phyNotSilentUpdate(b)(brPhyIdx)
-      val update_wdata      = update_phyWData(b)(brPhyIdx)
+      val update_wCtr       = update_phyWCtr(b)(brPhyIdx)
+      val update_wTag       = update_phyWTag(b)(brPhyIdx)
+      val update_wTagValid  = update_phyWTagValid(b)(brPhyIdx)
       val brLogicIdx        = get_lgc_br_idx(update_unhashedIdx, brPhyIdx.U(log2Ceil(numBr).W))
       val alloc             = io.update.alloc(brLogicIdx)
       val taken             = io.update.takens(brLogicIdx)
@@ -460,38 +493,43 @@ class TageTable
         latest_ctr_down := io.update.old_ctr_down(brLogicIdx)
       }
 
+      // Sanity check
+      assert(!(alloc && decay)) // Alloc and decay should not be both true
+
       // Generate update_wdata
-      update_wdata.tag := update_tag
+      update_wTag.value := update_tag
       when(alloc) {
-        // Init counters according to taken
-        when(taken) {
-          update_wdata.ctr_up := 1.U
-          update_wdata.ctr_down := 0.U
-        }.otherwise {
-          update_wdata.ctr_up := 0.U
-          update_wdata.ctr_down := 1.U
-        }
+        // Update tags
+        update_wTagValid := true.B
         // Allocation need to update tag, so always update
         not_silent_update := true.B
+        // Init counters according to taken
+        when(taken) {
+          update_wCtr.up := 1.U
+          update_wCtr.down := 0.U
+        }.otherwise {
+          update_wCtr.up := 0.U
+          update_wCtr.down := 1.U
+        }
       }.otherwise {
         when(decay) {
           // Decay the larger counter
           when(latest_ctr_up > latest_ctr_down) {
-            update_wdata.ctr_up := latest_ctr_up - 1.U
-            update_wdata.ctr_down := latest_ctr_down
+            update_wCtr.up := latest_ctr_up - 1.U
+            update_wCtr.down := latest_ctr_down
             not_silent_update := true.B
           }.elsewhen(latest_ctr_down < latest_ctr_up) {
-            update_wdata.ctr_up := latest_ctr_up
-            update_wdata.ctr_down := latest_ctr_down - 1.U
+            update_wCtr.up := latest_ctr_up
+            update_wCtr.down := latest_ctr_down - 1.U
             not_silent_update := true.B
           }.otherwise {
-            update_wdata.ctr_up := latest_ctr_up
-            update_wdata.ctr_down := latest_ctr_down
+            update_wCtr.up := latest_ctr_up
+            update_wCtr.down := latest_ctr_down
             not_silent_update := false.B
           }
         }.otherwise {
-          update_wdata.ctr_up := ctrUpdate(latest_ctr_up, taken)
-          update_wdata.ctr_down := ctrUpdate(latest_ctr_down, !taken)
+          update_wCtr.up := ctrUpdate(latest_ctr_up, taken)
+          update_wCtr.down := ctrUpdate(latest_ctr_down, !taken)
           not_silent_update := !silentUpdate(latest_ctr_up, taken) || !silentUpdate(latest_ctr_down, !taken)
         }
       }
@@ -504,15 +542,15 @@ class TageTable
       wrbypass.io.wen := io.update.mask(brLogicIdx) && update_reqBankOH(b)
       wrbypass.io.write_idx := get_bank_idx(update_idx)
       wrbypass.io.write_tag.foreach(_ := update_tag)
-      val entry = Mux1H(UIntToOH(brPhyIdx, numBr), update_phyWData(b))
-      wrbypass.io.write_data(0) := Cat(entry.ctr_up, entry.ctr_down)(2 * TageCtrBits - 1, 0)
+      val entry = Mux1H(UIntToOH(brPhyIdx, numBr), update_phyWCtr(b))
+      wrbypass.io.write_data(0) := Cat(entry.up, entry.down)
     }
   }
 
 
   // Perf counter
   val perf_bankConflict: Bool =
-    (0 until nBanks).map(b => tableBanks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
+    (0 until nBanks).map(b => tagBanks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
   XSPerfAccumulate(f"tage_table_bank_conflict", perf_bankConflict)
 
   for (i <- 0 until numBr) {
@@ -541,10 +579,10 @@ class TageTable
       val li   = i
       val pidx = get_phy_br_idx(update_unhashedIdx, li)
       XSPerfAccumulate(f"tage_table_bank_${b}_br_li_${li}_updated",
-        tableBanks(b).io.w.req.valid && tableBanks(b).io.w.req.bits.waymask.get(pidx))
+        tagBanks(b).io.w.req.valid && tagBanks(b).io.w.req.bits.waymask.get(pidx))
       val pi = i
       XSPerfAccumulate(f"tage_table_bank_${b}_br_pi_${pi}_updated",
-        tableBanks(b).io.w.req.valid && tableBanks(b).io.w.req.bits.waymask.get(pi))
+        tagBanks(b).io.w.req.valid && tagBanks(b).io.w.req.bits.waymask.get(pi))
     }
   }
 
