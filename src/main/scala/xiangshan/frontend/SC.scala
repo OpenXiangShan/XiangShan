@@ -387,11 +387,11 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
     }
 
-    tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
-    tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
-    tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
-    tage_perf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
-    tage_perf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
+    tagePerf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
+    tagePerf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
+    tagePerf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
+    tagePerf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
+    tagePerf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
     XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
     XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
     XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))

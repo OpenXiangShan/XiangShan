@@ -743,15 +743,18 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
 
   //---------------- Update logics below ------------------//
-  // These signals will be directly connect to TageTables and Basetable
+  // These signals will be directly connect to TageTables and BaseTable
   val update_valid                             = io.update.valid
   val update_data                              = io.update.bits
   val update_misPred                           = update_data.mispred_mask
   val update_meta                              = update_data.meta.asTypeOf(new TageMeta)
   val update_tageResp                          = update_meta.tagResps
   val update_condition                         = VecInit((0 until numBr).map(w =>
-    update_data.ftb_entry.brValids(w) && update_valid && !update_data.ftb_entry.always_taken(w) &&
-      !(PriorityEncoder(update_data.br_taken_mask) < w.U)))
+    update_data.ftb_entry.brValids(w) &&
+      update_valid &&
+      !update_data.ftb_entry.always_taken(w) && // Always taken branch does not enter TAGE
+      !(PriorityEncoder(update_data.br_taken_mask) < w.U) // No update for latter branch if former branch taken
+  ))
   val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
   // These signal is generated below
   val update_mask                              = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
@@ -794,8 +797,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val providerValid     = update_meta.providers(i).valid
     val providerIdx       = update_meta.providers(i).bits
     val providerResp      = update_tageResp(i)(providerIdx)
-    val nextProviderValid = update_meta.providers(i).valid
-    val nextProviderIdx   = update_meta.providers(i).bits
+    val nextProviderValid = update_meta.nextProviders(i).valid
+    val nextProviderIdx   = update_meta.nextProviders(i).bits
     val nextProviderResp  = update_tageResp(i)(nextProviderIdx)
 
     // Some conditions
@@ -904,13 +907,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   assert(io.s1_ready)
 
   // Debug and perf info
-  def pred_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_pred", cnt)
+  private def predPerf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_pred", cnt)
 
-  def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
+  private def commitPerf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
 
-  def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
-    pred_perf(name, pred_cnt)
-    commit_perf(name, commit_cnt)
+  protected def tagePerf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
+    predPerf(name, pred_cnt)
+    commitPerf(name, commit_cnt)
   }
 
   for (b <- 0 until TageBanks) {
@@ -921,19 +924,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
         s2_provideds(b) && s2_providers(b) === i.U
       val commit_i_provided =
         updateProvided && updateProvider === i.U && update_condition(b)
-      tage_perf(
+      tagePerf(
         s"bank_${b}_tage_table_${i}_provided",
         PopCount(pred_i_provided),
         PopCount(commit_i_provided)
       )
     }
-    tage_perf(
+    tagePerf(
       s"bank_${b}_tage_use_bim",
       PopCount(!s2_provideds(b)),
       PopCount(!updateProvided && update_condition(b))
     )
 
-    tage_perf(
+    tagePerf(
       s"bank_${b}_tage_provided",
       PopCount(s2_provideds(b)),
       PopCount(updateProvided && update_condition(b))
