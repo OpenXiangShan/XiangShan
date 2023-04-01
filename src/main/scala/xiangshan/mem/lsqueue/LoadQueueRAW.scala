@@ -86,7 +86,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   val canEnqueue = io.query.map(_.req).map(req => req.valid)
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect)) 
-  val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => !isAfter(io.stAddrReadySqPtr, sqIdx) && io.stAddrReadySqPtr =/= sqIdx)
+  val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => !isAfter(io.stAddrReadySqPtr, sqIdx) && !io.sqEmpty)
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
 
   // select LoadPipelineWidth valid index.
@@ -136,7 +136,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW deallocate
   for (i <- 0 until LoadQueueRAWSize) {
-    val deqNotBlock = !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx)
+    val deqNotBlock = isAfter(io.stAddrReadySqPtr, uop(i).sqIdx) || io.sqEmpty
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
 
     when (allocated(i) && (deqNotBlock || needCancel)) {
