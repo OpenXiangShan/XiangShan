@@ -1036,7 +1036,7 @@ class SMSPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exten
   pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid || stride_gen_valid
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
-  val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x2000000000L.U
+  val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
   io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
 

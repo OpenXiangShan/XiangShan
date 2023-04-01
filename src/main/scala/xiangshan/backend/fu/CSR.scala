@@ -1028,7 +1028,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     }
   }
 
-  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x1f10020808L.U, 0x1f10020800L.U) // 0x808 is when an exception occurs in debug mode prog buf exec
+  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808L.U, 0x38020800L.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(hasIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)

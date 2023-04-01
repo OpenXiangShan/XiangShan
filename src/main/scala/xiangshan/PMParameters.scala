@@ -31,7 +31,7 @@ case class PMParameters
 
   PlatformGrain: Int = log2Ceil(4*1024), // 4KB, a normal page
   mmpma: MMPMAConfig = MMPMAConfig(
-    address = 0x1f10030000L,
+    address = 0x38021000L,
     mask = 0xfff,
     lgMaxSize = 3,
     sameCycle = true,

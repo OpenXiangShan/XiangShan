@@ -102,7 +102,7 @@ object XSDebugModuleParams {
       nAbstractDataWords   = (if (xlen == 32) 1 else if (xlen == 64) 2 else 4),
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
-      baseAddress = BigInt(0x1f10020000L),
+      baseAddress = BigInt(0x38020000L),
       nScratch = 2,
       crossingHasSafeReset = false
     )
