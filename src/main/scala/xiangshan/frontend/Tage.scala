@@ -432,7 +432,7 @@ class TageTable
   val update_idx_in_bank: Bits      = get_bank_idx(update_idx)
 
   // No update on tag by default
-  val update_phyWTagValid      : Vec[Vec[Bool]]    = WireInit(0.U.asTypeOf(Vec(nBanks, Vec(numBr, Bool())))) // [nBanks, numBr]
+  val update_phyWTagValid      : Vec[Vec[Bool]]    = WireDefault(0.U.asTypeOf(Vec(nBanks, Vec(numBr, Bool())))) // [nBanks, numBr]
   val update_phyWTag           : Vec[Vec[TageTag]] = Wire(Vec(nBanks, Vec(numBr, new TageTag))) // [nBanks, numBr]
   val update_phyWCtr           : Vec[Vec[TageCtr]] = Wire(Vec(nBanks, Vec(numBr, new TageCtr))) // [nBanks, numBr]
   val update_phyNotSilentUpdate: Vec[Vec[Bool]]    = Wire(Vec(nBanks, Vec(numBr, Bool()))) // [nBanks, numBr]
@@ -497,7 +497,7 @@ class TageTable
       }
 
       // Sanity check
-      assert(!(alloc && decay)) // Alloc and decay should not be both true
+      XSError(!(alloc && decay), p"TageTable: Alloc and decay should not be both true")
 
       // Generate update_wdata
       update_wTag.value := update_tag
@@ -521,7 +521,7 @@ class TageTable
             update_wCtr.up := latest_ctr_up - 1.U
             update_wCtr.down := latest_ctr_down
             not_silent_update := true.B
-          }.elsewhen(latest_ctr_down < latest_ctr_up) {
+          }.elsewhen(latest_ctr_down > latest_ctr_up) {
             update_wCtr.up := latest_ctr_up
             update_wCtr.down := latest_ctr_down - 1.U
             not_silent_update := true.B
@@ -620,8 +620,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
         (a: (Bool, UInt, T), b: (Bool, UInt, T)) => (
           a._1 || b._1,
           // Left first if same confidence
-          Mux(a._2 <= b._2 && a._1, a._2, b._2),
-          Mux(a._2 <= b._2 && a._1, a._3, b._3)
+          Mux((a._2 <= b._2 && a._1) || !b._2, a._2, b._2),
+          Mux((a._2 <= b._2 && a._1) || !b._2, a._3, b._3)
         )
       )._3
     }
@@ -754,12 +754,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
       !(PriorityEncoder(update_data.br_taken_mask) < w.U)))
   val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
   // These signal is generated below
-  val update_mask                              = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_mask                              = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
   val update_takens                            = Wire(Vec(numBr, Vec(TageNTables, Bool())))
-  val update_allocMask                         = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val update_decayMask                         = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_allocMask                         = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_decayMask                         = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
   val update_baseCnt                           = Wire(Vec(numBr, UInt(2.W)))
-  val update_baseUpdateValid                   = WireInit(0.U.asTypeOf(Vec(numBr, Bool())))
+  val update_baseUpdateValid                   = WireDefault(0.U.asTypeOf(Vec(numBr, Bool())))
   val update_baseTakens                        = Wire(Vec(numBr, Bool()))
 
   // Connect to submodules
@@ -844,12 +844,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val catLFSR: UInt  = LFSR64()(log2Ceil(TageMINAP) - 1, 0)
     val catAllow       = catLFSR >= (CAT(i) >> (log2Ceil(TageCATMAX) - log2Ceil(TageMINAP))).asUInt
     // Allocate when mispredict and CAT allowed
-    val needToAllocate = hasUpdate && misPred && catAllow
+    val needToAllocate = hasUpdate && misPred
+    val doAllocate     = needToAllocate && catAllow
 
     // Maintain CAT
     val mhcSum: UInt = PopCount(update_tageResp(i).map(r => r.isMHC()))
     // Perform a saturating update
-    when(needToAllocate) {
+    when(doAllocate) {
       when(CAT(i) > TageCATMAX.asUInt - BatageCATR1.asUInt) {
         // First check overflow
         when(mhcSum.orR) {
@@ -871,18 +872,18 @@ class Tage(implicit p: Parameters) extends BaseTage {
         & Fill(TageNTables, providerValid.asUInt)
       )
     // Not high confidence is allocatable
-    val allocatableMask        = VecInit(update_tageResp(i).map(r => r.unconf())).asUInt & longerHistoryTableMask.asUInt
-    val allocatable            = allocatableMask.asBools.reduce(_ | _)
-    val allocateIdx: UInt      = Mux(allocatable, PriorityEncoder(allocatableMask), TageNTables.asUInt)
+    val allocatableMask: UInt  = VecInit(update_tageResp(i).map(r => r.unconf())).asUInt & longerHistoryTableMask.asUInt
+    val allocatable    : Bool  = allocatableMask.asBools.reduce(_ | _)
+    val allocateIdx    : UInt  = Mux(allocatable, PriorityEncoder(allocatableMask), TageNTables.asUInt)
 
 
-    when(needToAllocate) {
+    when(doAllocate) {
       for (idx <- 0 until TageNTables) {
         when(idx.asUInt < allocateIdx) {
           // Do decaying
           // With probability 1
-          update_mask(i)(allocateIdx) := true.B
-          update_decayMask(i)(allocateIdx) := true.B
+          update_mask(i)(idx) := true.B
+          update_decayMask(i)(idx) := true.B
         }.elsewhen(idx.asUInt === allocateIdx) {
           // Allocate it
           update_mask(i)(allocateIdx) := true.B
@@ -892,6 +893,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
     }
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && misPred)
+    XSPerfAccumulate(s"tage_bank_${i}_alloc", doAllocate)
+    XSPerfAccumulate(s"tage_bank_${i}_alloc_throttled", needToAllocate && !doAllocate)
   }
 
 
