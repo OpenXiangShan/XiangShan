@@ -618,8 +618,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
         (a: (Bool, UInt, T), b: (Bool, UInt, T)) => (
           a._1 || b._1,
           // Left first if same confidence
-          Mux((a._2 <= b._2 && a._1) || !b._2, a._2, b._2),
-          Mux((a._2 <= b._2 && a._1) || !b._2, a._3, b._3)
+          Mux((a._2 <= b._2 && a._1) || !b._1, a._2, b._2),
+          Mux((a._2 <= b._2 && a._1) || !b._1, a._3, b._3)
         )
       )._3
     }
@@ -722,7 +722,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
     }
     s2_nextProviders(i) := ParallelPriorityMux(s2_structuredResp.reverse)
-    s2_nextProvidersValid(i) := s2_tableHits(i)(s2_nextProviders(i))
+    s2_nextProvidersValid(i) := s2_structuredResp.map(_._1).reduce(_ || _)
 
     // Stage 3
     resp_meta.providers(i).valid := RegEnable(s2_provideds(i), io.s2_fire)
