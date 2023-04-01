@@ -494,7 +494,7 @@ class TageTable
       }
 
       // Sanity check
-      XSError(!(alloc && decay), p"TageTable: Alloc and decay should not be both true")
+      XSError((alloc && decay), p"TageTable: Alloc and decay should not be both true")
 
       // Generate update_wdata
       update_wTag.value := update_tag
