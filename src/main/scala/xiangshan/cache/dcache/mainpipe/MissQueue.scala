@@ -178,6 +178,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val paddr = Output(UInt(PAddrBits.W))
 
     val memSetPattenDetected = Input(Bool())
+
+    val maxPrefetchNum = Input(UInt(4.W))
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -436,7 +438,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       )
   }
 
-  when(io.id < cacheParams.nMaxPrefetchEntry.U) {
+  when(io.id < io.maxPrefetchNum) {
     // can accept prefetch req
     io.primary_ready := !req_valid
   }.otherwise {
@@ -709,6 +711,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
+  val nMaxPrefetchEntry_reg = RegInit(0.U(4.W))
+  nMaxPrefetchEntry_reg := Constantin.createRecord("nMaxPrefetchEntry_reg")
+
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)
@@ -739,6 +744,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
+
+      e.io.maxPrefetchNum := nMaxPrefetchEntry_reg
 
       io.debug_early_replace(i) := e.io.debug_early_replace
   }
