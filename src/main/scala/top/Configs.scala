@@ -282,7 +282,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           address = 0x39000000L,
           numCores = tiles.size
         )),
-        sramClkDivBy2 = true,
+        sramClkDivBy2 = false,
         sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
