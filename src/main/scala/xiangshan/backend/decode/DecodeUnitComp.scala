@@ -34,7 +34,7 @@ trait VectorConstants {
   val MAX_VLMUL = 8
   val INT_VCONFIG = 32
   val FP_TMP_REG_MV = 32
-  val VECTOR_TMP_REG_LMUL = 32
+  val VECTOR_TMP_REG_LMUL = 32 // 32~38  ->  7
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -106,6 +106,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_FSLIDE1UP   -> lmul,
     UopDivType.VEC_SLIDE1DOWN  -> Cat(lmul, 0.U(1.W)),
     UopDivType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) -1.U),
+    UopDivType.VEC_VRED        -> lmul,
   ))
 
   val src1 = ctrl_flow.instr(19, 15)
@@ -570,6 +571,61 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(numOfUop - 1.U).ctrl.srcType(0) := SrcType.fp
       csBundle(numOfUop - 1.U).ctrl.lsrc(0) := src1
       csBundle(numOfUop - 1.U).ctrl.ldest := dest + lmul - 1.U
+    }
+    is(UopDivType.VEC_VRED) {
+      when(simple.io.vconfig.vtype.vlmul === "b001".U){
+          csBundle(0).ctrl.srcType(2) := SrcType.DC
+          csBundle(0).ctrl.lsrc(0) := src2 + 1.U
+          csBundle(0).ctrl.lsrc(1) := src2
+          csBundle(0).ctrl.ldest := VECTOR_TMP_REG_LMUL.U
+          csBundle(0).ctrl.uopIdx := 0.U
+      }
+      when(simple.io.vconfig.vtype.vlmul === "b010".U) {
+        csBundle(0).ctrl.srcType(2) := SrcType.DC
+        csBundle(0).ctrl.lsrc(0) := src2 + 1.U
+        csBundle(0).ctrl.lsrc(1) := src2
+        csBundle(0).ctrl.ldest := VECTOR_TMP_REG_LMUL.U
+        csBundle(0).ctrl.uopIdx := 0.U
+
+        csBundle(1).ctrl.srcType(2) := SrcType.DC
+        csBundle(1).ctrl.lsrc(0) := src2 + 3.U
+        csBundle(1).ctrl.lsrc(1) := src2 + 2.U
+        csBundle(1).ctrl.ldest := (VECTOR_TMP_REG_LMUL+1).U
+        csBundle(1).ctrl.uopIdx := 1.U
+
+        csBundle(2).ctrl.srcType(2) := SrcType.DC
+        csBundle(2).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL+1).U
+        csBundle(2).ctrl.lsrc(1) := VECTOR_TMP_REG_LMUL.U
+        csBundle(2).ctrl.ldest := (VECTOR_TMP_REG_LMUL+2).U
+        csBundle(2).ctrl.uopIdx := 2.U
+      }
+      when(simple.io.vconfig.vtype.vlmul === "b011".U) {
+        for(i <- 0 until MAX_VLMUL){
+          if(i < MAX_VLMUL - MAX_VLMUL/2){
+            csBundle(i).ctrl.lsrc(0) := src2 + (i * 2 + 1).U
+            csBundle(i).ctrl.lsrc(1) := src2 + (i * 2).U
+            csBundle(i).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
+          } else if (i < MAX_VLMUL - MAX_VLMUL/4) {
+            csBundle(i).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL/2)*2 + 1).U
+            csBundle(i).ctrl.lsrc(1) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL/2)*2).U
+            csBundle(i).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
+          }else if (i < MAX_VLMUL - MAX_VLMUL/8) {
+            csBundle(6).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL + 5).U
+            csBundle(6).ctrl.lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
+            csBundle(6).ctrl.ldest := (VECTOR_TMP_REG_LMUL + 6).U
+          }
+          csBundle(i).ctrl.srcType(2) := SrcType.DC
+          csBundle(i).ctrl.uopIdx := i.U
+        }
+      }
+      when (simple.io.vconfig.vtype.vlmul.orR()){
+        csBundle(numOfUop - 1.U).ctrl.srcType(2) := SrcType.vp
+        csBundle(numOfUop - 1.U).ctrl.lsrc(0) := src1
+        csBundle(numOfUop - 1.U).ctrl.lsrc(1) := VECTOR_TMP_REG_LMUL.U + numOfUop - 2.U
+        csBundle(numOfUop - 1.U).ctrl.lsrc(2) := dest
+        csBundle(numOfUop - 1.U).ctrl.ldest := dest
+        csBundle(numOfUop - 1.U).ctrl.uopIdx := numOfUop - 1.U
+      }
     }
   }
 

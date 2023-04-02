@@ -578,6 +578,7 @@ package object xiangshan {
     def VEC_FSLIDE1UP    = "b100001".U // vfslide1up.vf
     def VEC_SLIDE1DOWN   = "b100010".U // vslide1down.vx
     def VEC_FSLIDE1DOWN  = "b100011".U // vfslide1down.vf
+    def VEC_VRED         = "b100100".U // VEC_VRED
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U
 
