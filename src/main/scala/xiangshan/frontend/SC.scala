@@ -276,7 +276,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       )
       val s2_scTableSums = RegEnable(s1_scTableSums, io.s1_fire)
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr_up, io.s1_fire))
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_taggedResps(w)(s1_providers(w)).ctr_up, io.s1_fire))
       val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds = VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))

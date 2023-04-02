@@ -106,7 +106,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
   def isMHC(): Bool = {
     // High conf but not that high
     // See BATAGE paper for detailed definition
-    this.conf() === 0.U && (ctr_up < 4.U) && (ctr_down < 4.U)
+    this.conf() === 0.U && !(ctr_up >= 4.U && ctr_down === 0.U) && !(ctr_down >= 4.U && ctr_up === 0.U)
   }
 
   def taken(): Bool = ctr_up >= ctr_down
@@ -488,7 +488,7 @@ class TageTable
       when(wrbypass_data_valid) {
         latest_ctr_up := wrbypass_ctr_up
         latest_ctr_down := wrbypass_ctr_down
-      } otherwise {
+      }.otherwise {
         latest_ctr_up := io.update.old_ctr_up(brLogicIdx)
         latest_ctr_down := io.update.old_ctr_down(brLogicIdx)
       }
@@ -661,13 +661,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val s1_resps: Vec[Vec[ValidIO[TageResp]]] = VecInit(taggedTables.map(_.io.resps))
 
-  val s1_provideds     = Wire(Vec(numBr, Bool()))
-  val s1_providers     = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
-  val s1_tableHits     = Wire(Vec(numBr, Vec(TageNTables, Bool())))
-  val s1_taggedResps   = Wire(Vec(numBr, Vec(TageNTables, new TageResp)))
-  val s1_providerResps = Wire(Vec(numBr, new TageResp))
-  val s1_tageTakens    = Wire(Vec(numBr, Bool()))
-  val s1_basecnts      = Wire(Vec(numBr, UInt(2.W)))
+  val s1_provideds   = Wire(Vec(numBr, Bool()))
+  val s1_providers   = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
+  val s1_tableHits   = Wire(Vec(numBr, Vec(TageNTables, Bool())))
+  val s1_taggedResps = Wire(Vec(numBr, Vec(TageNTables, new TageResp)))
+  val s1_tageTakens  = Wire(Vec(numBr, Bool()))
+  val s1_basecnts    = Wire(Vec(numBr, UInt(2.W)))
 
   val s2_resps              = RegEnable(s1_resps, io.s1_fire)
   val s2_provideds          = RegEnable(s1_provideds, io.s1_fire)
@@ -702,7 +701,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val provided     = s1_structuredResp.map(_._1).reduce(_ || _)
     s1_provideds(i) := provided
     s1_providers(i) := providerInfo.tableIdx
-    s1_providerResps(i) := providerInfo.resp
     s1_taggedResps(i) := resp.map(r => r.bits)
     s1_tableHits(i) := resp.map(r => r.valid)
 
@@ -738,6 +736,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     when(io.ctrl.tage_enable) {
       io.out.s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
     }
+
+    // Debug signal
+    XSError(s2_nextProvidersValid(i) && s2_provideds(i) && s2_nextProviders(i) >= s2_providers(i),
+      p"s2 nextProvider is valid and is same or larger than provider" +
+        p"nextProviderIdx: ${s2_nextProviders(i)}, providerIdx: ${s2_providers(i)}"
+    )
   }
 
   //---------------- Update logics below ------------------//
@@ -848,26 +852,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val needToAllocate = hasUpdate && misPred
     val doAllocate     = needToAllocate && catAllow
 
-    // Maintain CAT
-    val mhcSum: UInt = PopCount(update_tageResp(i).map(r => r.isMHC()))
-    // Perform a saturating update
-    when(doAllocate) {
-      when(CAT(i) > TageCATMAX.asUInt - BatageCATR1.asUInt) {
-        // First check overflow
-        when(mhcSum.orR) {
-          CAT(i) := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
-        }.otherwise {
-          CAT(i) := TageCATMAX.asUInt
-        }
-      }.elsewhen(CAT(i) + BatageCATR1.asUInt < mhcSum * BatageCATR2.asUInt) {
-        // Underflow
-        CAT(i) := 0.U
-      }.otherwise {
-        // Normal
-        CAT(i) := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
-      }
-    }
-
     val longerHistoryTableMask = ~(
       LowerMask(UIntToOH(providerIdx), TageNTables)
         & Fill(TageNTables, providerValid.asUInt)
@@ -887,15 +871,43 @@ class Tage(implicit p: Parameters) extends BaseTage {
           update_decayMask(i)(idx) := true.B
         }.elsewhen(idx.asUInt === allocateIdx) {
           // Allocate it
-          update_mask(i)(allocateIdx) := true.B
-          update_takens(i)(allocateIdx) := taken
-          update_allocMask(i)(allocateIdx) := true.B
+          update_mask(i)(idx) := true.B
+          update_takens(i)(idx) := taken
+          update_allocMask(i)(idx) := true.B
         }
       }
     }
+    // Maintain CAT
+    val mhcMask: UInt = VecInit(update_tageResp(i).map(r => r.isMHC())).asUInt & ((1.U << allocateIdx).asUInt - 1.U)
+    val mhcSum : UInt = PopCount(mhcMask)
+    // Perform a saturating update
+    when(doAllocate) {
+      when(CAT(i) > TageCATMAX.asUInt - BatageCATR1.asUInt) {
+        // First check overflow
+        when(mhcSum.orR) {
+          CAT(i) := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
+        }.otherwise {
+          CAT(i) := TageCATMAX.asUInt
+        }
+      }.elsewhen(CAT(i) + BatageCATR1.asUInt < mhcSum * BatageCATR2.asUInt) {
+        // Underflow
+        CAT(i) := 0.U
+      }.otherwise {
+        // Normal
+        CAT(i) := CAT(i) - BatageCATR2.asUInt * mhcSum + BatageCATR1.asUInt
+      }
+    }
+    // Performance counter
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && misPred)
-    XSPerfAccumulate(s"tage_bank_${i}_alloc", doAllocate)
-    XSPerfAccumulate(s"tage_bank_${i}_alloc_throttled", needToAllocate && !doAllocate)
+    XSPerfAccumulate(s"tage_bank_${i}_update_allocate_success", doAllocate && allocatable)
+    XSPerfAccumulate(s"tage_bank_${i}_update_allocate_throttled", needToAllocate && !doAllocate)
+    XSPerfAccumulate(s"tage_bank_${i}_update_allocate_failed", doAllocate && !allocatable)
+
+    // Debug signals
+    XSError(hasUpdate && nextProviderValid && providerValid && nextProviderIdx >= providerIdx,
+      p"""update nextProvider is valid and is same or larger than provider""" +
+        p"nextProviderIdx: ${nextProviderIdx}, providerIdx: ${providerIdx}"
+    )
   }
 
 
