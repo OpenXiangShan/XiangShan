@@ -32,7 +32,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3     \
-            --with-dramsim3 --threads 16 --spike --with-constantin
+            --with-dramsim3 --threads 16 --spike
       - name: Random Checkpoint 0
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
