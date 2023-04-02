@@ -106,8 +106,16 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     vipuModules.map(_._1.asInstanceOf[VPUSubModule]).foreach(mod => {
       mod.vxrm := csr_vxrm
       mod.vstart := csr_vstart
-      io.out.bits.vxsat := mod.vxsat
     })
+    // vxsat is selected by arbSelReg
+    require(config.hasFastUopOut, "non-fast not implemented")
+    val vxsatSel = vipuModules.map{ case (fu, (cfg, i)) =>
+      val vxsatValid = arbSelReg(i)
+      val vxsat = fu.asInstanceOf[VPUSubModule].vxsat
+      val vxsatBits = if (cfg.fastImplemented) vxsat else RegNext(vxsat)
+      (vxsatValid, vxsatBits)
+    }
+    io.out.bits.vxsat := Mux1H(vxsatSel.map(_._1), vxsatSel.map(_._2))
   }
   val fmaModules = functionUnits.filter(_.isInstanceOf[FMA]).map(_.asInstanceOf[FMA])
   if (fmaModules.nonEmpty) {
