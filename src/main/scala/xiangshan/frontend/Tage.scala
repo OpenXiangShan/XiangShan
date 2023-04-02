@@ -803,10 +803,18 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val nextProviderIdx   = update_meta.nextProviders(i).bits
     val nextProviderResp  = update_tageResp(i)(nextProviderIdx)
 
+    val longestHitIdx          = Mux(providerValid,
+      ParallelPriorityMux(tableHitMask.zipWithIndex.reverse.map(e => (e._1, e._2.asUInt))),
+      0.U
+    )
+    val longerHistoryTableMask = ~(
+      LowerMask(UIntToOH(longestHitIdx), TageNTables)
+        & Fill(TageNTables, providerValid.asUInt)
+      )
     // Some conditions
-    val nextProviderUnconf = nextProviderValid && nextProviderResp.unconf()
-    val nextProviderWrong  = nextProviderValid && taken =/= nextProviderResp.taken()
-    val providerUnconf     = providerResp.unconf()
+    val nextProviderUnconf     = nextProviderValid && nextProviderResp.unconf()
+    val nextProviderWrong      = nextProviderValid && taken =/= nextProviderResp.taken()
+    val providerUnconf         = providerResp.unconf()
 
 
     // Update provider and longer history component
@@ -852,19 +860,17 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val needToAllocate = hasUpdate && misPred
     val doAllocate     = needToAllocate && catAllow
 
-    val longerHistoryTableMask = ~(
-      LowerMask(UIntToOH(providerIdx), TageNTables)
-        & Fill(TageNTables, providerValid.asUInt)
-      )
+
     // Not high confidence is allocatable
-    val allocatableMask: UInt  = VecInit(update_tageResp(i).map(r => r.unconf())).asUInt & longerHistoryTableMask.asUInt
-    val allocatable    : Bool  = allocatableMask.asBools.reduce(_ | _)
-    val allocateIdx    : UInt  = Mux(allocatable, PriorityEncoder(allocatableMask), TageNTables.asUInt)
+    val allocatableMask: UInt = VecInit(update_tageResp(i).map(r => r.unconf())).asUInt &
+      longerHistoryTableMask.asUInt // Longer than already hit
+    val allocatable    : Bool = allocatableMask.asBools.reduce(_ | _)
+    val allocateIdx    : UInt = Mux(allocatable, PriorityEncoder(allocatableMask), TageNTables.asUInt)
 
 
     when(doAllocate) {
       for (idx <- 0 until TageNTables) {
-        when(idx.asUInt < allocateIdx) {
+        when(idx.asUInt < allocateIdx && idx.asUInt > longestHitIdx) {
           // Do decaying
           // With probability 1
           update_mask(i)(idx) := true.B
