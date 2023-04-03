@@ -93,7 +93,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
 
-  val tlbcontiguous = 8
+  val tlbcontiguous = 4
   val sectortlbwidth = log2Up(tlbcontiguous)
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth

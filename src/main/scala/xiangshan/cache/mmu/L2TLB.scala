@@ -278,8 +278,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // save eight ptes for each id when sector tlb
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte_sector = VecInit((0 until MemReqWidth).map(i =>
-    if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, mem_resp_done && !mem_resp_from_mq) }
-    else { DataHoldBypass(refill_data, llptw_mem.buffer_it(i)) }
+    if (i == l2tlbParams.llptwsize) {RegEnable(get_half(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_mq) }
+    else { DataHoldBypass(get_half(refill_data, req_addr_low(i)), llptw_mem.buffer_it(i)) }
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
 
@@ -391,6 +391,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     inner_data(index)
   }
 
+  def get_half(data: Vec[UInt], index: UInt): UInt = {
+    val inner_data = Wire(UInt((blockBits / 2).W))
+    when (index(index.getWidth - 1)) {
+      inner_data := data.asUInt(blockBits - 1, blockBits / 2)
+    } .otherwise {
+      inner_data := data.asUInt(blockBits / 2 - 1, 0)
+    }
+    inner_data
+  }
+
   def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean) : PtwResp = {
     val pte_in = pte.asTypeOf(new PteBundle())
     val ptw_resp = Wire(new PtwResp())
@@ -409,7 +419,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // not_super means that this is a normal page
   // valididx(i) will be all true when super page to be convenient for l1 tlb matching
   def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true) : PtwMergeResp = {
-    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    assert(tlbcontiguous == 4, "Only support tlbcontiguous = 4!")
     val ptw_merge_resp = Wire(new PtwMergeResp())
     for (i <- 0 until tlbcontiguous) {
       val pte_in = pte(64 * i + 63, 64 * i).asTypeOf(new PteBundle())
@@ -432,7 +442,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   def merge_ptwResp_to_sector_ptwResp(pte: PtwMergeResp) : PtwSectorResp = {
-    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    assert(tlbcontiguous == 4, "Only support tlbcontiguous = 4!")
     val ptw_sector_resp = Wire(new PtwSectorResp)
     ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
     ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid

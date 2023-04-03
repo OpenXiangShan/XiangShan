@@ -164,7 +164,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
 
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    val addr_low_hit = valididx(vpn(2, 0))
+    val addr_low_hit = valididx(vpn(sectortlbwidth, 0))
 
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
@@ -904,7 +904,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   val not_super = Bool()
 
   def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, addr_low : UInt, not_super : Boolean = true) = {
-    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    assert(tlbcontiguous == 4, "Only support tlbcontiguous = 4!")
 
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
     ptw_resp.ppn := pte.ppn(ppnLen - 1, sectortlbwidth)

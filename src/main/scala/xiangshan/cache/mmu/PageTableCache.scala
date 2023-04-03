@@ -55,7 +55,6 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
 }
 
 class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
-  assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
   val hit = Bool()
   val pre = Bool()
   val ppn = Vec(tlbcontiguous, UInt(ppnLen.W))
@@ -64,15 +63,26 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   val level = UInt(2.W)
   val v = Vec(tlbcontiguous, Bool())
 
-  def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)) {
+  def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(8, 0.U.asTypeOf(new PtePermBundle())),
+            ecc: Bool = false.B, level: UInt = 0.U, vpn : UInt, valid: Vec[Bool] = Vec(8, true.B)) {
     this.hit := hit && !ecc
     this.pre := pre
-    this.ppn := ppn
-    this.perm := perm
+    when (vpn(sectortlbwidth) === 0.U) {
+      for (i <- 0 until tlbcontiguous) {
+        this.ppn(i) := ppn(i)
+        this.perm(i) := perm(i)
+        this.v(i) := valid(i)
+      }
+    } otherwise {
+      for (i <- 0 until tlbcontiguous) {
+        this.ppn(i) := ppn(i + 4)
+        this.perm(i) := perm(i + 4)
+        this.v(i) := valid(i + 4)
+      }
+    }
     this.ecc := ecc && hit
     this.level := level
-    this.v := valid
+
   }
 }
 
@@ -399,7 +409,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val check_res = Wire(new PageCacheRespBundle)
   check_res.l1.apply(l1Hit, l1Pre, l1HitPPN)
   check_res.l2.apply(l2Hit, l2Pre, l2HitPPN, ecc = l2eccError)
-  check_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError, valid = l3HitValid)
+  check_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError, valid = l3HitValid, vpn = stageCheck(0).bits.req_info.vpn)
   check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel, spValid)
 
   val resp_res = Reg(new PageCacheRespBundle)
@@ -421,7 +431,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
-  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
+  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, sectortlbwidth))
   io.resp.bits.toTlb.entry.map(_.asid := io.csr_dup(0).satp.asid) // DontCare
   io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level)))
   io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
@@ -433,7 +443,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     io.resp.bits.toTlb.entry(i).pf := !io.resp.bits.toTlb.entry(i).v
     io.resp.bits.toTlb.entry(i).af := false.B
   }
-  io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
+  io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(sectortlbwidth - 1, 0)).asBools
   io.resp.bits.toTlb.not_super := Mux(resp_res.l3.hit, true.B, false.B)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
