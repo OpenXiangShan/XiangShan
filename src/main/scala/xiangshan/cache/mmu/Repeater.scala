@@ -247,6 +247,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.addr_low := ptwResp.addr_low
   io.tlb.resp.bits.data.ppn_low := ptwResp.ppn_low
   io.tlb.resp.bits.data.valididx := ptwResp.valididx
+  io.tlb.resp.bits.data.pteidx := ptwResp.pteidx
   io.tlb.resp.bits.data.pf := ptwResp.pf
   io.tlb.resp.bits.data.af := ptwResp.af
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
