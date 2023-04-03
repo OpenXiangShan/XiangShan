@@ -1077,7 +1077,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   switch (bpu_ftb_update_stall) {
     is (0.U) {
       when (can_commit_cfi.valid && !to_bpu_hit && canCommit) {
-        bpu_ftb_update_stall := 2.U // 2-cycle stall
+        bpu_ftb_update_stall := 3.U // 2-cycle stall
       }
     }
     is (2.U) {
@@ -1087,7 +1087,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       bpu_ftb_update_stall := 0.U
     }
     is (3.U) {
-      XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+      bpu_ftb_update_stall := 2.U
+      //XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
     }
   }
 

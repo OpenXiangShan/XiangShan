@@ -23,7 +23,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FTBP,FTB2, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -97,27 +97,47 @@ case class XSCoreParameters
   numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
-      val ftb = Module(new FTB()(p))
-      val ubtb =Module(new FauFTB()(p))
-      // val bim = Module(new BIM()(p))
-      val tage = Module(new Tage_SC()(p))
-      val ras = Module(new RAS()(p))
-      val ittage = Module(new ITTage()(p))
-      val preds = Seq(ubtb, tage, ftb, ittage, ras)
-      preds.map(_.io := DontCare)
+    val ftb = Module(new FTB()(p))
+    val ftb2 = Module(new FTB2()(p))
+    val ftbp = Module(new FTBP()(p))
+    val ubtb = Module(new FauFTB()(p))
+    // val bim = Module(new BIM()(p))
+    val tage = Module(new Tage_SC()(p))
+    val ras = Module(new RAS()(p))
+    val ittage = Module(new ITTage()(p))
+    val preds = Seq(ubtb, tage, ftbp, ftb, ftb2, ittage, ras)
+    preds.map(_.io := DontCare)
+    
+    ftbp.io := DontCare
+    ftbp.ftbpio := DontCare
+    ftb2.ftb2io := DontCare
+    ftb.ftbio := DontCare
 
-      // ubtb.io.resp_in(0)  := resp_in
-      // bim.io.resp_in(0)   := ubtb.io.resp
-      // btb.io.resp_in(0)   := bim.io.resp
-      // tage.io.resp_in(0)  := btb.io.resp
-      // loop.io.resp_in(0)  := tage.io.resp
-      ubtb.io.in.bits.resp_in(0) := resp_in
-      tage.io.in.bits.resp_in(0) := ubtb.io.out
-      ftb.io.in.bits.resp_in(0)  := tage.io.out
-      ittage.io.in.bits.resp_in(0)  := ftb.io.out
-      ras.io.in.bits.resp_in(0) := ittage.io.out
+    //ftb1
+    ftb.ftbio.ftbp_hit <> ftbp.ftbpio.ftbp_hit
+    ftb.ftbio.ftbp_hit_pc := ftbp.ftbpio.ftbp_hit_pc
 
-      (preds, ras.io.out)
+    //ftbp
+    ftbp.ftbpio.ftbp_from_ftb1 <> ftb.ftbio.victim
+    ftbp.ftbpio.ftb1_pc := ftb.ftbio.ftb1_victim_pc
+    ftbp.ftbpio.ftb_s1_hit := ftb.ftbio.ftb_s1_hit
+
+    ftbp.ftbpio.ftbp_from_ftb2 <> ftb2.ftb2io.ftb2_hit
+    ftbp.ftbpio.ftb2_pc := ftb2.ftb2io.ftb2_hit_pc
+    //ftb2
+    ftb2.ftb2io.ftb1_victim <> ftb.ftbio.victim
+    ftb2.ftb2io.ftb1_victim_pc := ftb.ftbio.ftb1_victim_pc
+    ftb2.ftb2io.ftb1_s2_hit := ftb.ftbio.ftb_s2_hit
+
+    ubtb.io.in.bits.resp_in(0) := resp_in
+    //ftbp.io.in.bits.resp_in(0)  := ubtb.io.out
+    tage.io.in.bits.resp_in(0) := ubtb.io.out
+    ftbp.io.in.bits.resp_in(0)  := tage.io.out
+    ftb.io.in.bits.resp_in(0)  := ftbp.io.out
+    ftb2.io.in.bits.resp_in(0)  := ftb.io.out
+    ittage.io.in.bits.resp_in(0)  := ftb2.io.out
+    ras.io.in.bits.resp_in(0) := ittage.io.out
+    (preds, ras.io.out)
     }),
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
