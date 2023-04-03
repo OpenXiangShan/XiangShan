@@ -26,7 +26,7 @@ import utils._
 import scala.math.min
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
+  val MaxMetaLength = if (!env.FPGAPlatform) 1024 else 256 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   // val numBr = 2
@@ -182,7 +182,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule 
+abstract class BasePredictor(implicit p: Parameters) extends XSModule
   with HasBPUConst with BPUUtils with HasPerfEvents {
   val meta_size = 0
   val spec_meta_size = 0
@@ -212,7 +212,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.out.s1.pc := s1_pc
   io.out.s2.pc := s2_pc
   io.out.s3.pc := s3_pc
-  
+
   val perfEvents: Seq[(String, UInt)] = Seq()
 
 
@@ -298,13 +298,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   println(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
-  
+
   val s0_ghist_ptr = Wire(new CGHPtr)
   val s0_ghist_ptr_reg = RegNext(s0_ghist_ptr, 0.U.asTypeOf(new CGHPtr))
   val s1_ghist_ptr = RegEnable(s0_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s0_fire)
   val s2_ghist_ptr = RegEnable(s1_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s1_fire)
   val s3_ghist_ptr = RegEnable(s2_ghist_ptr, 0.U.asTypeOf(new CGHPtr), s2_fire)
-  
+
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
@@ -408,7 +408,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s1_predicted_ghist = WireInit(getHist(s1_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when (resp.s1.shouldShiftVec(i)) {
+      when (resp.s1.shouldShiftVec(i)&& resp.s1.full_pred.hit) {
         s1_predicted_ghist(i) := resp.s1.brTaken && (i==0).B
       }
     }
@@ -469,7 +469,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s2_predicted_ghist = WireInit(getHist(s2_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when (resp.s2.shouldShiftVec(i)) {
+      when (resp.s2.shouldShiftVec(i)&& resp.s2.full_pred.hit) {
         s2_predicted_ghist(i) := resp.s2.brTaken && (i==0).B
       }
     }
@@ -537,7 +537,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s3_predicted_ghist = WireInit(getHist(s3_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when (resp.s3.shouldShiftVec(i)) {
+      when (resp.s3.shouldShiftVec(i)&& resp.s3.full_pred.hit) {
         s3_predicted_ghist(i) := resp.s3.brTaken && (i==0).B
       }
     }
@@ -556,21 +556,45 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       ))
     )
   )
+  val s2_pred_info = Wire(new PreviousPredInfo)
+  s2_pred_info.target := resp.s2.getTarget
+  s2_pred_info.lastBrPosOH := resp.s2.lastBrPosOH.asUInt
+  s2_pred_info.taken := resp.s2.taken
+  s2_pred_info.cfiIndex := resp.s2.cfiIndex.bits
+
 
   val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire)
+
+  val previous_s2_pred_info = RegEnable(s2_pred_info, init=0.U.asTypeOf(s2_pred_info), s2_fire)
+  val s3_redirect_s2_last_pred_vec = preds_needs_redirect_vec(previous_s2_pred_info, resp.s3)
 
   val s3_redirect_on_br_taken = resp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt
   val s3_redirect_on_target = resp.s3.getTarget =/= previous_s2_pred.getTarget
   val s3_redirect_on_jalr_target = resp.s3.full_pred.hit_taken_on_jalr && resp.s3.full_pred.jalr_target =/= previous_s2_pred.full_pred.jalr_target
   val s3_redirect_on_fall_thru_error = resp.s3.fallThruError
 
-  s3_redirect := s3_fire && (
+  s3_redirect := s3_fire && s3_redirect_s2_last_pred_vec.reduce(_||_)
+
+/*  s3_redirect := s3_fire && (
     s3_redirect_on_br_taken || s3_redirect_on_target || s3_redirect_on_fall_thru_error
   )
 
   XSPerfAccumulate(f"s3_redirect_on_br_taken", s3_fire && s3_redirect_on_br_taken)
   XSPerfAccumulate(f"s3_redirect_on_jalr_target", s3_fire && s3_redirect_on_jalr_target)
-  XSPerfAccumulate(f"s3_redirect_on_others", s3_redirect && !(s3_redirect_on_br_taken || s3_redirect_on_jalr_target))
+  XSPerfAccumulate(f"s3_redirect_on_others", s3_redirect && !(s3_redirect_on_br_taken || s3_redirect_on_jalr_target || s3_redirect_on_fall_thru_error))
+  XSPerfAccumulate("s3_redirect_because_fallThroughError", s3_fire && resp.s3.fallThruError)*/
+
+  XSPerfAccumulate("s3_redirect_because_target_diff", s3_fire && s3_redirect_s2_last_pred_vec(0))
+  XSPerfAccumulate("s3_redirect_because_branch_num_diff", s3_fire && s3_redirect_s2_last_pred_vec(1))
+  XSPerfAccumulate("s3_redirect_because_direction_diff", s3_fire && s3_redirect_s2_last_pred_vec(2))
+  XSPerfAccumulate("s3_redirect_because_cfi_idx_diff", s3_fire && s3_redirect_s2_last_pred_vec(3))
+  // XSPerfAccumulate("s2_redirect_because_shouldShiftVec_diff", s2_fire && s2_redirect_s1_last_pred_vec(4))
+  // XSPerfAccumulate("s2_redirect_because_brTaken_diff", s2_fire && s2_redirect_s1_last_pred_vec(5))
+  XSPerfAccumulate("s3_redirect_because_fallThroughError", s3_fire && resp.s3.fallThruError)
+
+  XSPerfAccumulate("s3_redirect_when_taken", s3_redirect && resp.s3.taken && resp.s3.full_pred.hit)
+  XSPerfAccumulate("s3_redirect_when_not_taken", s3_redirect && !resp.s3.taken && resp.s3.full_pred.hit)
+  XSPerfAccumulate("s3_redirect_when_not_hit", s2_redirect && !resp.s2.full_pred.hit)
 
   npcGen.register(s3_redirect, resp.s3.getTarget, Some("s3_target"), 3)
   foldedGhGen.register(s3_redirect, s3_predicted_fh, Some("s3_FGH"), 3)
