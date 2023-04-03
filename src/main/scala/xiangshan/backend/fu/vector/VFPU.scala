@@ -118,29 +118,27 @@ class VFPU(implicit p: Parameters) extends FPUSubModule(p(XSCoreParamsKey).VLEN)
   vfdiv.io.ready_out.s0_vl := s0_uopReg.ctrl.vconfig.vl
 
 // connect the output port
-  fflagsWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
-    VfpuType.fadd  -> vfalu.io.out.bits.fflags,
-    VfpuType.fsub  -> vfalu.io.out.bits.fflags,
-    VfpuType.fmin  -> vfalu.io.out.bits.fflags,
-    VfpuType.fmax  -> vfalu.io.out.bits.fflags,
-    VfpuType.fmacc -> vfmacc.io.out.bits.fflags,
-    VfpuType.fdiv  -> vfdiv.io.out.bits.fflags,
-  ))
+  fflagsWire := Mux1H(
+    Seq(
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfalu ) -> vfalu.io.out.bits.fflags,
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfmacc) -> vfmacc.io.out.bits.fflags,
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfdiv ) -> vfdiv.io.out.bits.fflags
+    )
+  )
   fflags := Mux(state === s_compute && outFire, fflagsWire, fflagsReg)
-  dataWire := LookupTree(s0_uopReg.ctrl.fuOpType, List(
-    VfpuType.fadd -> vfalu.io.out.bits.result,
-    VfpuType.fsub -> vfalu.io.out.bits.result,
-    VfpuType.fmin -> vfalu.io.out.bits.result,
-    VfpuType.fmax -> vfalu.io.out.bits.result,
-    VfpuType.fmacc -> vfmacc.io.out.bits.result,
-    VfpuType.fdiv -> vfdiv.io.out.bits.result,
-  ))
+  dataWire := Mux1H(
+    Seq(
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfalu ) -> vfalu.io.out.bits.result,
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfmacc) -> vfmacc.io.out.bits.result,
+      (s0_uopReg.ctrl.fuOpType === VfpuType.isVfdiv ) -> vfdiv.io.out.bits.result
+    )
+  )
   io.out.bits.data := Mux(state === s_compute && outFire, dataWire, dataReg)
   io.out.bits.uop := s0_uopReg
   // valid/ready
-  vfalu.io.in.valid := io.in.valid && VfpuType.isVfalu(in.uop.ctrl.fuOpType) && state === s_idle
-  vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fmacc && state === s_idle
-  vfdiv.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.fdiv && state === s_idle
+  vfalu.io.in.valid  := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.isVfalu  && state === s_idle
+  vfmacc.io.in.valid := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.isVfmacc && state === s_idle
+  vfdiv.io.in.valid  := io.in.valid && in.uop.ctrl.fuOpType === VfpuType.isVfdiv  && state === s_idle
   io.out.valid := state === s_compute && outValid || state === s_finish
   vfalu.io.out.ready := io.out.ready
   vfmacc.io.out.ready := io.out.ready
@@ -259,7 +257,7 @@ class VfmaccWrapper(implicit p: Parameters)  extends XSModule{
     vfmacc(i).io.frs1 := in.src(0)(63,0)
     vfmacc(i).io.is_frs1 := false.B // TODO: support vf inst
     vfmacc(i).io.uop_idx := in.uopIdx // TODO
-    vfmacc(i).io.op_code := in.op_code
+    vfmacc(i).io.op_code := in.op_code(3,0)
     vfmacc(i).io.is_vec := true.B // If you can enter, it must be vector
     vfmacc(i).io.round_mode := in.round_mode
     vfmacc(i).io.fp_format := Mux(inHs, in.fp_format, 3.U(2.W))
@@ -325,7 +323,7 @@ class VfaluWrapper(implicit p: Parameters)  extends XSModule{
     vfalu(i).io.fp_format := Mux(inHs, in.fp_format, 3.U(2.W))
     vfalu(i).io.opb_widening := in.opb_widening // TODO
     vfalu(i).io.res_widening := in.res_widening // TODO
-    vfalu(i).io.op_code := in.op_code
+    vfalu(i).io.op_code := in.op_code(4,0)
   }
 
   // output signal generation

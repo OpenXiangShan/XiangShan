@@ -384,37 +384,37 @@ object VecDecoder extends DecodeConstants {
 
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fadd , F, T, F),
-    VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fsub, F, T, F),
+    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfadd, F, T, F),
+    VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsub, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
-    VFWADD_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWSUB_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWADD_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWSUB_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFWADD_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfadd, F, T, F),
+    VFWSUB_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsub, F, T, F),
+    VFWADD_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfadd, F, T, F),
+    VFWSUB_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsub, F, T, F),
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
-    VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fdiv , F, T, F),
+    VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfmul, F, T, F),
+    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfdiv , F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
-    VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfmul, F, T, F),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.fmacc, F, T, F),
-    VFNMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFMSAC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFNMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFMADD_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFNMADD_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFMSUB_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFNMSUB_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmacc , F, T, F),
+    VFNMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmacc, F, T, F),
+    VFMSAC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmsac , F, T, F),
+    VFNMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmsac, F, T, F),
+    VFMADD_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmadd , F, T, F),
+    VFNMADD_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmadd, F, T, F),
+    VFMSUB_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmsub , F, T, F),
+    VFNMSUB_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmsub, F, T, F),
 
     // 13.7. Vector Widening Floating-Point Fused Multiply-Add Instructions
-    VFWMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWNMACC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFWMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmacc , F, T, F),
+    VFWNMACC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmacc, F, T, F),
+    VFWMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfmsac , F, T, F),
+    VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfpu, VfpuType.vfnmsac, F, T, F),
 
     // 13.8. Vector Floating-Point Square-Root Instruction
     VFSQRT_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -426,22 +426,22 @@ object VecDecoder extends DecodeConstants {
     VFREC7_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
-    VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fmin, F, T, F),
-    VFMAX_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.fmax, F, T, F),
+    VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfmin, F, T, F),
+    VFMAX_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfmax, F, T, F),
 
     // 13.12. Vector Floating-Point Sign-Injection Instructions
-    VFSGNJ_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFSGNJN_VV         -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFSGNJX_VV         -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFSGNJ_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsgnj , F, T, F),
+    VFSGNJN_VV         -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsgnjn, F, T, F),
+    VFSGNJX_VV         -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfsgnjx, F, T, F),
 
     // 13.13. Vector Floating-Point Compare Instructions
-    VMFEQ_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VMFNE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VMFLT_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VMFLE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VMFEQ_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfeq, F, T, F),
+    VMFNE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfne, F, T, F),
+    VMFLT_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vflt, F, T, F),
+    VMFLE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfle, F, T, F),
 
     // 13.14. Vector Floating-Point Classify Instruction
-    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.fclass, F, T, F),
 
     // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
     VFCVT_XU_F_V       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -482,13 +482,13 @@ object VecDecoder extends DecodeConstants {
     VFWREDUSUM_VS      -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_F_S           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// f[rd] = vs2[0] (rs1=0)
+    VFMV_F_S           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.vfmove, F, T, F),// f[rd] = vs2[0] (rs1=0)
   )
 
   val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fadd , F, T, F),
-    VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fsub, F, T, F),
+    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.vfadd, F, T, F),
+    VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.vfsub, F, T, F),
     VFRSUB_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
@@ -499,14 +499,14 @@ object VecDecoder extends DecodeConstants {
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
     VFMUL_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fdiv , F, T, F),
+    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.vfdiv, F, T, F),
     VFRDIV_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
     VFWMUL_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.fmacc, F, T, F),
+    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.vfmacc, F, T, F),
     VFNMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFMSAC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -522,8 +522,8 @@ object VecDecoder extends DecodeConstants {
     VFWNMSAC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfpu, VfpuType.dummy, F, T, F),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
-    VFMIN_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fmin, F, T, F),
-    VFMAX_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.fmax, F, T, F),
+    VFMIN_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.vfmin, F, T, F),
+    VFMAX_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.vfmax, F, T, F),
 
     // 13.12. Vector Floating-Point Sign-Injection Instructions
     VFSGNJ_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
