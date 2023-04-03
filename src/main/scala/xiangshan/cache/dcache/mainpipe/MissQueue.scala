@@ -438,7 +438,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       )
   }
 
-  when(io.id < io.maxPrefetchNum) {
+  when(io.id >= ((cfg.nMissEntries).U - io.maxPrefetchNum)) {
     // can accept prefetch req
     io.primary_ready := !req_valid
   }.otherwise {
