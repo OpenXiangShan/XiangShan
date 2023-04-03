@@ -41,6 +41,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val rollback = Output(Valid(new Redirect)) 
     val correctTableUpdate = Valid(new CorrectTableUpdate) 
     val stAddrReadySqPtr = Input(new SqPtr)
+    val stIssuePtr = Input(new SqPtr)
     val ldIssuePtr = Input(new LqPtr)
     val lqEmpty = Input(Bool())
     val sqEmpty = Input(Bool())
@@ -86,9 +87,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   val canEnqueue = io.query.map(_.req).map(req => req.valid)
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect)) 
+  val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => {
-    val sqFull = (io.stAddrReadySqPtr.flag ^ sqIdx.flag) && (io.stAddrReadySqPtr.value === sqIdx.value)
-    sqFull || !isAfter(io.stAddrReadySqPtr, sqIdx) && io.stAddrReadySqPtr =/= sqIdx
+    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B) 
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
 
@@ -139,7 +140,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW deallocate
   for (i <- 0 until LoadQueueRAWSize) {
-    val deqNotBlock = !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx)
+    val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
 
     when (allocated(i) && (deqNotBlock || needCancel)) {

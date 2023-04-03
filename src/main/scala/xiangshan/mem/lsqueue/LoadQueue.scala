@@ -112,6 +112,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val stAddrReadyVec = Input(Vec(StoreQueueSize, Bool()))
       val stDataReadySqPtr = Input(new SqPtr)
       val stDataReadyVec = Input(Vec(StoreQueueSize, Bool()))
+      val stIssuePtr = Input(new SqPtr)
       val sqEmpty = Input(Bool())
     }
     val loadOut = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
@@ -155,6 +156,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAW.io.storeIn <> io.sta.s1.storeAddrIn
   loadQueueRAW.io.correctTableUpdate <> io.correctTableUpdate
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
+  loadQueueRAW.io.stIssuePtr <> io.sq.stIssuePtr
   loadQueueRAW.io.ldIssuePtr := loadQueueFlag.io.ldIssuePtr
   loadQueueRAW.io.lqEmpty := loadQueueFlag.io.lqEmpty
   loadQueueRAW.io.sqEmpty <> io.sq.sqEmpty

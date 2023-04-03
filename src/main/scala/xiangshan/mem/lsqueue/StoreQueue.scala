@@ -83,6 +83,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val stAddrReadyVec = Output(Vec(StoreQueueSize, Bool()))
     val stDataReadySqPtr = Output(new SqPtr)
     val stDataReadyVec = Output(Vec(StoreQueueSize, Bool()))
+    val stIssuePtr = Output(new SqPtr)
     val sqDeqPtr = Output(new SqPtr)
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -272,6 +273,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   io.stDataReadySqPtr := dataReadyPtrExt
+  io.stIssuePtr := enqPtrExt(0)
   io.sqDeqPtr := deqPtrExt(0)
 
   /**

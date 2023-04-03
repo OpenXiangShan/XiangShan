@@ -181,6 +181,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.sq.stAddrReadyVec <> storeQueue.io.stAddrReadyVec
   loadQueue.io.sq.stDataReadySqPtr <> storeQueue.io.stDataReadySqPtr
   loadQueue.io.sq.stDataReadyVec <> storeQueue.io.stDataReadyVec
+  loadQueue.io.sq.stIssuePtr <> storeQueue.io.stIssuePtr
   loadQueue.io.sq.sqEmpty := storeQueue.io.sqEmpty
   loadQueue.io.sta.s1.storeAddrIn <> io.sta.s1.storeAddrIn
   loadQueue.io.std.s0.storeDataIn <> io.std.s0.storeDataIn
