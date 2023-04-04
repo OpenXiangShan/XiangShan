@@ -47,7 +47,7 @@ object XSLog {
     if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR)) {
       ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond && RegNext(true.B, false.B)
       when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
