@@ -91,11 +91,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // TODO: use SRAM or not?
   (0 until SSIT_WRITE_PORT_NUM).map(i => {
     valid_array.io.wen(i) := false.B
-    valid_array.io.waddr(i) := DontCare
-    valid_array.io.wdata(i) := DontCare
+    valid_array.io.waddr(i) := 0.U
+    valid_array.io.wdata(i) := false.B
     data_array.io.wen(i) := false.B
-    data_array.io.waddr(i) := DontCare
-    data_array.io.wdata(i) := DontCare
+    data_array.io.waddr(i) := 0.U
+    data_array.io.wdata(i) := 0.U.asTypeOf(new SSITDataEntry)
   })
 
   val debug_valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
