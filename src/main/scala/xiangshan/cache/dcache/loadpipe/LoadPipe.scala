@@ -159,9 +159,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
   val s1_tag_match_way_dup_lsu = Wire(UInt(nWays.W))
   if (EnableDCacheWPU) {
-    s1_tag_match_way_dup_dc := s1_real_tag_match_way_dup_dc
-    s1_tag_match_way_dup_lsu := s1_real_tag_match_way_dup_lsu
-  } else {
     when(RegNext(wpu.io.resp.valid)) {
       s1_tag_match_way_dup_dc := RegNext(wpu.io.resp.bits.s0_pred_way_en)
       s1_tag_match_way_dup_lsu := RegNext(wpu.io.resp.bits.s0_pred_way_en)
@@ -169,6 +166,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       s1_tag_match_way_dup_dc := s1_real_tag_match_way_dup_dc
       s1_tag_match_way_dup_lsu := s1_real_tag_match_way_dup_lsu
     }
+  } else {
+    s1_tag_match_way_dup_dc := s1_real_tag_match_way_dup_dc
+    s1_tag_match_way_dup_lsu := s1_real_tag_match_way_dup_lsu
   }
 
   val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
@@ -418,6 +418,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
   XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
   XSPerfAccumulate("load_replay_for_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_replay_for_wpu_pred_fial", io.lsu.resp.fire() && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss && !resp.bits.replay)
