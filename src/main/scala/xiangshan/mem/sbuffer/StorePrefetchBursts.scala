@@ -13,7 +13,7 @@
 *
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
- 
+
 package xiangshan.mem
 
 import chipsalliance.rocketchip.config.Parameters
@@ -55,11 +55,6 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
     val valids = RegInit(VecInit(List.tabulate(SIZE){_ => false.B}))
     val datas  = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U.asTypeOf(io.vaddr)}))
     val pagebits = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U(1.W)}))
-    val send_cnt = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U(6.W)}))
-
-    val max_send_num = RegInit(0.U(6.W))
-
-    max_send_num := Constantin.createRecord("max_send_num")
 
     // enq
     val enq_valids = ~(valids.asUInt)
@@ -71,7 +66,6 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
         valids(enq_idx) := true.B
         datas(enq_idx) := io.vaddr
         pagebits(enq_idx) := io.vaddr(PAGEOFFSET)
-        send_cnt(enq_idx) := max_send_num
     }
 
     XSPerfAccumulate("burst_generator_alloc_success", io.alloc && !full && !enq_filter)
@@ -90,7 +84,7 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
     val deq_valids = valids
     val deq_decoupled = Wire(Vec(StorePipelineWidth, Vec(SIZE, Decoupled(new StorePrefetchReq))))
 
-    (deq_valids zip deq_decoupled zip datas zip datas_next zip datas_next_next zip pagebits zip valids zip send_cnt).foreach{case (((((((deq_valid, out_decouple), data), data_next), data_next_next), pg_bit), v), cnt) => {
+    (deq_valids zip deq_decoupled zip datas zip datas_next zip datas_next_next zip pagebits zip valids).foreach{case ((((((deq_valid, out_decouple), data), data_next), data_next_next), pg_bit), v) => {
         out_decouple(0).valid := deq_valid
         out_decouple(0).bits := DontCare
         out_decouple(0).bits.vaddr := data
@@ -99,16 +93,12 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
         out_decouple(1).bits.vaddr := data_next
         when(out_decouple(1).fire) {
             data := data_next_next
-            val cnt_next = Mux(cnt >= 2.U, cnt - 2.U, 0.U)
-            cnt := cnt_next
-            when(data_next_next(PAGEOFFSET) =/= pg_bit || cnt_next === 0.U) {
+            when(data_next_next(PAGEOFFSET) =/= pg_bit) {
                 v := false.B
             }
         }.elsewhen(out_decouple(0).fire) {
             data := data_next
-            val cnt_next = Mux(cnt >= 1.U, cnt - 1.U, 0.U)
-            cnt := cnt_next
-            when(data_next(PAGEOFFSET) =/= pg_bit || cnt_next === 0.U) {
+            when(data_next(PAGEOFFSET) =/= pg_bit) {
                 v := false.B
             }
         }
@@ -140,12 +130,10 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule {
     }
 
     // meta for SPB 
-    // val N = BigInt(48)
-    val N_reg = RegInit(0.U(6.W))
-    N_reg := Constantin.createRecord("N_reg")
+    val N = BigInt(48)
     val last_st_block_addr = RegInit(0.U(VAddrBits.W))
     val saturate_counter = RegInit(0.U(4.W))
-    val store_count = RegInit(0.U(6.W))
+    val store_count = RegInit(0.U(log2Up(N).W))
     val burst_engine = Module(new PrefetchBurstGenerator())
 
     val sbuffer_fire_vec  = VecInit(io.sbuffer_enq.map(_.valid))
@@ -169,11 +157,11 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule {
         }
     }
     val check_vec = temp_store_count_vec.map{
-        case st_count => trigger_check(st_count, N_reg)
+        case st_count => trigger_check(st_count, N.U)
     }
     val burst_vec = (temp_store_count_vec zip temp_saturate_count_vec).map{
         case (st_count, sa_count) => {
-            can_burst(st_count, N_reg, sa_count)
+            can_burst(st_count, N.U, sa_count)
         }
     }
     val do_check = VecInit(check_vec).asUInt.orR
