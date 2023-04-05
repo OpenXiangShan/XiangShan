@@ -553,6 +553,12 @@ class TageTable
     (0 until nBanks).map(b => tagBanks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
   XSPerfAccumulate(f"tage_table_bank_conflict", perf_bankConflict)
 
+  val lastAllocPC = RegEnable(io.update.pc, io.update.alloc.asUInt.orR)
+  val lastAllocTag = RegEnable(update_tag, io.update.alloc.asUInt.orR)
+  XSPerfAccumulate(f"tage_table_duplicate_update",
+    lastAllocPC === io.update.pc && lastAllocTag === update_tag && io.update.alloc.asUInt.orR
+  )
+
   for (i <- 0 until numBr) {
     for (b <- 0 until nBanks) {
       val wrbypass = tableBanks_wrbypasses(b)(i)
@@ -884,7 +890,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
     }
     // Maintain CAT
-    val mhcMask: UInt = VecInit(update_tageResp(i).map(r => r.isMHC())).asUInt & ((1.U << allocateIdx).asUInt - 1.U)
+    // Only take (longestHit, allocateIdx) into account
+    val mhcMask: UInt = VecInit(update_tageResp(i).map(r => r.isMHC())).asUInt &
+      ((1.U << allocateIdx).asUInt - 1.U) &
+      longerHistoryTableMask.asUInt
     val mhcSum : UInt = PopCount(mhcMask)
     // Perform a saturating update
     when(doAllocate) {
@@ -908,11 +917,16 @@ class Tage(implicit p: Parameters) extends BaseTage {
     XSPerfAccumulate(s"tage_bank_${i}_update_allocate_success", doAllocate && allocatable)
     XSPerfAccumulate(s"tage_bank_${i}_update_allocate_throttled", needToAllocate && !doAllocate)
     XSPerfAccumulate(s"tage_bank_${i}_update_allocate_failed", doAllocate && !allocatable)
+    XSPerfAccumulate(s"tage_bank_${i}_update_decay", PopCount(update_decayMask(i)))
 
     // Debug signals
     XSError(hasUpdate && nextProviderValid && providerValid && nextProviderIdx >= providerIdx,
       p"""update nextProvider is valid and is same or larger than provider""" +
         p"nextProviderIdx: ${nextProviderIdx}, providerIdx: ${providerIdx}"
+    )
+    XSError(doAllocate && providerValid && allocateIdx <= longestHitIdx,
+      p"update allocateIdx is smaller or equal as longestHitIdx" +
+        p"allocateIdx: ${allocateIdx}, longestHitIdx: ${longestHitIdx}"
     )
   }
 
