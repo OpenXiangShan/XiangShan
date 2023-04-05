@@ -216,13 +216,14 @@ object Bundles {
       * @param successor Seq[(psrc, srcType)]
       * @return Seq[if wakeup psrc]
       */
-    def wakeUp(successor: Seq[(UInt, UInt)]): Seq[Bool]= {
+    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool): Seq[Bool]= {
       successor.map { case (thatPsrc, srcType) =>
         val pdestMatch = pdest === thatPsrc
         pdestMatch && (
           SrcType.isFp(srcType) && this.fpWen ||
           SrcType.isXp(srcType) && this.rfWen ||
-          SrcType.isVp(srcType) && this.vecWen)
+          SrcType.isVp(srcType) && this.vecWen
+        ) && valid
       }
     }
   }

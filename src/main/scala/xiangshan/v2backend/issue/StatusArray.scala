@@ -144,7 +144,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   srcWakeUpVec.zipWithIndex.foreach { case (wakeups: Vec[Bool], i) =>
     // wakeupVec(i)(j): the ith psrc woken up by the jth bundle
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeup.map((bundle: ValidIO[IssueQueueWakeUpBundle]) =>
-      bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType)).transpose
+      bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType, bundle.valid)).transpose
     wakeups := wakeupVec.map(VecInit(_).asUInt.orR)
   }
 

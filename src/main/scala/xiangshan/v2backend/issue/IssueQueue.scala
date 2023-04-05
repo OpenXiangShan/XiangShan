@@ -135,7 +135,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   for (i <- io.enq.indices) {
     for (j <- s0_enqBits(i).srcType.indices) {
       wakeupEnqSrcStateBypass(i)(j) := Cat(
-        io.wakeup.map(x => x.valid && x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j)))).head)
+        io.wakeup.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head)
       ).orR
     }
   }
