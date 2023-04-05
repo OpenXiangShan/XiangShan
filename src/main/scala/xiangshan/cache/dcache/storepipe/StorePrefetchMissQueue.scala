@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate, QueuePerf}
 
+// TODO: distinguish load and store
 class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
     val paddr = UInt(PAddrBits.W)
     val vaddr = UInt(VAddrBits.W)

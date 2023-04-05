@@ -134,7 +134,7 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule {
     val last_st_block_addr = RegInit(0.U(VAddrBits.W))
     val saturate_counter = RegInit(0.U(4.W))
     val store_count = RegInit(0.U(log2Up(N).W))
-    val burst_engine = Module(new PrefetchBurstGenerator())
+    val burst_engine = Module(new PrefetchBurstGenerator(is_store = true))
 
     val sbuffer_fire_vec  = VecInit(io.sbuffer_enq.map(_.valid))
     val sbuffer_vaddr_vec = VecInit(io.sbuffer_enq.map(_.bits.vaddr))
@@ -178,4 +178,60 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule {
     // perf 
     XSPerfAccumulate("trigger_burst", trigger_burst)
     XSPerfAccumulate("trigger_check", do_check)
+}
+
+
+// an simple lpb (load prefetch burst)
+class LoadPrefetchBurstsIO(implicit p: Parameters) extends DCacheBundle {
+    val lq_deq  = Flipped(Valid(new DCacheWordReqWithVaddr))
+    val prefetch_req = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
+}
+
+// Virtual Address Prefetch
+class LoadPrefetchBursts(implicit p: Parameters) extends DCacheModule {
+    val io = IO(new LoadPrefetchBurstsIO)
+
+    def cache_block_addr_difference(req_vaddr: UInt, last_vaddr: UInt): UInt = {
+        (get_block_addr(req_vaddr) - get_block_addr(last_vaddr)) >> blockOffBits
+    }
+    def get_load_count_divided_by_8(ld_count: UInt): UInt = {
+        ld_count(ld_count.getWidth - 1, 3)
+    }
+    def trigger_check(ld_count: UInt, N: UInt): Bool = {
+        ld_count > N
+    }
+    def can_burst(ld_count: UInt, N: UInt, sa_count: UInt): Bool = {
+        trigger_check(ld_count, N) && get_load_count_divided_by_8(ld_count) === sa_count
+    }
+
+    // meta for SPB 
+    val N = BigInt(48)
+    val last_ld_block_addr = RegInit(0.U(VAddrBits.W))
+    val saturate_counter = RegInit(0.U(4.W))
+    val load_count = RegInit(0.U(log2Up(N).W))
+    val burst_engine = Module(new PrefetchBurstGenerator(is_store = false))
+
+    val lq_deq_fire = io.lq_deq.fire
+    val lq_vaddr = io.lq_deq.bits.vaddr
+
+    val next_load_count = load_count + Mux(lq_deq_fire, 1.U, 0.U)
+    val next_saturate_count = saturate_counter + Mux(lq_deq_fire, cache_block_addr_difference(lq_vaddr, last_ld_block_addr), 0.U)
+
+    when(lq_deq_fire) {
+        last_ld_block_addr := lq_vaddr
+    }
+
+    val check = trigger_check(next_load_count, N.U)
+    val burst = can_burst(next_load_count, N.U, next_saturate_count)
+
+    load_count := Mux(burst || check, 0.U, next_load_count)
+    saturate_counter := Mux(burst || check, 0.U, next_saturate_count)
+
+    burst_engine.io.alloc := burst
+    burst_engine.io.vaddr := io.lq_deq.bits.vaddr
+    burst_engine.io.prefetch_req <> io.prefetch_req
+
+    // perf 
+    XSPerfAccumulate("trigger_burst", burst)
+    XSPerfAccumulate("trigger_check", check)
 }

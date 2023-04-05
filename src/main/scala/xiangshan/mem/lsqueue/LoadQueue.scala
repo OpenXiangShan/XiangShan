@@ -29,6 +29,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import chisel3.ExcitingUtils
 import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.DCacheWordReqWithVaddr
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize
@@ -120,6 +121,9 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
 
   val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
+
+  // for load prefetch burst
+  val lq_deq  = Valid(new DCacheWordReqWithVaddr)
 }
 
 // Load Queue
@@ -140,8 +144,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  // vaddrModule's read port 0 for exception addr, port 1 for uncache vaddr read, port {2, 3} for load replay
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1 + 1 + LoadPipelineWidth, numWrite = LoadPipelineWidth))
+  // vaddrModule's read port 0 for exception addr, port 1 for uncache vaddr read, port {2, 3} for load replay, port 4 for prefetch read
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1 + 1 + LoadPipelineWidth + 1, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
   val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
   vaddrTriggerResultModule.io := DontCare
@@ -239,6 +243,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
+
+  val commitPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
 
   val commitCount = RegNext(io.rob.lcommit)
 
@@ -1062,6 +1068,17 @@ def detectRollback(i: Int) = {
   deqPtrExt := deqPtrExtNext
 
   io.lqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
+
+  val PrefetchAddrReadPort = 4
+  vaddrModule.io.raddr(PrefetchAddrReadPort) := commitPtrExt.value
+
+  io.lq_deq.valid := RegNext(commitPtrExt =/= deqPtrExt)
+  io.lq_deq.bits  := DontCare
+  io.lq_deq.bits.vaddr := vaddrModule.io.rdata(PrefetchAddrReadPort)
+
+  when(commitPtrExt =/= deqPtrExt) {
+    commitPtrExt := commitPtrExt + 1.U
+  }
 
   /**
     * misc
