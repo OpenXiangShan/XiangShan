@@ -369,9 +369,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.redirect     <> redirect
     stu.io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
-    stu.io.rsIdx        <> io.rsfeedback(i).rsIdx
-    // NOTE: just for dtlb's perf cnt
-    stu.io.isFirstIssue <> io.rsfeedback(i).isFirstIssue
     stu.io.stin         <> io.issue(LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
     stu.io.lsq_replenish <> lsq.io.storeInRe(i)
@@ -526,8 +523,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.storeDataIn.valid := st_data_atomics.reduce(_ || _)
   atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(StaCnt)(i =>
     st_data_atomics(i) -> stData(i).bits))
-  atomicsUnit.io.rsIdx    := Mux1H(Seq.tabulate(StaCnt)(i =>
-    st_atomics(i) -> io.rsfeedback(atomic_replay_port_idx(i)).rsIdx))
   atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support

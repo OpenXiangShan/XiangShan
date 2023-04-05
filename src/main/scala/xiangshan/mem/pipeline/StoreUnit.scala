@@ -33,8 +33,6 @@ import xiangshan.v2backend.{StaCfg}
 class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new MemExuInput))
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
-    val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
   })
@@ -56,7 +54,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.pc
-  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
+  io.dtlbReq.bits.debug.isFirstIssue := io.in.bits.isFirstIssue
 
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
@@ -66,9 +64,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
-  io.out.bits.rsIdx := io.rsIdx
+  io.out.bits.rsIdx := io.in.bits.iqIdx // guarded by io.in.valid
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.fuOpType(1,0))
-  io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.isFirstIssue := io.in.bits.isFirstIssue // guarded by io.in.valid
   io.out.bits.wlineflag := io.in.bits.uop.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -85,11 +83,11 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
-  XSPerfAccumulate("in_fire_first_issue", io.in.fire && io.isFirstIssue)
+  XSPerfAccumulate("in_fire_first_issue", io.in.fire && io.in.bits.isFirstIssue)
   XSPerfAccumulate("addr_spec_success", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("addr_spec_failed", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.in.bits.isFirstIssue)
+  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.in.bits.isFirstIssue)
 }
 
 // Store Pipeline Stage 1
@@ -213,8 +211,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Flipped(new PMPRespBundle())
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
-    val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
     val lsq_replenish = Output(new LsPipelineBundle())
     val stout = DecoupledIO(new MemExuOutput) // writeback store
@@ -232,8 +228,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
   io.tlb.req_kill := false.B
-  store_s0.io.rsIdx := io.rsIdx
-  store_s0.io.isFirstIssue := io.isFirstIssue
 
   io.storeMaskOut.valid := store_s0.io.in.valid
   io.storeMaskOut.bits.mask := store_s0.io.out.bits.mask

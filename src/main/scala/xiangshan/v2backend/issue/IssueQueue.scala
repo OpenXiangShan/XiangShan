@@ -262,6 +262,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.deq.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i)
     deq.bits.addrOH          := finalDeqSelOHVec(i)
+    deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
+    deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.common.fuType   := payloadArrayRdata(i).fuType
     deq.bits.common.fuOpType := payloadArrayRdata(i).fuOpType
     deq.bits.common.rfWen.foreach(_ := payloadArrayRdata(i).rfWen)
@@ -455,11 +457,6 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
 
     statusArray.io.fromMem.get.memWaitUpdateReq := memIO.checkWait.memWaitUpdateReq
     statusArray.io.fromMem.get.stIssuePtr := memIO.checkWait.stIssuePtr
-  }
-
-  for (i <- 0 until params.numDeq) {
-    memIO.feedbackIO(i).rsIdx := OHToUInt(finalDeqOH(i))
-    memIO.feedbackIO(i).isFirstIssue := deqFirstIssueVec(i)
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>

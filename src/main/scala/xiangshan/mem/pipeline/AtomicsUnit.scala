@@ -38,7 +38,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
-    val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
@@ -117,7 +116,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   // since we will continue polling tlb all by ourself
   io.feedbackSlow.valid       := RegNext(RegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
-  io.feedbackSlow.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.feedbackSlow.bits.rsIdx  := RegEnable(io.in.bits.iqIdx, io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
   io.feedbackSlow.bits.sourceType := DontCare
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare

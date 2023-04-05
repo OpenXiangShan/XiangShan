@@ -178,8 +178,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.issueUops.zip(dataPath.io.toMemExu.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
-    sink.bits.uop := 0.U.asTypeOf(sink.bits.uop)
-    sink.bits.src := 0.U.asTypeOf(sink.bits.src)
+    sink.bits.iqIdx         := source.bits.iqIdx
+    sink.bits.isFirstIssue  := source.bits.isFirstIssue
+    sink.bits.uop           := 0.U.asTypeOf(sink.bits.uop)
+    sink.bits.src           := 0.U.asTypeOf(sink.bits.src)
     sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
     sink.bits.uop.fuType    := source.bits.fuType
     sink.bits.uop.fuOpType  := source.bits.fuOpType

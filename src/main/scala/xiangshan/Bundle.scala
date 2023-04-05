@@ -392,8 +392,6 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
   // for instance: MemRSFeedbackIO()(updateP)
   val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
   val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
-  val rsIdx = Input(UInt(log2Up(IssQueSize).W))
-  val isFirstIssue = Input(Bool())
 }
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {

@@ -273,25 +273,27 @@ object Bundles {
 
   // DataPath --[ExuInput]--> Exu
   class ExuInput(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
-    val fuType    = FuType()
-    val fuOpType  = FuOpType()
-    val src       = Vec(params.numSrc, UInt(params.dataBitsMax.W))
-    val imm       = UInt(XLEN.W)
-    val robIdx    = new RobPtr
-    val pdest     = UInt(params.wbPregIdxWidth.W)
-    val rfWen     = if (params.writeIntRf)    Some(Bool())                        else None
-    val fpWen     = if (params.writeFpRf)     Some(Bool())                        else None
-    val vecWen    = if (params.writeVecRf)    Some(Bool())                        else None
-    val fpu       = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
-    val flushPipe = if (params.flushPipe)     Some(Bool())                        else None
-    val pc        = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val jalrTarget= if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None
-    val preDecode = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
-    val ftqIdx    = if (params.needPc || params.replayInst)
-                                              Some(new FtqPtr)                    else None
-    val ftqOffset = if (params.needPc || params.replayInst)
-                                              Some(UInt(log2Up(PredictWidth).W))  else None
-    val predictInfo = if (params.hasPredecode) Some(new Bundle {
+    val fuType        = FuType()
+    val fuOpType      = FuOpType()
+    val src           = Vec(params.numSrc, UInt(params.dataBitsMax.W))
+    val imm           = UInt(XLEN.W)
+    val robIdx        = new RobPtr
+    val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
+    val isFirstIssue  = Bool()                      // Only used by store yet
+    val pdest         = UInt(params.wbPregIdxWidth.W)
+    val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
+    val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
+    val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
+    val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
+    val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
+    val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
+    val jalrTarget    = if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None
+    val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
+    val ftqIdx        = if (params.needPc || params.replayInst)
+                                                  Some(new FtqPtr)                    else None
+    val ftqOffset     = if (params.needPc || params.replayInst)
+                                                  Some(UInt(log2Up(PredictWidth).W))  else None
+    val predictInfo   = if (params.hasPredecode)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
@@ -300,24 +302,26 @@ object Bundles {
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
-      this.fuType     := source.common.fuType
-      this.fuOpType   := source.common.fuOpType
-      this.imm        := source.common.imm
-      this.robIdx     := source.common.robIdx
-      this.pdest      := source.common.pdest
-      this.rfWen      .foreach(_ := source.common.rfWen.get)
-      this.fpWen      .foreach(_ := source.common.fpWen.get)
-      this.vecWen     .foreach(_ := source.common.vecWen.get)
-      this.fpu        .foreach(_ := source.common.fpu.get)
-      this.flushPipe  .foreach(_ := source.common.flushPipe.get)
-      this.pc         .foreach(_ := source.jmp.get.pc)
-      this.jalrTarget .foreach(_ := source.jmp.get.target)
-      this.preDecode  .foreach(_ := source.common.preDecode.get)
-      this.ftqIdx     .foreach(_ := source.common.ftqIdx.get)
-      this.ftqOffset  .foreach(_ := source.common.ftqOffset.get)
-      this.predictInfo.foreach(_ := source.common.predictInfo.get)
-      this.lqIdx      .foreach(_ := source.common.lqIdx.get)
-      this.sqIdx      .foreach(_ := source.common.sqIdx.get)
+      this.fuType       := source.common.fuType
+      this.fuOpType     := source.common.fuOpType
+      this.imm          := source.common.imm
+      this.robIdx       := source.common.robIdx
+      this.pdest        := source.common.pdest
+      this.isFirstIssue := source.common.isFirstIssue // Only used by mem debug log
+      this.iqIdx        := source.common.iqIdx        // Only used by mem feedback
+      this.rfWen        .foreach(_ := source.common.rfWen.get)
+      this.fpWen        .foreach(_ := source.common.fpWen.get)
+      this.vecWen       .foreach(_ := source.common.vecWen.get)
+      this.fpu          .foreach(_ := source.common.fpu.get)
+      this.flushPipe    .foreach(_ := source.common.flushPipe.get)
+      this.pc           .foreach(_ := source.jmp.get.pc)
+      this.jalrTarget   .foreach(_ := source.jmp.get.target)
+      this.preDecode    .foreach(_ := source.common.preDecode.get)
+      this.ftqIdx       .foreach(_ := source.common.ftqIdx.get)
+      this.ftqOffset    .foreach(_ := source.common.ftqOffset.get)
+      this.predictInfo  .foreach(_ := source.common.predictInfo.get)
+      this.lqIdx        .foreach(_ := source.common.lqIdx.get)
+      this.sqIdx        .foreach(_ := source.common.sqIdx.get)
     }
   }
 
@@ -423,6 +427,8 @@ object Bundles {
   class MemExuInput(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val src = Vec(3, UInt(XLEN.W))
+    val iqIdx = UInt(log2Up(MemIQSizeMax).W)
+    val isFirstIssue = Bool()
   }
 
   class MemExuOutput(implicit p: Parameters) extends XSBundle {
