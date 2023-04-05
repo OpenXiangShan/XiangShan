@@ -186,6 +186,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
+    if (LvnaEnable){
+      val l3LvNA = l3cacheOpt.get.module.io.lvnaCtrl.get
+      val cp2l3 = misc.module.cp2l3IO.get
+      if (l3cacheOpt.get.hasLvnaCtrl) {
+        l3LvNA.waymaskSetReq <> cp2l3.waymaskSetReq
+      }
+      else{
+        cp2l3.waymaskSetReq.ready := true.B
+      }
+    }
+
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := misc.module.reset
