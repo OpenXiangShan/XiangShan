@@ -279,6 +279,7 @@ trait HasXSParameter {
 
   val coreParams = p(XSCoreParamsKey)
   val env = p(DebugOptionsKey)
+  val outSoCParams = p(SoCParamsKey)
 
   val XLEN = coreParams.XLEN
   val minFLen = 32

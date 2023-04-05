@@ -266,7 +266,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   clint.node := peripheralXbar
 
   val alter_clints =
-    if (LvnaEnable)
+    if (LvnaEnable && NohypeDevOffset != 0)
       Some(
         (1 until NumCores).map(i => {
           val clint = LazyModule(new CLINT(CLINTParams(0x38000000L + i * NohypeDevOffset), 8))
@@ -338,7 +338,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val tick = cnt === 0.U
     cnt := Mux(tick, (freq - 1).U, cnt - 1.U)
     clint.module.io.rtcTick := tick
-    if (soc.LvnaEnable) {
+    if (soc.LvnaEnable && alter_clints.isDefined) {
       alter_clints.get.zipWithIndex.foreach { case (clint, i) =>
         clint.module.io.rtcTick := tick
       }

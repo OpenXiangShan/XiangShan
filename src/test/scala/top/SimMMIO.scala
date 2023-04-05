@@ -31,7 +31,12 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
   val socParams = p(SoCParamsKey)
-  val uart1 = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L + socParams.NohypeDevOffset, 0xf))))
+  val uart1 = if (socParams.NohypeDevOffset == 0) {
+    LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L + 0x3000000, 0xf))))
+  }
+  else {
+    LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L + socParams.NohypeDevOffset, 0xf))))
+  }
 
   // val vga = LazyModule(new AXI4VGA(
   //   sim = false,

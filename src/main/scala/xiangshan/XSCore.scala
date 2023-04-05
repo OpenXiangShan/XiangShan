@@ -33,6 +33,8 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
+import huancun.utils.RegNextN
+import system.SoCParamsKey
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
   with HasXSParameter
@@ -135,7 +137,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 {
   // interrupt sinks
   val clint_int_sink = 
-    if (coreParams.LvnaEnable && coreParams.HartId != 0) IntSinkNode(IntSinkPortSimple(2, 2))
+    if (coreParams.LvnaEnable && coreParams.HartId != 0 && outSoCParams.NohypeDevOffset != 0) IntSinkNode(IntSinkPortSimple(2, 2))
     else IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
@@ -304,7 +306,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val ioOffreg = RegEnable(lvnaIO.get.ioOffset.bits, 0.U(64.W), lvnaIO.get.ioOffset.fire)
     val csrMemOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeMemOffset)
     val csrIoOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeIoOffset)
-    val nohypeMode = WireInit(csrioIn.customCtrl.lvna.get.nohypeModeSel)
+    val csrNohypeMode = WireInit(csrioIn.customCtrl.lvna.get.nohypeModeSel)
+    val nohypeModeSelFromCSR = RegNextN(true.B, 4, Some(false.B))
+    val nohypeMode = csrNohypeMode && nohypeModeSelFromCSR
     val memOff = Mux(nohypeMode, csrMemOff, memOffreg)
     val ioOff = Mux(nohypeMode, csrIoOff, ioOffreg)
     frontend.io.memOffset.get := memOff
@@ -418,7 +422,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
-  if (coreParams.LvnaEnable && coreParams.HartId != 0){
+  if (coreParams.LvnaEnable && coreParams.HartId != 0 && outSoCParams.NohypeDevOffset != 0){
     csrioIn.externalInterrupt.msip := 
       outer.clint_int_sink.in.head._1(0) || outer.clint_int_sink.in.last._1(0)
     csrioIn.externalInterrupt.mtip :=

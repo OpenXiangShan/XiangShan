@@ -83,7 +83,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
-    if (LvnaEnable && i > 0) {
+    if (LvnaEnable && i > 0 && NohypeDevOffset != 0) {
       core_with_l2(i).clint_int_sink := misc.alter_clints.get(i-1).intnode
     }
     core_with_l2(i).plic_int_sink :*= misc.plic.intnode

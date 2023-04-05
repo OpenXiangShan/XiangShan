@@ -418,7 +418,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // modesel == True use CSR offset, otherwise use controlplane offset
   val nohypeMemOffset = RegInit(UInt(64.W), 0.U)
   val nohypeIoOffset = RegInit(UInt(64.W), 0.U)
-  val nohypeModeSel = RegInit(true.B)
+  val nohypeModeSel = RegInit(false.B)
   if (coreParams.LvnaEnable) {
     csrio.customCtrl.lvna.get.dsid := sdsid
     csrio.customCtrl.lvna.get.nohypeMemOffset := nohypeMemOffset

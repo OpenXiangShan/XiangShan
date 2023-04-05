@@ -201,7 +201,9 @@ trait PMAMethod extends PMAConst {
     addPMA(0x80000000L, a = 1, w = true, r = true)
     addPMA(0x3c000000L, a = 1)
     addPMA(0x39002000L, a = 1, w = true, r = true)
-    addPMA(0x39000000L, a = 1)
+    if (!p(SoCParamsKey).LvnaEnable){
+      addPMA(0x39000000L, a = 1)
+    }
     addPMA(0x38021000L, a = 1, w = true, r = true, x = true)
     addPMA(0x38020000L, a = 1)
     addPMA(0x38010000L, a = 1, w = true, r = true)
