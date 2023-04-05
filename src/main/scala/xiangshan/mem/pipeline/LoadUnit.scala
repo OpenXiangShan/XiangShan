@@ -824,11 +824,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
   XSPerfAccumulate("replay_from_fetch_forward", io.out.valid && debug_forwardFailReplay)
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
-  XSPerfAccumulate("replay_lq",  io.replaySlow.valid && (!io.replaySlow.tlb_hited || !io.replaySlow.cache_no_replay || !io.replaySlow.forward_data_valid))
-  XSPerfAccumulate("replay_lq_tlb_miss", io.replaySlow.valid && !io.replaySlow.tlb_hited)
-  XSPerfAccumulate("replay_sl_vio", io.replaySlow.valid && io.replaySlow.tlb_hited && !io.replaySlow.st_ld_check_ok)
-  XSPerfAccumulate("replay_lq_cache", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_no_replay)
-  XSPerfAccumulate("replay_lq_cache_miss", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_hited)
+  // replay reason
+  XSPerfAccumulate("load_replay_lq",  io.replaySlow.valid && io.replaySlow.needreplay)
+  XSPerfAccumulate("load_replay_for_tlb_miss", io.replaySlow.valid && !io.replaySlow.tlb_hited)
+  XSPerfAccumulate("load_replay_for_sl_vio", io.replaySlow.valid && io.replaySlow.tlb_hited && !io.replaySlow.st_ld_check_ok)
+  XSPerfAccumulate("load_replay_for_cache", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.cache_no_replay)
+  XSPerfAccumulate("load_replay_for_forward_fail", io.replaySlow.valid && io.replaySlow.tlb_hited && io.replaySlow.st_ld_check_ok && !io.replaySlow.forward_data_valid)
   XSPerfAccumulate("prefetch", io.in.fire && s2_is_prefetch)
   XSPerfAccumulate("prefetch_ignored", io.in.fire && s2_is_prefetch && s2_cache_replay) // ignore prefetch for mshr full / miss req port conflict
   XSPerfAccumulate("prefetch_miss", io.in.fire && s2_is_prefetch && s2_cache_miss) // prefetch req miss in l1 
@@ -1013,10 +1014,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.meta_access := io.dcache.resp.bits.meta_access
   io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio && !load_s2.io.in.bits.tlbMiss
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
-  if (env.FPGAPlatform)
+  if (env.FPGAPlatform){
+    // FIXME lyq: it is needed in s0 and s1
+    io.dcache.s0_pc := DontCare
+    io.dcache.s1_pc := DontCare
     io.dcache.s2_pc := DontCare
-  else
+  }else{
+    io.dcache.s0_pc := load_s0.io.out.bits.uop.cf.pc
+    io.dcache.s1_pc := load_s1.io.out.bits.uop.cf.pc
     io.dcache.s2_pc := load_s2.io.out.bits.uop.cf.pc
+  }
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
   load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)

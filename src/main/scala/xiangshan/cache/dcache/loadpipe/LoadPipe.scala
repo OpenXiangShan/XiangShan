@@ -130,7 +130,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
-  val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  // val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  val s1_vaddr = s1_req.addr
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
@@ -155,10 +156,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   wpu.io.update.bits.vaddr := s1_vaddr
   wpu.io.update.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
   val s1_wpu_pred_fail = wpu.io.resp.bits.s1_pred_fail
+  if(wpuParam.enCfPred){
+    wpu.io.cfpred.s0_pc := io.lsu.s0_pc
+    wpu.io.cfpred.s1_pc := io.lsu.s1_pc
+    // whether direct_map_way miss with valid tag value
+    val s1_direct_map_way = get_direct_map_way(s1_req.addr)
+    wpu.io.cfpred.s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way && tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
+  }else{
+    wpu.io.cfpred := DontCare
+  }
 
   val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
   val s1_tag_match_way_dup_lsu = Wire(UInt(nWays.W))
-  if (EnableDCacheWPU) {
+  if (wpuParam.enWPU) {
     when(RegNext(wpu.io.resp.valid)) {
       s1_tag_match_way_dup_dc := RegNext(wpu.io.resp.bits.s0_pred_way_en)
       s1_tag_match_way_dup_lsu := RegNext(wpu.io.resp.bits.s0_pred_way_en)
@@ -415,10 +425,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_s1_kill", s1_fire && io.lsu.s1_kill)
   XSPerfAccumulate("load_hit_way", s1_fire && s1_tag_match_dup_dc)
   XSPerfAccumulate("load_replay", io.lsu.resp.fire() && resp.bits.replay)
-  XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
-  XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_replay_for_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
-  XSPerfAccumulate("load_replay_for_wpu_pred_fial", io.lsu.resp.fire() && resp.bits.replay && s2_wpu_pred_fail)
+  XSPerfAccumulate("load_replay_for_dcache_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
+  XSPerfAccumulate("load_replay_for_dcache_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
+  XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire() && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss && !resp.bits.replay)

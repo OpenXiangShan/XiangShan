@@ -200,7 +200,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     data_sram.io.r.req.valid := io.r.en
     data_sram.io.r.req.bits.apply(setIdx = io.r.addr)
     io.r.data := data_sram.io.r.resp.data(0)
-    XSPerfAccumulate("data_read_counter", data_sram.io.r.req.valid)
+    XSPerfAccumulate("data_sram_read_counter", data_sram.io.r.req.valid)
 
     def dump_r() = {
       when(RegNext(io.r.en)) {
@@ -307,6 +307,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val read_error_delayed_result = Wire(Vec(DCacheBanks, Vec(DCacheWays, Bool())))
   dontTouch(read_result)
   dontTouch(read_error_delayed_result)
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks * DCacheWays)(0.U(1.W))))
   for (bank_index <- 0 until DCacheBanks) {
     for (way_index <- 0 until DCacheWays) {
       //     Set Addr & Read Way Mask
@@ -352,8 +353,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_en))
       read_result(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
       read_error_delayed_result(bank_index)(way_index) := read_result(bank_index)(way_index).error_delayed
+      data_read_oh(bank_index * DCacheBanks + way_index) := read_en
     }
   }
+  XSPerfAccumulate("data_read_counter", PopCount(Cat(data_read_oh)))
 
   // read result: expose banked read result
   /*

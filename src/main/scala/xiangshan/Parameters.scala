@@ -23,13 +23,14 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, FauFTB, ITTage, RAS, Tage, Tage_SC}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.cache.dcache.WPUParameters
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
@@ -169,11 +170,15 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableDCacheWPU: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 6, // load replay queue replay select counter len
+  wpuParameters: WPUParameters = WPUParameters(
+    enWPU = true,
+    algoName = "mru",
+    enCfPred = false
+  ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -403,12 +408,12 @@ trait HasXSParameter {
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val EnableDCacheWPU = coreParams.EnableDCacheWPU
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
+  val wpuParam = coreParams.wpuParameters
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

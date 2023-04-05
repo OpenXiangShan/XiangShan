@@ -199,6 +199,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
+  def get_direct_map_way(addr:UInt): UInt = {
+    addr(DCacheAboveIndexOffset + log2Up(DCacheWays) - 1, DCacheAboveIndexOffset)
+  }
+
   def arbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
@@ -485,6 +489,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
   val s2_kill  = Output(Bool())
+  val s0_pc = Output(UInt(VAddrBits.W))
+  val s1_pc = Output(UInt(VAddrBits.W))
   val s2_pc = Output(UInt(VAddrBits.W))
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
@@ -686,6 +692,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  DCacheSetOffset: " + DCacheSetOffset)
   println("  DCacheTagOffset: " + DCacheTagOffset)
   println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
+  println("  WPUEnable: " + wpuParam.enWPU)
+  println("  WPUEnableCfPred: " + wpuParam.enCfPred)
+  println("  WPUAlgorithm: " + wpuParam.algoName)
 
   //----------------------------------------
   // core data structures
