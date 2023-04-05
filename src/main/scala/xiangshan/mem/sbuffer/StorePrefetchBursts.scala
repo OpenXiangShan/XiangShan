@@ -29,7 +29,7 @@ class StorePrefetchBurstsIO(implicit p: Parameters) extends DCacheBundle {
     val prefetch_req = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
 }
 
-class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
+class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends DCacheModule {
     val io = IO(new DCacheBundle {
         val alloc = Input(Bool())
         val vaddr = Input(UInt(VAddrBits.W))
@@ -82,7 +82,7 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
     // deq
     // val deq_valids = (valids zip datas zip pagebits).map{case (v, vaddr, pgbit) => v && vaddr(PAGEOFFSET) === pagebits}
     val deq_valids = valids
-    val deq_decoupled = Wire(Vec(StorePipelineWidth, Vec(SIZE, Decoupled(new StorePrefetchReq))))
+    val deq_decoupled = Wire(Vec(SIZE, Vec(StorePipelineWidth, Decoupled(new StorePrefetchReq))))
 
     (deq_valids zip deq_decoupled zip datas zip datas_next zip datas_next_next zip pagebits zip valids).foreach{case ((((((deq_valid, out_decouple), data), data_next), data_next_next), pg_bit), v) => {
         out_decouple(0).valid := deq_valid
@@ -104,7 +104,7 @@ class PrefetchBurstGenerator(implicit p: Parameters) extends DCacheModule {
         }
     }}
     for (i <- 0 until StorePipelineWidth) {
-        arbiter(deq_decoupled(i), io.prefetch_req(i), Some(s"spb_deq_art${i}"))
+        arbiter(deq_decoupled.map(_(i)), io.prefetch_req(i), Some(s"spb_deq_art${i}"))
     }
 
     XSPerfAccumulate("burst_valid_num", PopCount(valids))
