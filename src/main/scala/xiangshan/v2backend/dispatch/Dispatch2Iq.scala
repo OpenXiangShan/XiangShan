@@ -22,14 +22,18 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
   val numOut = issueBlockParams.head.numEnq
 
   // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.
-  val numIntSrc = issueBlockParams.map(_.exuBlockParams.map(
-    x => if (x.hasStoreAddrFu) x.numIntSrc + 1 else x.numIntSrc
-  ).max)
+  val numRegSrc: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => if (x.hasStoreAddrFu) x.numRegSrc + 1 else x.numRegSrc
+  ).max).max
 
-  val numIntStateRead = numIntSrc.max * numIn
-
-  val numFpSrc = issueBlockParams.map(_.exuBlockParams.map(_.numFpSrc).max)
-  val numFpStateRead = numFpSrc.max * numIn
+  val numIntStateRead = schdBlockParams.schdType match {
+    case IntScheduler() | MemScheduler() => numRegSrc * numIn
+    case _ => 0
+  }
+  val numVfStateRead = schdBlockParams.schdType match {
+    case VfScheduler() | MemScheduler() => numRegSrc * numIn
+    case _ => 0
+  }
 
   val isMem = schdBlockParams.schdType == MemScheduler()
 
@@ -44,16 +48,16 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
 abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends LazyModuleImp(wrapper) with HasXSParameter {
 
-  val numIntSrc = wrapper.numIntSrc.max
+  val numRegSrc = wrapper.numRegSrc
   val numIntStateRead = wrapper.numIntStateRead
-  val numFpStateRead = wrapper.numFpStateRead
+  val numVfStateRead = wrapper.numVfStateRead
   val numIssueBlock = wrapper.issueBlockParams.size
 
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val in = Flipped(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
     val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
-    val readFpState = if (numFpStateRead > 0) Some(Vec(numFpStateRead, Flipped(new BusyTableReadIO))) else None
+    val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
     val out = Vec(wrapper.issueBlockParams.count(_.StdCnt == 0), Vec(wrapper.numOut, DecoupledIO(new DynInst)))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
   })
@@ -185,7 +189,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
   if (io.readIntState.isDefined) {
-    val reqPsrc = uopsIn.flatMap(in => in.bits.psrc.take(numIntSrc))
+    val reqPsrc = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
     require(io.readIntState.get.size >= reqPsrc.size, s"io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrc}")
     io.readIntState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
   }
@@ -193,7 +197,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   // srcState is read from outside and connected directly
   if (io.readIntState.isDefined) {
-    val intSrcStateVec = uopsIn.flatMap(_.bits.srcState.take(numIntSrc))
+    val intSrcStateVec = uopsIn.flatMap(_.bits.srcState.take(numRegSrc))
     io.readIntState.get.map(_.resp).zip(intSrcStateVec).foreach(x => x._2 := x._1)
   }
 
@@ -263,8 +267,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     (Seq(stu), 2),
   )
 
-  println(s"[Dispatch2IqMemImp] numIntSrc: ${numIntSrc}")
-
   private val enqLsqIO = io.enqLsqIO.get
 
   private val numLoadDeq = LoadPipelineWidth
@@ -326,15 +328,26 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
-  val reqPsrc = io.in.flatMap(in => in.bits.psrc.take(numIntSrc))
+  val reqPsrc = io.in.flatMap(in => in.bits.psrc.take(numRegSrc))
   require(io.readIntState.get.size >= reqPsrc.size, s"io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrc}")
+  require(io.readVfState.get.size >= reqPsrc.size, s"io.readFpState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrc}")
   io.readIntState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
+  io.readVfState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
 
-  val intSrcStateVec = Wire(Vec(numEnq, Vec(numIntSrc, SrcState())))
+  val intSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
+  val vfSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
 
   // srcState is read from outside and connected directly
   io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
-  s0_in.flatMap(x => x.bits.srcState.take(numIntSrc)).zip(intSrcStateVec.flatten).foreach(x => x._1 := x._2)
+  io.readVfState.get.map(_.resp).zip(vfSrcStateVec.flatten).foreach(x => x._2 := x._1)
+
+  s0_in.flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcStateVec.flatten zip vfSrcStateVec.flatten).foreach {
+    case ((state: UInt, srcType), (intState, vfState)) =>
+      state := Mux1H(Seq(
+        SrcType.isXp(srcType) -> intState,
+        SrcType.isVfp(srcType) -> vfState,
+      ))
+  }
 
   val iqNotAllReady = !Cat(s0_out.map(_.map(_.ready)).flatten).andR
   val lsqCannotAccept = !enqLsqIO.canAccept

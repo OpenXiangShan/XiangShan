@@ -299,12 +299,11 @@ case class XSCoreParameters
     val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
-        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 1, 0))),
+        ExeUnitParams(Seq(FmacCfg, FDivSqrtCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(FmacCfg, FDivSqrtCfg), Seq(VecWB(port = 1, 0))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 2, 0))),
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 3, 0))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = vfPreg.numEntries,
@@ -480,6 +479,8 @@ trait HasXSParameter {
   val dpParams = coreParams.dpParams
 
   def backendParams: BackendParams = coreParams.backendParams
+  def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
+  def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 //  val exuParameters = coreParams.exuParameters
 //  val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
 //  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts

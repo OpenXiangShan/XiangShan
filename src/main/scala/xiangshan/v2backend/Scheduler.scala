@@ -46,7 +46,10 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
     val uops =  Vec(params.numUopIn, Flipped(DecoupledIO(new DynInst)))
   }
-  val writeback = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregIdxWidth))))
+  val intWriteBack = MixedVec(Vec(backendParams.intPregParams.numWrite,
+    new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
+  val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
+    new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPath: MixedVec[MixedVec[DecoupledIO[Bundles.IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
@@ -89,20 +92,16 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   }
 
   val vfBusyTable = schdType match {
-    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numFpStateRead, wrapper.numVfStateWrite)))
+    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite)))
     case _ => None
   }
-
-  println(s"[Scheduler] intBusyTable: ${intBusyTable}, vfBusyTable: ${vfBusyTable}")
 
   dispatch2Iq.io match { case dp2iq =>
     dp2iq.redirect <> io.fromCtrlBlock.flush
     dp2iq.in <> io.fromDispatch.uops
     dp2iq.readIntState.foreach(_ <> intBusyTable.get.io.read)
-    dp2iq.readFpState.foreach(_ <> vfBusyTable.get.io.read)
+    dp2iq.readVfState.foreach(_ <> vfBusyTable.get.io.read)
   }
-
-  dontTouch(dispatch2Iq.io.out)
 
   intBusyTable match {
     case Some(bt) =>
@@ -111,8 +110,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         btAllocPregs.bits := dpAllocPregs.preg
       }
       bt.io.wbPregs.zipWithIndex.foreach { case (wb, i) =>
-        wb.valid := io.writeback(i).valid && io.writeback(i).bits.rfWen
-        wb.bits := io.writeback(i).bits.pdest
+        wb.valid := io.intWriteBack(i).wen && io.intWriteBack(i).intWen
+        wb.bits := io.intWriteBack(i).addr
       }
     case None =>
   }
@@ -124,10 +123,19 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         btAllocPregs.bits := dpAllocPregs.preg
       }
       bt.io.wbPregs.zipWithIndex.foreach { case (wb, i) =>
-        wb.valid := io.writeback(i).valid && (io.writeback(i).bits.fpWen || io.writeback(i).bits.vecWen)
-        wb.bits := io.writeback(i).bits.pdest
+        wb.valid := io.vfWriteBack(i).wen && (io.vfWriteBack(i).fpWen || io.vfWriteBack(i).vecWen)
+        wb.bits := io.vfWriteBack(i).addr
       }
     case None =>
+  }
+
+  val wakeupFromWBVec = Wire(Vec(params.numWakeupFromWB, ValidIO(new IssueQueueWakeUpBundle(params.pregIdxWidth))))
+  wakeupFromWBVec.zip(io.intWriteBack ++ io.vfWriteBack).foreach { case (sink, source) =>
+    sink.valid := source.wen
+    sink.bits.rfWen := source.intWen
+    sink.bits.fpWen := source.fpWen
+    sink.bits.vecWen := source.vecWen
+    sink.bits.pdest := source.addr
   }
 
   io.toDataPath.zipWithIndex.foreach { case (toDp, i) =>
@@ -139,17 +147,20 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
 {
+  println(s"[SchedulerArithImp] " +
+    s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
+    s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
+
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
-    iq.io.wakeup <> io.writeback
+    iq.io.wakeup := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
       deqResp.bits.success := io.toDataPath(i)(j).ready // Todo: remove it
       deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
-    dontTouch(iq.io.enq)
   }
 
   val iqJumpBundleVec: Seq[IssueQueueJumpBundle] = issueQueues.map {
@@ -168,6 +179,10 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
 {
+  println(s"[SchedulerMemImp] " +
+    s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
+    s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
+
   val memAddrIQs = issueQueues.filter(iq => iq.params.StdCnt == 0)
   val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
@@ -176,7 +191,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
-    iq.io.wakeup <> io.writeback
+    iq.io.wakeup := wakeupFromWBVec
 
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
@@ -205,7 +220,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
-    stdIQ.io.wakeup <> io.writeback
+    stdIQ.io.wakeup := wakeupFromWBVec
 
     stdIQ.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := stdIQ.io.deq(j).valid
@@ -236,5 +251,4 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   val memIQFeedbackIO: Seq[MemRSFeedbackIO] = iqMemBundleVec.flatMap(_.feedbackIO)
   io.memIO.get.feedbackIO <> memIQFeedbackIO
-//  dontTouch(io)
 }

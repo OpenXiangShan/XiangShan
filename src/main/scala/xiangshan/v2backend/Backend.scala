@@ -75,13 +75,15 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromCtrlBlock.targetVec := ctrlBlock.io.toIssueBlock.targetVec
   intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
-  intScheduler.io.writeback := wbDataPath.io.toIntPreg.map(_.toWakeUpBundle)
+  intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
+  intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   memScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
-  memScheduler.io.writeback := wbDataPath.io.toIntPreg.map(_.toWakeUpBundle) ++ wbDataPath.io.toVfPreg.map(_.toWakeUpBundle)
+  memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
+  memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   memScheduler.io.fromMem.get.scommit := ctrlBlock.io.robio.lsq.scommit
   memScheduler.io.fromMem.get.lcommit := ctrlBlock.io.robio.lsq.lcommit
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
@@ -112,9 +114,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.fromMemIQ <> memScheduler.io.toDataPath
 
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
-  println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromFpWb.size}")
+  println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
-  dataPath.io.fromFpWb := wbDataPath.io.toVfPreg
+  dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
   dataPath.io.debugIntRat := ctrlBlock.io.debug_int_rat
   dataPath.io.debugFpRat := ctrlBlock.io.debug_fp_rat
   dataPath.io.debugVecRat := ctrlBlock.io.debug_vec_rat

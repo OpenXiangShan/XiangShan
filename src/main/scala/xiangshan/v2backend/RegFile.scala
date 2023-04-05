@@ -19,7 +19,9 @@ class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) exte
   val wen = Input(Bool())
   val addr = Input(UInt(addrWidth.W))
   val data = Input(UInt(rfWriteDataCfg.dataWidth.W))
-
+  val intWen = Input(Bool())
+  val fpWen = Input(Bool())
+  val vecWen = Input(Bool())
   def writeInt: Boolean = rfWriteDataCfg.isInstanceOf[IntData]
   def writeFp : Boolean = rfWriteDataCfg.isInstanceOf[FpData]
   def writeVec: Boolean = rfWriteDataCfg.isInstanceOf[VecData]
@@ -27,9 +29,9 @@ class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) exte
   def toWakeUpBundle: ValidIO[IssueQueueWakeUpBundle] = {
     val wakeup = Wire(ValidIO(new IssueQueueWakeUpBundle(addrWidth)))
     wakeup.bits.pdest := this.addr
-    wakeup.bits.rfWen := (if (writeInt) this.wen else false.B)
-    wakeup.bits.fpWen := (if (writeFp) this.wen else false.B)
-    wakeup.bits.vecWen := (if(writeVec) this.wen else false.B)
+    wakeup.bits.rfWen := this.intWen && this.wen
+    wakeup.bits.fpWen := this.fpWen && this.wen
+    wakeup.bits.vecWen := this.vecWen && this.wen
     wakeup.valid := this.wen
     wakeup
   }

@@ -317,11 +317,11 @@ case class SchdBlockParams(
     case _ => 0
   }
 
-  def numTotalIntRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).sum).sum
-//  def numTotalVfRfRead: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.).sum).sum
+  def numIntRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).sum).sum
+  def numVfRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.numVecSrc).sum).sum
 
   // Todo: 14R8W
-  def numIntRfRead : Int = numTotalIntRfRead
+  def numIntRfRead : Int = numIntRfReadByExu
 
   def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
@@ -370,12 +370,18 @@ case class IssueBlockParams(
   def numIntSrc     : Int = exuBlockParams.map(_.numIntSrc).max
   def numFpSrc      : Int = exuBlockParams.map(_.numFpSrc ).max
   def numVecSrc     : Int = exuBlockParams.map(_.numVecSrc).max
+  def numVfSrc      : Int = exuBlockParams.map(_.numVfSrc ).max
+  def numRegSrc     : Int = exuBlockParams.map(_.numRegSrc).max
+  def numSrc        : Int = exuBlockParams.map(_.numSrc   ).max
+
   def readIntRf     : Boolean = numIntSrc > 0
   def readFpRf      : Boolean = numFpSrc  > 0
   def readVecRf     : Boolean = numVecSrc > 0
+  def readVfRf      : Boolean = numVfSrc  > 0
   def writeIntRf    : Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
   def writeFpRf     : Boolean = exuBlockParams.map(_.writeFpRf ).reduce(_ || _)
   def writeVecRf    : Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
+
   def exceptionOut  : Seq[Int] = exuBlockParams.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
   def hasLoadError  : Boolean = exuBlockParams.map(_.hasLoadError).reduce(_ || _)
   def flushPipe     : Boolean = exuBlockParams.map(_.flushPipe).reduce(_ ||_)
@@ -516,7 +522,9 @@ case class ExeUnitParams(
   val numIntSrc     : Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc      : Int = fuConfigs.map(_.numFpSrc ).max
   val numVecSrc     : Int = fuConfigs.map(_.numVecSrc).max
-  val numSrc        : Int = numIntSrc max numFpSrc max numVecSrc
+  val numVfSrc      : Int = fuConfigs.map(_.numVfSrc ).max
+  val numRegSrc     : Int = fuConfigs.map(_.numRegSrc).max
+  val numSrc        : Int = fuConfigs.map(_.numSrc   ).max
   val dataBitsMax   : Int = fuConfigs.map(_.dataBits ).max
   val readIntRf     : Boolean = numIntSrc > 0
   val readFpRf      : Boolean = numFpSrc  > 0
@@ -556,6 +564,10 @@ case class ExeUnitParams(
 
   def hasMemAddrFu = hasLoadFu || hasStoreAddrFu
 
+  def getSrcDataType(srcIdx: Int) : Set[DataConfig] = {
+    fuConfigs.map(_.getSrcDataType(srcIdx)).reduce(_ ++ _)
+  }
+
   def immType: Set[UInt] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
 
   def getWBSource: SchedulerType = {
@@ -590,7 +602,7 @@ case class ExeUnitParams(
 
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
     val fuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuConfigs.map(_.getRfReadDataCfgSet)
-    val alignedFuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuSrcsCfgSet.map(x => x ++ Seq.fill(numSrc - x.length)(Set[DataConfig]()))
+    val alignedFuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuSrcsCfgSet.map(x => x ++ Seq.fill(numRegSrc - x.length)(Set[DataConfig]()))
 
     val exuSrcsCfgSet = alignedFuSrcsCfgSet.reduce((x, y) => (x zip y).map { case (cfg1, cfg2) => cfg1 union cfg2 } )
 

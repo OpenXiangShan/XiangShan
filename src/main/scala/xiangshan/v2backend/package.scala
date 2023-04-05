@@ -177,7 +177,11 @@ package object v2backend {
   case class VConfigData() extends DataConfig("vconfig", VecData().dataWidth) // Todo: use 16 bit instead
   case class NoData() extends DataConfig("nodata", 0)
 
-  def RegSrcDataSet: Set[DataConfig] = Set(IntData(), FpData(), VecData(), MaskSrcData(), VConfigData())
+  def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData(), MaskSrcData(), VConfigData())
+  def IntRegSrcDataSet: Set[DataConfig] = Set(IntData())
+  def FpRegSrcDataSet : Set[DataConfig] = Set(FpData())
+  def VecRegSrcDataSet: Set[DataConfig] = Set(VecData(), MaskSrcData(), VConfigData())
+  def VfRegSrcDataSet : Set[DataConfig] = Set(FpData(), VecData(), MaskSrcData(), VConfigData())
 
   case class FuConfig (
     name: String,
@@ -199,10 +203,13 @@ package object v2backend {
     needSrcFrm: Boolean = false,
     immType: Set[UInt] = Set(),
   ) {
-    def numIntSrc: Int = srcData.map(_.count(_ == IntData())).max
-    def numFpSrc: Int = srcData.map(_.count(_ == FpData())).max
-    def numVecSrc: Int = srcData.map(_.count(x => x == VecData() || x == MaskSrcData() || x == VConfigData())).max
-    def numSrcMax: Int = srcData.map(_.length).max
+    def numIntSrc : Int = srcData.map(_.count(x => IntRegSrcDataSet.contains(x))).max
+    def numFpSrc  : Int = srcData.map(_.count(x => FpRegSrcDataSet.contains(x))).max
+    def numVecSrc : Int = srcData.map(_.count(x => VecRegSrcDataSet.contains(x))).max
+    def numVfSrc  : Int = srcData.map(_.count(x => VfRegSrcDataSet.contains(x))).max
+    def numRegSrc : Int = srcData.map(_.count(x => RegSrcDataSet.contains(x))).max
+    def numSrc    : Int = srcData.map(_.length).max
+
     def readFp: Boolean = numFpSrc > 0
 
     def fuSel(fuType: UInt): Bool = fuType === this.fuType.U
@@ -215,6 +222,19 @@ package object v2backend {
       // make srcData is uniform sized to avoid exception when transpose
       val alignedSrcData: Seq[Seq[DataConfig]] = srcData.map(x => x ++ Seq.fill(numSrcMax - x.length)(null))
       alignedSrcData.transpose.map(_.toSet.intersect(RegSrcDataSet))
+    }
+
+    def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
+      val res: Seq[Option[DataConfig]] = srcData
+        .map((x: Seq[DataConfig]) => if(x.isDefinedAt(srcIdx)) Some(x(srcIdx)) else None)
+      println(s"${this.name}: ${res}, srcData: ${srcData}")
+
+      val res2 = res
+        .filter(_.nonEmpty)
+        .map(_.get)
+        .toSet
+      println(s"${this.name}: ${res2}, srcData: ${srcData}")
+      res2
     }
 
     def hasNoDataWB: Boolean = {

@@ -261,7 +261,7 @@ object Bundles {
         MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, addrWidth)).toSeq)
       )
     ))
-    val srcType = Vec(exuParams.numSrc, SrcType()) // used to select imm or reg data
+    val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
     val jmp = if (exuParams.needPc) Some(Flipped(new IssueQueueJumpBundle)) else None
@@ -275,7 +275,7 @@ object Bundles {
   class ExuInput(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
-    val src           = Vec(params.numSrc, UInt(params.dataBitsMax.W))
+    val src           = Vec(params.numRegSrc, UInt(params.dataBitsMax.W))
     val imm           = UInt(XLEN.W)
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
@@ -402,6 +402,9 @@ object Bundles {
       rfWrite.wen := this.rfWen && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
+      rfWrite.intWen := this.rfWen
+      rfWrite.fpWen := false.B
+      rfWrite.vecWen := false.B
       rfWrite
     }
 
@@ -410,6 +413,9 @@ object Bundles {
       rfWrite.wen := (this.fpWen || this.vecWen) && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
+      rfWrite.intWen := false.B
+      rfWrite.fpWen := this.fpWen
+      rfWrite.vecWen := this.vecWen
       rfWrite
     }
   }
