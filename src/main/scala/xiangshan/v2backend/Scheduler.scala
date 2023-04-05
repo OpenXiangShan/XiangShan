@@ -194,7 +194,14 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     stdIQ.io.enq.zip(staIQ.io.enq).foreach { case (stdIQEnq, staIQEnq) =>
       stdIQEnq.valid := staIQEnq.valid
       stdIQEnq.bits  := staIQEnq.bits
+      // Store data reuses store addr src(1) in dispatch2iq
+      // [dispatch2iq] --src*------src*(0)--> [staIQ]
+      //                       \
+      //                        ---src*(1)--> [stdIQ]
+      // Since the src(1) of sta is easier to get, stdIQEnq.bits.src*(0) is assigned to staIQEnq.bits.src*(1)
+      // instead of dispatch2Iq.io.out(x).bits.src*(1)
       stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
+      stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
       stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
