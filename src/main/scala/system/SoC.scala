@@ -42,6 +42,7 @@ case class SoCParameters
   PAddrBits: Int = 36,
   LvnaEnable: Boolean = false,
   NohypeDevOffset: Int = 0x0,
+  dsidWidth: Int = 5,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -367,6 +368,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val cp2coresIO  = if (LvnaEnable) Some(IO(new CPToCore)) else None
     if (LvnaEnable){
       cp2coresIO.get := controlPlane.module.io.core
+    }
+    val cp2l3IO = if (LvnaEnable) Some(IO(new CPToHuanCunIO)) else None
+    if (LvnaEnable) {
+      cp2l3IO.get <> controlPlane.module.io.huancun
     }
   }
 }

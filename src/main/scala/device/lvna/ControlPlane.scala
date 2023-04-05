@@ -1,18 +1,19 @@
 package device.lvna
 
-import chisel3._
+import chisel3.{Bundle, _}
 import xiangshan._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, SimpleDevice}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.TLRegisterNode
-import freechips.rocketchip.util.{AsyncQueue}
+import freechips.rocketchip.util.AsyncQueue
 import freechips.rocketchip.devices.debug.DMI_RegAddrs._
 import freechips.rocketchip.devices.debug.RWNotify
 import freechips.rocketchip.regmapper.{RegField, RegReadFn, RegWriteFn}
 import chisel3.util._
 import utils._
 import system.SoCParamsKey
+
 import scala.tools.nsc.doc.model.Val
 
 object log2Safe {
@@ -29,15 +30,15 @@ object log2Safe {
 // case object NL3CacheWays extends Field[Int](8)
 
 
-trait HasControlPlaneParameters {
+trait HasControlPlaneParameters{
   implicit val p: Parameters
   val tiles = p(XSTileKey)
   val nTiles = tiles.size
   val ldomDSidWidth = log2Up(nTiles)
   val procDSidWidth = 2   // p(ProcDSidWidth) ?
-  val dsidWidth = ldomDSidWidth + procDSidWidth
+  val dsidWidth = p(SoCParamsKey).dsidWidth
   val nDSID = 1 << dsidWidth
-  val cycle_counter_width = 64
+//  val cycle_counter_width = 64
   // val cacheCapacityWidth = log2Safe(p(NL2CacheCapacity) * 1024 / 64) + 1
 
   val llcWays = p(SoCParamsKey).L3CacheParamsOpt.get.ways
@@ -52,10 +53,12 @@ trait HasControlPlaneParameters {
 
 }
 
+abstract class CPBundle(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters
+
 /**
  * From ControlPlane's side of view.
  */
-class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters with HasAutoCatParameters {
+class ControlPlaneIO(implicit p: Parameters) extends CPBundle with HasAutoCatParameters {
   private val indexWidth = 64
 
   val updateData   = Input(UInt(32.W))
@@ -77,10 +80,16 @@ class ControlPlaneIO(implicit val p: Parameters) extends Bundle with HasControlP
   val progHartIdWen = Input(Bool())
 }
 
+class CPToHuancunSetWaymask(implicit p: Parameters) extends CPBundle
+{
+  val dsid = UInt(dsidWidth.W)
+  val waymask = UInt(llcWays.W)
+}
+
 /* From ControlPlane's View */
-class CPToHuanCunIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters {
-  val waymask = Output(UInt(llcWays.W))  // waymask returned to L2cache (1 cycle delayed)
-  val dsid = Input(UInt(dsidWidth.W))  // DSID from requests L2 cache received
+class CPToHuanCunIO(implicit p: Parameters) extends CPBundle {
+
+  val waymaskSetReq = DecoupledIO(new CPToHuancunSetWaymask)
   // val capacity = Input(UInt(cacheCapacityWidth.W))  // Count on way numbers
   // val capacity_dsid = Output(UInt(dsidWidth.W))  // Capacity query dsid
   /*val req_miss = Input(UInt(32.W))
@@ -193,7 +202,7 @@ with HasTokenBucketParameters
 
     val bucketIO = IO(Vec(nTiles, new BucketIO()))
 
-    val timer = RegInit(0.U(cycle_counter_width.W))
+    val timer = RegInit(0.U(64.W))
     timer := Mux(timer === (~0.U(timer.getWidth.W)).asUInt, 0.U, timer + 1.U)
 
     bucketState.zipWithIndex.foreach { case (state, i) =>
@@ -230,10 +239,14 @@ with HasTokenBucketParameters
     
     
     /**
-      * Programmable hartid.
+      * waymask set.
       */
-    val l2dsid_reg = RegNext(io.huancun.dsid)  // 1 cycle delay
-    io.huancun.waymask := waymasks(l2dsid_reg)
+    val waymaskSetQueue = Module(new Queue(new CPToHuancunSetWaymask,2))
+    val newWaymaskSet = WireInit(false.B)
+    waymaskSetQueue.io.enq.valid := RegNext(newWaymaskSet, false.B)
+    waymaskSetQueue.io.enq.bits.dsid := dsidSel
+    waymaskSetQueue.io.enq.bits.waymask := waymasks(dsidSel)
+    io.huancun.waymaskSetReq <> waymaskSetQueue.io.deq
 
     // Miss
     /*val l2_stat_reset = RegInit(false.B)
@@ -293,6 +306,9 @@ with HasTokenBucketParameters
       )),
       CP_IO_OFFSET -> Seq(RWNotify(64, ioOffsets(hartSel), ioOffsets(hartSel),
         Wire(Bool()), ioOffNewdata(hartSel)
+      )),
+      CP_WAYMASK -> Seq(RWNotify(64, waymasks(dsidSel), waymasks(dsidSel),
+        Wire(Bool()), newWaymaskSet
       )),
       CP_NOHYPE_BARRIER -> Seq(RegField(64, nohypeBarrier)),
       CP_HARTNUM -> Seq(RegField(64, nTilesReg)),
