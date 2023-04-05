@@ -179,8 +179,8 @@ object VecDecoder extends DecodeConstants {
 
     VRGATHER_VX   -> OPIVX(FuType.vipu, VipuType.dummy, T, F, F),
 
-    VSLIDEUP_VX   -> OPIVX(FuType.vipu, VipuType.dummy, T, F, F),
-    VSLIDEDOWN_VX -> OPIVX(FuType.vipu, VipuType.dummy, T, F, F),
+    VSLIDEUP_VX   -> OPIVX(FuType.vppu, VpermType.vslideup, T, F, F, UopDivType.VEC_SLIDEUP),
+    VSLIDEDOWN_VX -> OPIVX(FuType.vppu, VpermType.vslidedown, T, F, F, UopDivType.VEC_SLIDEDOWN),
 
     VADC_VXM      -> OPIVX(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
     VMADC_VXM      -> OPIVX(FuType.vialuF, VialuFixType.vmadc_vvm, F, T, F, UopDivType.VEC_VXM),
@@ -233,8 +233,8 @@ object VecDecoder extends DecodeConstants {
 
     VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
-    VSLIDEUP_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
-    VSLIDEDOWN_VI -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VSLIDEUP_VI   -> OPIVI(FuType.vppu, VpermType.vslideup, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_ISLIDEUP),
+    VSLIDEDOWN_VI -> OPIVI(FuType.vppu, VpermType.vslidedown, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_ISLIDEDOWN),
 
     VADC_VIM      -> OPIVI(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
     VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopDivType = UopDivType.VEC_VVM),

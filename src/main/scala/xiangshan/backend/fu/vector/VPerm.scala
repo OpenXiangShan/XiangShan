@@ -22,7 +22,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import utils._
 import yunsuan.VpermType
-import xiangshan.{XSCoreParamsKey, FuType}
+import xiangshan.{XSCoreParamsKey, FuType, SrcType}
 import yunsuan.vector.perm.Permutation
 import yunsuan.vector.{FToSModule, Vfslide1upModule}
 
@@ -90,7 +90,9 @@ class VPermWrapper(implicit p: Parameters)  extends VPUDataModule {
   VPerm.io.in.bits.srcType(0) := srcVdType.srcType2
   VPerm.io.in.bits.srcType(1) := srcVdType.srcType1
   VPerm.io.in.bits.vdType := srcVdType.vdType
-  VPerm.io.in.bits.vs1 := vs1
+  // dirty code for VSLIDEUP_VX/VSLIDEDOWN_VX
+  val vs1Mux = Mux(VpermType.isVsilde(in.uop.ctrl.fuOpType), Mux(SrcType.isFp(in.uop.ctrl.srcType(0)), in.src(0)(63,0), ctrl.imm(4,0)), vs1)
+  VPerm.io.in.bits.vs1 := vs1Mux
   VPerm.io.in.bits.vs2 := vs2
   VPerm.io.in.bits.old_vd := in.src(2)
   VPerm.io.in.bits.mask := in.src(3)

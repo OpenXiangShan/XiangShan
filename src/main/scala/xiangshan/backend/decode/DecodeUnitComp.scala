@@ -85,6 +85,11 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     "b010".U -> 4.U,
     "b011".U -> 8.U
   ))
+  val numOfUopVslide = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(log2Up(maxNumOfUop+1).W), Array(
+    "b001".U -> 3.U,
+    "b010".U -> 10.U,
+    "b011".U -> 36.U
+  ))
   //number of uop
   val numOfUop = MuxLookup(typeOfDiv, 1.U(log2Up(maxNumOfUop+1).W), Array(
     UopDivType.VEC_0XV         -> 2.U,
@@ -107,11 +112,15 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_SLIDE1DOWN  -> Cat(lmul, 0.U(1.W)),
     UopDivType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) -1.U),
     UopDivType.VEC_VRED        -> lmul,
+    UopDivType.VEC_SLIDEUP     -> (numOfUopVslide + 1.U),
+    UopDivType.VEC_ISLIDEUP    -> numOfUopVslide,
+    UopDivType.VEC_SLIDEDOWN   -> (numOfUopVslide + 1.U),
+    UopDivType.VEC_ISLIDEDOWN  -> numOfUopVslide,
   ))
 
-  val src1 = ctrl_flow.instr(19, 15)
-  val src2 = ctrl_flow.instr(24, 20)
-  val dest = ctrl_flow.instr(11, 7)
+  val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
+  val src2 = Cat(0.U(1.W), ctrl_flow.instr(24, 20))
+  val dest = Cat(0.U(1.W), ctrl_flow.instr(11, 7 ))
 
   //uop div up to maxNumOfUop
   val csBundle = Wire(Vec(maxNumOfUop, new CfCtrl))
@@ -626,6 +635,102 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(numOfUop - 1.U).ctrl.ldest := dest
         csBundle(numOfUop - 1.U).ctrl.uopIdx := numOfUop - 1.U
       }
+    }
+
+    is(UopDivType.VEC_SLIDEUP) {
+      // FMV.D.X
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := FP_TMP_REG_MV.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.vecWen := false.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+      // LMUL
+      for(i <- 0 until MAX_VLMUL)
+        for(j <- 0 to i){
+          val old_vd = if (j==0) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
+          val vd = if (j==i) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j).U
+          csBundle(i*(i+1)/2+j+1).ctrl.srcType(0) := SrcType.fp
+          csBundle(i*(i+1)/2+j+1).ctrl.lsrc(0) := FP_TMP_REG_MV.U
+          csBundle(i*(i+1)/2+j+1).ctrl.lsrc(1) := src2 + j.U
+          csBundle(i*(i+1)/2+j+1).ctrl.lsrc(2) := old_vd
+          csBundle(i*(i+1)/2+j+1).ctrl.ldest := vd
+          csBundle(i*(i+1)/2+j+1).ctrl.uopIdx := (i*(i+1)/2+j).U
+        }
+    }
+
+    is(UopDivType.VEC_ISLIDEUP) {
+      // LMUL
+      for(i <- 0 until MAX_VLMUL)
+        for(j <- 0 to i){
+          val old_vd = if (j==0) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
+          val vd = if (j==i) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j).U
+          csBundle(i*(i+1)/2+j).ctrl.lsrc(1) := src2 + j.U
+          csBundle(i*(i+1)/2+j).ctrl.lsrc(2) := old_vd
+          csBundle(i*(i+1)/2+j).ctrl.ldest := vd
+          csBundle(i*(i+1)/2+j).ctrl.uopIdx := (i*(i+1)/2+j).U
+        }
+    }
+
+    is(UopDivType.VEC_SLIDEDOWN) {
+      // FMV.D.X
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := FP_TMP_REG_MV.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.vecWen := false.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+      // LMUL
+      for(i <- 0 until MAX_VLMUL)
+        for(j <- (0 to i).reverse){
+          when(i.U < lmul){
+            val old_vd = if (j==0) {dest + lmul -1.U - i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
+            val vd = if (j==i) {dest + lmul - 1.U - i.U} else (VECTOR_TMP_REG_LMUL+j).U
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.srcType(0) := SrcType.fp
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.lsrc(0) := FP_TMP_REG_MV.U
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.lsrc(1) := src2 + lmul - 1.U - j.U
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.lsrc(2) := old_vd
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.ldest := vd
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.uopIdx := numOfUop-(i*(i+1)/2+i-j+2).U
+          }
+        }
+    }
+
+    is(UopDivType.VEC_ISLIDEDOWN) {
+      // LMUL
+      for(i <- 0 until MAX_VLMUL)
+        for(j <- (0 to i).reverse){
+          when(i.U < lmul){
+            val old_vd = if (j==0) {dest + lmul -1.U - i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
+            val vd = if (j==i) {dest + lmul - 1.U - i.U} else (VECTOR_TMP_REG_LMUL+j).U
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.lsrc(1) := src2 + lmul - 1.U - j.U
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.lsrc(2) := old_vd
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.ldest := vd
+            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.uopIdx := numOfUop-(i*(i+1)/2+i-j+1).U
+          }
+        }
     }
   }
 
