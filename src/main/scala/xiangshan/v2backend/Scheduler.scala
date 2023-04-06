@@ -157,7 +157,7 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.wakeup := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := io.toDataPath(i)(j).ready // Todo: remove it
+      deqResp.bits.success := false.B // Todo: remove it
       deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
@@ -195,7 +195,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := io.toDataPath(i)(j).ready // Todo: remove it
+      deqResp.bits.success := false.B // Todo: remove it
       deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
@@ -224,7 +224,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
     stdIQ.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := stdIQ.io.deq(j).valid
-      deqResp.bits.success := io.toDataPath(i)(j).ready // Todo: remove it
+      deqResp.bits.success := false.B // Todo: remove it
       deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
       deqResp.bits.addrOH := stdIQ.io.deq(j).bits.addrOH
     }

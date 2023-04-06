@@ -196,9 +196,14 @@ class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends
         io.fromMem.get.slowResp.map(x => x.valid && x.bits.addrOH(i)) ++
         io.fromMem.get.fastResp.map(x => x.valid && x.bits.addrOH(i))
       ).toSeq)
+    val deqRespBitsVec = MixedVecInit(
+      io.deqResp.map(x => x.bits) ++
+        io.fromMem.get.slowResp.map(x => x.bits) ++
+        io.fromMem.get.fastResp.map(x => x.bits)
+    )
     XSError(PopCount(deqRespValidVec) > 1.U, p"status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
     deqResp.valid := deqRespValidVec.asUInt.orR
-    deqResp.bits := Mux1H(deqRespValidVec, io.deqResp.map(_.bits))
+    deqResp.bits := Mux1H(deqRespValidVec, deqRespBitsVec)
   }
 
   clearVec.zipWithIndex.foreach { case (clear, i) =>
