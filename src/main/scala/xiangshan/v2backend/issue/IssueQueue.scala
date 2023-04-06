@@ -9,6 +9,7 @@ import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
 import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, SrcState, SrcType, XSBundle}
+import utility._
 
 case class IssueQueueParams(
   val exuParams          : Seq[ExeUnitParams],
@@ -83,9 +84,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
-  val specialFuCfgs : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs.filterNot(commonFuCfgs.contains))
   println(s"commonFuCfgs: ${commonFuCfgs.map(_.name)}")
-  println(s"specialFuCfgs: ${specialFuCfgs.map(_.map(_.name))}")
   lazy val io = IO(new IssueQueueIO())
   dontTouch(io.deq)
   dontTouch(io.deqResp)
@@ -94,8 +93,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val immArray      = Module(new DataArray(UInt(XLEN.W), params.numDeq, params.numEnq, params.numEntries))
   val payloadArray  = Module(new DataArray(Output(new DynInst), params.numDeq, params.numEnq, params.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
-  val mainDeqPolicy = Module(new DeqPolicy)
-  val subDeqPolicies  = specialFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
+  val subDeqPolicies  = deqFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
 
   // Wires
   val s0_enqValidVec = io.enq.map(_.valid)
@@ -111,14 +109,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val s0_enqImmValidVec = io.enq.map(enq => enq.valid)
   val s0_enqImmVec = VecInit(io.enq.map(_.bits.imm))
 
-  val mainDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
-  val mainDeqSelOHVec = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
-  val mainDeqOH: IndexedSeq[UInt] = (mainDeqSelValidVec zip mainDeqSelOHVec).map { case (valid, oh) =>
-    Mux(valid, oh, 0.U)
-  }
-  val mainDeqMask: UInt = mainDeqOH.reduce(_ | _)
-  val finalDeqSelValidVec : Vec[Bool] = WireInit(mainDeqSelValidVec)
-  val finalDeqSelOHVec    : Vec[UInt] = WireInit(mainDeqSelOHVec)
+  // One deq port only need one special deq policy
+  val subDeqSelValidVec: Seq[Option[Vec[Bool]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, Bool()))))
+  val subDeqSelOHVec: Seq[Option[Vec[UInt]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, UInt(params.numEntries.W)))))
+
+  val finalDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
+  val finalDeqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val finalDeqOH: IndexedSeq[UInt] = (finalDeqSelValidVec zip finalDeqSelOHVec).map { case (valid, oh) =>
     Mux(valid, oh, 0.U)
   }
@@ -216,47 +212,35 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     Cat(commonFuCfgs.map(_.fuType.U === fuType)).orR
   ).reverse)
 
-  mainDeqPolicy match { case dp =>
-    dp.io.request       := canIssueVec.asUInt & commonAccept
-    mainDeqSelValidVec  := dp.io.deqSelOHVec.map(oh => oh.valid)
-    mainDeqSelOHVec     := dp.io.deqSelOHVec.map(oh => oh.bits)
-  }
-
   // if deq port can accept the uop
   protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     Cat(fuTypeRegVec.map(fuType => Cat(fuCfgs.map(_.fuType.U === fuType)).orR).reverse).asUInt
   }
 
-  protected val specialCanAcceptVec: Seq[IndexedSeq[Bool]] = specialFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+  protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     fuTypeRegVec.map(fuType =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR)
+      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR) // C+E0    C+E1
   }
 
-  // One deq port only need one special deq policy
-  val subDeqSelValidVec: Seq[Option[Vec[Bool]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, Bool()))))
-  val subDeqSelOHVec: Seq[Option[Vec[UInt]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, UInt(params.numEntries.W)))))
-
   subDeqPolicies.zipWithIndex.map { case (dpOption: Option[DeqPolicy], i) =>
-    dpOption.zip(specialCanAcceptVec).map { case (dp: DeqPolicy, canAccept: IndexedSeq[Bool]) =>
-      dp.io.request             := canIssueVec.asUInt & VecInit(canAccept).asUInt
+    if (dpOption.nonEmpty) {
+      val dp = dpOption.get
+      dp.io.request             := canIssueVec.asUInt & VecInit(deqCanAcceptVec(i)).asUInt
       subDeqSelValidVec(i).get  := dp.io.deqSelOHVec.map(oh => oh.valid)
       subDeqSelOHVec(i).get     := dp.io.deqSelOHVec.map(oh => oh.bits)
     }
   }
 
-  val mainDeqCanAccept: IndexedSeq[Bool] = (mainDeqOH zip canAcceptVec).map { case (deqOH, accept) =>
-    (deqOH & accept).orR
-  }
-
-  subDeqPolicies.zipWithIndex.foreach {
-    case (x: Option[DeqPolicy], i) =>
-      x.map(_ => {
-        // If the inst selected by mainDeqPolicy cannot be accepted, use specialDeqPolicy instead
-        when (!mainDeqCanAccept(i)) {
-          finalDeqSelValidVec(i)  := subDeqSelValidVec(i).get.head
-          finalDeqSelOHVec(i)     := subDeqSelOHVec(i).get.head
-        }
-      })
+  finalDeqSelValidVec(0) := subDeqSelValidVec(0).getOrElse(Seq(0.U)).head
+  finalDeqSelOHVec(0)    := subDeqSelOHVec(0).getOrElse(Seq(0.U)).head
+  if(params.numDeq == 2){
+    val isSame = subDeqSelOHVec(0).getOrElse(Seq(0.U)).head === subDeqSelOHVec(1).getOrElse(Seq(0.U)).head
+    finalDeqSelValidVec(1) := Mux(isSame,
+                                  subDeqSelValidVec(1).getOrElse(Seq(0.U)).last,
+                                  subDeqSelValidVec(1).getOrElse(Seq(0.U)).head)
+    finalDeqSelOHVec(1)    := Mux(isSame,
+                                  subDeqSelOHVec(1).getOrElse(Seq(0.U)).last,
+                                  subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
