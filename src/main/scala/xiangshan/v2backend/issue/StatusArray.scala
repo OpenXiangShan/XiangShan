@@ -131,13 +131,21 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
         stateNext := wakeup | state
       }
       statusNext.blocked := false.B // Todo
-      statusNext.issued := MuxCase (deqSelVec(i) || status.issued, Seq(
-        (deqRespVec(i).valid && !deqRespVec(i).bits.success) -> false.B
-      ))
       statusNext.ready := statusNext.srcReady || status.ready
       statusNext.robIdx := status.robIdx
       statusNext.srcType := status.srcType
       statusNext.firstIssue := status.firstIssue || deqSelVec(i)
+
+      statusNext.issued := status.issued // otherwise
+      when (deqSelVec(i)) {
+        // Deq at current cycle
+        statusNext.issued := true.B
+      }.elsewhen(deqRespVec(i).valid) {
+        // Not stage success
+        when (!RSFeedbackType.isStageSuccess(deqRespVec(i).bits.respType)) {
+          statusNext.issued := false.B
+        }
+      }
     }
   }
 
@@ -221,8 +229,7 @@ class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends
     // load cannot be issued before older store, unless meet some condition
     val blockedByOlderStore = isAfter(memStatusNext.sqIdx, fromMem.stIssuePtr)
 
-    val deqFailed = deqRespVec(i).valid && !deqRespVec(i).bits.success
-    val deqFailedForStdInvalid = deqFailed && deqRespVec(i).bits.respType === RSFeedbackType.dataInvalid
+    val deqFailedForStdInvalid = deqRespVec(i).valid && deqRespVec(i).bits.respType === RSFeedbackType.dataInvalid
 
     val staWaitedReleased = Cat(
       fromMem.memWaitUpdateReq.staIssue.map(x => x.valid && x.bits.uop.robIdx.value === memStatusNext.waitForRobIdx.value)

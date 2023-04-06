@@ -52,6 +52,10 @@ object RSFeedbackType {
   val feedbackInvalid = 7.U(3.W)
 
   def apply() = UInt(3.W)
+
+  def isStageSuccess(feedbackType: UInt) = {
+    feedbackType === readRfSuccess
+  }
 }
 
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
