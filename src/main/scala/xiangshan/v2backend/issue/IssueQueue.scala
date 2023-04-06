@@ -9,6 +9,7 @@ import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.v2backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
 import xiangshan.v2backend._
 import xiangshan.{HasXSParameter, MemRSFeedbackIO, Redirect, SrcState, SrcType, XSBundle}
+import utility._
 
 case class IssueQueueParams(
   val exuParams          : Seq[ExeUnitParams],
@@ -84,6 +85,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
   val specialFuCfgs : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs.filterNot(commonFuCfgs.contains))
+  val comSpecFuCfgs : Seq[Seq[FuConfig]] = commonFuCfgs +: specialFuCfgs // C E0 E1
   println(s"commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   println(s"specialFuCfgs: ${specialFuCfgs.map(_.map(_.name))}")
   lazy val io = IO(new IssueQueueIO())
@@ -217,7 +219,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   ).reverse)
 
   mainDeqPolicy match { case dp =>
-    dp.io.request       := canIssueVec.asUInt & commonAccept
+    dp.io.request       := canIssueVec.asUInt
     mainDeqSelValidVec  := dp.io.deqSelOHVec.map(oh => oh.valid)
     mainDeqSelOHVec     := dp.io.deqSelOHVec.map(oh => oh.bits)
   }
@@ -227,9 +229,34 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     Cat(fuTypeRegVec.map(fuType => Cat(fuCfgs.map(_.fuType.U === fuType)).orR).reverse).asUInt
   }
 
-  protected val specialCanAcceptVec: Seq[IndexedSeq[Bool]] = specialFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+  protected val specialCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     fuTypeRegVec.map(fuType =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR)
+      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR) // C+E0    C+E1
+  }
+
+  // Identify this pattern of mainDeqOH uop
+  val getMainDeqFormat = {
+//    val deq = Wire(VecInit(Fill(mainDeqOH.length, UInt(comSpecFuCfgs.length.W))))
+    val deq = Seq.fill(2)(WireInit(0.U(3.W)))
+    mainDeqOH.zipWithIndex.foreach { case (mainDeqOH0, i) =>
+      deq(i) := VecInit(comSpecFuCfgs.map {
+        case fuCfgs => Cat(fuCfgs.map(_.fuType.U === fuTypeRegVec(OHToUInt(mainDeqOH0)))).orR()
+      }).asUInt() // C E0 E1
+    } // deq0 : C E0 E1  deq1: C E0 E1
+       //       1                1     reverse        =>  deq(0)(2)&&!deq(1)(2) || deq(1)(1)&&!deq(0)(1)
+       //            1         1       reverse
+       //            1           1     reverse
+       //         1               1    E0 + other(1)  =>  deq(0)(1)&&deq(1)(1)
+       //            1              1  other(0) + E1  =>  deq(0)(2)&&deq(1)(2)
+       // otherwise                     remain
+    val format = WireInit(0.U(2.W))
+    format := Mux1H(Seq(
+         (deq(0)(2)&&(!deq(1)(2))) -> 1.U,
+         (deq(1)(1)&&(!deq(0)(1))) -> 1.U,
+         (deq(0)(1)&&deq(1)(1)) -> 2.U,
+         (deq(0)(2)&&deq(1)(2)) -> 3.U,
+       ))
+    format
   }
 
   // One deq port only need one special deq policy
@@ -248,15 +275,26 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     (deqOH & accept).orR
   }
 
-  subDeqPolicies.zipWithIndex.foreach {
-    case (x: Option[DeqPolicy], i) =>
-      x.map(_ => {
-        // If the inst selected by mainDeqPolicy cannot be accepted, use specialDeqPolicy instead
-        when (!mainDeqCanAccept(i)) {
-          finalDeqSelValidVec(i)  := subDeqSelValidVec(i).get.head
-          finalDeqSelOHVec(i)     := subDeqSelOHVec(i).get.head
-        }
-      })
+  for(i <- 0 until params.numDeq) {
+    val subDeqSelValid = Mux(subDeqSelOHVec(i).getOrElse(Seq(0.U)).head === mainDeqSelOHVec(subDeqPolicies.size - 1 - i),
+      subDeqSelValidVec(i).getOrElse(Seq(0.U)).last,
+      subDeqSelValidVec(i).getOrElse(Seq(0.U)).head)
+
+    val subDeqSelOH = Mux(subDeqSelOHVec(i).getOrElse(Seq(0.U)).head === mainDeqSelOHVec(subDeqPolicies.size - 1 - i),
+      subDeqSelOHVec(i).getOrElse(Seq(0.U)).last,
+      subDeqSelOHVec(i).getOrElse(Seq(0.U)).head)
+
+    // If the inst selected by mainDeqPolicy cannot be accepted, use specialDeqPolicy instead
+    finalDeqSelValidVec(i) := LookupTreeDefault(getMainDeqFormat, mainDeqSelValidVec(i), List(
+      1.U -> mainDeqSelValidVec(subDeqPolicies.size - 1 - i),         // condition : subDeqPolicies.size == 2
+      2.U -> (if (i == 0) mainDeqSelValidVec(i) else subDeqSelValid),
+      3.U -> (if (i == 1) mainDeqSelValidVec(i) else subDeqSelValid)
+    ))
+    finalDeqSelOHVec(i) := LookupTreeDefault(getMainDeqFormat, mainDeqSelOHVec(i), List(
+      1.U -> mainDeqSelOHVec(subDeqPolicies.size - 1 - i),
+      2.U -> (if (i == 0) mainDeqSelOHVec(i) else subDeqSelOH),
+      3.U -> (if (i == 1) mainDeqSelOHVec(i) else subDeqSelOH)
+    ))
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
