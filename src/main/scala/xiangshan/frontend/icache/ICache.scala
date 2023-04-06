@@ -44,6 +44,7 @@ case class ICacheParameters(
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 12,
     nPrefBufferEntries: Int = 64,
+    prefetchPipeNum: Int = 2,
     hasPrefetch: Boolean = true,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
@@ -91,6 +92,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def totalMSHRNum = PortNumber + nPrefetchEntries
   def nIPFBufferSize   = cacheParams.nPrefBufferEntries
   def maxIPFMoveConf   = 1 // temporary use small value to cause more "move" operation
+  def prefetchPipeNum = ICacheParameters().prefetchPipeNum
 
   def getBits(num: Int) = log2Ceil(num).W
 
@@ -270,7 +272,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   }
 
 
-  io.write.ready := true.B
+  io.write.ready := true.B // TODO : has bug ? should be !io.cacheOp.req.valid
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
@@ -493,8 +495,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle
   val toIFU       = Output(Bool())
-  val pmp         = Vec(PortNumber + 1, new ICachePMPBundle)
-  val itlb        = Vec(PortNumber + 1, new TlbRequestIO)
+  val pmp         = Vec(PortNumber + prefetchPipeNum, new ICachePMPBundle)
+  val itlb        = Vec(PortNumber + prefetchPipeNum, new TlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
   /* Cache Instruction */
@@ -538,27 +540,26 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray      = Module(new ICacheMetaArray)
-  val metaArrayCopy = Module(new ICacheMetaArray)
-//  val metaArrayMoveFilterCopy = Module(new ICacheMetaArray)
+  val bankedMetaArray = Module(new ICacheBankedMetaArray(prefetchPipeNum + 1)) // need add 1 port for IPF filter
   val dataArray      = Module(new ICacheDataArray)
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
-  val prefetchPipe = Module(new IPrefetchPipe)
+  val prefetchPipes = (0 until prefetchPipeNum).map( i => Module(new IPrefetchPipe))
   val ipfBuffer  = Module(new PrefetchBuffer)
 
   val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  1))
   val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  1))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
-  val metaCopy_read_arb = Module(new Arbiter(new ICacheReadBundle, 2))
+  val prefetch_req_arb = Module(new Arbiter(new PIQReq, prefetchPipeNum))
 
   mainPipe.io.PIQ <> missUnit.io.to_main_pipe
   ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
   meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
   data_write_arb.io.in(1) <> ipfBuffer.io.move.data_write
   mainPipe.io.IPFBufMove <> ipfBuffer.io.replace
-  ipfBuffer.io.filter_read <> prefetchPipe.io.IPFBufferRead
-  mainPipe.io.missSlotInfo <> prefetchPipe.io.mainPipeMissSlotInfo
+  (0 until prefetchPipeNum).foreach(i => ipfBuffer.io.filter_read(i) <> prefetchPipes(i).io.IPFBufferRead)
+  (0 until prefetchPipeNum).foreach(i => mainPipe.io.missSlotInfo <> prefetchPipes(i).io.mainPipeMissSlotInfo)
   mainPipe.io.mainPipeMissInfo <> ipfBuffer.io.mainpipe_missinfo
 
   ipfBuffer.io.fencei := false.B
@@ -568,15 +569,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   meta_read_arb.io.in(0)      <> mainPipe.io.metaArray.toIMeta
   metaArray.io.read                     <> meta_read_arb.io.out
-  metaCopy_read_arb.io.in(0) <> prefetchPipe.io.toIMeta
-  metaCopy_read_arb.io.in(1) <> ipfBuffer.io.meta_filter_read.toIMeta
-  metaArrayCopy.io.read <> metaCopy_read_arb.io.out
-//  metaArrayCopy.io.read <> prefetchPipe.io.toIMeta
-//  metaArrayMoveFilterCopy.io.read <> ipfBuffer.io.meta_filter_read.toIMeta
+  bankedMetaArray.io.read(0) <> ipfBuffer.io.meta_filter_read_req
+  (0 until prefetchPipeNum).foreach(i => bankedMetaArray.io.read(i + 1) <> prefetchPipes(i).io.toIMeta)
 
   mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
-  prefetchPipe.io.fromIMeta             <> metaArrayCopy.io.readResp
-  ipfBuffer.io.meta_filter_read.fromIMeta <> metaArrayCopy.io.readResp //metaArrayMoveFilterCopy.io.readResp
+  ipfBuffer.io.meta_filter_read_resp <> bankedMetaArray.io.readResp(0)
+  (0 until prefetchPipeNum).foreach(i => bankedMetaArray.io.readResp(i + 1) <> prefetchPipes(i).io.fromIMeta)
 
   data_read_arb.io.in(0)    <> mainPipe.io.dataArray.toIData
   dataArray.io.read                   <> data_read_arb.io.out
@@ -589,35 +587,37 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   data_write_arb.io.in(0)     <> missUnit.io.data_write
 
   metaArray.io.write <> meta_write_arb.io.out
-  metaArrayCopy.io.write <> meta_write_arb.io.out
-//  metaArrayMoveFilterCopy.io.write <> meta_write_arb.io.out
-//  metaArray.io.write.valid := RegNext(meta_write_arb.io.out.valid,init =false.B)
-//  metaArray.io.write.bits  := RegNext(meta_write_arb.io.out.bits)
-//  meta_write_arb.io.out.ready := true.B
+  bankedMetaArray.io.write <> meta_write_arb.io.out
 
   dataArray.io.write <> data_write_arb.io.out
-//  dataArray.io.write.valid := RegNext(missUnit.io.data_write.valid,init =false.B)
-//  dataArray.io.write.bits  := RegNext(missUnit.io.data_write.bits)
-//  missUnit.io.data_write.ready := true.B
 
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
 
   if(cacheParams.hasPrefetch){
-    prefetchPipe.io.fromFtq <> io.prefetch
+    val alloc = PriorityEncoder(prefetchPipes.map(_.io.fromFtq.req.ready))
+    (0 until prefetchPipeNum).foreach(i => {
+      prefetchPipes(i).io.fromFtq.req.valid := io.prefetch.req.valid && i.U === alloc
+      prefetchPipes(i).io.fromFtq.req.bits := io.prefetch.req.bits
+    })
+    io.prefetch.req.ready := ParallelOR(prefetchPipes.map(_.io.fromFtq.req.ready))
     when(!io.csr_pf_enable){
-      prefetchPipe.io.fromFtq.req.valid := false.B
+      (0 until prefetchPipeNum).foreach(i => {
+        prefetchPipes(i).io.fromFtq.req.valid := false.B
+      })
       io.prefetch.req.ready := true.B
     }
   } else {
-    prefetchPipe.io.fromFtq <> DontCare
+    (0 until prefetchPipeNum).foreach(i => prefetchPipes(i).io.fromFtq <> DontCare)
   }
 
   io.pmp(0) <> mainPipe.io.pmp(0)
   io.pmp(1) <> mainPipe.io.pmp(1)
-  io.pmp(2) <> prefetchPipe.io.pmp
+  (0 until prefetchPipeNum).foreach(i => io.pmp(2 + i) <> prefetchPipes(i).io.pmp)
+  (0 until prefetchPipeNum).foreach(i => {
+    prefetchPipes(i).io.prefetchEnable := mainPipe.io.prefetchEnable
+    prefetchPipes(i).io.prefetchDisable := mainPipe.io.prefetchDisable
+  })
 
-  prefetchPipe.io.prefetchEnable := mainPipe.io.prefetchEnable
-  prefetchPipe.io.prefetchDisable := mainPipe.io.prefetchDisable
 
   //notify IFU that Icache pipeline is available
   io.toIFU := mainPipe.io.fetch.req.ready
@@ -625,7 +625,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.itlb(0)        <>    mainPipe.io.itlb(0)
   io.itlb(1)        <>    mainPipe.io.itlb(1)
-  io.itlb(2)        <>    prefetchPipe.io.iTLBInter
+  (0 until prefetchPipeNum).foreach(i => io.itlb(2 + i) <> prefetchPipes(i).io.iTLBInter)
 
 
   io.fetch.resp     <>    mainPipe.io.fetch.resp
@@ -635,11 +635,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     mainPipe.io.mshr(i).fromMSHR <>   missUnit.io.resp(i)
   }
 
-  missUnit.io.prefetch_req <> prefetchPipe.io.toMissUnit.enqReq
+  (0 until prefetchPipeNum).foreach(i => prefetch_req_arb.io.in(i) <> prefetchPipes(i).io.toMissUnit.enqReq)
+  missUnit.io.prefetch_req <> prefetch_req_arb.io.out
   missUnit.io.hartId       := io.hartId
-  prefetchPipe.io.fromMSHR <> missUnit.io.mshr_info
-  prefetchPipe.io.fencei := false.B
-  prefetchPipe.io.freePIQEntry := missUnit.io.freePIQEntry
+  (0 until prefetchPipeNum).foreach(i => {
+    prefetchPipes(i).io.fromMSHR <> missUnit.io.mshr_info
+    prefetchPipes(i).io.fencei := false.B
+    prefetchPipes(i).io.freePIQEntry := missUnit.io.freePIQEntry
+  })
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -673,9 +676,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  metaArrayCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
-//  metaArrayMoveFilterCopy.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  // TODO : metaArrayCopy & metaArrayMoveFilterCopy cache op may has bug
+  bankedMetaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
