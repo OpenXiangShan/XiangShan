@@ -29,8 +29,8 @@ import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
 import utility.FastArbiter
-import mem.{AddPipelineReg}
-import xiangshan.cache.dcache.ReplayCarry
+import mem.AddPipelineReg
+import xiangshan.cache.dcache.{ReplayCarry, VictimList}
 
 import scala.math.max
 
@@ -290,6 +290,7 @@ class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
 
 class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
   val set = ValidIO(UInt(log2Up(nSets).W))
+  val dmWay = Output(UInt(log2Up(nWays).W))
   val way = Input(UInt(log2Up(nWays).W))
 }
 
@@ -1090,12 +1091,32 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // replacement algorithm
   val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
-
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
-  replWayReqs.foreach{
-    case req =>
-      req.way := DontCare
-      when (req.set.valid) { req.way := replacer.way(req.set.bits) }
+
+  val victimList = VictimList(nSets)
+  if (wpuParam.enCfPred) {
+    when(missQueue.io.replace_pipe_req.valid) {
+      victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
+    }
+    replWayReqs.foreach {
+      case req =>
+        req.way := DontCare
+        when(req.set.valid) {
+          when(victimList.whether_sa(req.set.bits)) {
+            req.way := replacer.way(req.set.bits)
+          }.otherwise {
+            req.way := req.dmWay
+          }
+        }
+    }
+  } else {
+    replWayReqs.foreach {
+      case req =>
+        req.way := DontCare
+        when(req.set.valid) {
+          req.way := replacer.way(req.set.bits)
+        }
+    }
   }
 
   val replAccessReqs = ldu.map(_.io.replace_access) ++ Seq(

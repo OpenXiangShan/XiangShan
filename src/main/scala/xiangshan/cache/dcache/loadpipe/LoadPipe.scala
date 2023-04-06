@@ -131,6 +131,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   // val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  // now it is not need to replace bank bit
   val s1_vaddr = s1_req.addr
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
   val s1_nack = RegNext(io.nack)
@@ -199,6 +200,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
+  io.replace_way.dmWay := get_direct_map_way(s1_vaddr)
   val s1_repl_way_en = UIntToOH(io.replace_way.way)
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).coh))

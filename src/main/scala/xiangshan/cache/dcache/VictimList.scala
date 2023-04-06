@@ -11,7 +11,8 @@ trait HasVictimParameters extends HasDCacheParameters{
   // Victim List
   // (addr, counter)
   // WayConflictPredictTable
-  val VictimListSize = 16
+  // val VictimListSize = 16
+  val VictimListSize = nSets
   val VictimWidth = 2
 }
 
@@ -24,9 +25,17 @@ trait WayConflictPredictParameters extends HasDCacheParameters {
   def get_pc_idx(addr: UInt) = { addr(IdxBits+PCOffBits, PCOffBits)}
 }
 
-// use for replacement
-class VictimList {
+case class VictimList(nSets: Int, width: Int = 2) {
+  val victim_vec = RegInit(VecInit(Seq.fill(nSets)(0.U(width.W))))
 
+  // replace to search
+  def replace(set: UInt) = {
+    when(victim_vec(set) =/= Fill(width, 1.U)) {
+      victim_vec(set) := victim_vec(set) + 1.U
+    }
+  }
+
+  def whether_sa(set:UInt) = victim_vec(set)(width-1)
 }
 
 abstract class WayConflictPredictorModule(implicit P: Parameters) extends XSModule with WayConflictPredictParameters

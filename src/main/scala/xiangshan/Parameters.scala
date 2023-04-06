@@ -177,7 +177,7 @@ case class XSCoreParameters
   wpuParameters: WPUParameters = WPUParameters(
     enWPU = true,
     algoName = "mmru",
-    enCfPred = false
+    enCfPred = true
   ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
