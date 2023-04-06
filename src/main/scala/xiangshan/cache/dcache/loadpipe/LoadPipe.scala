@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utils.{HasPerfEvents, OHToUIntStartOne, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
 
@@ -156,12 +156,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   wpu.io.update.bits.vaddr := s1_vaddr
   wpu.io.update.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
   val s1_wpu_pred_fail = wpu.io.resp.bits.s1_pred_fail
-  if(wpuParam.enCfPred){
+  val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
+  if(wpuParam.enCfPred || !env.FPGAPlatform){
     wpu.io.cfpred.s0_pc := io.lsu.s0_pc
     wpu.io.cfpred.s1_pc := io.lsu.s1_pc
     // whether direct_map_way miss with valid tag value
-    val s1_direct_map_way = get_direct_map_way(s1_req.addr)
-    wpu.io.cfpred.s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way && tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
+    wpu.io.cfpred.s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way_num && tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
   }else{
     wpu.io.cfpred := DontCare
   }
@@ -186,7 +186,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
 
   val s1_fake_meta = Wire(new Meta)
-  // s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
   s1_fake_meta.coh := ClientMetadata.onReset
   val s1_fake_tag = get_tag(s1_paddr_dup_dcache)
 
@@ -239,6 +238,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
   val s2_wpu_pred_fail = RegEnable(s1_wpu_pred_fail, s1_fire)
   val s2_real_way_en = RegEnable(s1_real_tag_match_way_dup_dc, s1_fire)
+  val s2_pred_way_en = RegEnable(s1_tag_match_way_dup_lsu, s1_fire)
+  val s2_dm_way_num = RegEnable(s1_direct_map_way_num, s1_fire)
 
   s2_ready := true.B
 
@@ -337,8 +338,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
   // resp.bits.miss := real_miss
-  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
-  // load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail
+  /* load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail */
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := resp.bits.replay
   resp.bits.replayCarry.real_way_en := s2_real_way_en
@@ -347,6 +347,20 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.debug_robIdx := s2_req.debug_robIdx
+  // debug info
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
+  io.lsu.debug_s2_real_way_num := OHToUIntStartOne(s2_real_way_en)
+  if(wpuParam.enWPU) {
+    io.lsu.debug_s2_pred_way_num := OHToUIntStartOne(s2_pred_way_en)
+  }else{
+    io.lsu.debug_s2_pred_way_num := 0.U
+  }
+  if(wpuParam.enWPU && wpuParam.enCfPred || !env.FPGAPlatform){
+    io.lsu.debug_s2_dm_way_num :=  s2_dm_way_num + 1.U
+  }else{
+    io.lsu.debug_s2_dm_way_num := 0.U
+  }
+
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss)
