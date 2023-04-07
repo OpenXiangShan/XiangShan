@@ -367,9 +367,20 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     data_not_refilled && (req.isLoad || req.isStore) && new_req.isLoad
   }
 
+  def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
+    require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
+    if(blockOffBits + idxBits > pgIdxBits) {
+      vaddr0(blockOffBits + idxBits - 1, pgIdxBits) === vaddr1(blockOffBits + idxBits - 1, pgIdxBits)
+    }else {
+      // no alias problem
+      true.B
+    }
+  }
+
   def should_merge(new_req: MissReqWoStoreData): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
-    block_match &&
+    val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
+    block_match && alias_match &&
     (
       before_read_sent_can_merge(new_req) ||
       before_data_refill_can_merge(new_req)
@@ -385,12 +396,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   def should_reject(new_req: MissReqWoStoreData): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
+    val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
 
     req_valid &&
       Mux(
         block_match,
         !before_read_sent_can_merge(new_req) &&
-          !before_data_refill_can_merge(new_req),
+          !before_data_refill_can_merge(new_req) || !alias_match,
         set_match && new_req.way_en === req.way_en
       )
   }
