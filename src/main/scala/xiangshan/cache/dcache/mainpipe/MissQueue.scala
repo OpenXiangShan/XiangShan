@@ -151,6 +151,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val tag = UInt(tagBits.W) // paddr
     })
     val l2_pf_store_only = Input(Bool())
+
+    val fault_trigger = Output(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -263,6 +265,14 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     should_refill_data := should_refill_data_reg || io.req.bits.isLoad
     should_refill_data_reg := should_refill_data
   }
+
+  val fault_trigger = Wire(Bool())
+
+  // merge a store, with different alias
+  fault_trigger := secondary_fire && io.req.bits.isStore && addr_to_dcache_set(req.vaddr) =/= addr_to_dcache_set(io.req.bits.vaddr)
+  io.fault_trigger := fault_trigger
+
+  dontTouch(fault_trigger)
 
   when (io.mem_acquire.fire()) {
     s_acquire := true.B
@@ -588,6 +598,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val reject = Cat(secondary_reject_vec).orR
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
+
+  val fault_trigger = Wire(Bool())
+  fault_trigger := VecInit(entries.map(_.io.fault_trigger)).asUInt.orR
+  dontTouch(fault_trigger)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
