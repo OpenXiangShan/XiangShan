@@ -25,7 +25,7 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, FastToSlow, SlowToFast}
+import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, FastToSlow}
 import top.BusPerfMonitor
 import utils.TLEdgeBuffer
 import huancun._
@@ -135,10 +135,10 @@ trait HaveSlaveAXI4Port {
 
   class DMAPortClockDivDomain()(implicit p: Parameters) extends LazyModule {
     val dmaNode = AXI4IdentityNode()
-    val rationalNode = TLRationalIdentityNode()
+    val rationalNode = TLIdentityNode()
 
     rationalNode :=
-      TLRationalCrossingSource() :=
+      // TLRationalCrossingSource() :=
       TLFIFOFixer() :=
       TLWidthWidget(32) :=
       AXI4ToTL() :=
@@ -158,7 +158,7 @@ trait HaveSlaveAXI4Port {
   val dma_xbar = TLXbar()
   dma_xbar :=
     TLBuffer() :=
-    TLRationalCrossingSink(SlowToFast) :=
+    // TLRationalCrossingSink(SlowToFast) :=
     dmaClkDiv2Domain.rationalNode
   // Illegal DMA requests are sent to the error device.
   errorDevice.node := TLBuffer() := dma_xbar
@@ -360,8 +360,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     memClkDiv2Domain.module.reset := reset_sync_div2
     periClkDiv2Domain.module.clock := clock_div2
     periClkDiv2Domain.module.reset := reset_sync_div2
-    dmaClkDiv2Domain.module.clock := clock_div2
-    dmaClkDiv2Domain.module.reset := reset_sync_div2
+    // dmaClkDiv2Domain.module.clock := clock_div2
+    // dmaClkDiv2Domain.module.reset := reset_sync_div2
 
     debugModule.module.io <> debug_module_io
 

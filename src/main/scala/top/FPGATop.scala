@@ -46,6 +46,7 @@ class TopIOAdapter(_top: XSTop)(implicit p: Parameters) extends RawModule {
     }
     val debug_reset = Output(Bool())
     val cacheable_check = new TLPMAIO()
+    val clock_div2 = Input(Clock())
   })
 
   // This is the IO of southlake.
@@ -55,9 +56,7 @@ class TopIOAdapter(_top: XSTop)(implicit p: Parameters) extends RawModule {
 
   top := DontCare
   top.clock := io.clock
-  withClockAndReset(io.clock, io.reset) {
-    top.clock_div2 := io.clock // Module(new Pow2ClockDivider(1)).io.clock_out
-  }
+  top.clock_div2 := io.clock_div2
   top.reset := io.reset
   top.extIntrs := io.extIntrs
   top.systemjtag <> io.systemjtag
@@ -75,7 +74,7 @@ class TopIOAdapter(_top: XSTop)(implicit p: Parameters) extends RawModule {
     top.rtc_clock := rtcClock
   }
   // FPGA supports booting directly from memory.
-  top.riscv_rst_vec.foreach(_ := 0x2000000000L.U)
+  top.riscv_rst_vec.foreach(_ := 0x80000000L.U)
 
 }
 
@@ -139,7 +138,7 @@ class TopMemoryAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
 
   def reMapAddress(addr: UInt): UInt = {
     // Memory: 0x20_0000_0000 --> 0x8000_0000
-    addr - (0x2000000000L - 0x80000000L).U
+    addr
   }
 
   memory.elts.zip(l_adapter.io_slave.elts).foreach{ case (m, a) =>
@@ -156,7 +155,7 @@ class TopPeripheralAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
 
     val errorDev = LazyModule(new TLError(
       params = DevNullParams(
-        address = Seq(AddressSet(0x0L, 0x7fffffffL)),
+        address = Seq(AddressSet(0x80000000L, 0x7fffffffL)),
         maxAtomic = 8,
         maxTransfer = 128
       ),
@@ -212,12 +211,77 @@ class TopPeripheralAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
     // Peripheral:
     // (1) UART: 0x1f_0005_0000 --> 0x310b_0000
     // (2) QSPI: 0x1f_fff8_0000 --> 0x1000_0000
-    Mux(addr(31), addr - (0x1ffff80000L - 0x10000000L).U, addr - (0x1f00050000L - 0x310b0000L).U)
+    addr
   }
   peripheral.elts.zip(l_adapter.io_slave.elts).foreach{ case (p, a) =>
     p.ar.bits.addr := reMapAddress(a.ar.bits.addr)
     p.aw.bits.addr := reMapAddress(a.aw.bits.addr)
   }
+}
+
+class TopDMAAdapter(_top: XSTop)(implicit p: Parameters) extends Module {
+  class TopDMABusAdapter()(implicit p: Parameters) extends LazyModule {
+    val dmaIdBits = 8
+    val master = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      Seq(AXI4MasterParameters(
+        name = "dma",
+        id = IdRange(0, 1 << dmaIdBits)
+      ))
+    )))
+    val slave = AXI4SlaveNode(List(_top.misc.l3FrontendAXI4Node.in.head._2.slave))
+
+    val errorDev = LazyModule(new TLError(
+      params = DevNullParams(
+        address = Seq(AddressSet(0x0L, 0x7fffffffL)),
+        maxAtomic = 8,
+        maxTransfer = 128
+      ),
+      beatBytes = 32
+    ))
+
+    val tlBus = TLXbar()
+    tlBus :=
+      TLFIFOFixer() :=
+      AXI4ToTL() :=
+      AXI4UserYanker(Some(32)) :=
+      master
+    errorDev.node := tlBus
+    class DMASlowClockDomain()(implicit p: Parameters) extends LazyModule {
+      val node = AXI4IdentityNode()
+      val rationalNode = TLRationalIdentityNode()
+
+      node := AXI4UserYanker(Some(32)) := TLToAXI4() := TLRationalCrossingSink(FastToSlow) := rationalNode
+
+      lazy val module = new LazyModuleImp(this) {
+        override def desiredName: String = "DMASlowClockDomain"
+      }
+    }
+    val slowClockDomain = LazyModule(new DMASlowClockDomain)
+    slowClockDomain.rationalNode := TLRationalCrossingSource() := tlBus
+    slave := slowClockDomain.node
+
+    val io_slave = InModuleBody {
+      slave.makeIOs()
+    }
+    val io_master = InModuleBody {
+      master.makeIOs()
+    }
+    lazy val module = new LazyModuleImp(this) {
+      val clock_slow = IO(Input(Clock()))
+      slowClockDomain.module.clock := clock_slow
+    }
+  }
+
+  val clock_slow = IO(Input(Clock()))
+  val l_adapter = LazyModule(new TopDMABusAdapter)
+  val adapter = Module(l_adapter.module)
+  adapter.clock_slow := clock_slow
+
+  val dma = IO(l_adapter.io_master.cloneType)
+  val top = IO(Flipped(_top.misc.dma.cloneType))
+
+  dma <> l_adapter.io_master
+  l_adapter.io_slave <> top
 }
 
 class FPGATop()(implicit p: Parameters) extends RawModule {
@@ -245,10 +309,19 @@ class FPGATop()(implicit p: Parameters) extends RawModule {
   val peripheral = IO(peripheral_adapter.peripheral.cloneType)
   peripheral <> peripheral_adapter.peripheral
 
-  val dma = IO(top.dma.cloneType)
-  dma.elts.foreach(dontTouch(_))
-  dma := DontCare
-  top.dma := DontCare
+//  val dma_adapter = withClockAndReset(io_adapter.top.clock, io.reset) {
+//    Module(new TopDMAAdapter(lazy_module_top))
+//  }
+//  dma_adapter.top <> top.dma
+//  dma_adapter.clock_slow := io_adapter.top.clock_div2
+//  val dma = IO(Flipped(dma_adapter.dma.cloneType))
+//  dma <> dma_adapter.dma
+
+  val dma = IO(Flipped(lazy_module_top.misc.dma.cloneType))
+  dma <> top.dma
+  // dma.elts.foreach(dontTouch(_))
+  // dma := DontCare
+  // top.dma := DontCare
 
   // Extra bits are DontCare
   top.xsx_fscan := DontCare
