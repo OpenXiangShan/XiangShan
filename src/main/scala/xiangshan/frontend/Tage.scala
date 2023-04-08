@@ -61,6 +61,12 @@ trait TageParams extends HasBPUConst with HasXSParameter {
 
   def get_lgc_br_idx(unhashed_idx: UInt, br_pidx: UInt) = get_unshuffle_bits(unhashed_idx) ^ br_pidx
 
+  class TageCtr() extends TageBundle {
+    val up  : UInt = UInt(TageCtrBits.W)
+    val down: UInt = UInt(TageCtrBits.W)
+  }
+
+
 }
 
 trait HasFoldedHistory {
@@ -102,6 +108,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
   def conf(): UInt = {
     val medium: Bool = (ctr_up === Cat(ctr_down, 1.U)) || (Cat(ctr_up, 1.U) === ctr_down)
     val low   : Bool = (ctr_up < Cat(ctr_down, 1.U)) && (Cat(ctr_up, 1.U) > ctr_down)
+    XSDebug(p"ctr_up: ${ctr_up}, ctr_down: ${ctr_down}, conf: ${low}${medium}\n")
     Cat(low, medium)
   }
 
@@ -118,16 +125,16 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 }
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
-  val pc           = UInt(VAddrBits.W)
-  val folded_hist  = new AllFoldedHistories(foldedGHistInfos)
-  val ghist        = UInt(HistoryLength.W)
+  val pc          = UInt(VAddrBits.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghist       = UInt(HistoryLength.W)
   // update tag and ctr
-  val mask         = Vec(numBr, Bool())
-  val takens       = Vec(numBr, Bool())
-  val decay        = Vec(numBr, Bool()) // BATAGE decay mechanism
-  val alloc        = Vec(numBr, Bool())
-  val old_ctr_up   = Vec(numBr, UInt(TageCtrBits.W)) // BATAGE up down ctr
-  val old_ctr_down = Vec(numBr, UInt(TageCtrBits.W)) // BATAGE up down ctr
+  val mask        = Vec(numBr, Bool())
+  val takens      = Vec(numBr, Bool())
+  val decay       = Vec(numBr, Bool()) // BATAGE decay mechanism
+  val alloc       = Vec(numBr, Bool())
+  val ctr_up      = Vec(numBr, UInt(TageCtrBits.W)) // BATAGE up down ctr
+  val ctr_down    = Vec(numBr, UInt(TageCtrBits.W)) // BATAGE up down ctr
 }
 
 class TageMeta(implicit p: Parameters)
@@ -255,18 +262,11 @@ class TageTable
   // Constants
   private val nRowsPerBr: Int = nRows / numBr
 
-  // bypass entries for tage update
-  val perBankWrbypassEntries = 8
-
   // Class definitions
   class TageTag() extends TageBundle {
     val value: UInt = UInt(tagLen.W)
   }
 
-  class TageCtr() extends TageBundle {
-    val up  : UInt = UInt(TageCtrBits.W)
-    val down: UInt = UInt(TageCtrBits.W)
-  }
 
   class TageEntry() extends TageBundle {
     val tag: TageTag = new TageTag()
@@ -274,7 +274,7 @@ class TageTable
   }
 
   // Internal functions
-  def getFoldedHistoryInfo: Set[(Int, Int)] = allFhInfos.filter(_._1 > 0).toSet
+  def getFoldedHistoryInfo: Seq[(Int, Int)] = allFhInfos.filter(_._1 > 0)
 
   def computeTagAndHash(unhashedIdx: UInt, allFh: AllFoldedHistories): (UInt, UInt) = {
     val idxFoldedHistory  = allFh.getHistWithInfo(idxFhInfo).folded_hist
@@ -346,10 +346,6 @@ class TageTable
       singlePort = true)
     )
   )
-
-  val tableBanks_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt((TageCtrBits * 2).W), perBankWrbypassEntries, 1, tagWidth = tagLen))
-  )) // let it corresponds to logical brIdx
 
 
   // CSR base folded history debug
@@ -478,23 +474,10 @@ class TageTable
       val taken             = io.update.takens(brLogicIdx)
       val decay             = io.update.decay(brLogicIdx)
 
-      // WrBypass signals
-      val wrbypass_io         = Mux1H(UIntToOH(brLogicIdx, numBr), tableBanks_wrbypasses(b).map(_.io))
-      val wrbypass_hit        = wrbypass_io.hit
-      val wrbypass_ctr: UInt  = wrbypass_io.hit_data(0).bits
-      val wrbypass_ctr_down   = wrbypass_ctr(TageCtrBits - 1, 0)
-      val wrbypass_ctr_up     = wrbypass_ctr(TageCtrBits * 2 - 1, TageCtrBits)
-      val wrbypass_data_valid = wrbypass_hit && wrbypass_io.hit_data(0).valid
-
       val latest_ctr_up   = Wire(UInt(TageCtrBits.W))
       val latest_ctr_down = Wire(UInt(TageCtrBits.W))
-      when(wrbypass_data_valid) {
-        latest_ctr_up := wrbypass_ctr_up
-        latest_ctr_down := wrbypass_ctr_down
-      }.otherwise {
-        latest_ctr_up := io.update.old_ctr_up(brLogicIdx)
-        latest_ctr_down := io.update.old_ctr_down(brLogicIdx)
-      }
+      latest_ctr_up := io.update.ctr_up(brLogicIdx)
+      latest_ctr_down := io.update.ctr_down(brLogicIdx)
 
       // Sanity check
       XSError((alloc && decay), p"TageTable: Alloc and decay should not be both true")
@@ -521,7 +504,7 @@ class TageTable
             update_wCtr.up := latest_ctr_up - 1.U
             update_wCtr.down := latest_ctr_down
             not_silent_update := true.B
-          }.elsewhen(latest_ctr_down > latest_ctr_up) {
+          }.elsewhen(latest_ctr_down > latest_ctr_up + 1.U) {
             update_wCtr.up := latest_ctr_up
             update_wCtr.down := latest_ctr_down - 1.U
             not_silent_update := true.B
@@ -538,15 +521,6 @@ class TageTable
       }
     }
 
-    // Maintain WrBypass
-    for (brLogicIdx <- 0 until numBr) {
-      val wrbypass = tableBanks_wrbypasses(b)(brLogicIdx)
-      val brPhyIdx = get_phy_br_idx(update_unhashedIdx, brLogicIdx)
-      wrbypass.io.wen := io.update.mask(brLogicIdx) && update_reqBankOH(b)
-      wrbypass.io.write_idx := get_bank_idx(update_idx)
-      val entry = Mux1H(UIntToOH(brPhyIdx, numBr), update_phyWCtr(b))
-      wrbypass.io.write_data(0) := Cat(entry.up, entry.down)
-    }
   }
 
 
@@ -555,20 +529,16 @@ class TageTable
     (0 until nBanks).map(b => tagBanks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
   XSPerfAccumulate(f"tage_table_bank_conflict", perf_bankConflict)
 
-  val lastAllocPC = RegEnable(io.update.pc, io.update.alloc.asUInt.orR)
-  val lastAllocTag = RegEnable(update_tag, io.update.alloc.asUInt.orR)
-  XSPerfAccumulate(f"tage_table_duplicate_update",
-    lastAllocPC === io.update.pc && lastAllocTag === update_tag && io.update.alloc.asUInt.orR
-  )
-
+  private val lastAllocIdx: Vec[UInt] = Reg(Vec(numBr, UInt()))
+  private val lastAllocTag: Vec[UInt] = Reg(Vec(numBr, UInt()))
   for (i <- 0 until numBr) {
-    for (b <- 0 until nBanks) {
-      val wrbypass = tableBanks_wrbypasses(b)(i)
-      XSPerfAccumulate(f"tage_table_bank_${b}_wrbypass_enq_$i",
-        io.update.mask(i) && update_reqBankOH(b) && !wrbypass.io.hit)
-      XSPerfAccumulate(f"tage_table_bank_${b}_wrbypass_hit_$i",
-        io.update.mask(i) && update_reqBankOH(b) && wrbypass.io.hit)
+    when(io.update.alloc(i)) {
+      lastAllocIdx(i) := update_idx
+      lastAllocTag(i) := update_tag
     }
+    XSPerfAccumulate(f"tage_table_bank_${i}_duplicate_update",
+      lastAllocIdx(i) === update_idx && lastAllocTag(i) === update_tag && io.update.alloc(i)
+    )
   }
 
   for (b <- 0 until nBanks) {
@@ -612,6 +582,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   println(s"TAGE Total Bits: ${TageTotalBits / 8}B")
 
+  // Constants
+  private val perCompWrBypassCnt = 256
+
+
+  // Variables
   val CAT: Vec[UInt] = RegInit(VecInit(Seq.fill(numBr)(0.U(log2Ceil(TageCATMAX).W))))
 
   val resp_meta = Wire(new TageMeta)
@@ -662,10 +637,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
   baseTable.io.s0_fire := io.s0_fire(1)
   baseTable.io.s0_pc   := s0_pc_dup(1)
 
+  // Update WrBypass
+  // [TageNTable, numBr]
+  val update_wrBypass: Seq[Seq[WrBypass[TageCtr]]] = TageTableInfos.zipWithIndex.map {
+    case ((nRows, histLen, tagLen), idx) => Seq.fill(numBr)(
+      Module(
+        new WrBypass(new TageCtr(), perCompWrBypassCnt, idxWidth = log2Ceil(nRows) - log2Ceil(numBr))
+      )
+    )
+  }.toSeq
 
-  val tage_fh_info = taggedTables.map(_.getFoldedHistoryInfo).reduce(_ ++ _).toSet
+  val tage_fh_info = taggedTables.map(_.getFoldedHistoryInfo).reduce(_ ++ _)
 
-  override def getFoldedHistoryInfo = Some(tage_fh_info)
+  override def getFoldedHistoryInfo = Some(tage_fh_info.toSet)
 
   val s1_resps: Vec[Vec[ValidIO[TageResp]]] = VecInit(taggedTables.map(_.io.resps))
 
@@ -752,20 +736,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     )
   }
 
+
   //---------------- Update logics below ------------------//
-  // These signals will be directly connect to TageTables and BaseTable
-  val update_valid                             = io.update.valid
-  val update_data                              = io.update.bits
-  val update_misPred                           = update_data.mispred_mask
-  val update_meta                              = update_data.meta.asTypeOf(new TageMeta)
-  val update_tageResp                          = update_meta.tagResps
-  val update_condition                         = VecInit((0 until numBr).map(w =>
-    update_data.ftb_entry.brValids(w) &&
-      update_valid &&
-      !update_data.ftb_entry.always_taken(w) && // Always taken branch does not enter TAGE
-      !(PriorityEncoder(update_data.br_taken_mask) < w.U) // No update for latter branch if former branch taken
-  ))
-  val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
   // These signal is generated below
   val update_mask                              = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
   val update_takens                            = Wire(Vec(numBr, Vec(TageNTables, Bool())))
@@ -774,6 +746,25 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val update_baseCnt                           = Wire(Vec(numBr, UInt(2.W)))
   val update_baseUpdateValid                   = WireDefault(0.U.asTypeOf(Vec(numBr, Bool())))
   val update_baseTakens                        = Wire(Vec(numBr, Bool()))
+  val update_wrBypassResps                     = Wire(Vec(numBr, Vec(TageNTables, Valid(new TageResp()))))
+  // These signals will be directly connect to TageTables and BaseTable
+  val update_valid                             = io.update.valid
+  val update_data                              = io.update.bits
+  val update_misPred                           = update_data.mispred_mask
+  val update_meta                              = update_data.meta.asTypeOf(new TageMeta)
+  val update_condition                         = VecInit((0 until numBr).map(w =>
+    update_data.ftb_entry.brValids(w) &&
+      update_valid &&
+      !update_data.ftb_entry.always_taken(w) && // Always taken branch does not enter TAGE
+      !(PriorityEncoder(update_data.br_taken_mask) < w.U) // No update for latter branch if former branch taken
+  ))
+  val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
+  val update_tageResp     : Seq[Vec[TageResp]] = (update_meta.tagResps, update_wrBypassResps).zipped.
+    map((a, b) => {
+      VecInit((a, b).zipped.map((predict, wrbypass) => {
+        Mux(wrbypass.valid, wrbypass.bits, predict)
+      }))
+    }) // [numBr, TageNTable]
 
   // Connect to submodules
   for (i <- 0 until numBr) {
@@ -782,13 +773,56 @@ class Tage(implicit p: Parameters) extends BaseTage {
       taggedTables(compIdx).io.update.takens(i) := RegNext(update_takens(i)(compIdx))
       taggedTables(compIdx).io.update.decay(i) := RegNext(update_decayMask(i)(compIdx))
       taggedTables(compIdx).io.update.alloc(i) := RegNext(update_allocMask(i)(compIdx))
-      taggedTables(compIdx).io.update.old_ctr_up(i) := RegNext(update_tageResp(i)(compIdx).ctr_up)
-      taggedTables(compIdx).io.update.old_ctr_down(i) := RegNext(update_tageResp(i)(compIdx).ctr_down)
+      taggedTables(compIdx).io.update.ctr_up(i) := RegNext(update_tageResp(i)(compIdx).ctr_up)
+      taggedTables(compIdx).io.update.ctr_down(i) := RegNext(update_tageResp(i)(compIdx).ctr_down)
 
       // use fetch pc instead of instruction pc
       taggedTables(compIdx).io.update.pc := RegNext(update_data.pc)
       taggedTables(compIdx).io.update.folded_hist := RegNext(update_foldedHistory)
       taggedTables(compIdx).io.update.ghist := RegNext(io.update.bits.ghist)
+
+      // Update WrBypass
+      update_wrBypassResps(i)(compIdx).valid :=
+        update_wrBypass(compIdx)(i).io.hit && update_wrBypass(compIdx)(i).io.hit_data(0).valid
+      update_wrBypassResps(i)(compIdx).bits.ctr_up := update_wrBypass(compIdx)(i).io.hit_data(0).bits.up
+      update_wrBypassResps(i)(compIdx).bits.ctr_down := update_wrBypass(compIdx)(i).io.hit_data(0).bits.down
+      update_wrBypass(compIdx)(i).io.wen := update_mask(i)(compIdx)
+      val index = ((update_data.pc >> instOffsetBits).asUInt ^
+        update_foldedHistory.getHistWithInfo(tage_fh_info(compIdx)).folded_hist)
+
+      val latest_ctr_up   = update_tageResp(i)(compIdx).ctr_up
+      val latest_ctr_down = update_tageResp(i)(compIdx).ctr_down
+      val ctr             = Wire(new TageCtr())
+      when(update_allocMask(i)(compIdx)) {
+        // Update tags
+        // Init counters according to taken
+        when(update_takens(i)(compIdx)) {
+          ctr.up := 1.U
+          ctr.down := 0.U
+        }.otherwise {
+          ctr.up := 0.U
+          ctr.down := 1.U
+        }
+      }.otherwise {
+        when(update_decayMask(i)(compIdx)) {
+          // Decay the larger counter
+          when(latest_ctr_up > latest_ctr_down) {
+            ctr.up := latest_ctr_up - 1.U
+            ctr.down := latest_ctr_down
+          }.elsewhen(latest_ctr_down > latest_ctr_up + 1.U) {
+            ctr.up := latest_ctr_up
+            ctr.down := latest_ctr_down - 1.U
+          }.otherwise {
+            ctr.up := latest_ctr_up
+            ctr.down := latest_ctr_down
+          }
+        }.otherwise {
+          ctr.up := satUpdate(latest_ctr_up, TageCtrBits, update_takens(i)(compIdx))
+          ctr.down := satUpdate(latest_ctr_down, TageCtrBits, !update_takens(i)(compIdx))
+        }
+      }
+      update_wrBypass(compIdx)(i).io.write_idx := index
+      update_wrBypass(compIdx)(i).io.write_data(0) := ctr
     }
   }
   baseTable.io.update_mask := RegNext(update_baseUpdateValid)
@@ -839,7 +873,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
             // Update provider only under this condition
             update_mask(i)(idx) := true.B
             update_takens(i)(idx) := taken
-          }.otherwise {
+          }.elsewhen(nextProviderValid) {
             // Next longer hit comp can predict well
             // Entry in this provider is probably useless
             // So decay
@@ -916,10 +950,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
     // Performance counter
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && misPred)
-    XSPerfAccumulate(s"tage_bank_${i}_update_allocate_success", doAllocate && allocatable)
+    XSPerfAccumulate(s"tage_bank_${i}_update_allocate_success",
+      needToAllocate && doAllocate && update_allocMask(i).asUInt.orR)
     XSPerfAccumulate(s"tage_bank_${i}_update_allocate_throttled", needToAllocate && !doAllocate)
     XSPerfAccumulate(s"tage_bank_${i}_update_allocate_failed", doAllocate && !allocatable)
-    XSPerfAccumulate(s"tage_bank_${i}_update_decay", PopCount(update_decayMask(i)))
+    XSPerfAccumulate(s"tage_bank_${i}_update_decay", PopCount(update_mask(i).asUInt & update_decayMask(i).asUInt))
 
     // Debug signals
     XSError(hasUpdate && nextProviderValid && providerValid && nextProviderIdx >= providerIdx,

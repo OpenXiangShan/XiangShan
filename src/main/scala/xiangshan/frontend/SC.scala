@@ -399,7 +399,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
 
   }
 
-  override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
+  override def getFoldedHistoryInfo = Some(tage_fh_info.toSet ++ sc_fh_info)
 
   override val perfEvents = Seq(
     ("tage_tht_hit                  ", PopCount(update_meta.providers.map(_.valid))),
