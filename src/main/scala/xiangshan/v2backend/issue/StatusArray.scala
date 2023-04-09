@@ -137,14 +137,13 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
       statusNext.firstIssue := status.firstIssue || deqSelVec(i)
 
       statusNext.issued := status.issued // otherwise
-      when (deqSelVec(i)) {
-        // Deq at current cycle
-        statusNext.issued := true.B
-      }.elsewhen(deqRespVec(i).valid) {
-        // Not stage success
+      when (deqRespVec(i).valid) {
+        // Not stage success, issue again
         when (!RSFeedbackType.isStageSuccess(deqRespVec(i).bits.respType)) {
           statusNext.issued := false.B
         }
+      }.elsewhen(deqSelVec(i)) {
+        statusNext.issued := true.B
       }
     }
   }
