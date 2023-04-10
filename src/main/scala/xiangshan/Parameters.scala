@@ -147,12 +147,12 @@ case class XSCoreParameters
     LsDqDeqWidth = 6,
   ),
   intPreg: PregParams = IntPregParams(
-    numEntries = 160,
+    numEntries = 64,
     numRead = 14,
     numWrite = 8,
   ),
   vfPreg: VfPregParams = VfPregParams(
-    numEntries = 160,
+    numEntries = 64,
     numRead = 14,
     numWrite = 8,
   ),
@@ -299,11 +299,11 @@ case class XSCoreParameters
     val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(FmacCfg, FDivSqrtCfg), Seq(VecWB(port = 0, 0))),
-        ExeUnitParams(Seq(FmacCfg, FDivSqrtCfg), Seq(VecWB(port = 1, 0))),
+        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(F2fCfg, F2iCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = vfPreg.numEntries,

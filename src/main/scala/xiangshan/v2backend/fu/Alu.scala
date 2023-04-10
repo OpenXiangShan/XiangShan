@@ -18,5 +18,5 @@ class Alu(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   aluModule.io.src := in.src
   aluModule.io.func := in.fuOpType
   out.data := aluModule.io.result
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

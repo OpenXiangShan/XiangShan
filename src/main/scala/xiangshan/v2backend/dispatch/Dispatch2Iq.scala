@@ -126,6 +126,8 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
 
+  private val numEnq = io.in.size
+
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.name).toSet)
   println(s"portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
@@ -186,19 +188,39 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
 
+  private val reqPsrcVec: IndexedSeq[UInt] = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
+
+  private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
+  private val vfSrcStateVec  = if (io.readVfState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
+
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
   if (io.readIntState.isDefined) {
-    val reqPsrc = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
-    require(io.readIntState.get.size >= reqPsrc.size, s"io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrc}")
-    io.readIntState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
+    require(io.readIntState.get.size >= reqPsrcVec.size,
+      s"[Dispatch2IqArithImp] io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrcVec.size}")
+    io.readIntState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
+    io.readIntState.get.map(_.resp).zip(intSrcStateVec.get).foreach(x => x._2 := x._1)
   }
 
+  if (io.readVfState.isDefined) {
+    require(io.readVfState.get.size >= reqPsrcVec.size,
+      s"[Dispatch2IqArithImp] io.readVfState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrcVec.size}")
+    io.readVfState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
+    io.readVfState.get.map(_.resp).zip(vfSrcStateVec.get).foreach(x => x._2 := x._1)
+  }
 
-  // srcState is read from outside and connected directly
-  if (io.readIntState.isDefined) {
-    val intSrcStateVec = uopsIn.flatMap(_.bits.srcState.take(numRegSrc))
-    io.readIntState.get.map(_.resp).zip(intSrcStateVec).foreach(x => x._2 := x._1)
+  uopsIn
+    .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .zip(
+      intSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy))) zip vfSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy)))
+    )
+    .foreach {
+      case ((state: UInt, srcType), (intState, vfState)) =>
+        state := Mux1H(Seq(
+          SrcType.isXp(srcType) -> intState,
+          SrcType.isVfp(srcType) -> vfState,
+          SrcType.isNotReg(srcType) -> true.B,
+        ))
   }
 
 
@@ -346,6 +368,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
       state := Mux1H(Seq(
         SrcType.isXp(srcType) -> intState,
         SrcType.isVfp(srcType) -> vfState,
+        SrcType.isNotReg(srcType) -> true.B,
       ))
   }
 

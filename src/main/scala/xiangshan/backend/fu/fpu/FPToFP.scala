@@ -117,14 +117,15 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
   )
 
   io.out.data := RegEnable(boxed_data, regEnables(1))
-  fflags := RegEnable(mux.exc, regEnables(1))
+  io.out.fflags := RegEnable(mux.exc, regEnables(1))
 }
 
 class FPToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
 
-  override def latency: Int = F2fCfg.latency.latencyVal.get
+  override def latency: Int = cfg.latency.latencyVal.get
 
   override val dataModule = Module(new FPToFPDataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
+  connectNonPipedCtrlSingal // Todo: make it piped
 }

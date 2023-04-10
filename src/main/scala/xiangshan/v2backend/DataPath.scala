@@ -44,8 +44,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   // Todo: limit read port
   private val numIntR = numIntRfReadByExu
   private val numVfR = numVfRfReadByExu
-  println(s"RegFile read req needed by Exu: Int(${numIntRfReadByExu}), Vf(${numVfRfReadByExu})")
-  println(s"RegFile read port: Int(${numIntR}), Vf(${numVfR})")
+  println(s"[DataPath] RegFile read req needed by Exu: Int(${numIntRfReadByExu}), Vf(${numVfRfReadByExu})")
+  println(s"[DataPath] RegFile read port: Int(${numIntR}), Vf(${numVfR})")
 
   private val intRfRaddr = Wire(Vec(numIntR, UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfRdata = Wire(Vec(numIntR, UInt(intSchdParams.rfDataWidth.W)))
@@ -152,7 +152,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         val readDataCfgSet = toExu(iqIdx)(exuIdx).bits.params.getSrcDataType(srcIdx)
         // need read int reg
         if (readDataCfgSet.intersect(IntRegSrcDataSet).nonEmpty) {
-          println(s"[DataPath] (iqIdx, exuIdx, srcIdx): ($iqIdx, $exuIdx, $srcIdx)")
           s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := intRfRdata(intRfRdataIdx)
           intRfRdataIdx += 1
         } else {
@@ -232,7 +231,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       // s1Reg --[Data]--> exu(s1) ---------- begin
       // data source1: preg read data
       for (k <- sinkData.src.indices) {
-        println(s"[DataPath] (iqIdx, exuIdx, srcIdx): ($i, $j, $k)")
         val srcDataTypeSet: Set[DataConfig] = sinkData.params.getSrcDataType(k)
 
         val readRfMap: Seq[(Bool, UInt)] = (Seq(None) :+
@@ -243,7 +241,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
             Some(SrcType.isVfp(s1_srcType(i)(j)(k))-> s1_vfPregRData(i)(j)(k))
           else None)
         ).filter(_.nonEmpty).map(_.get)
-        println(readRfMap)
         if (readRfMap.nonEmpty)
           sinkData.src(k) := Mux1H(readRfMap)
       }
@@ -313,8 +310,4 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val debugIntRat = Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))
   val debugFpRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
   val debugVecRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
-
-  println(this.intSchdParams.issueBlockParams.map(_.exuBlockParams.map(_.getRfReadDataCfgSet)))
-  println(this.memSchdParams.issueBlockParams.map(_.exuBlockParams.map(_.getRfReadDataCfgSet)))
-  println(this.vfSchdParams.issueBlockParams.map(_.exuBlockParams.map(_.getRfReadDataCfgSet)))
 }

@@ -4,9 +4,10 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.fu.fpu.IntToFP
-import xiangshan.backend.fu.{CertainLatency, HasFuLatency, UncertainLatency, CSR, Fence, Bku}
+import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.{Bku, CSR, CertainLatency, Fence, HasFuLatency, UncertainLatency}
 import xiangshan.backend.Std
+import xiangshan.v2backend.Bundles.ExuInput
 import xiangshan.v2backend.fu._
 
 // Todo: split it into other config files
@@ -212,7 +213,19 @@ package object v2backend {
 
     def readFp: Boolean = numFpSrc > 0
 
-    def fuSel(fuType: UInt): Bool = fuType === this.fuType.U
+    def fuSel(uop: ExuInput): Bool = {
+      // Don't add more shit here!!!
+      // Todo: add new FuType to distinguish f2i, f2f
+      if (this.fuType == FuType.fmisc) {
+        this.name match {
+          case F2iCfg.name => uop.rfWen.get
+          case F2fCfg.name => uop.fpu.get.fpWen && !uop.fpu.get.div && !uop.fpu.get.sqrt
+        }
+      } else {
+        uop.fuType === this.fuType.U
+      }
+    }
+
     /**
       * params(i): data type set of the ith src port
       * @return
@@ -400,7 +413,7 @@ package object v2backend {
   val FmacCfg: FuConfig = FuConfig (
     name = "fmac",
     fuType = FuType.fmac,
-    fuGen = null, // Todo
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("FMac")),
     srcData = Seq(
       Seq(FpData(), FpData()),
       Seq(FpData(), FpData(), FpData()),
@@ -415,8 +428,9 @@ package object v2backend {
   val F2iCfg: FuConfig = FuConfig (
     name = "f2i",
     fuType = FuType.fmisc,
-    fuGen = null, // Todo
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToInt(cfg)(p).suggestName("F2i")),
     srcData = Seq(
+      Seq(FpData(), FpData()),
       Seq(FpData()),
     ),
     writeIntRf = true,
@@ -428,23 +442,23 @@ package object v2backend {
 
   val F2fCfg: FuConfig = FuConfig (
     name = "f2f",
-    fuType = FuType.fDivSqrt,
-    fuGen = null, // Todo
+    fuType = FuType.fmisc,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToFP(cfg)(p).suggestName("F2f")),
     srcData = Seq(
+      Seq(FpData(), FpData()),
       Seq(FpData()),
     ),
     writeIntRf = false,
     writeFpRf = true,
     writeFflags = true,
-    latency = UncertainLatency(),
-    hasInputBuffer = (true, 8, true),
+    latency = CertainLatency(2),
     needSrcFrm = true,
   )
 
   val FDivSqrtCfg: FuConfig = FuConfig (
-    name = "fdiv",
+    name = "fDivSqrt",
     fuType = FuType.fDivSqrt,
-    fuGen = null, // Todo
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FDivSqrt(cfg)(p).suggestName("FDivSqrt")),
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),

@@ -35,11 +35,11 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
-//  val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
   val memScheduler = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
   val dataPath = LazyModule(new DataPath(params))
   val intExuBlock = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
-//  val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
+  val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
 
   lazy val module = new BackendImp(this)
 }
@@ -50,11 +50,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val intScheduler = wrapper.intScheduler.get.module
-//  private val vfScheduler = wrapper.vfScheduler.module
+  private val vfScheduler = wrapper.vfScheduler.get.module
   private val memScheduler = wrapper.memScheduler.get.module
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
-//  private val fpExuBlock = wrapper.vfExuBlock.get.module
+  private val vfExuBlock = wrapper.vfExuBlock.get.module
   private val wbDataPath = Module(new WbDataPath(params))
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -95,11 +95,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.robIdx := source.bits.robIdx
   }
 
-//  vfScheduler.io.fromTop.hartId := io.fromTop.hartId
-//  vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.redirect
-//  vfScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
-//  vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.uops
-//  vfScheduler.io.writeback := wbDataPath.io.toVfPreg.map(_.toWakeUpBundle)
+  vfScheduler.io.fromTop.hartId := io.fromTop.hartId
+  vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
+  vfScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
+  vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.vfUops
+  vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
+  vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
 
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
 
@@ -110,7 +111,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     }
   }
 
-  dataPath.io.fromVfIQ <> 0.U.asTypeOf(dataPath.io.fromVfIQ)
+  dataPath.io.fromVfIQ <> vfScheduler.io.toDataPath
   dataPath.io.fromMemIQ <> memScheduler.io.toDataPath
 
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
@@ -148,13 +149,18 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fenceio.disableSfence := csrio.disableSfence
   io.fenceio <> fenceio
 
-//  fpExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
-//  fpExuBlock.io.in := dataPath.io.toFpExu
-//  fpExuBlock.io.frm.get := intExuBlock.io.csrio.get.fpu.frm
+  vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
+  for (i <- 0 until vfExuBlock.io.in.size) {
+    for (j <- 0 until vfExuBlock.io.in(i).size) {
+      PipelineConnect(dataPath.io.toFpExu(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
+        dataPath.io.toFpExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
+    }
+  }
+  vfExuBlock.io.frm.get := csrio.fpu.frm
 
   wbDataPath.io.flush := ctrlBlock.io.redirect
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
-  wbDataPath.io.fromVfExu <> 0.U.asTypeOf(wbDataPath.io.fromVfExu) // fpExuBlock.io.out
+  wbDataPath.io.fromVfExu <> vfExuBlock.io.out
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready

@@ -130,7 +130,13 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   }
 
   val wakeupFromWBVec = Wire(Vec(params.numWakeupFromWB, ValidIO(new IssueQueueWakeUpBundle(params.pregIdxWidth))))
-  wakeupFromWBVec.zip(io.intWriteBack ++ io.vfWriteBack).foreach { case (sink, source) =>
+  val writeback = params.schdType match {
+    case IntScheduler() => io.intWriteBack
+    case MemScheduler() => io.intWriteBack ++ io.vfWriteBack
+    case VfScheduler() => io.vfWriteBack
+    case _ => Seq()
+  }
+  wakeupFromWBVec.zip(writeback).foreach { case (sink, source) =>
     sink.valid := source.wen
     sink.bits.rfWen := source.intWen
     sink.bits.fpWen := source.fpWen
@@ -158,7 +164,7 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
       deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
+      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
   }
@@ -196,7 +202,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
       deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
+      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
   }
@@ -225,7 +231,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     stdIQ.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := stdIQ.io.deq(j).valid
       deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, 0.U)
+      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
       deqResp.bits.addrOH := stdIQ.io.deq(j).bits.addrOH
     }
   }

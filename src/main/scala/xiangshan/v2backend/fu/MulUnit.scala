@@ -58,5 +58,5 @@ class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val res = Mux(ctrlVec.last.isHi, result(2 * xlen - 1, xlen), result(xlen - 1, 0))
 
   io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31, 0), xlen), res)
-  connectCtrlSingal
+  connectNonPipedCtrlSingal // Todo: make it piped
 }

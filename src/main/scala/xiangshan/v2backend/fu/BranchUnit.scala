@@ -44,5 +44,5 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.redirect.get.bits.cfiUpdate.taken := dataModule.io.taken
   io.out.bits.redirect.get.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
   io.out.bits.redirect.get.bits.cfiUpdate.target := addModule.io.target
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

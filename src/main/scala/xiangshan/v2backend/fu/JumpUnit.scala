@@ -46,5 +46,5 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.data := jumpDataModule.io.result
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

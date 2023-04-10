@@ -50,5 +50,5 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := divDataModule.io.in_ready
   io.out.valid := divDataModule.io.out_valid
   io.out.bits.data := divDataModule.io.out_data
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

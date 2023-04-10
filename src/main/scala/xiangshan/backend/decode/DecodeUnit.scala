@@ -425,10 +425,10 @@ object BDecode extends DecodeConstants{
  */
 object FDivSqrtDecode extends DecodeConstants {
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
-    FDIV_S  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fmisc, FuOpType.X, fWen = T),
-    FDIV_D  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fmisc, FuOpType.X, fWen = T),
-    FSQRT_S -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T),
-    FSQRT_D -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T),
+    FDIV_S  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T),
+    FDIV_D  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T),
+    FSQRT_S -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T),
+    FSQRT_D -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T),
   )
 }
 

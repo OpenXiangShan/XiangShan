@@ -56,7 +56,7 @@ class ExeUnitImp(
   }
 
   def acceptCond(input: ExuInput): Seq[Bool] = {
-    input.params.fuConfigs.map(_.fuSel(input.fuType))
+    input.params.fuConfigs.map(_.fuSel(input))
   }
 
   val in1ToN = Module(new Dispatcher(new ExuInput(exuParams), funcUnits.length, acceptCond))
@@ -137,14 +137,14 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
 
   val io = IO(new DispatcherIO(gen, n))
 
-  private val acceptVec: Seq[Bool] = acceptCond(io.in.bits)
+  private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
 
-  XSError(PopCount(acceptVec) > 1.U, "[ExeUnit] accept vec should no more than 1")
+  XSError(PopCount(acceptVec) > 1.U, s"s[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
   XSError(io.in.valid && PopCount(acceptVec) === 0.U, "[ExeUnit] there is a inst not dispatched to any fu")
 
   io.out.zipWithIndex.foreach { case (out, i) =>
     out.valid := acceptVec(i) && io.in.valid && out.ready
-    out.bits := Mux(out.valid, io.in.bits, 0.U.asTypeOf(out.bits))
+    out.bits := io.in.bits
   }
 
   io.in.ready := Cat(io.out.map(_.ready)).orR

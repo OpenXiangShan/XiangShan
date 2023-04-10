@@ -47,7 +47,7 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
   implicit val iqParams = params
   lazy val module = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
-    case VfScheduler() => new IssueQueueImp(this)
+    case VfScheduler() => new IssueQueueVfImp(this)
     case MemScheduler() => if (iqParams.StdCnt == 0) new IssueQueueMemAddrImp(this)
       else new IssueQueueIntImp(this)
     case _ => null
@@ -79,12 +79,15 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   extends LazyModuleImp(wrapper)
   with HasXSParameter {
 
+  println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB: ${params.numWakeupFromWB}, " +
+    s"numEntries: ${params.numEntries}, numRegSrc: ${params.numRegSrc}")
+
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
   val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
-  println(s"commonFuCfgs: ${commonFuCfgs.map(_.name)}")
+  println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
   dontTouch(io.deq)
   dontTouch(io.deqResp)
@@ -350,28 +353,29 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
     })
     // for std
     deq.bits.common.sqIdx.foreach(_ := payloadArrayRdata(i).sqIdx)
+    // for i2f
+    deq.bits.common.fpu.foreach(_ := payloadArrayRdata(i).fpu)
   }}
 }
 
 class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
   extends IssueQueueImp(wrapper)
 {
-  private val numPSrc = 5 // Todo: imm
-  private val numLSrc = 3 // Todo: imm
-
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
-      for (j <- 0 until numPSrc) {
-        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j)
-        enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
-      }
+      val numLSrc = s0_enqBits(i).srcType.size min enq.bits.data.srcType.size
       for (j <- 0 until numLSrc) {
+        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
+        enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
         enq.bits.data.srcType(j) := s0_enqBits(i).srcType(j)
       }
-      enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
-      enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
+      // enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
+      // enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
     }
   }
+  io.deq.zipWithIndex.foreach{ case (deq, i) => {
+    deq.bits.common.fpu.get := payloadArrayRdata(i).fpu
+  }}
 }
 
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {

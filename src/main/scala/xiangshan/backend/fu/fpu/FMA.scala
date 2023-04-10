@@ -16,22 +16,25 @@
 
 package xiangshan.backend.fu.fpu
 
+import _root_.utils._
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import fudian.utils.Multiplier
 import fudian._
+import fudian.utils.Multiplier
 import utility._
-import _root_.utils._
 import xiangshan._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.v2backend.FuConfig
 
 
-class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends Bundle {
+class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit p: Parameters) extends XSBundle {
   val mul_out = MixedVec(ftypes.map(t => new FMULToFADD(t.expWidth, t.precision)))
   val addend = UInt(ftypes.map(_.len).max.W)
   val fpCtrl = new FPUCtrlSignals
-
+  val robIdx = new RobPtr
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val fpWen = Bool()
   def getFloat = mul_out.head
   def getDouble = mul_out.last
 }
@@ -93,13 +96,17 @@ class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
 
   toAdd.addend := S2Reg(S1Reg(io.in.bits.src(2)))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
-  toAdd.fpCtrl := fpCtrl
+  toAdd.fpCtrl := S2Reg(S1Reg(io.in.bits.fpu.get))
+  toAdd.robIdx := robIdxVec(latency)
+  toAdd.pdest := S2Reg(S1Reg(io.in.bits.pdest))
+  toAdd.fpWen := S2Reg(S1Reg(io.in.bits.fpWen.get))
   io.out.bits.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   })
-  fflags := Mux1H(outSel, s3.map(_.io.fflags))
-  io.out.bits.robIdx := RegEnable(io.in.bits.robIdx, io.in.fire)
-  io.out.bits.fflags.get := fflags
+  io.out.bits.fflags.get := Mux1H(outSel, s3.map(_.io.fflags))
+  io.out.bits.robIdx := robIdxVec(latency)
+  io.out.bits.pdest := S2Reg(S1Reg(io.in.bits.pdest))
+  io.out.bits.fpu.get := S2Reg(S1Reg(io.in.bits.fpu.get))
 }
 
 class FADD_pipe(cfg: FuConfig, val addLat: Int = 2)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
@@ -152,9 +159,10 @@ class FADD_pipe(cfg: FuConfig, val addLat: Int = 2)(implicit p: Parameters) exte
   io.out.bits.data := Mux1H(outSel, s2.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   })
-  fflags := Mux1H(outSel, s2.map(_.io.fflags))
-  io.out.bits.fflags.get := fflags
-  connectCtrlSingal
+  io.out.bits.fflags.get := Mux1H(outSel, s2.map(_.io.fflags))
+  io.out.bits.robIdx := robIdxVec(latency)
+  io.out.bits.pdest := S2Reg(S1Reg(io.in.bits.pdest))
+  io.out.bits.fpu.get := S2Reg(S1Reg(io.in.bits.fpu.get))
 }
 
 class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
@@ -186,8 +194,12 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
   // When FMUL gives an FMA, FADD accepts this instead of io.in.
   // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
   add_pipe.io.in.valid := io.in.valid && fpCtrl.isAddSub || isFMAReg
+  add_pipe.io.in.bits := 0.U.asTypeOf(add_pipe.io.in.bits)
   add_pipe.io.in.bits.src := io.in.bits.src
+  add_pipe.io.in.bits.robIdx := Mux(isFMAReg, add_pipe.mulToAdd.robIdx, io.in.bits.robIdx)
+  add_pipe.io.in.bits.pdest := Mux(isFMAReg, add_pipe.mulToAdd.pdest, io.in.bits.pdest)
   add_pipe.io.in.bits.fpu.get := Mux(isFMAReg, add_pipe.mulToAdd.fpCtrl, io.in.bits.fpu.get)
+  add_pipe.io.in.bits.fpWen.get := Mux(isFMAReg, add_pipe.mulToAdd.fpWen, io.in.bits.fpWen.get)
   add_pipe.isFMA := isFMAReg
 
   // When the in uop is Add/Sub, we check FADD, otherwise fmul is checked.
@@ -207,15 +219,21 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
     add_pipe.io.out.bits.robIdx,
     mul_pipe.io.out.bits.robIdx
   )
-  io.out.bits.data := Mux(RegNext(add_pipe.io.out.valid),
+  io.out.bits.fpu.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.fpu.get,
+    mul_pipe.io.out.bits.fpu.get
+  )
+  io.out.bits.pdest := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.pdest,
+    mul_pipe.io.out.bits.pdest
+  )
+  io.out.bits.data := Mux(add_pipe.io.out.valid,
     add_pipe.io.out.bits.data,
     mul_pipe.io.out.bits.data
   )
-  fflags := Mux(RegNext(add_pipe.io.out.valid),
-    add_pipe.fflags,
-    mul_pipe.fflags
+  io.out.bits.fflags.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.fflags.get,
+    mul_pipe.io.out.bits.fflags.get
   )
   io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA)
-  io.out.bits.fflags.get := fflags
-  io.out.bits.pdest := RegEnable(io.in.bits.pdest, io.in.fire)
 }

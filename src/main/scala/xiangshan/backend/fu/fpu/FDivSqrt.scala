@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
-import utility.MaskExpand
+import utility.{MaskExpand, RegNextWithEnable}
 import xiangshan.v2backend.FuConfig
 
 import scala.collection.mutable
@@ -52,6 +52,7 @@ class InstantiableFDIV(t: FPU.FType) extends Module {
 class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_valid, out_ready = IO(Input(Bool()))
   val in_ready, out_valid = IO(Output(Bool()))
+  val out_validNext = IO(Output(Bool()))
   val kill_w = IO(Input(Bool()))
   val kill_r = IO(Input(Bool()))
 
@@ -80,11 +81,12 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   }
 
   in_ready := divSqrt.map(_.io.specialIO.in_ready).foldRight(true.B)(_ && _)
-  out_valid := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
+  out_validNext := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
+  out_valid := RegNext(out_validNext)
   io.out.data := outDataSel.zip(divSqrt.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   }).map(x => x._1 & x._2).reduce(_ | _)
-  fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
+  io.out.fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
 }
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
@@ -100,5 +102,5 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) 
   dataModule.kill_r := kill_r
   io.in.ready := dataModule.in_ready
   io.out.valid := dataModule.out_valid
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

@@ -361,5 +361,5 @@ class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasP
                       Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
 
   io.out.bits.data := RegEnable(result, regEnable(2))
-  connectCtrlSingal
+  connectNonPipedCtrlSingal
 }

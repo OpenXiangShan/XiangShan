@@ -73,7 +73,7 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   val s3_out = RegEnable(mux, regEnables(1))
   val s3_tag = RegEnable(s2_tag, regEnables(1))
 
-  fflags := s3_out.exc
+  io.out.fflags := s3_out.exc
   io.out.data := FPU.box(s3_out.data, s3_tag)
 }
 
@@ -82,4 +82,5 @@ class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(c
   override val dataModule = Module(new IntToFPDataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
+  connectNonPipedCtrlSingal // Todo: make it piped
 }

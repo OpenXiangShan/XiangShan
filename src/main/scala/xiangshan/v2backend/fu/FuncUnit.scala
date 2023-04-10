@@ -61,11 +61,13 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends Bundle {
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends Module {
   val io = IO(new FuncUnitIO(cfg))
 
-  def connectCtrlSingal: Unit = {
+  // should only be used in non-piped fu
+  def connectNonPipedCtrlSingal: Unit = {
     io.out.bits.robIdx := DataHoldBypass(io.in.bits.robIdx, io.in.fire)
     io.out.bits.pdest := DataHoldBypass(io.in.bits.pdest, io.in.fire)
     io.out.bits.pc.foreach(_ := io.in.bits.pc.get)
     io.out.bits.preDecode.foreach(_ := io.in.bits.preDecode.get)
+    io.out.bits.fpu.foreach(_ := DataHoldBypass(io.in.bits.fpu.get, io.in.fire))
   }
 }
 
