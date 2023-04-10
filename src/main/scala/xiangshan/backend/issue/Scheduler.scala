@@ -164,9 +164,9 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.enq <> dispatch2Iq.io.out(i)
     iq.io.wakeup := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid
+      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
       deqResp.bits.success := false.B
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, RSFeedbackType.fuBusy)
+      deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
@@ -210,9 +210,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid
+      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
       deqResp.bits.success := false.B
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, 0.U)
+      deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>

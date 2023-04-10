@@ -229,9 +229,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   vfRFReadArbiter.io.out.map(_.bits.addr).zip(vfRfRaddr).foreach{ case(source, sink) => sink := source }
 
-  // fromIQFire(i): flattened the i-th deq port fired
-  private val fromIQFire: IndexedSeq[Bool] = fromIQ.flatten.map(_.fire)
-
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat
   }
@@ -356,22 +353,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  private val intFromIQFire = fromIQ.map(_.map(_.fire))
-  private val intToExuFire = toExu.map(_.map(_.fire))
+  private val fromIQFire = fromIQ.map(_.map(_.fire))
+  private val toExuFire = toExu.map(_.map(_.fire))
   toIQs.zipWithIndex.foreach {
     case(toIQ, iqIdx) =>
       toIQ.zipWithIndex.foreach {
         case (toIU, iuIdx) =>
           // IU: issue unit
           val og0resp = toIU.og0resp
-          og0resp.valid := fromIQ(iqIdx)(iuIdx).valid
-          og0resp.bits.respType := Mux(intFromIQFire(iqIdx)(iuIdx), RSFeedbackType.rfArbitSuccess, RSFeedbackType.rfArbitFail)
+          og0resp.valid := fromIQ(iqIdx)(iuIdx).valid && (!fromIQFire(iqIdx)(iuIdx))
+          og0resp.bits.respType := RSFeedbackType.rfArbitFail
           og0resp.bits.success := false.B
           og0resp.bits.addrOH := fromIQ(iqIdx)(iuIdx).bits.addrOH
 
           val og1resp = toIU.og1resp
           og1resp.valid := s1_toExuValid(iqIdx)(iuIdx)
-          og1resp.bits.respType := Mux(intToExuFire(iqIdx)(iuIdx), RSFeedbackType.fuIdle, RSFeedbackType.fuBusy)
+          og1resp.bits.respType := Mux(toExuFire(iqIdx)(iuIdx), RSFeedbackType.fuIdle, RSFeedbackType.fuBusy)
           og1resp.bits.success := false.B
           og1resp.bits.addrOH := s1_addrOHs(iqIdx)(iuIdx)
       }

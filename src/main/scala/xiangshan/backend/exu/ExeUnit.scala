@@ -48,6 +48,9 @@ class ExeUnitImp(
   }.elsewhen(io.in.fire) {
     busy := true.B
   }
+  if(exuParams.latencyValMax.nonEmpty){
+    busy := false.B
+  }
 
   // rob flush --> funcUnits
   funcUnits.zipWithIndex.foreach { case (fu, i) =>
@@ -61,7 +64,7 @@ class ExeUnitImp(
   val in1ToN = Module(new Dispatcher(new ExuInput(exuParams), funcUnits.length, acceptCond))
 
   // ExeUnit.in <---> Dispatcher.in
-  in1ToN.io.in.valid := io.in.valid && !busy
+  in1ToN.io.in.valid := io.in.fire()
   in1ToN.io.in.bits := io.in.bits
   io.in.ready := !busy
 
@@ -89,6 +92,7 @@ class ExeUnitImp(
   }
 
   private val fuOutValidOH = funcUnits.map(_.io.out.valid)
+  XSError(PopCount(fuOutValidOH) > 1.U, p"fuOutValidOH ${Binary(VecInit(fuOutValidOH).asUInt)} should be one-hot)\n")
   private val fuOutBitsVec = funcUnits.map(_.io.out.bits)
   private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = funcUnits.map(_.io.out.bits.redirect)
 
