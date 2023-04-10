@@ -138,8 +138,9 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
 
       statusNext.issued := status.issued // otherwise
       when (deqRespVec(i).valid) {
-        // Not stage success, issue again
-        when (!RSFeedbackType.isStageSuccess(deqRespVec(i).bits.respType)) {
+        when (RSFeedbackType.isStageSuccess(deqRespVec(i).bits.respType)) {
+          statusNext.issued := true.B // need not issue again
+        }.elsewhen (RSFeedbackType.isBlocked(deqRespVec(i).bits.respType)) {
           statusNext.issued := false.B
         }
       }.elsewhen(deqSelVec(i)) {

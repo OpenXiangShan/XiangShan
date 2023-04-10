@@ -48,6 +48,7 @@ object RSFeedbackType {
   val dataInvalid = 2.U(3.W)
   val bankConflict = 3.U(3.W)
   val ldVioCheckRedo = 4.U(3.W)
+  val fuBusy = 5.U(3.W)
   val readRfSuccess = 6.U(3.W)
   val feedbackInvalid = 7.U(3.W)
 
@@ -55,6 +56,10 @@ object RSFeedbackType {
 
   def isStageSuccess(feedbackType: UInt) = {
     feedbackType === readRfSuccess
+  }
+
+  def isBlocked(feedbackType: UInt) = {
+    feedbackType === fuBusy
   }
 }
 
