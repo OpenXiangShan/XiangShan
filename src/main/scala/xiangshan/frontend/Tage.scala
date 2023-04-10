@@ -420,7 +420,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, 1, tagWidth=tagLen))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRowsPerBr) ))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
@@ -456,7 +456,6 @@ class TageTable
       val br_pidx = get_phy_br_idx(update_unhashed_idx, li)
       wrbypass.io.wen := io.update.mask(li) && update_req_bank_1h(b)
       wrbypass.io.write_idx := get_bank_idx(update_idx)
-      wrbypass.io.write_tag.map(_ := update_tag)
       wrbypass.io.write_data(0) := Mux1H(UIntToOH(br_pidx, numBr), per_bank_update_wdata(b)).ctr
     }
   }

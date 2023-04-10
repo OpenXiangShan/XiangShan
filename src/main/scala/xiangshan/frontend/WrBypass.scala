@@ -60,8 +60,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val valids = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
   val ever_written = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
-  val enq_ptr = RegInit(0.U.asTypeOf(new WrBypassPtr))
-  val enq_idx = enq_ptr.value
 
   idx_tag_cam.io.r.req(0)(io.write_idx, io.write_tag.getOrElse(0.U))
   val hits_oh = idx_tag_cam.io.r.resp(0).zip(ever_written).map {case (h, ew) => h && ew}
@@ -74,14 +72,22 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     io.hit_data(i).bits  := data_mem.read(hit_idx)(i)
   }
 
+  val replacer = ReplacementPolicy.fromString("plru", numEntries) // numEntries in total
+  val replacer_touch_ways = Wire(Vec(1, Valid(UInt(log2Ceil(numEntries).W)))) // One index at a time
+  val enq_idx = replacer.way
   val full_mask = Fill(numWays, 1.U(1.W)).asTypeOf(Vec(numWays, Bool()))
   val update_way_mask = io.write_way_mask.getOrElse(full_mask)
 
   // write data on every request
+  replacer_touch_ways(0).valid := false.B // Default false
+  replacer_touch_ways(0).bits := 0.U
   when (io.wen) {
     val data_write_idx = Mux(hit, hit_idx, enq_idx)
     data_mem.write(data_write_idx, io.write_data, update_way_mask)
+    replacer_touch_ways(0).valid := true.B
+    replacer_touch_ways(0).bits := data_write_idx
   }
+  replacer.access(replacer_touch_ways)
 
   // update valids
   for (i <- 0 until numWays) {
@@ -104,7 +110,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   idx_tag_cam.io.w.valid := enq_en
   idx_tag_cam.io.w.bits.index := enq_idx
   idx_tag_cam.io.w.bits.data(io.write_idx, io.write_tag.getOrElse(0.U))
-  enq_ptr := enq_ptr + enq_en
 
   XSPerfAccumulate("wrbypass_hit",  io.wen &&  hit)
   XSPerfAccumulate("wrbypass_miss", io.wen && !hit)
