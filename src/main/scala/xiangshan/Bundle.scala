@@ -226,7 +226,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val srcState = Vec(3, SrcState())
   val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
@@ -368,7 +367,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
