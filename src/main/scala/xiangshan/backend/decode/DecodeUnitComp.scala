@@ -116,6 +116,8 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_ISLIDEUP    -> numOfUopVslide,
     UopDivType.VEC_SLIDEDOWN   -> (numOfUopVslide + 1.U),
     UopDivType.VEC_ISLIDEDOWN  -> numOfUopVslide,
+    UopDivType.VEC_0MX         -> (lmul +& 1.U),
+    UopDivType.VEC_VMV         -> (Cat(lmul, 0.U(1.W)) -1.U),
   ))
 
   val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
@@ -731,6 +733,67 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
             csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ctrl.uopIdx := numOfUop-(i*(i+1)/2+i-j+1).U
           }
         }
+    }
+
+    is(UopDivType.VEC_0MX) {
+      // LMUL
+      for (i <- 0 until MAX_VLMUL) {
+        val lsrc0 = if (i==0) 0.U else (VECTOR_TMP_REG_LMUL + i - 1).U
+        val ldest = (VECTOR_TMP_REG_LMUL + i).U
+        csBundle(i).ctrl.srcType(0) := SrcType.vp
+        csBundle(i).ctrl.srcType(1) := SrcType.vp
+        csBundle(i).ctrl.rfWen := false.B
+        csBundle(i).ctrl.vecWen := true.B
+        csBundle(i).ctrl.lsrc(0) := lsrc0
+        csBundle(i).ctrl.lsrc(1) := src2
+        // csBundle(i).ctrl.lsrc(2) := dest + i.U  DontCare
+        csBundle(i).ctrl.ldest := ldest
+        csBundle(i).ctrl.uopIdx := i.U
+      }
+      csBundle(lmul-1.U).ctrl.vecWen := false.B
+      csBundle(lmul-1.U).ctrl.fpWen := true.B
+      csBundle(lmul-1.U).ctrl.ldest := FP_TMP_REG_MV.U
+      // FMV_X_D
+      csBundle(lmul).ctrl.srcType(0) := SrcType.fp
+      csBundle(lmul).ctrl.srcType(1) := SrcType.imm
+      csBundle(lmul).ctrl.lsrc(0) := FP_TMP_REG_MV.U
+      csBundle(lmul).ctrl.lsrc(1) := 0.U
+      csBundle(lmul).ctrl.ldest := dest
+      csBundle(lmul).ctrl.fuType := FuType.fmisc
+      csBundle(lmul).ctrl.rfWen := true.B
+      csBundle(lmul).ctrl.fpWen := false.B
+      csBundle(lmul).ctrl.vecWen := false.B
+      csBundle(lmul).ctrl.fpu.isAddSub := false.B
+      csBundle(lmul).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(lmul).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(lmul).ctrl.fpu.fromInt := false.B
+      csBundle(lmul).ctrl.fpu.wflags := false.B
+      csBundle(lmul).ctrl.fpu.fpWen := false.B
+      csBundle(lmul).ctrl.fpu.div := false.B
+      csBundle(lmul).ctrl.fpu.sqrt := false.B
+      csBundle(lmul).ctrl.fpu.fcvt := false.B
+    }
+
+    is(UopDivType.VEC_VMV) {
+      // LMUL
+      for (i <- 0 until MAX_VLMUL) {
+        val lsrc0 = if (i==0) 0.U else (VECTOR_TMP_REG_LMUL + i - 1).U
+        csBundle(i*2+0).ctrl.srcType(0) := SrcType.vp
+        csBundle(i*2+0).ctrl.srcType(1) := SrcType.vp
+        csBundle(i*2+0).ctrl.lsrc(0) := lsrc0
+        csBundle(i*2+0).ctrl.lsrc(1) := src2
+        csBundle(i).ctrl.lsrc(2) := dest + i.U
+        csBundle(i*2+0).ctrl.ldest := dest + i.U
+        csBundle(i*2+0).ctrl.uopIdx := (i*2+0).U
+
+        csBundle(i*2+1).ctrl.srcType(0) := SrcType.vp
+        csBundle(i*2+1).ctrl.srcType(1) := SrcType.vp
+        csBundle(i*2+1).ctrl.lsrc(0) := lsrc0
+        csBundle(i*2+1).ctrl.lsrc(1) := src2
+        // csBundle(i).ctrl.lsrc(2) := dest + i.U  DontCare
+        csBundle(i*2+1).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
+        csBundle(i*2+1).ctrl.uopIdx := (i*2+1).U
+      }
     }
   }
 
