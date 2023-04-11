@@ -360,7 +360,7 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
           LduCnt = 2,
           StuCnt = 2
         ),
-        prefetcher = None,
+        //prefetcher = None,
         EnableSC = false,
         EnableLoop = false,
         FtbSize = 1024,
