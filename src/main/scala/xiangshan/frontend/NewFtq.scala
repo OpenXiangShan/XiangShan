@@ -500,11 +500,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     dontTouch(ptr)
   }
   val validEntries = distanceBetween(bpuPtr, commPtr)
+  val canCommit = Wire(Bool())
 
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U
+  val new_entry_ready = validEntries < FtqSize.U || canCommit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
@@ -1038,7 +1039,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
-  val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
