@@ -202,9 +202,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
+    // tools: init to close dpi-c when in fpga
+    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+    Constantin.init(envInFPGA)
+    ChiselDB.init(envInFPGA)
+
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firrtlComplier)
+    Generator.execute(firrtlOpts, soc.module, firrtlComplier, firtoolOpts)
     FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
   }
 }

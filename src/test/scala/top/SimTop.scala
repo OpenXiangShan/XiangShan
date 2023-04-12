@@ -108,12 +108,21 @@ class SimTop(implicit p: Parameters) extends Module {
 object SimTop extends App {
   override def main(args: Array[String]): Unit = {
     // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
+    // tools: init to close dpi-c when in fpga
+    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+    Constantin.init(envInFPGA)
+    ChiselDB.init(envInFPGA)
+
     Generator.execute(
       firrtlOpts,
       DisableMonitors(p => new SimTop()(p))(config),
-      firrtlComplier
+      firrtlComplier,
+      firtoolOpts
     )
+
+    // tools: write cpp files
     ChiselDB.addToFileRegisters
     Constantin.addToFileRegisters
     FileRegisters.write(fileDir = "./build")
