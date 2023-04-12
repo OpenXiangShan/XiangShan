@@ -71,6 +71,8 @@ class StatusArrayIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new StatusArrayDeqRespBundle)))
+  val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new StatusArrayDeqRespBundle)))
+  val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new StatusArrayDeqRespBundle)))
 
   val rsFeedback = Output(Vec(5, Bool()))
   // mem only
@@ -139,7 +141,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
       statusNext.issued := status.issued // otherwise
       when (deqRespVec(i).valid) {
         when (RSFeedbackType.isStageSuccess(deqRespVec(i).bits.respType)) {
-          statusNext.issued := true.B // need not issue again
+          statusNext.issued := true.B
         }.elsewhen (RSFeedbackType.isBlocked(deqRespVec(i).bits.respType)) {
           statusNext.issued := false.B
         }
@@ -160,11 +162,18 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqSel := VecInit(io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i))).asUInt.orR
   }
 
+  val resps = params.schdType match {
+    case IntScheduler() => io.deqResp ++ io.og0Resp ++ io.og1Resp
+    case MemScheduler() => io.deqResp ++ io.og1Resp
+    case VfScheduler()  => io.deqResp ++ io.og1Resp
+    case _ => null
+  }
+
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
-    val deqRespValidVec = VecInit(io.deqResp.map(x => x.valid && x.bits.addrOH(i)))
+    val deqRespValidVec = VecInit(resps.map(x => x.valid && x.bits.addrOH(i)))
     XSError(PopCount(deqRespValidVec) > 1.U, p"status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
     deqResp.valid := deqRespValidVec.asUInt.orR
-    deqResp.bits := Mux1H(deqRespValidVec, io.deqResp.map(_.bits))
+    deqResp.bits := Mux1H(deqRespValidVec, resps.map(_.bits))
   }
 
   flushedVec.zipWithIndex.foreach { case (flushed, i) =>
@@ -175,7 +184,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   // (2) deq success
   clearVec.zipWithIndex.foreach { case (clear, i) =>
     val clearByFlush = (enqStatusVec(i).valid || validVec(i)) && flushedVec(i)
-    val clearByResp = deqRespVec(i).valid && deqRespVec(i).bits.respType === RSFeedbackType.readRfSuccess
+    val clearByResp = deqRespVec(i).valid && deqRespVec(i).bits.respType === RSFeedbackType.fuIdle
 
     clear := clearByFlush || clearByResp
   }
@@ -198,27 +207,24 @@ class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends
 
   val fromMem = io.fromMem.get
 
+  val memResps = resps ++ io.fromMem.get.slowResp ++ io.fromMem.get.fastResp
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
-    val deqRespValidVec = MixedVecInit((
-      io.deqResp.map(x => x.valid && x.bits.addrOH(i)) ++
-        io.fromMem.get.slowResp.map(x => x.valid && x.bits.addrOH(i)) ++
-        io.fromMem.get.fastResp.map(x => x.valid && x.bits.addrOH(i))
-      ).toSeq)
-    val deqRespBitsVec = MixedVecInit(
-      io.deqResp.map(x => x.bits) ++
-        io.fromMem.get.slowResp.map(x => x.bits) ++
-        io.fromMem.get.fastResp.map(x => x.bits)
-    )
-    XSError(PopCount(deqRespValidVec) > 1.U, p"status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
+    val deqRespValidVec = VecInit(memResps.map(x => x.valid && x.bits.addrOH(i)))
+    XSError(PopCount(deqRespValidVec) > 1.U, p"mem status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
     deqResp.valid := deqRespValidVec.asUInt.orR
-    deqResp.bits := Mux1H(deqRespValidVec, deqRespBitsVec)
+    deqResp.bits := Mux1H(deqRespValidVec, memResps.map(_.bits))
   }
 
   clearVec.zipWithIndex.foreach { case (clear, i) =>
     val clearByFlush = (enqStatusVec(i).valid || validVec(i)) && flushedVec(i)
     val clearByResp = deqRespVec(i).valid && (
-      (params.isStAddrIQ.B && deqRespVec(i).bits.success) || // Todo: special mem success
-      (!params.isStAddrIQ.B && deqRespVec(i).bits.respType === RSFeedbackType.readRfSuccess)
+      //do: special mem success
+      if(params.StaCnt == 0) {
+        deqRespVec(i).bits.respType === RSFeedbackType.fuIdle
+      }
+      else{
+        deqRespVec(i).bits.success
+      }
     )
     clear := clearByFlush || clearByResp
   }

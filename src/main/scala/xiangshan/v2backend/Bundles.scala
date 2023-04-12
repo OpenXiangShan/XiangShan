@@ -10,7 +10,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.v2backend.FuType.isFence
-import xiangshan.v2backend.issue.IssueQueueJumpBundle
+import xiangshan.v2backend.issue.{IssueQueueJumpBundle, StatusArrayDeqRespBundle}
 
 object Bundles {
 
@@ -271,7 +271,10 @@ object Bundles {
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
     def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readFp)
   }
-
+  class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
+    val og0resp = Valid(new StatusArrayDeqRespBundle)
+    val og1resp = Valid(new StatusArrayDeqRespBundle)
+  }
   // DataPath --[ExuInput]--> Exu
   class ExuInput(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()

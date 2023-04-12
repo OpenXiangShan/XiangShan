@@ -106,13 +106,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
-      PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).fire,
-        intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.redirect))
+      PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
+        intScheduler.io.toDataPath(i)(j).fire && intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.redirect))
+      intScheduler.io.fromDataPath(i)(j) := dataPath.io.toIntIQ(i)(j)
     }
   }
 
   dataPath.io.fromVfIQ <> vfScheduler.io.toDataPath
+  vfScheduler.io.fromDataPath := dataPath.io.toVfIQ
   dataPath.io.fromMemIQ <> memScheduler.io.toDataPath
+  memScheduler.io.fromDataPath := dataPath.io.toMemIQ
 
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
   println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
