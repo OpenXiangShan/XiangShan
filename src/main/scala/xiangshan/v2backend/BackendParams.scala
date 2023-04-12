@@ -19,9 +19,9 @@ package xiangshan.v2backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, WriteBackBundle}
+import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle, WriteBackBundle}
 import xiangshan.v2backend.exu._
-import xiangshan.v2backend.issue.IssueQueueParams
+import xiangshan.v2backend.issue.{IssueQueueParams, StatusArrayDeqRespBundle}
 
 abstract class PregParams {
   val numEntries: Int
@@ -124,6 +124,8 @@ case class BackendParams(
   def numVfWb = vfPregParams.numWrite
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
+  def numRfRead  = 14
+  def numRfWrite = 8
 
   def numException = allExuParams.count(_.exceptionOut.nonEmpty)
 
@@ -169,16 +171,16 @@ object SchdBlockParams {
     val rfDataWidth = 64
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0))),
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg), Seq(IntWB(port = 2, 0), VecWB(port = 0, Int.MaxValue))),
-        ExeUnitParams(Seq(AluCfg, DivCfg), Seq(IntWB(port = 3, 0))),
+        ExeUnitParams(Seq(AluCfg, DivCfg, I2fCfg), Seq(IntWB(port = 2, 0), VecWB(port = 0, Int.MaxValue)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(AluCfg, DivCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg), Seq(IntWB(port = 4, 0))),
-        ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg), Seq(IntWB(port = 5, 0)))
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(BrhCfg, VsetCfg, CsrCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntReadPort(0, 0))))
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -202,12 +204,12 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
-        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(VipuCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 0, 0))),
-        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg), Seq(IntWB(port = 5, Int.MaxValue), VecWB(port = 0, 0))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(VfpuCfg, F2fCfg, F2iCfg), Seq(IntWB(port = 5, Int.MaxValue), VecWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregIdxWidth, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -229,16 +231,16 @@ object SchdBlockParams {
 
     var params = SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(6, 0))),
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(7, 0), VecWB(7, 0))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(6, 0)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(7, 0), VecWB(7, 0)), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StaCfg), WBSeq()),
-        ExeUnitParams(Seq(StaCfg), WBSeq()),
+        ExeUnitParams(Seq(StaCfg), WBSeq(), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(StaCfg), WBSeq(), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StdCfg), WBSeq()),
-        ExeUnitParams(Seq(StdCfg), WBSeq()),
+        ExeUnitParams(Seq(StdCfg), WBSeq(), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(StdCfg), WBSeq(), Seq(Seq(IntReadPort(0, 0)))),
       ), numEntries = 16, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 4),
     ),
       numPregs = numPregs,
@@ -476,6 +478,11 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
   }
 
+  def genOGRespBundle(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map(_ => new OGRespBundle))
+  }
+
   def getIQName = {
     "IssueQueue" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
   }
@@ -513,9 +520,18 @@ object WBSeq {
   }
 }
 
+abstract class RFReadPortConfig(){
+  val port: Int
+  val priority: Int
+}
+case class AllReadPort(port: Int, priority: Int) extends RFReadPortConfig()
+case class IntReadPort(port: Int, priority: Int) extends RFReadPortConfig()
+case class VfReadPort(port: Int, priority: Int) extends RFReadPortConfig()
+
 case class ExeUnitParams(
   fuConfigs: Seq[FuConfig],
   wbPortConfigs: Seq[WriteBackConfig],
+  rfrPortConfigs: Seq[Seq[RFReadPortConfig]],
 )(implicit
   val schdType: SchedulerType,
 ) {

@@ -69,6 +69,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
 
   val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
+  val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
+  val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
@@ -168,6 +170,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
     }
+    statusArrayIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
+      og0Resp.valid := io.og0Resp(i).valid
+      og0Resp.bits.addrOH := io.og0Resp(i).bits.addrOH
+      og0Resp.bits.success := io.og0Resp(i).bits.success
+      og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
+      og0Resp.bits.respType := io.og0Resp(i).bits.respType
+    }
+    statusArrayIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
+      og1Resp.valid := io.og1Resp(i).valid
+      og1Resp.bits.addrOH := io.og1Resp(i).bits.addrOH
+      og1Resp.bits.success := io.og1Resp(i).bits.success
+      og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
+      og1Resp.bits.respType := io.og1Resp(i).bits.respType
+    }
   }
 
   val immArrayRdataVec = immArray.io.read.map(_.data)
@@ -262,6 +278,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.imm := immArrayRdataVec(i)
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
       rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
+    }
+    deq.bits.rf.zip(payloadArrayRdata(i).srcType).foreach { case (rf, srcType) =>
+      rf.foreach(_.srcType := srcType) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
     }
     deq.bits.srcType.zip(payloadArrayRdata(i).srcType).foreach { case (sink, source) =>
       sink := source
@@ -425,6 +444,21 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       deqResp.bits.success := io.deqResp(i).bits.success
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
+    }
+
+    statusArray.io.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
+      og0Resp.valid := io.og0Resp(i).valid
+      og0Resp.bits.addrOH := io.og0Resp(i).bits.addrOH
+      og0Resp.bits.success := io.og0Resp(i).bits.success
+      og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
+      og0Resp.bits.respType := io.og0Resp(i).bits.respType
+    }
+    statusArray.io.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
+      og1Resp.valid := io.og1Resp(i).valid
+      og1Resp.bits.addrOH := io.og1Resp(i).bits.addrOH
+      og1Resp.bits.success := io.og1Resp(i).bits.success
+      og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
+      og1Resp.bits.respType := io.og1Resp(i).bits.respType
     }
 
     statusArray.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>

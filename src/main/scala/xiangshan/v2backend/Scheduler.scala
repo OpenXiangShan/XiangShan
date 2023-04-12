@@ -51,6 +51,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPath: MixedVec[MixedVec[DecoupledIO[Bundles.IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
+  val fromDataPath: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val feedbackIO = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
@@ -163,9 +164,21 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.wakeup := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
+      deqResp.bits.success := false.B
+      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, RSFeedbackType.fuBusy)
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
+    }
+    iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
+      og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
+      og0Resp.bits.success := false.B // Todo: remove it
+      og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
+      og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
+    }
+    iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
+      og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
+      og1Resp.bits.success := false.B
+      og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
+      og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
     }
   }
 
@@ -194,17 +207,31 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
+  issueQueues.zipWithIndex.foreach { case (iq, i) =>
+    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
+      deqResp.valid := iq.io.deq(j).valid
+      deqResp.bits.success := false.B
+      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, 0.U)
+      deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
+    }
+    iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
+      og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
+      og0Resp.bits.success := false.B // Todo: remove it
+      og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
+      og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
+    }
+    iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
+      og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
+      og1Resp.bits.success := false.B
+      og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
+      og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
+    }
+  }
+
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
     iq.io.wakeup := wakeupFromWBVec
-
-    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
-      deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
-    }
   }
 
   require(stAddrIQs.size == stDataIQs.size, s"number of store address IQs(${stAddrIQs.size}) " +
@@ -227,13 +254,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
     stdIQ.io.wakeup := wakeupFromWBVec
-
-    stdIQ.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := stdIQ.io.deq(j).valid
-      deqResp.bits.success := false.B // Todo: remove it
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.readRfSuccess, RSFeedbackType.fuBusy)
-      deqResp.bits.addrOH := stdIQ.io.deq(j).bits.addrOH
-    }
   }
 
   val iqMemBundleVec = stAddrIQs.map {

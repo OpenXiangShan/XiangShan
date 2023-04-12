@@ -139,7 +139,7 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
 
   private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
 
-  XSError(PopCount(acceptVec) > 1.U, s"s[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
+  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"s[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
   XSError(io.in.valid && PopCount(acceptVec) === 0.U, "[ExeUnit] there is a inst not dispatched to any fu")
 
   io.out.zipWithIndex.foreach { case (out, i) =>

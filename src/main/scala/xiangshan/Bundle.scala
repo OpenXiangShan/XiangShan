@@ -43,23 +43,27 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(3.W)
-  val mshrFull = 1.U(3.W)
-  val dataInvalid = 2.U(3.W)
-  val bankConflict = 3.U(3.W)
-  val ldVioCheckRedo = 4.U(3.W)
-  val fuBusy = 5.U(3.W)
-  val readRfSuccess = 6.U(3.W)
-  val feedbackInvalid = 7.U(3.W)
+  val tlbMiss         = 0.U(4.W)
+  val mshrFull        = 1.U(4.W)
+  val dataInvalid     = 2.U(4.W)
+  val bankConflict    = 3.U(4.W)
+  val ldVioCheckRedo  = 4.U(4.W)
+  val feedbackInvalid = 7.U(4.W)
+  val issueSuccess    = 8.U(4.W)
+  val issueFail       = 9.U(4.W)
+  val rfArbitSuccess  = 10.U(4.W)
+  val rfArbitFail     = 11.U(4.W)
+  val fuIdle          = 12.U(4.W)
+  val fuBusy          = 13.U(4.W)
 
-  def apply() = UInt(3.W)
+  def apply() = UInt(4.W)
 
   def isStageSuccess(feedbackType: UInt) = {
-    feedbackType === readRfSuccess
+    feedbackType === issueSuccess
   }
 
   def isBlocked(feedbackType: UInt) = {
-    feedbackType === fuBusy
+    feedbackType === issueFail || feedbackType === rfArbitFail || feedbackType === fuBusy
   }
 }
 

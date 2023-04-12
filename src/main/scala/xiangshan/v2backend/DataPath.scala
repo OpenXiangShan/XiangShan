@@ -8,7 +8,67 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.v2backend.Bundles._
 import xiangshan.v2backend.issue._
-import xiangshan.{HasXSParameter, Redirect, SrcType, XSBundle}
+import xiangshan.{HasXSParameter, RSFeedbackType, Redirect, SrcType, XSBundle, XSModule}
+
+class RFArbiterBundle(addrWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val addr = UInt(addrWidth.W)
+}
+
+class RFReadArbiterIO(inPortSize: Int, outPortSize: Int, dataWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val in = Vec(inPortSize, Flipped(DecoupledIO(new RFArbiterBundle(dataWidth))))
+  val out = Vec(outPortSize, Valid(new RFArbiterBundle(dataWidth)))
+  val flush = Flipped(ValidIO(new Redirect))
+}
+
+class RFReadArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
+  val allExuParams = backendParams.allExuParams
+
+  val portConfigs = allExuParams.map(_.rfrPortConfigs.flatten).flatten.filter{
+    rfrPortConfigs =>
+      if(isInt){
+        rfrPortConfigs.isInstanceOf[IntReadPort]
+      }
+      else{
+        rfrPortConfigs.isInstanceOf[VfReadPort]
+      }
+  }
+
+  val pregParams = if(isInt) backendParams.intPregParams else backendParams.vfPregParams
+
+  val io = IO(new RFReadArbiterIO(portConfigs.size, backendParams.numRfRead, pregParams.addrWidth))
+  val inGroup: Map[Int, IndexedSeq[(DecoupledIO[RFArbiterBundle], RFReadPortConfig)]] = io.in.zip(portConfigs).groupBy{ case(port, config) => config.port}
+  // sort by priority
+  val inGroupSorted: Map[Int, IndexedSeq[(DecoupledIO[RFArbiterBundle], RFReadPortConfig)]] = inGroup.map{
+    case(key, value) => (key -> value.sortBy{ case(port, config) => config.priority})
+  }
+
+  private val arbiters: Seq[Option[Arbiter[RFArbiterBundle]]] = Seq.tabulate(backendParams.numRfRead) { x => {
+    if (inGroupSorted.contains(x)) {
+      Some(Module(new Arbiter(new RFArbiterBundle(pregParams.addrWidth), inGroupSorted(x).length)))
+    } else {
+      None
+    }
+  }}
+
+  arbiters.zipWithIndex.foreach { case (arb, i) =>
+    if (arb.nonEmpty) {
+      arb.get.io.in.zip(inGroupSorted(i).map(_._1)).foreach { case (arbIn, addrIn) =>
+        arbIn <> addrIn
+      }
+    }
+  }
+
+  io.out.zip(arbiters).foreach { case (addrOut, arb) =>
+    if (arb.nonEmpty) {
+      val arbOut = arb.get.io.out
+      arbOut.ready := true.B
+      addrOut.valid := arbOut.valid
+      addrOut.bits := arbOut.bits
+    } else {
+      addrOut := 0.U.asTypeOf(addrOut)
+    }
+  }
+}
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   private implicit val dpParams: BackendParams = params
@@ -20,20 +80,74 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val io = IO(new DataPathIO())
 
-  private val (fromIntIQ, toIntExu) = (io.fromIntIQ, io.toIntExu)
-  private val (fromMemIQ, toMemExu) = (io.fromMemIQ, io.toMemExu)
-  private val (fromVfIQ, toVfExu) = (io.fromVfIQ, io.toFpExu)
+  private val (fromIntIQ, toIntIQ, toIntExu) = (io.fromIntIQ, io.toIntIQ, io.toIntExu)
+  private val (fromMemIQ, toMemIQ, toMemExu) = (io.fromMemIQ, io.toMemIQ, io.toMemExu)
+  private val (fromVfIQ , toVfIQ , toVfExu ) = (io.fromVfIQ , io.toVfIQ , io.toFpExu)
 
   println(s"[DataPath] IntIQ(${fromIntIQ.size}), MemIQ(${fromMemIQ.size})")
   println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
 
   // just refences for convience
-  private val fromIQ = fromIntIQ ++ fromMemIQ ++ fromVfIQ
-  private val fromMemIntIQ = fromIntIQ ++ fromMemIQ
-  private val fromMemVfIQ = fromVfIQ ++ fromMemIQ
-  private val toExu = toIntExu ++ toMemExu ++ toVfExu
-  private val toMemIntExu = toIntExu ++ toMemExu
-  private val toMemVfExu = toVfExu ++ toMemExu
+  private val fromIQ = fromIntIQ ++ fromVfIQ ++ fromMemIQ
+
+  private val toIQs = toIntIQ ++ toVfIQ ++ toMemIQ
+
+  private val toExu = toIntExu ++ toVfExu ++ toMemExu
+
+  private val intRFReadArbiter = Module(new RFReadArbiter(true))
+  private val vfRFReadArbiter = Module(new RFReadArbiter(false))
+
+  private val issuePortsIn = fromIQ.flatten
+  private val intBlocks = fromIQ.map{ case iq => Wire(Vec(iq.size, Bool())) }
+  private val intBlocksSeq = intBlocks.flatten
+  private val vfBlocks = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
+  private val vfBlocksSeq = vfBlocks.flatten
+
+  val intReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
+  issuePortsIn.zipWithIndex.foreach{
+    case (issuePortIn, idx) =>
+      val readPortIn = issuePortIn.bits.getIntRfReadBundle
+      val l = intReadPortInSize(idx)
+      val r = intReadPortInSize(idx + 1)
+      val arbiterIn = intRFReadArbiter.io.in.slice(l, r)
+      arbiterIn.zip(readPortIn).foreach{
+        case(sink, source) =>
+          sink.bits.addr := source.addr
+          sink.valid := issuePortIn.valid && SrcType.isXp(source.srcType)
+      }
+      if(r > l){
+        intBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
+          case (sink, source) => Mux(SrcType.isXp(source.srcType), sink.ready, true.B)
+        }.reduce(_ & _)
+      }
+      else{
+        intBlocksSeq(idx) := false.B
+      }
+  }
+  intRFReadArbiter.io.flush := io.flush
+
+  val vfReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getFpRfReadBundle.size).scan(0)(_ + _)
+  issuePortsIn.zipWithIndex.foreach {
+    case (issuePortIn, idx) =>
+      val readPortIn = issuePortIn.bits.getFpRfReadBundle
+      val l = vfReadPortInSize(idx)
+      val r = vfReadPortInSize(idx + 1)
+      val arbiterIn = vfRFReadArbiter.io.in.slice(l, r)
+      arbiterIn.zip(readPortIn).foreach {
+        case (sink, source) =>
+          sink.bits.addr := source.addr
+          sink.valid := issuePortIn.valid && SrcType.isVfp(source.srcType)
+      }
+      if (r > l) {
+        vfBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
+          case (sink, source) => Mux(SrcType.isVfp(source.srcType), sink.ready, true.B)
+        }.reduce(_ & _)
+      }
+      else {
+        vfBlocksSeq(idx) := false.B
+      }
+  }
+  vfRFReadArbiter.io.flush := io.flush
 
   private val intSchdParams = params.schdParams(IntScheduler())
   private val vfSchdParams = params.schdParams(VfScheduler())
@@ -47,15 +161,17 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   println(s"[DataPath] RegFile read req needed by Exu: Int(${numIntRfReadByExu}), Vf(${numVfRfReadByExu})")
   println(s"[DataPath] RegFile read port: Int(${numIntR}), Vf(${numVfR})")
 
-  private val intRfRaddr = Wire(Vec(numIntR, UInt(intSchdParams.pregIdxWidth.W)))
-  private val intRfRdata = Wire(Vec(numIntR, UInt(intSchdParams.rfDataWidth.W)))
+  private val schdParams = params.allSchdParams
+
+  private val intRfRaddr = Wire(Vec(params.numRfRead, UInt(intSchdParams.pregIdxWidth.W)))
+  private val intRfRdata = Wire(Vec(params.numRfRead, UInt(intSchdParams.rfDataWidth.W)))
   private val intRfWen = Wire(Vec(io.fromIntWb.length, Bool()))
   private val intRfWaddr = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfWdata = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.rfDataWidth.W)))
 
   private val vfRfSplitNum = VLEN / XLEN
-  private val vfRfRaddr = Wire(Vec(numVfR, UInt(vfSchdParams.pregIdxWidth.W)))
-  private val vfRfRdata = Wire(Vec(numVfR, UInt(vfSchdParams.rfDataWidth.W)))
+  private val vfRfRaddr = Wire(Vec(params.numRfRead, UInt(vfSchdParams.pregIdxWidth.W)))
+  private val vfRfRdata = Wire(Vec(params.numRfRead, UInt(vfSchdParams.rfDataWidth.W)))
   private val vfRfWen = Wire(Vec(vfRfSplitNum, Vec(io.fromVfWb.length, Bool())))
   private val vfRfWaddr = Wire(Vec(io.fromVfWb.length, UInt(vfSchdParams.pregIdxWidth.W)))
   private val vfRfWdata = Wire(Vec(io.fromVfWb.length, UInt(vfSchdParams.rfDataWidth.W)))
@@ -100,29 +216,20 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   intRfWdata := io.fromIntWb.map(_.data)
   intRfWen := io.fromIntWb.map(_.wen)
 
+  intRFReadArbiter.io.out.map(_.bits.addr).zip(intRfRaddr).foreach{ case(source, sink) => sink := source }
+
   vfRfWaddr := io.fromVfWb.map(_.addr)
   vfRfWdata := io.fromVfWb.map(_.data)
   vfRfWen.foreach(_.zip(io.fromVfWb.map(_.wen)).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
 
+  vfRFReadArbiter.io.out.map(_.bits.addr).zip(vfRfRaddr).foreach{ case(source, sink) => sink := source }
+
   // fromIQFire(i): flattened the i-th deq port fired
   private val fromIQFire: IndexedSeq[Bool] = fromIQ.flatten.map(_.fire)
-
-  // intAddrFromIQ(i)(j): the j-th src addr of the i-th deq port
-  private val intAddrFromIQ: IndexedSeq[Seq[UInt]] = fromIQ.flatten.map(_.bits.getIntRfReadBundle.map(_.addr))
-  // hold read addr until new fromIQ.fire
-  intAddrFromIQ.zip(fromIQFire).flatMap { case (addrVec: Seq[UInt], fire: Bool) =>
-    addrVec.map(addr => (addr, fire))
-  }.zip(intRfRaddr).foreach { case ((source, fire), sink) => sink := DataHoldBypass(source, fire)}
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat
   }
-
-  // vfAddrFromIQ(i)(j): the j-th src addr of the i-th deq port
-  private val vfAddrFromIQ: IndexedSeq[Seq[UInt]] = fromIQ.flatten.map(_.bits.getFpRfReadBundle.map(_.addr))
-  vfAddrFromIQ.zip(fromIQFire).flatMap { case (addrVec: Seq[UInt], fire: Bool) =>
-    addrVec.map(addr => (addr, fire))
-  }.zip(vfRfRaddr).foreach { case ((source, fire), sink) => sink := DataHoldBypass(source, fire) }
 
   vfDebugRead.foreach { case (addr, _) =>
     addr := io.debugFpRat ++ io.debugVecRat
@@ -131,6 +238,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     s"has intDebugRead: ${intDebugRead.nonEmpty}, " +
     s"has vfDebugRead: ${vfDebugRead.nonEmpty}")
 
+  val s1_addrOHs = Reg(MixedVec(
+    fromIQ.map(x => MixedVec(x.map(_.bits.addrOH.cloneType)))
+  ))
   val s1_toExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(
     toExu.map(x => MixedVec(x.map(_.valid.cloneType)))
   ))
@@ -141,36 +251,59 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType)))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType)))))
 
-  println(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
-  println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
+  val rfrPortConfigs = schdParams.map(_.issueBlockParams).flatten.map(_.exuBlockParams.map(_.rfrPortConfigs))
 
-  var intRfRdataIdx = 0
-  var vfRfRdataIdx = 0
-  for (iqIdx <- toExu.indices) {
-    for (exuIdx <- toExu(iqIdx).indices) {
-      for (srcIdx <- toExu(iqIdx)(exuIdx).bits.src.indices) {
-        val readDataCfgSet = toExu(iqIdx)(exuIdx).bits.params.getSrcDataType(srcIdx)
-        // need read int reg
-        if (readDataCfgSet.intersect(IntRegSrcDataSet).nonEmpty) {
-          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := intRfRdata(intRfRdataIdx)
-          intRfRdataIdx += 1
-        } else {
-          // better for debug, should never assigned to other bundles
-          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef".U
-        }
-        // need read vf reg
-        if (readDataCfgSet.intersect(VfRegSrcDataSet).nonEmpty) {
-          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := vfRfRdata(vfRfRdataIdx)
-          vfRfRdataIdx += 1
-        } else {
-          // better for debug, should never assigned to other bundles
-          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef_dead_beef_dead_beef".U
-        }
+  println(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
+  s1_intPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  s1_intPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
+      iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
+        val realIuCfg = iuCfg.map(x => if(x.size > 1) x.filter(_.isInstanceOf[IntReadPort]) else x).flatten
+        assert(iuRdata.size == realIuCfg.size, "iuRdata.size != realIuCfg.size")
+        iuRdata.zip(realIuCfg)
+          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[IntReadPort] }
+          .foreach { case (sink, cfg) => sink := intRfRdata(cfg.port) }
       }
-    }
   }
 
-  println(s"[DataPath] assigned RegFile Rdata: int(${intRfRdataIdx}), vf(${vfRfRdataIdx})")
+  println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
+  s1_vfPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
+      iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
+        val realIuCfg = iuCfg.map(x => if(x.size > 1) x.filter(_.isInstanceOf[VfReadPort]) else x).flatten
+        assert(iuRdata.size == realIuCfg.size, "iuRdata.size != realIuCfg.size")
+        iuRdata.zip(realIuCfg)
+          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[VfReadPort] }
+          .foreach { case (sink, cfg) => sink := vfRfRdata(cfg.port) }
+      }
+  }
+
+  //  var intRfRdataIdx = 0
+//  var vfRfRdataIdx = 0
+//  for (iqIdx <- toExu.indices) {
+//    for (exuIdx <- toExu(iqIdx).indices) {
+//      for (srcIdx <- toExu(iqIdx)(exuIdx).bits.src.indices) {
+//        val readDataCfgSet = toExu(iqIdx)(exuIdx).bits.params.getSrcDataType(srcIdx)
+//        // need read int reg
+//        if (readDataCfgSet.intersect(IntRegSrcDataSet).nonEmpty) {
+//          println(s"[DataPath] (iqIdx, exuIdx, srcIdx): ($iqIdx, $exuIdx, $srcIdx)")
+//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := intRfRdata(intRfRdataIdx)
+//        } else {
+//          // better for debug, should never assigned to other bundles
+//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef".U
+//        }
+//        // need read vf reg
+//        if (readDataCfgSet.intersect(VfRegSrcDataSet).nonEmpty) {
+//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := vfRfRdata(vfRfRdataIdx)
+//          vfRfRdataIdx += 1
+//        } else {
+//          // better for debug, should never assigned to other bundles
+//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef_dead_beef_dead_beef".U
+//        }
+//      }
+//    }
+//  }
+//
+//  println(s"[DataPath] assigned RegFile Rdata: int(${intRfRdataIdx}), vf(${vfRfRdataIdx})")
 
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
@@ -179,14 +312,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s1_valid = s1_toExuValid(i)(j)
       val s1_ready = s1_toExuReady(i)(j)
       val s1_data = s1_toExuData(i)(j)
-      val s0 = fromIQ(i)(j)
-      val block = false.B // Todo: read arbiter
-      // assign
+      val s1_addrOH = s1_addrOHs(i)(j)
+      val s0 = fromIQ(i)(j) // s0
+      val block = intBlocks(i)(j) || vfBlocks(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       when (s0.fire && !s1_flush && !block) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
-      }.elsewhen (s1_ready) {
+        s1_addrOH := s0.bits.addrOH
+      }.otherwise {
         s1_valid := false.B
       }
 
@@ -217,6 +351,26 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
+  private val intFromIQFire = fromIQ.map(_.map(_.fire))
+  private val intToExuFire = toExu.map(_.map(_.fire))
+  toIQs.zipWithIndex.foreach {
+    case(toIQ, iqIdx) =>
+      toIQ.zipWithIndex.foreach {
+        case (toIU, iuIdx) =>
+          // IU: issue unit
+          val og0resp = toIU.og0resp
+          og0resp.valid := fromIQ(iqIdx)(iuIdx).valid
+          og0resp.bits.respType := Mux(intFromIQFire(iqIdx)(iuIdx), RSFeedbackType.rfArbitSuccess, RSFeedbackType.rfArbitFail)
+          og0resp.bits.success := false.B
+          og0resp.bits.addrOH := fromIQ(iqIdx)(iuIdx).bits.addrOH
+
+          val og1resp = toIU.og1resp
+          og1resp.valid := s1_toExuValid(iqIdx)(iuIdx)
+          og1resp.bits.respType := Mux(intToExuFire(iqIdx)(iuIdx), RSFeedbackType.fuIdle, RSFeedbackType.fuBusy)
+          og1resp.bits.success := false.B
+          og1resp.bits.addrOH := s1_addrOHs(iqIdx)(iuIdx)
+      }
+  }
   for (i <- toExu.indices) {
     for (j <- toExu(i).indices) {
       // s1Reg --[Ctrl]--> exu(s1) ---------- begin
@@ -296,6 +450,12 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
     Flipped(MixedVec(memSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
   val fromVfIQ = Flipped(MixedVec(vfSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
+
+  val toIntIQ = MixedVec(intSchdParams.issueBlockParams.map(_.genOGRespBundle))
+
+  val toMemIQ = MixedVec(memSchdParams.issueBlockParams.map(_.genOGRespBundle))
+
+  val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 
