@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
-import utility._
+//import utility._
 import xiangshan._
 import xiangshan.frontend._
 

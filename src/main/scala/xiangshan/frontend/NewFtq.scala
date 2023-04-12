@@ -916,7 +916,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
   toBpuCfi.fromFtqRedirectSram(ftq_redirect_sram.io.rdata.head)
   when (ifuRedirectReg.bits.cfiUpdate.pd.isRet) {
-    toBpuCfi.target := toBpuCfi.rasEntry.retAddr
+    toBpuCfi.target := toBpuCfi.topAddr
   }
 
   // *********************************************************************
@@ -1074,23 +1074,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
-  switch (bpu_ftb_update_stall) {
-    is (0.U) {
-      when (can_commit_cfi.valid && !to_bpu_hit && canCommit) {
-        bpu_ftb_update_stall := 3.U // 2-cycle stall
-      }
-    }
-    is (2.U) {
-      bpu_ftb_update_stall := 1.U
-    }
-    is (1.U) {
-      bpu_ftb_update_stall := 0.U
-    }
-    is (3.U) {
-      bpu_ftb_update_stall := 2.U
-      //XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
-    }
-  }
 
   // TODO: remove this
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
@@ -1125,6 +1108,25 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.pred_hit          := commit_hit === h_hit || commit_hit === h_false_hit
   update.br_taken_mask     := ftbEntryGen.taken_mask
   update.jmp_taken         := ftbEntryGen.jmp_taken
+  switch (bpu_ftb_update_stall) {
+    is (0.U) {
+      when (can_commit_cfi.valid && !to_bpu_hit && canCommit) {
+        bpu_ftb_update_stall := 3.U // 3-cycle stall
+      }.elsewhen((ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified) && RegNext(can_commit_cfi.valid && to_bpu_hit && canCommit)) {
+        bpu_ftb_update_stall := 2.U
+      }
+    }
+    is (2.U) {
+      bpu_ftb_update_stall := 1.U
+    }
+    is (1.U) {
+      bpu_ftb_update_stall := 0.U
+    }
+    is (3.U) {
+      bpu_ftb_update_stall := 2.U
+      //XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+    }
+  }
 
   // update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
   // update.full_pred.jalr_target := commit_target
@@ -1225,10 +1227,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
     val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
     val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
-    XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
+  /*  XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
     p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
-    p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
+    p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")*/
+    val isRet = isJmp && commit_pd.hasRet
+    XSDebug(v && do_commit && isRet && misPred, p"cfi_update: isRet(${isRet}) pc(${Hexadecimal(pc)}) " +
+      p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
+     // p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+      p"target(${Hexadecimal(target)})\n")
 
     val logbundle = Wire(new FtqDebugBundle)
     logbundle.pc := pc

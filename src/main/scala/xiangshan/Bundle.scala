@@ -42,6 +42,7 @@ import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
+import xiangshan.frontend.RASPtr
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -72,14 +73,21 @@ class PredictorAnswer(implicit p: Parameters) extends XSBundle {
   val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
 }
-
+/*
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
-  val pd = new PreDecodeInfo
+/*  val pd = new PreDecodeInfo
   val rasSp = UInt(log2Up(RasSize).W)
-  val rasEntry = new RASEntry
+  val rasEntry = new RASEntry*/
+   val pd = new PreDecodeInfo
+  val ssp = UInt(log2Up(RasSize).W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
+  val TOSW = new RASPtr
+  val TOSR = new RASPtr
+  val NOS = new RASPtr
+  val topAddr = UInt(VAddrBits.W)
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
@@ -104,6 +112,48 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.histPtr := entry.histPtr
     this.rasSp := entry.rasSp
     this.rasEntry := entry.rasTop
+    this
+  }
+}*/
+class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
+  // from backend
+  val pc = UInt(VAddrBits.W)
+  // frontend -> backend -> frontend
+  val pd = new PreDecodeInfo
+  val ssp = UInt(log2Up(RasSize).W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
+  val TOSW = new RASPtr
+  val TOSR = new RASPtr
+  val NOS = new RASPtr
+  val topAddr = UInt(VAddrBits.W)
+  // val hist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
+  val lastBrNumOH = UInt((numBr+1).W)
+  val ghr = UInt(UbtbGHRLength.W)
+  val histPtr = new CGHPtr
+  val specCnt = Vec(numBr, UInt(10.W))
+  // need pipeline update
+  val br_hit = Bool()
+  val predTaken = Bool()
+  val target = UInt(VAddrBits.W)
+  val taken = Bool()
+  val isMisPred = Bool()
+  val shift = UInt((log2Ceil(numBr)+1).W)
+  val addIntoHist = Bool()
+
+  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+    // this.hist := entry.ghist
+    this.folded_hist := entry.folded_hist
+    this.lastBrNumOH := entry.lastBrNumOH
+    this.afhob := entry.afhob
+    this.histPtr := entry.histPtr
+    this.ssp := entry.ssp
+    this.sctr := entry.sctr
+    this.TOSW := entry.TOSW
+    this.TOSR := entry.TOSR
+    this.NOS := entry.NOS
+    this.topAddr := entry.topAddr
     this
   }
 }
