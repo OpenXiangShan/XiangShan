@@ -176,8 +176,8 @@ case class XSCoreParameters
   ReSelectLen: Int = 6, // load replay queue replay select counter len
   wpuParameters: WPUParameters = WPUParameters(
     enWPU = true,
-    algoName = "mmru",
-    enCfPred = true
+    algoName = "utag",
+    enCfPred = false
   ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",

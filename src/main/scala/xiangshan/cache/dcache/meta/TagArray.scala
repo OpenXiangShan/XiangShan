@@ -28,6 +28,7 @@ class TagReadReq(implicit p: Parameters) extends DCacheBundle {
 }
 
 class TagWriteReq(implicit p: Parameters) extends TagReadReq {
+  val vaddr = UInt(vtagBits.W)
   val tag = UInt(tagBits.W)
 }
 

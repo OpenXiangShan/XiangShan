@@ -808,6 +808,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   tag_write_arb.io.in(1) <> mainPipe.io.tag_write
   tagArray.io.write <> tag_write_arb.io.out
 
+  ldu.map(m => {
+    m.io.vtag_update.valid := tagArray.io.write.valid
+    m.io.vtag_update.bits := tagArray.io.write.bits
+  })
+
   //----------------------------------------
   // data array
 

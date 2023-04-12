@@ -22,6 +22,7 @@ import chisel3.util._
 
 class RefillPipeReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
+  val vaddr = UInt(VAddrBits.W)
   val addr = UInt(PAddrBits.W)
   val way_en = UInt(DCacheWays.W)
   val alias = UInt(2.W) // TODO: parameterize
@@ -47,6 +48,7 @@ class RefillPipeReq(implicit p: Parameters) extends RefillPipeReqCtrl {
   def getCtrl = {
     val ctrl = Wire(new RefillPipeReqCtrl)
     ctrl.source := source
+    ctrl.vaddr := vaddr
     ctrl.addr := addr
     ctrl.way_en := way_en
     ctrl.alias := alias
@@ -135,6 +137,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.tag_write.bits.idx := req_dup_for_tag_w.idx
   io.tag_write.bits.way_en := req_dup_for_tag_w.way_en
   io.tag_write.bits.tag := tag
+  io.tag_write.bits.vaddr := refill_w_req.vaddr
 
   io.store_resp.valid := refill_w_valid && refill_w_req.source === STORE_SOURCE.U
   io.store_resp.bits := DontCare

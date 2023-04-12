@@ -19,7 +19,7 @@ trait HasWPUParameters extends HasDCacheParameters{
   val auxWayBits = wayBits + 1
   val nTagIdx = nWays
   val TagIdxBits = log2Up(nTagIdx)
-
+  val utagBits = 8
 /*
   val AlgoWPUMap = Map(
     "MRU" -> Module(new MruWPU()),
@@ -86,7 +86,8 @@ class ConflictPredictIO(implicit p:Parameters) extends WPUBuddle{
 class WPUIO(implicit p:Parameters) extends WPUBuddle{
   val req = Flipped(Decoupled(new WPUReq))
   val resp = ValidIO(new WPUResp)
-  val update = Flipped(ValidIO(new WPUUpdate))
+  val lookup_upd = Flipped(ValidIO(new WPUUpdate))
+  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate))
   val cfpred = new ConflictPredictIO
 }
 
@@ -129,22 +130,33 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
   /** check and update in s1 */
   val s1_dmSel = RegNext(s0_dmSel)
   val s1_pred_way_en = RegNext(s0_pred_way_en)
-  val s1_pred_fail = RegNext(io.resp.valid) && s1_pred_way_en =/= io.update.bits.s1_real_way_en
-  val s1_pred_hit = RegNext(io.resp.valid) && s1_pred_way_en.orR && s1_pred_way_en === io.update.bits.s1_real_way_en
+  val s1_pred_fail = RegNext(io.resp.valid) && s1_pred_way_en =/= io.lookup_upd.bits.s1_real_way_en
+  val s1_pred_hit = RegNext(io.resp.valid) && s1_pred_way_en.orR && s1_pred_way_en === io.lookup_upd.bits.s1_real_way_en
+  // FIXME: is replay carry valid && req.valid ?
+  val s0_replay_upd = Wire(new BaseWpuUpdateBuddle)
+  s0_replay_upd.update_en := io.req.valid && io.req.bits.replayCarry.valid
+  s0_replay_upd.update_vaddr := io.req.bits.vaddr
+  s0_replay_upd.update_way_en := io.req.bits.replayCarry.real_way_en
+  val s1_replay_upd = RegNext(s0_replay_upd)
 
-  wayConflictPredictor.io.update_en := io.update.valid
+  wayConflictPredictor.io.update_en := io.lookup_upd.valid
   wayConflictPredictor.io.update_pc := io.cfpred.s1_pc
   wayConflictPredictor.io.update_dm_hit := s1_dmSel && io.cfpred.s1_dm_hit
   wayConflictPredictor.io.update_sa_hit := !s1_dmSel && s1_pred_hit
 
-  wpu.io.update_en := io.update.valid
-  wpu.io.update_vaddr := io.update.bits.vaddr
-  when(io.update.bits.s1_real_way_en.orR){ // not cache miss
-    wpu.io.update_way_en := io.update.bits.s1_real_way_en
-  }.otherwise{
-    wpu.io.update_way_en := 0.U(nWays.W)
-  }
+  // look up res
+  wpu.io.lookup_upd.update_en := io.lookup_upd.valid
+  wpu.io.lookup_upd.update_vaddr := io.lookup_upd.bits.vaddr
   // FIXME lyq: if cache misses, it can be updated by way number replaced
+  wpu.io.lookup_upd.update_way_en := io.lookup_upd.bits.s1_real_way_en
+
+  // which will update in look up pred fail
+  wpu.io.replaycarry_upd := s1_replay_upd
+
+  // replace / tag write
+  wpu.io.tagwrite_upd.update_en := io.tagwrite_upd.valid
+  wpu.io.tagwrite_upd.update_vaddr := io.tagwrite_upd.bits.vaddr
+  wpu.io.tagwrite_upd.update_way_en := io.tagwrite_upd.bits.s1_real_way_en
 
   /** predict and response in s0 */
   io.req.ready := true.B
@@ -164,7 +176,7 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
   XSPerfAccumulate("wpu_pred_succ", RegNext(io.resp.valid) && !s1_pred_fail)
   XSPerfAccumulate("wpu_pred_fail", RegNext(io.resp.valid) && s1_pred_fail)
   XSPerfAccumulate("wpu_pred_miss", RegNext(io.resp.valid) && !RegNext(s0_pred_way_en).orR)
-  XSPerfAccumulate("wpu_real_miss", RegNext(io.resp.valid) && !io.update.bits.s1_real_way_en.orR)
+  XSPerfAccumulate("wpu_real_miss", RegNext(io.resp.valid) && !io.lookup_upd.bits.s1_real_way_en.orR)
   // pred component
   XSPerfAccumulate("wpu_pred_replayCarry", io.req.valid && io.req.bits.replayCarry.valid)
   if(!wpuParam.enCfPred){
@@ -173,8 +185,8 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule{
     XSPerfAccumulate("wpu_pred_wayPrediction", io.req.valid && !io.req.bits.replayCarry.valid && s0_pred_way_conflict)
     XSPerfAccumulate("wpu_pred_directMap", io.req.valid && !io.req.bits.replayCarry.valid && !s0_pred_way_conflict)
     // dm situation
-    XSPerfAccumulate("direct_map_all", io.update.valid)
-    XSPerfAccumulate("direct_map_ok", io.update.valid && io.cfpred.s1_dm_hit)
+    XSPerfAccumulate("direct_map_all", io.lookup_upd.valid)
+    XSPerfAccumulate("direct_map_ok", io.lookup_upd.valid && io.cfpred.s1_dm_hit)
   }
 }
 

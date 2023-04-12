@@ -53,6 +53,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def pgIdxBits = 12
   def pgUntagBits = untagBits min pgIdxBits
   def tagBits = PAddrBits - pgUntagBits
+  def vtagBits = VAddrBits - untagBits
 
   // the basic unit at which we store contents
   // SRAM bank width

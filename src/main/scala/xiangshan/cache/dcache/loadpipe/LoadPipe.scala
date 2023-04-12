@@ -38,6 +38,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
+    val vtag_update = Flipped(DecoupledIO(new TagWriteReq))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_resp = Input(new L1BankedDataReadResult())
@@ -153,9 +154,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_real_tag_match_way_dup_dc = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
   val s1_real_tag_match_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
 
-  wpu.io.update.valid := s1_valid
-  wpu.io.update.bits.vaddr := s1_vaddr
-  wpu.io.update.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
+  // lookup update
+  wpu.io.lookup_upd.valid := s1_valid
+  wpu.io.lookup_upd.bits.vaddr := s1_vaddr
+  wpu.io.lookup_upd.bits.s1_real_way_en := s1_real_tag_match_way_dup_dc
+  // replace / tag write
+  io.vtag_update.ready := true.B
+  wpu.io.tagwrite_upd.valid := io.vtag_update.valid
+  wpu.io.tagwrite_upd.bits.vaddr := io.vtag_update.bits.vaddr
+  wpu.io.tagwrite_upd.bits.s1_real_way_en := io.vtag_update.bits.way_en
+
   val s1_wpu_pred_fail = wpu.io.resp.bits.s1_pred_fail
   val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
   if(wpuParam.enCfPred || !env.FPGAPlatform){
