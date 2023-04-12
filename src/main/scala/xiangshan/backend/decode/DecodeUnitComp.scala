@@ -118,6 +118,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_ISLIDEDOWN  -> numOfUopVslide,
     UopDivType.VEC_0MX         -> (lmul +& 1.U),
     UopDivType.VEC_VMV         -> (Cat(lmul, 0.U(1.W)) -1.U),
+    UopDivType.VEC_0MX_VFIRST  -> 2.U,
   ))
 
   val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
@@ -794,6 +795,32 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(i*2+1).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
         csBundle(i*2+1).ctrl.uopIdx := (i*2+1).U
       }
+    }
+
+    is(UopDivType.VEC_0MX_VFIRST) {
+      // LMUL
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.ldest := FP_TMP_REG_MV.U
+      // FMV_X_D
+      csBundle(1).ctrl.srcType(0) := SrcType.fp
+      csBundle(1).ctrl.srcType(1) := SrcType.imm
+      csBundle(1).ctrl.lsrc(0) := FP_TMP_REG_MV.U
+      csBundle(1).ctrl.lsrc(1) := 0.U
+      csBundle(1).ctrl.ldest := dest
+      csBundle(1).ctrl.fuType := FuType.fmisc
+      csBundle(1).ctrl.rfWen := true.B
+      csBundle(1).ctrl.fpWen := false.B
+      csBundle(1).ctrl.vecWen := false.B
+      csBundle(1).ctrl.fpu.isAddSub := false.B
+      csBundle(1).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(1).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(1).ctrl.fpu.fromInt := false.B
+      csBundle(1).ctrl.fpu.wflags := false.B
+      csBundle(1).ctrl.fpu.fpWen := false.B
+      csBundle(1).ctrl.fpu.div := false.B
+      csBundle(1).ctrl.fpu.sqrt := false.B
+      csBundle(1).ctrl.fpu.fcvt := false.B
     }
   }
 

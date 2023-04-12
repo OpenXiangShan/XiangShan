@@ -72,14 +72,14 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vwredsumu_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew2).asUInt(),
     VipuType.vwredsum_vs -> Cat(VAluOpcode.vredsum, sSew, sSew, sSew2).asUInt(),
 
-    VipuType.vcpop_m -> Cat(VAluOpcode.vcpop, mask, mask, mask).asUInt(),
-    VipuType.vfirst_m -> Cat(VAluOpcode.vfirst, mask, mask, mask).asUInt(),
+    VipuType.vcpop_m -> Cat(VAluOpcode.vcpop, mask, mask, uSew).asUInt(),
+    VipuType.vfirst_m -> Cat(VAluOpcode.vfirst, mask, mask, uSew).asUInt(),
     VipuType.vmsbf_m -> Cat(VAluOpcode.vmsbf, mask, mask, mask).asUInt(),
     VipuType.vmsif_m -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt(),
     VipuType.vmsof_m -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt(),
 
-    VipuType.viota_m -> Cat(VAluOpcode.viota, mask, mask, uSew).asUInt(),
-    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt()
+    VipuType.viota_m -> Cat(VAluOpcode.viota, uSew, mask, uSew).asUInt(),
+    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, mask, uSew).asUInt()
 
   )).asTypeOf(new VIAluDecodeResultBundle)
 
