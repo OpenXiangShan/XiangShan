@@ -487,26 +487,6 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
-//object Imm32Gen {
-//  def apply(sel: UInt, inst: UInt) = {
-//    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
-//    val b30_20 = Mux(sel === SelImm.IMM_U, inst(30,20).asSInt, sign)
-//    val b19_12 = Mux(sel =/= SelImm.IMM_U && sel =/= SelImm.IMM_UJ, sign, inst(19,12).asSInt)
-//    val b11 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.S,
-//              Mux(sel === SelImm.IMM_UJ, inst(20).asSInt,
-//              Mux(sel === SelImm.IMM_SB, inst(7).asSInt, sign)))
-//    val b10_5 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.U(1.W), inst(30,25))
-//    val b4_1 = Mux(sel === SelImm.IMM_U, 0.U(1.W),
-//               Mux(sel === SelImm.IMM_S || sel === SelImm.IMM_SB, inst(11,8),
-//               Mux(sel === SelImm.IMM_Z, inst(19,16), inst(24,21))))
-//    val b0 = Mux(sel === SelImm.IMM_S, inst(7),
-//             Mux(sel === SelImm.IMM_I, inst(20),
-//             Mux(sel === SelImm.IMM_Z, inst(15), 0.U(1.W))))
-//
-//    Cat(sign, b30_20, b19_12, b11, b10_5, b4_1, b0)
-//  }
-//}
-
 abstract class Imm(val len: Int) extends Bundle {
   def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
   def do_toImm32(minBits: UInt): UInt
@@ -725,11 +705,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
       x._1 -> minBits
     }
   ))
-
-//  decodedInst.vconfig := 0.U(16.W)
-//  when(FuType.isVpu(decodedInst.fuType)){
-//    decodedInst.vconfig := io.vconfig
-//  }
 
   decodedInst.isVset := FuType.isInt(decodedInst.fuType) && ALUOpType.isVset(decodedInst.fuOpType)
   decodedInst.commitType := 0.U // Todo: remove it

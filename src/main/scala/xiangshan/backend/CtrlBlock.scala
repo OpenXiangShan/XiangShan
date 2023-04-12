@@ -43,11 +43,6 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   val rob = LazyModule(new Rob(params))
 
-//  override def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]]): HasWritebackSink = {
-//    rob.addWritebackSink(Seq(this), Some(Seq(writebackSinks.length)))
-//    super.addWritebackSink(source, index)
-//  }
-
   lazy val module = new CtrlBlockImp(this)(p, params)
 
 }
@@ -144,14 +139,7 @@ class CtrlBlockImp(
   )
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
 
-  //  val isCommitWriteVconfigVec = rob.io.commits.commitValid.zip(rob.io.commits.info).map{case (valid, info) => valid && info.ldest === 32.U}.reverse
-//  val isWalkWriteVconfigVec = rob.io.commits.walkValid.zip(rob.io.commits.info).map{case (valid, info) => valid && info.ldest === 32.U}.reverse
   val pdestReverse = rob.io.commits.info.map(info => info.pdest).reverse
-//  val commitSel = PriorityMux(isCommitWriteVconfigVec, pdestReverse)
-//  val walkSel = PriorityMux(isWalkWriteVconfigVec, pdestReverse)
-//  val vconfigAddr = Mux(rob.io.commits.isCommit, commitSel, walkSel)
-//  decode.io.vconfig := io.vconfigReadPort.data
-//  decode.io.isVsetFlushPipe := rob.io.isVsetFlushPipe
 
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
   redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
@@ -249,8 +237,6 @@ class CtrlBlockImp(
   decode.io.fpRat <> rat.io.fpReadPorts
   decode.io.vecRat <> rat.io.vecReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
-//  decode.io.isRedirect <> stage2Redirect.valid
-//  decode.io.robCommits <> rob.io.commits
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
   // fusion decoder
@@ -423,8 +409,6 @@ class CtrlBlockImp(
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
 
-//  io.robio.csr.vcsrFlag := RegNext(rob.io.commits.isCommit && Cat(isCommitWriteVconfigVec).orR)
-
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
@@ -503,7 +487,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   })
   val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W))) // TODO: use me
+  val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
 
 }

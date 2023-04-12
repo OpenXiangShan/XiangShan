@@ -7,8 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.PipelineConnect
 import xiangshan._
 import xiangshan.backend.CtrlBlock
-import xiangshan.backend.exu.FenceIO
-import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer, PerfCounterIO}
+import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer, PerfCounterIO, FenceIO}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}

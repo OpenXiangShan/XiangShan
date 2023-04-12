@@ -256,38 +256,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
-//  // Assume only the LUI instruction is decoded with IMM_U in ALU.
-//  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
-//  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
-//  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-//    successor.map{ case (src, srcType) =>
-//      val pdestMatch = pdest === src
-//      // For state: no need to check whether src is x0/imm/pc because they are always ready.
-//      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
-//      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
-//      val bothIntFp = exuCfg.readIntRf && exuCfg.readFpRf
-//      val bothStateMatch = Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch)
-//      val stateCond = pdestMatch && (if (bothIntFp) bothStateMatch else rfStateMatch || fpMatch)
-//      // For data: types are matched and int pdest is not $zero.
-//      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
-//      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType))
-//      (stateCond, dataCond)
-//    }
-//  }
-//  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
-//  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-//    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
-//  }
-//  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
-
-//class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
-//  val uop = new MicroOp
-//}
-
-//class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
-//  val flag = UInt(1.W)
-//}
 
 class Redirect(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
@@ -302,9 +271,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
 
   val debug_runahead_checkpoint_id = UInt(64.W)
 
-  // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
-  // def isException() = RedirectLevel.isException(level)
 }
 
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
@@ -320,22 +287,6 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
 }
-
-//class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
-//  val dataWidth = if (isVpu) VLEN else XLEN
-//
-//  val src = Vec(3, UInt(dataWidth.W))
-//}
-
-//class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
-//  val dataWidth = if (isVpu) VLEN else XLEN
-//
-//  val data = UInt(dataWidth.W)
-//  val fflags = UInt(5.W)
-//  val redirectValid = Bool()
-//  val redirect = new Redirect
-//  val debug = new DebugBundle
-//}
 
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
@@ -353,10 +304,6 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val externalInterrupt = new ExternalInterruptIO
   val interrupt = Output(Bool())
 }
-
-//class ExceptionInfo(implicit p: Parameters) extends XSBundleWithMicroOp {
-//  val isInterrupt = Bool()
-//}
 
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(6.W)

@@ -6,8 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
-import xiangshan.backend.exu.FenceIO
-import xiangshan.backend.fu.CSRFileIO
+import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.v2backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
 import xiangshan.v2backend.ExeUnitParams
 import xiangshan.v2backend.fu.FuncUnitInput

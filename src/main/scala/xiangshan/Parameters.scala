@@ -23,7 +23,6 @@ import huancun._
 import huancun.debug._
 import system.SoCParamsKey
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.backend.exu._
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.cache.prefetch._
@@ -156,17 +155,6 @@ case class XSCoreParameters
     numRead = 14,
     numWrite = 8,
   ),
-//  exuParameters: ExuParameters = ExuParameters(
-//    JmpCnt = 1,
-//    AluCnt = 4,
-//    MulCnt = 0,
-//    MduCnt = 2,
-//    FmacCnt = 4,
-//    FmiscCnt = 2,
-//    FmiscDivSqrtCnt = 0,
-//    LduCnt = 2,
-//    StuCnt = 2
-//  ),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -481,12 +469,6 @@ trait HasXSParameter {
   def backendParams: BackendParams = coreParams.backendParams
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
-//  val exuParameters = coreParams.exuParameters
-//  val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
-//  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
-//  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
-//  val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
-//  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
@@ -513,11 +495,6 @@ trait HasXSParameter {
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
-
-//  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
-//              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
-//              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-//              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -547,15 +524,6 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
-
-//  val loadExuConfigs = coreParams.loadExuConfigs
-//  val storeExuConfigs = coreParams.storeExuConfigs
-//
-//  val intExuConfigs = coreParams.intExuConfigs
-//
-//  val fpExuConfigs = coreParams.fpExuConfigs
-//
-//  val exuConfigs = coreParams.exuConfigs
 
   val PCntIncrStep: Int = 6
   val numPCntHc: Int = 25

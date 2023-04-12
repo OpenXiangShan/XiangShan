@@ -50,12 +50,6 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
 
   lazy val module = new MemBlockImp(this)
 
-//  override val writebackSourceParams: Seq[WritebackSourceParams] = {
-//    val params = new WritebackSourceParams
-//    params.exuConfigs = (loadExuConfigs ++ storeExuConfigs).map(cfg => Seq(cfg))
-//    Seq(params)
-//  }
-//  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }
 
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)

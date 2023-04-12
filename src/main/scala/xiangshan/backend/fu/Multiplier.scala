@@ -29,36 +29,6 @@ class MulDivCtrl extends Bundle{
   val isHi = Bool() // return hi bits of result ?
 }
 
-//class AbstractMultiplier(len: Int)(implicit p: Parameters) extends FunctionUnit(
-//  len
-//){
-//  val ctrl = IO(Input(new MulDivCtrl))
-//}
-//
-//class NaiveMultiplier(len: Int, val latency: Int)(implicit p: Parameters)
-//  extends AbstractMultiplier(len)
-//  with HasPipelineReg
-//{
-//
-//  val (src1, src2) = (io.in.bits.src(0), io.in.bits.src(1))
-//
-//  val mulRes = src1.asSInt() * src2.asSInt()
-//
-//  var dataVec = Seq(mulRes.asUInt())
-//  var ctrlVec = Seq(ctrl)
-//
-//  for(i <- 1 to latency){
-//    dataVec = dataVec :+ PipelineReg(i)(dataVec(i-1))
-//    ctrlVec = ctrlVec :+ PipelineReg(i)(ctrlVec(i-1))
-//  }
-//
-//  val xlen = io.out.bits.data.getWidth
-//  val res = Mux(ctrlVec.last.isHi, dataVec.last(2*xlen-1, xlen), dataVec.last(xlen-1,0))
-//  io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
-//
-//  XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")
-//}
-
 class ArrayMulDataModule(len: Int) extends Module {
   val io = IO(new Bundle() {
     val a, b = Input(UInt(len.W))
@@ -179,26 +149,3 @@ class ArrayMulDataModule(len: Int) extends Module {
 
   io.result := sum + carry
 }
-
-//class ArrayMultiplier(len: Int)(implicit p: Parameters)
-//  extends AbstractMultiplier(len) with HasPipelineReg {
-//
-//  override def latency = 2
-//
-//  val mulDataModule = Module(new ArrayMulDataModule(len))
-//  mulDataModule.io.a := io.in.bits.src(0)
-//  mulDataModule.io.b := io.in.bits.src(1)
-//  mulDataModule.io.regEnables := VecInit((1 to latency) map (i => regEnable(i)))
-//  val result = mulDataModule.io.result
-//
-//  var ctrlVec = Seq(ctrl)
-//  for(i <- 1 to latency){
-//    ctrlVec = ctrlVec :+ PipelineReg(i)(ctrlVec(i-1))
-//  }
-//  val xlen = len - 1
-//  val res = Mux(ctrlVec.last.isHi, result(2*xlen-1, xlen), result(xlen-1,0))
-//
-//  io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
-//
-//  XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")
-//}

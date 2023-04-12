@@ -4,8 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.DataHoldBypass
-import xiangshan.backend.exu.FenceIO
-import xiangshan.backend.fu.CSRFileIO
+import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.v2backend.{FuConfig, VAddrData}

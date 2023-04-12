@@ -44,16 +44,3 @@ object ImmExtractor {
     mod.io.out.imm
   }
 }
-
-//class AluImmExtractor() extends ImmExtractor(64) {
-//  val imm32 = MuxLookup(io.in.immType, 0.U, Seq(
-//    SelImm.IMM_U -> ImmUnion.U.toImm32(io.in.imm),
-//    SelImm.IMM_I -> ImmUnion.I.toImm32(io.in.imm),
-//  ))
-//  io.out.imm := SignExt(imm32, 64)
-//}
-//
-//class MulImmExtractor() extends ImmExtractor(64) {
-//  val imm32 = ImmUnion.I.toImm32(io.in.imm)
-//  io.out.imm := SignExt(imm32, 64)
-//}

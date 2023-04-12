@@ -320,12 +320,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wfi_enable = Input(Bool())
   })
 
-//  def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
-//    wbExuConfigs(index).zip(io.writeback(index)).filter(x => func(x._1))
-//  }
-
-  val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu).toSeq
-  val stdWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(_.bits.params.hasStdFu).toSeq
+  val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu)
+  val stdWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(_.bits.params.hasStdFu)
   val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty)
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty)
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty)
@@ -338,13 +334,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val numStdWbPorts = stdWBs.length
 
 
-//  val exeWbSel = wrapper.selWritebackSinks(_.exuConfigs.length)
-//  val fflagsWbSel = wrapper.selWritebackSinks(_.exuConfigs.count(_.exists(_.writeFflags)))
-//  val fflagsPorts = selectWb(fflagsWbSel, _.exists(_.writeFflags))
-//  val exceptionWbSel = outer.selWritebackSinks(_.exuConfigs.count(_.exists(_.needExceptionGen)))
-//  val exceptionPorts = selectWb(fflagsWbSel, _.exists(_.needExceptionGen))
-//  val exuWbPorts = selectWb(exeWbSel, _.forall(_ != StdExeUnitCfg))
-//  val stdWbPorts = selectWb(exeWbSel, _.contains(StdExeUnitCfg))
   println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, numStdWbPorts: $numStdWbPorts, commitwidth: $CommitWidth")
 //  println(s"exuPorts: ${exuWbPorts.map(_._1.map(_.name))}")
 //  println(s"stdPorts: ${stdWbPorts.map(_._1.map(_.name))}")

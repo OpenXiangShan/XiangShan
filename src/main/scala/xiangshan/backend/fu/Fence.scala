@@ -26,6 +26,13 @@ import xiangshan._
 import xiangshan.v2backend.FuConfig
 import xiangshan.v2backend.fu.FuncUnit
 
+class FenceIO(implicit p: Parameters) extends XSBundle {
+  val sfence = Output(new SfenceBundle)
+  val fencei = Output(Bool())
+  val sbuffer = new FenceToSbuffer
+  val disableSfence = Input(Bool())
+}
+
 class FenceToSbuffer extends Bundle {
   val flushSb = Output(Bool())
   val sbIsEmpty = Input(Bool())

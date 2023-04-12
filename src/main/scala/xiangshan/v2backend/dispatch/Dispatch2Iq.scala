@@ -226,8 +226,8 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire", PopCount(io.in.map(_.fire)))
-//  XSPerfAccumulate("out_valid", PopCount(io.out.map(_.valid)))
-//  XSPerfAccumulate("out_fire", PopCount(io.out.map(_.fire)))
+  XSPerfAccumulate("out_valid", PopCount(io.out.flatMap(_.map(_.valid))))
+  XSPerfAccumulate("out_fire", PopCount(io.out.flatMap(_.map(_.fire))))
 }
 
 /**
@@ -391,8 +391,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
   }
 
-//  s0_out.flatten.flatMap(x => x.bits.srcState.take(numIntSrc)).zip(intSrcStateVec.flatten).foreach(x => x._1 := x._2)
-
   // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
   val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x)))
   val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten)
@@ -403,11 +401,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
       in.ready := (Cat(outVec) & Cat(outReadyVec)).orR && !s0_blockedVec(inIdx)
     }
   }
-//  dontTouch(outToInMap)
-//  dontTouch(outReadyVec)
-//  dontTouch(s0_out)
-//  dontTouch(s0_blockedVec)
-
 
   io.out <> s0_out
 }

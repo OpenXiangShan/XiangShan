@@ -238,16 +238,11 @@ package object v2backend {
     }
 
     def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
-      val res: Seq[Option[DataConfig]] = srcData
+      srcData
         .map((x: Seq[DataConfig]) => if(x.isDefinedAt(srcIdx)) Some(x(srcIdx)) else None)
-      println(s"${this.name}: ${res}, srcData: ${srcData}")
-
-      val res2 = res
         .filter(_.nonEmpty)
         .map(_.get)
         .toSet
-      println(s"${this.name}: ${res2}, srcData: ${srcData}")
-      res2
     }
 
     def hasNoDataWB: Boolean = {
