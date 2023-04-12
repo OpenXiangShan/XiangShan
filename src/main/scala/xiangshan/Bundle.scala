@@ -38,6 +38,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
@@ -198,10 +199,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
     isXSTrap, noSpecExec, blockBackward, flushPipe, uopDivType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder: Seq[UInt] = ListLookup(
-      inst, XDecode.decodeDefault.map(bitPatToUInt),
-      table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
-    )
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
     allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
     this
