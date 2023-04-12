@@ -739,13 +739,13 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     is(UopDivType.VEC_0MX) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
-        val lsrc0 = if (i==0) 0.U else (VECTOR_TMP_REG_LMUL + i - 1).U
+        val srcType0 = if (i==0) SrcType.DC else SrcType.vp
         val ldest = (VECTOR_TMP_REG_LMUL + i).U
-        csBundle(i).ctrl.srcType(0) := SrcType.vp
+        csBundle(i).ctrl.srcType(0) := srcType0
         csBundle(i).ctrl.srcType(1) := SrcType.vp
         csBundle(i).ctrl.rfWen := false.B
         csBundle(i).ctrl.vecWen := true.B
-        csBundle(i).ctrl.lsrc(0) := lsrc0
+        csBundle(i).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
         csBundle(i).ctrl.lsrc(1) := src2
         // csBundle(i).ctrl.lsrc(2) := dest + i.U  DontCare
         csBundle(i).ctrl.ldest := ldest

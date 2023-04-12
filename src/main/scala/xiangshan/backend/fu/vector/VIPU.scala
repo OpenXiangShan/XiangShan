@@ -111,7 +111,8 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUDataModule{
   vialu.io.in.bits.srcType(0) := decoder.io.out.srcType2
   vialu.io.in.bits.srcType(1) := decoder.io.out.srcType1
   vialu.io.in.bits.vdType := decoder.io.out.vdType
-  vialu.io.in.bits.vs1 := vs1
+  val needClearVs1 = VipuType.vcpop_m === in.uop.ctrl.fuOpType && in.uop.ctrl.uopIdx === 0.U // dirty code for vcpop_m
+  vialu.io.in.bits.vs1 := Mux(needClearVs1, 0.U, vs1)
   vialu.io.in.bits.vs2 := vs2
   vialu.io.in.bits.old_vd := in.src(2)
   vialu.io.in.bits.mask := mask
