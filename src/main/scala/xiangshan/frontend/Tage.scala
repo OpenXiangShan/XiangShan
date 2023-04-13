@@ -420,7 +420,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(nRowsPerBr) ))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(bankSize)))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
