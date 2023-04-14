@@ -132,7 +132,7 @@ class CtrlBlockImp(
 
   private val exuRedirects: IndexedSeq[ValidIO[Redirect]] = delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => {
     val out = Wire(Valid(new Redirect()))
-    out.valid := x.valid && x.bits.redirect.get.valid
+    out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred
     out.bits := x.bits.redirect.get.bits
     out
   })
