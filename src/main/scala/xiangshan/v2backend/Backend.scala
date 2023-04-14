@@ -84,7 +84,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
-  memScheduler.io.fromMem.get.scommit := ctrlBlock.io.robio.lsq.scommit
+  memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := ctrlBlock.io.robio.lsq.lcommit
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
   memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
