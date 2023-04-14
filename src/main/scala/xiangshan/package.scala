@@ -583,10 +583,10 @@ package object xiangshan {
     def VEC_ISLIDEUP     = "b100110".U // VEC_ISLIDEUP
     def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
     def VEC_ISLIDEDOWN   = "b101000".U // VEC_ISLIDEDOWN
-    def VEC_0MX          = "b101001".U // VEC_0MX  0MV
-    def VEC_VMV          = "b101010".U // VEC_VMV  VMV
-    def VEC_0MX_VFIRST   = "b101011".U // 
-    def VEC_0MM          = "b000000".U // VEC_0MM
+    def VEC_M0X          = "b101001".U // VEC_M0X  0MV
+    def VEC_MVV          = "b101010".U // VEC_MVV  VMV
+    def VEC_M0X_VFIRST   = "b101011".U // 
+    def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U
 

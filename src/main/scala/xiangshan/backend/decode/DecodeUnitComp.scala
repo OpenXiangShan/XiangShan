@@ -116,9 +116,9 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_ISLIDEUP    -> numOfUopVslide,
     UopDivType.VEC_SLIDEDOWN   -> (numOfUopVslide + 1.U),
     UopDivType.VEC_ISLIDEDOWN  -> numOfUopVslide,
-    UopDivType.VEC_0MX         -> (lmul +& 1.U),
-    UopDivType.VEC_VMV         -> (Cat(lmul, 0.U(1.W)) -1.U),
-    UopDivType.VEC_0MX_VFIRST  -> 2.U,
+    UopDivType.VEC_M0X         -> (lmul +& 1.U),
+    UopDivType.VEC_MVV         -> (Cat(lmul, 0.U(1.W)) -1.U),
+    UopDivType.VEC_M0X_VFIRST  -> 2.U,
   ))
 
   val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
@@ -736,7 +736,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         }
     }
 
-    is(UopDivType.VEC_0MX) {
+    is(UopDivType.VEC_M0X) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
         val srcType0 = if (i==0) SrcType.DC else SrcType.vp
@@ -775,7 +775,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(lmul).ctrl.fpu.fcvt := false.B
     }
 
-    is(UopDivType.VEC_VMV) {
+    is(UopDivType.VEC_MVV) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
         val srcType0 = if (i==0) SrcType.DC else SrcType.vp
@@ -797,7 +797,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       }
     }
 
-    is(UopDivType.VEC_0MX_VFIRST) {
+    is(UopDivType.VEC_M0X_VFIRST) {
       // LMUL
       csBundle(0).ctrl.rfWen := false.B
       csBundle(0).ctrl.fpWen := true.B
