@@ -778,18 +778,18 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     is(UopDivType.VEC_VMV) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
-        val lsrc0 = if (i==0) 0.U else (VECTOR_TMP_REG_LMUL + i - 1).U
-        csBundle(i*2+0).ctrl.srcType(0) := SrcType.vp
+        val srcType0 = if (i==0) SrcType.DC else SrcType.vp
+        csBundle(i*2+0).ctrl.srcType(0) := srcType0
         csBundle(i*2+0).ctrl.srcType(1) := SrcType.vp
-        csBundle(i*2+0).ctrl.lsrc(0) := lsrc0
+        csBundle(i*2+0).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
         csBundle(i*2+0).ctrl.lsrc(1) := src2
-        csBundle(i).ctrl.lsrc(2) := dest + i.U
+        csBundle(i*2+0).ctrl.lsrc(2) := dest + i.U
         csBundle(i*2+0).ctrl.ldest := dest + i.U
         csBundle(i*2+0).ctrl.uopIdx := (i*2+0).U
 
-        csBundle(i*2+1).ctrl.srcType(0) := SrcType.vp
+        csBundle(i*2+1).ctrl.srcType(0) := srcType0
         csBundle(i*2+1).ctrl.srcType(1) := SrcType.vp
-        csBundle(i*2+1).ctrl.lsrc(0) := lsrc0
+        csBundle(i*2+1).ctrl.lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
         csBundle(i*2+1).ctrl.lsrc(1) := src2
         // csBundle(i).ctrl.lsrc(2) := dest + i.U  DontCare
         csBundle(i*2+1).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
