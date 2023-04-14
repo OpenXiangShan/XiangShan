@@ -25,6 +25,8 @@ import utility._
 
 abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
+  val rm = IO(Input(UInt(3.W)))
+  val fflags = IO(Output(UInt(5.W)))
   val vstart = IO(Input(UInt(XLEN.W)))
   val vxrm = IO(Input(UInt(2.W)))
   val vxsat = IO(Output(UInt(1.W)))
@@ -49,12 +51,16 @@ abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends Fun
   // connect io
   io.out.bits.uop := DontCare
   io.in.ready := DontCare
+  fflags := DontCare
+  vxsat := DontCare
 
 }
 
 
 abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
+  val rm = IO(Input(UInt(3.W)))
+  val fflags = IO(Output(UInt(5.W)))
   val vstart = IO(Input(UInt(XLEN.W)))
   val vxrm = IO(Input(UInt(2.W)))
   val vxsat = IO(Output(UInt(1.W)))
@@ -100,12 +106,14 @@ abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends Func
     dataModule.zipWithIndex.foreach{ case(l, i) =>
       l.io.in.bits <> io.in.bits
       l.io.redirectIn := DontCare
+      l.rm := rm
       l.vxrm := vxrm
       l.vstart := vstart
       l.io.in.valid := io.in.valid && state === s_idle && select(i)
       l.io.out.ready := io.out.ready
     }
     vxsat := Mux1H(s0_selectReg, dataModule.map(_.vxsat))
+    fflags := Mux1H(s0_selectReg, dataModule.map(_.fflags))
 
     io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
     io.out.bits.uop := s0_uopReg
@@ -136,5 +144,20 @@ object VecImmExtractor {
   def apply(immType: UInt, sew: UInt, imm: UInt): UInt = {
     val _imm = Mux(immType === SelImm.IMM_OPIVIS, Imm_OPIVIS(imm), Imm_OPIVIU(imm))
     imm_sew(sew, _imm(7,0))
+  }
+}
+
+object VecExtractor{
+  def xf2v_sew(sew: UInt, xf:UInt): UInt = {
+    LookupTree(sew(1, 0), List(
+      "b00".U -> VecInit(Seq.fill(16)(xf(7, 0))).asUInt,
+      "b01".U -> VecInit(Seq.fill(8)(xf(15, 0))).asUInt,
+      "b10".U -> VecInit(Seq.fill(4)(xf(31, 0))).asUInt,
+      "b11".U -> VecInit(Seq.fill(2)(xf(63, 0))).asUInt,
+    ))
+  }
+
+  def apply(sew: UInt, xf: UInt): UInt = {
+    xf2v_sew(sew, xf)
   }
 }

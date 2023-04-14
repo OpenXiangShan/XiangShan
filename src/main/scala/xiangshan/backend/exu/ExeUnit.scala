@@ -26,7 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
-import xiangshan.backend.fu.vector.{VFPU, VPUSubModule}
+import xiangshan.backend.fu.vector.VPUSubModule
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
@@ -76,8 +76,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   }
 
   val fpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[FPUSubModule])
-  val vfpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[VFPU])
-  val vipuModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(x => x._1.isInstanceOf[VPUSubModule])
+  val vpuModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(x => x._1.isInstanceOf[VPUSubModule])
   if (fpModules.nonEmpty) {
     // frm is from csr/frm (from CSR) or instr_rm (from instruction decoding)
     val fpSubModules = fpModules.map(_._1.asInstanceOf[FPUSubModule])
@@ -95,21 +94,22 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     }
     io.out.bits.fflags := Mux1H(fflagsSel.map(_._1), fflagsSel.map(_._2))
   }
-  // Overwrite write operation of fpModules
-  if (vfpModules.nonEmpty) {
-    val vfpSubModules = vfpModules.map(_._1.asInstanceOf[VFPU])
-    vfpSubModules.foreach(mod => {
+  if (vpuModules.nonEmpty) {
+    vpuModules.map(_._1.asInstanceOf[VPUSubModule]).foreach(mod => {
       mod.rm := csr_frm
-    })
-  }
-  if (vipuModules.nonEmpty) {
-    vipuModules.map(_._1.asInstanceOf[VPUSubModule]).foreach(mod => {
       mod.vxrm := csr_vxrm
       mod.vstart := csr_vstart
     })
-    // vxsat is selected by arbSelReg
+    // fflags/vxsat is selected by arbSelReg
     require(config.hasFastUopOut, "non-fast not implemented")
-    val vxsatSel = vipuModules.map{ case (fu, (cfg, i)) =>
+    val fflagsSel = fpModules.map{ case (fu, (cfg, i)) =>
+      val fflagsValid = arbSelReg(i)
+      val fflags = fu.asInstanceOf[FPUSubModule].fflags
+      val fflagsBits = if (cfg.fastImplemented) fflags else RegNext(fflags)
+      (fflagsValid, fflagsBits)
+    }
+    io.out.bits.fflags := Mux1H(fflagsSel.map(_._1), fflagsSel.map(_._2))
+    val vxsatSel = vpuModules.map{ case (fu, (cfg, i)) =>
       val vxsatValid = arbSelReg(i)
       val vxsat = fu.asInstanceOf[VPUSubModule].vxsat
       val vxsatBits = if (cfg.fastImplemented) vxsat else RegNext(vxsat)
