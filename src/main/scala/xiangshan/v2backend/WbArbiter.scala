@@ -3,6 +3,7 @@ package xiangshan.v2backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import xiangshan.v2backend.Bundles.{ExuOutput, WriteBackBundle}
 import xiangshan.{Redirect, XSBundle, XSModule}
 
@@ -53,6 +54,10 @@ class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModul
 
 class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
+  
+  val fromTop = new Bundle {
+    val hartId = Input(UInt(8.W))
+  }
 
   val fromIntExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.intSchdParams.get.genExuOutputDecoupledBundle)
 
@@ -144,6 +149,29 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     sink.bits := source.bits
     source.ready := true.B
   }
+  
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    intWbArbiterOut.foreach(out => {
+      val difftest = Module(new DifftestIntWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := io.fromTop.hartId
+      difftest.io.valid := out.fire && out.bits.rfWen
+      difftest.io.dest := out.bits.pdest
+      difftest.io.data := out.bits.data
+    })
+  }
+
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    vfWbArbiterOut.foreach(out => {
+      val difftest = Module(new DifftestFpWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := io.fromTop.hartId
+      difftest.io.valid := out.fire // all fp instr will write fp rf
+      difftest.io.dest := out.bits.pdest
+      difftest.io.data := out.bits.data
+    })
+  }
+
 }
 
 

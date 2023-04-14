@@ -162,6 +162,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfExuBlock.io.frm.get := csrio.fpu.frm
 
   wbDataPath.io.flush := ctrlBlock.io.redirect
+  wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
