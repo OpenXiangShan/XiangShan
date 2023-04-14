@@ -234,13 +234,20 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     iq.io.wakeup := wakeupFromWBVec
   }
 
+
+  dispatch2Iq.io.out(1).zip(stAddrIQs(0).io.enq).zip(stDataIQs(0).io.enq).foreach{ case((di, staIQ), stdIQ) =>
+    val isAllReady = staIQ.ready && stdIQ.ready
+    di.ready := isAllReady
+    staIQ.valid := di.valid && isAllReady
+    stdIQ.valid := di.valid && isAllReady
+  }
+
   require(stAddrIQs.size == stDataIQs.size, s"number of store address IQs(${stAddrIQs.size}) " +
     s"should be equal to number of data IQs(${stDataIQs})")
   stDataIQs.zip(stAddrIQs).zipWithIndex.foreach { case ((stdIQ, staIQ), i) =>
     stdIQ.io.flush <> io.fromCtrlBlock.flush
 
     stdIQ.io.enq.zip(staIQ.io.enq).foreach { case (stdIQEnq, staIQEnq) =>
-      stdIQEnq.valid := staIQEnq.valid
       stdIQEnq.bits  := staIQEnq.bits
       // Store data reuses store addr src(1) in dispatch2iq
       // [dispatch2iq] --src*------src*(0)--> [staIQ]
