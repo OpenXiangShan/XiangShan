@@ -306,6 +306,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val s0_out = Wire(io.out.cloneType)
   private val s0_blockedVec = Wire(Vec(io.in.size, Bool()))
 
+  val iqNotAllReady = !Cat(s0_out.map(_.map(_.ready)).flatten).andR
+  val lsqCannotAccept = !enqLsqIO.canAccept
+
   private val isLoadVec = VecInit(io.in.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
   private val isStoreVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType)))
   private val isAMOVec = io.in.map(x => x.valid && FuType.isAMO(x.bits.fuType))
@@ -343,7 +346,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }.otherwise {
       enqLsqIO.needAlloc(i) := 1.U // load
     }
-    enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i)
+    enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i) && !iqNotAllReady && !lsqCannotAccept
     enqLsqIO.req(i).bits := io.in(i).bits
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
@@ -371,9 +374,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isNotReg(srcType) -> true.B,
       ))
   }
-
-  val iqNotAllReady = !Cat(s0_out.map(_.map(_.ready)).flatten).andR
-  val lsqCannotAccept = !enqLsqIO.canAccept
 
   for ((iqPorts, iqIdx) <- s0_out.zipWithIndex) {
     for ((port, portIdx) <- iqPorts.zipWithIndex) {
