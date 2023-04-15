@@ -28,6 +28,7 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val isDoubleLine  = Bool()
   val vSetIdx       = Vec(2,UInt(log2Ceil(nSets).W))
+  // val way_en = UInt(nWays.W)
 
   def port_0_read_0 =  !vSetIdx(0)(0)
   def port_0_read_1 =   vSetIdx(0)(0)

@@ -1,8 +1,7 @@
-package xiangshan.cache.dcache
+package xiangshan.cache.wpu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.IO
 import chisel3.util.{Fill, log2Ceil}
 import xiangshan._
 import xiangshan.cache.HasDCacheParameters

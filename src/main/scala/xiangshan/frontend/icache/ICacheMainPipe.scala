@@ -156,6 +156,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_vsetIdx      = s0_req_vsetIdx.head
   val s0_final_only_first   = s0_only_first.head
   val s0_final_double_line  = s0_double_line.head
+  val s0_pred_way_en = Wire(UInt(nWays.W))
+
+  /** WPU */
+/*  val wpu = Module(new ICacheWPU)
+  wpu.io.req.valid := s0_fire
+  wpu.io.req.bits.vaddr := s0_final_vaddr
+  when(wpu.io.resp.valid){
+    s0_pred_way_en := wpu.io.resp.bits
+  }.otherwise{
+    s0_pred_way_en := ~0.U(nWays.W)
+  }*/
 
   /** SRAM request */
   //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
@@ -176,6 +187,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toData.valid                  := ftq_req_to_data_valid(i) && !missSwitchBit
     toData.bits(i).isDoubleLine   := ftq_req_to_data_doubleline(i)
     toData.bits(i).vSetIdx        := ftq_req_to_data_vset_idx(i)
+    // toData.bits(i).way_en := s0_pred_way_en
   }
 
   toMeta.valid               := s0_valid && !missSwitchBit

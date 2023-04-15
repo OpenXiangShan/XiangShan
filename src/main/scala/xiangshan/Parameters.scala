@@ -30,7 +30,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
-import xiangshan.cache.dcache.WPUParameters
+import xiangshan.cache.wpu.WPUParameters
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
@@ -174,10 +174,19 @@ case class XSCoreParameters
   EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 6, // load replay queue replay select counter len
-  wpuParameters: WPUParameters = WPUParameters(
+  iwpuParameters: WPUParameters = WPUParameters(
+    enWPU = true,
+    algoName = "mmru",
+    enCfPred = false,
+    isIcache = false,
+    portNum = 1
+  ),
+  dwpuParameters: WPUParameters = WPUParameters(
     enWPU = true,
     algoName = "utag",
-    enCfPred = false
+    enCfPred = false,
+    isIcache = true,
+    portNum = 1
   ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
@@ -426,7 +435,8 @@ trait HasXSParameter {
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
-  val wpuParam = coreParams.wpuParameters
+  val iwpuParam = coreParams.iwpuParameters
+  val wpuParam = coreParams.dwpuParameters
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

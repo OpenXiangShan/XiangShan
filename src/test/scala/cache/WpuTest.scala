@@ -4,7 +4,7 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import top.DefaultConfig
-import xiangshan.cache.dcache.DCacheWPU
+import xiangshan.cache.wpu.DCacheWPU
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 
 class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {

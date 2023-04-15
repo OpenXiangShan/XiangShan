@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, OHToUIntStartOne, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
-import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
+import xiangshan.cache.wpu.DCacheWPU
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val io = IO(new DCacheBundle {

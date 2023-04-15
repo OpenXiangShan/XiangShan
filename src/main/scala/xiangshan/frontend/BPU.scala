@@ -156,7 +156,10 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   // val s0_all_ready = Bool()
 }
 
-class BasePredictorOutput (implicit p: Parameters) extends BranchPredictionResp {}
+class BasePredictorOutput (implicit p: Parameters) extends BranchPredictionResp {
+  // TODO: different pc source --> uBTB has its own way, it is different from cache way
+  // val pred_way_en = UInt(nWays.W)
+}
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val reset_vector = Input(UInt(PAddrBits.W))

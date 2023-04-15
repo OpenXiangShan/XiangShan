@@ -30,7 +30,7 @@ import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
 import utility.FastArbiter
 import mem.AddPipelineReg
-import xiangshan.cache.dcache.{ReplayCarry, VictimList}
+import xiangshan.cache.wpu.{ReplayCarry, VictimList}
 
 import scala.math.max
 

@@ -26,8 +26,8 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache._
-import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.wpu.ReplayCarry
 
 class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
   val valid = Output(Bool())

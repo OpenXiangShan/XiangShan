@@ -72,6 +72,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   val ICacheSets = cacheParams.nSets
   val ICacheWays = cacheParams.nWays
+  val ICacheBanks = 2
 
   val ICacheSameVPAddrLength = 12
   val ReplaceIdWid = 5

@@ -26,7 +26,7 @@ import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.wpu.ReplayCarry
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
