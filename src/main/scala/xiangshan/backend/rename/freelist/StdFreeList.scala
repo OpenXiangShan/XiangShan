@@ -27,18 +27,9 @@ import utility._
 class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 32).U(PhyRegIdxWidth.W) )))
-  val headPtr  = RegInit(FreeListPtr(false, 0))
-  val headPtrOH = RegInit(1.U(size.W))
-  val headPtrOHShift = CircularShift(headPtrOH)
-  // may shift [0, RenameWidth] steps
-  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
   val tailPtrOHReg = RegInit(0.U(size.W))
-  val archHeadPtr = RegInit(FreeListPtr(false, 0))
-
-  val lastCycleRedirect = RegNext(io.redirect, false.B)
 
   //
   // free committed instructions' `old_pdest` reg
@@ -84,8 +75,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   val isNormalAlloc = io.canAllocate && io.doAllocate
   val isAllocate = isWalkAlloc || isNormalAlloc
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
-  val headPtrAllocate = Mux(lastCycleRedirect, archHeadPtr + PopCount(io.walkReq), headPtr + numAllocate)
-  val headPtrOHAllocate = Mux(lastCycleRedirect, (archHeadPtr + PopCount(io.walkReq)).toOH, headPtrOHVec(numAllocate))
+  val headPtrAllocate = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
+  val headPtrOHAllocate = Mux(lastCycleRedirect, redirectedHeadPtrOH, headPtrOHVec(numAllocate))
   val headPtrNext = Mux(isAllocate, headPtrAllocate, headPtr)
   freeRegCnt := Mux(isWalkAlloc && !lastCycleRedirect, distanceBetween(tailPtr, headPtr) - PopCount(io.walkReq),
                 Mux(isNormalAlloc,                     distanceBetween(tailPtr, headPtr) - PopCount(io.allocateReq),

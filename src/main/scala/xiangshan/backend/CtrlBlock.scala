@@ -40,6 +40,10 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
 }
 
+class SnapshotPtr(implicit p: Parameters) extends CircularQueuePtr[SnapshotPtr](
+  p => p(XSCoreParamsKey).RenameSnapshotNum
+)
+
 class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 
@@ -415,6 +419,60 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   waittable.io.update <> RegNext(redirectGen.io.memPredUpdate)
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
+  val renameOut = Wire(chiselTypeOf(rename.io.out))
+  renameOut <> rename.io.out
+  // snapshot check
+  val snapshots = Reg(Vec(RenameSnapshotNum, chiselTypeOf(rename.io.out.head.bits.robIdx)))
+  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
+  val snptDeq = snptValids(snptDeqPtr.value) && rob.io.commits.isCommit &&
+    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snapshots(snptDeqPtr.value))).orR
+  rob.io.snpt.snptEnq := DontCare
+  rob.io.snpt.snptDeq := snptDeq
+  rat.io.snpt.snptEnq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  rat.io.snpt.snptDeq := snptDeq
+  rename.io.snpt.snptEnq := DontCare
+  rename.io.snpt.snptDeq := snptDeq
+  // prevent rob from generating snapshot when full here
+  when(isFull(snptEnqPtr, snptDeqPtr)) {
+    renameOut.head.bits.snapshot := false.B
+  }
+  when(!isFull(snptEnqPtr, snptDeqPtr) && rename.io.out.head.bits.snapshot && rename.io.out.head.fire) {
+    snapshots(snptEnqPtr.value) := rename.io.out.head.bits.robIdx
+    snptValids(snptEnqPtr.value) := true.B
+    snptEnqPtr := snptEnqPtr + 1.U
+  }
+  when(snptDeq) {
+    snptValids(snptDeqPtr.value) := false.B
+    snptDeqPtr := snptDeqPtr + 1.U
+    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
+  }
+  when(stage2Redirect.valid) {
+    snptValids := 0.U.asTypeOf(snptValids)
+    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
+    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
+  }
+
+  val snptValidsDeqNext = WireDefault(snptValids)
+  when(snptDeq) {
+    snptValidsDeqNext(snptDeqPtr.value) := false.B
+  }
+
+  val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
+    snptValidsDeqNext(idx) && stage2Redirect.bits.robIdx >= snapshots(idx)).reduceTree(_ || _)
+  val snptSelect = MuxCase(
+    0.U(log2Ceil(RenameSnapshotNum).W),
+    (1 to RenameSnapshotNum).map(i => (snptEnqPtr - i.U).value).map(idx =>
+      (snptValidsDeqNext(idx) && stage2Redirect.bits.robIdx >= snapshots(idx), idx)
+  ))
+  rob.io.snpt.useSnpt := useSnpt
+  rob.io.snpt.snptSelect := snptSelect
+  rat.io.snpt.useSnpt := useSnpt
+  rat.io.snpt.snptSelect := snptSelect
+  rename.io.snpt.useSnpt := useSnpt
+  rename.io.snpt.snptSelect := snptSelect
+
   // LFST lookup and update
   val lfst = Module(new LFST)
   lfst.io.redirect <> RegNext(io.redirect)
@@ -485,7 +543,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
+    PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
 
   dispatch.io.hartId := io.hartId

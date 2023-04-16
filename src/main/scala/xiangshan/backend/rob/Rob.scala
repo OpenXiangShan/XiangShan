@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.SnapshotPtr
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 
@@ -374,8 +375,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val writeback = MixedVec(numWbPorts.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
     val commits = Output(new RobCommitIO)
     val lsq = new RobLsqIO
-    val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
+    val snpt = Input(new SnapshotPort)
     val robFull = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
@@ -435,6 +436,27 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val isEmpty = enqPtr === deqPtr
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
+  val snapshots = Reg(Vec(RenameSnapshotNum, Vec(CommitWidth, new RobPtr)))
+  val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
+  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
+  when(!isFull(snptEnqPtr, snptDeqPtr) && snptEnq) {
+    snapshots(snptEnqPtr.value) := enqPtrVec
+    snptValids(snptEnqPtr.value) := true.B
+    snptEnqPtr := snptEnqPtr + 1.U
+  }
+  when(io.snpt.snptDeq) {
+    snptValids(snptDeqPtr.value) := false.B
+    snptDeqPtr := snptDeqPtr + 1.U
+    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should have not been empty when dequeue!\n")
+  }
+  when(io.redirect.valid) {
+    snptValids := 0.U.asTypeOf(snptValids)
+    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
+    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
+  }
+
   /**
     * states of Rob
     */
@@ -458,8 +480,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val exceptionGen = Module(new ExceptionGen)
   val exceptionDataRead = exceptionGen.io.state
   val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
-
-  io.robDeqPtr := deqPtr
 
   /**
     * Enqueue (from dispatch)
@@ -678,7 +698,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
     io.commits.commitValid(i) := commit_v(i) && commit_w(i) && !isBlocked
-    io.commits.info(i)  := dispatchDataRead(i)
+    io.commits.info(i) := dispatchDataRead(i)
+    io.commits.robIdx(i) := deqPtrVec(i)
 
     when (state === s_walk) {
       io.commits.walkValid(i) := shouldWalkVec(i)
@@ -759,7 +780,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // (1) redirect occurs: update according to state
   // (2) walk: move forwards
   val walkPtrVec_next = Mux(io.redirect.valid,
-    deqPtrVec_next,
+    Mux(io.snpt.useSnpt, snapshots(io.snpt.snptSelect), deqPtrVec_next),
+    // MuxCase(deqPtrVec_next, (1 to RenameSnapshotNum).map(i => (snptEnqPtr - i.U).value).map(idx =>
+    //   (snptValids(idx) && io.redirect.bits.robIdx >= snapshots(idx)(0), snapshots(idx))
+    // )),
+    // deqPtrVec_next,
     Mux(state === s_walk, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrVec := walkPtrVec_next
@@ -769,7 +794,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
 
-  val redirectWalkDistance = distanceBetween(io.redirect.bits.robIdx, deqPtrVec_next(0))
   when (io.redirect.valid) {
     lastWalkPtr := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx - 1.U, io.redirect.bits.robIdx)
   }
