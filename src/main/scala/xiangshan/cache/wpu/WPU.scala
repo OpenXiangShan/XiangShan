@@ -4,7 +4,8 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.cache.{HasDCacheParameters, HasL1CacheParameters, L1CacheBundle, L1CacheModule, L1CacheParameters}
-import xiangshan.{XSBundle, XSModule}
+import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.{HasXSParameter, XSBundle, XSModule}
 
 /*
 // TODO: need to learn the specific grammar
@@ -26,66 +27,49 @@ case class WPUParameters
   // how to impelement a extend inlcude hasL1Cache and L2 Cache
 )
 
-trait HasWPUParameters extends HasL1CacheParameters {
-  //auxiliary 1 bit is used to judge whether cache miss
-  // override val cacheParams = dcacheParameters
-  val cacheParams = dcacheParameters
-  val nTagIdx = dcacheParameters.nWays
-  val auxWayBits = wayBits + 1
-  val TagIdxBits = log2Up(nTagIdx)
-  val utagBits = 8
-/*
-  val AlgoWPUMap = Map(
-    "MRU" -> Module(new MruWPU()),
-    "MMRU" -> Module(new MmruWPU()),
-    "UTAG" -> Module(new UtagWPU())
-  )
-*/
-  def AlgoWPUMap(wpuParam: WPUParameters): BaseWPU = wpuParam.algoName.toLowerCase match {
-    case "mru" => Module(new MruWPU(wpuParam))
-    case "mmru" => Module(new MmruWPU(wpuParam))
-    case "utag" => Module(new UtagWPU(wpuParam))
-    case t => throw new IllegalArgumentException(s"unknown WPU Algorithm $t")
+trait HasWPUParameters extends HasL1CacheParameters{
+  def AlgoWPUMap(wpuParam: WPUParameters): BaseWPU = {
+    wpuParam.algoName.toLowerCase match {
+      case "mru" => Module(new MruWPU(wpuParam))
+      case "mmru" => Module(new MmruWPU(wpuParam))
+      case "utag" => Module(new UtagWPU(wpuParam))
+      case t => throw new IllegalArgumentException(s"unknown WPU Algorithm $t")
+    }
   }
 }
 
-abstract class WPUBundle(implicit P: Parameters) extends L1CacheBundle with HasWPUParameters
-abstract class WPUModule(implicit P: Parameters) extends L1CacheModule with HasWPUParameters
+abstract class BaseWPUBundle(implicit P: Parameters) extends XSBundle
+abstract class WPUModule(implicit P: Parameters) extends XSModule with HasWPUParameters
 
-class BaseWpuUpdateBundle(implicit p: Parameters) extends WPUBundle{
+class BaseWpuUpdateBundle(nWays: Int)(implicit p: Parameters) extends BaseWPUBundle{
   val update_en = Bool()
   val update_vaddr = UInt(VAddrBits.W)
   val update_way_en = UInt(nWays.W)
 }
 
-/*
-class WPUBaseIO(implicit p:Parameters) extends WPUBundle {
-  val pred_en = Input(Bool())
-  val pred_vaddr = Input(UInt(VAddrBits.W))
-  val pred_way_en = Output(UInt(nWays.W))
-
-  val lookup_upd = Input(new BaseWpuUpdateBundle)
-  val replaycarry_upd = Input(new BaseWpuUpdateBundle)
-  val tagwrite_upd = Input(new BaseWpuUpdateBundle)
-}
-*/
-class WPUBaseIO(portNum: Int)(implicit p:Parameters) extends WPUBundle {
+class WPUBaseIO(portNum: Int, nWays: Int)(implicit p:Parameters) extends BaseWPUBundle {
   val predVec = Vec(portNum, new Bundle{
     val en = Input(Bool())
     val vaddr = Input(UInt(VAddrBits.W))
     val way_en = Output(UInt(nWays.W))
   })
 
-  val lookup_upd = Input(Vec(portNum, new BaseWpuUpdateBundle))
-  val replaycarry_upd = Input(Vec(portNum, new BaseWpuUpdateBundle))
-  val tagwrite_upd = Input(Vec(portNum, new BaseWpuUpdateBundle))
+  val lookup_upd = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
+  val replaycarry_upd = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
+  val tagwrite_upd = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
 }
 
 abstract class BaseWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends WPUModule {
-//abstract class BaseWPU(isIcache: Boolean = false, num: Int)(implicit p:Parameters) extends BaseWPU(isIcache, num){
-  val setSize = if (wpuParam.isIcache) nSets/2 else nSets
+  val cacheParams: L1CacheParameters = if (wpuParam.isIcache) icacheParameters else dcacheParameters
 
-  val io = IO(new WPUBaseIO(wpuParam.portNum))
+  val setSize = if (wpuParam.isIcache) nSets/2 else nSets
+  val nTagIdx = nWays
+  // auxiliary 1 bit is used to judge whether cache miss
+  val auxWayBits = wayBits + 1
+  val TagIdxBits = log2Up(nTagIdx)
+  val utagBits = 8
+
+  val io = IO(new WPUBaseIO(wpuParam.portNum, nWays))
 
   def get_wpu_idx(addr: UInt): UInt = {
     if (wpuParam.isIcache) {

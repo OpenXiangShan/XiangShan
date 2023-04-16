@@ -156,7 +156,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_vsetIdx      = s0_req_vsetIdx.head
   val s0_final_only_first   = s0_only_first.head
   val s0_final_double_line  = s0_double_line.head
-  val s0_pred_way_en = Wire(UInt(nWays.W))
+  // val s0_pred_way_en = Wire(UInt(nWays.W))
 
   /** WPU */
 /*  val wpu = Module(new ICacheWPU)

@@ -102,3 +102,7 @@ abstract class L1CacheModule(implicit p: Parameters) extends XSModule
 
 abstract class L1CacheBundle(implicit p: Parameters) extends XSBundle
   with HasL1CacheParameters
+
+//object HasL1CacheParameters extends HasL1CacheParameters{
+//  override lazy val cacheParams: L1CacheParameters = dcacheParameters
+//}

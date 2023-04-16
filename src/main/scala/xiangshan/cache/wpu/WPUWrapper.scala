@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import utils.XSPerfAccumulate
 import xiangshan._
-import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.{DCacheModule, HasDCacheParameters}
 import xiangshan.frontend.icache.HasICacheParameters
 
 class ReplayCarry(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
@@ -29,7 +29,7 @@ object ReplayCarry{
   }
 }
 
-class WPUBaseReq(implicit p: Parameters) extends WPUBundle{
+class WPUBaseReq(implicit p: Parameters) extends BaseWPUBundle{
   val vaddr = UInt(VAddrBits.W)
 }
 
@@ -37,17 +37,17 @@ class WPUReplayedReq(implicit p: Parameters) extends WPUBaseReq {
   val replayCarry = new ReplayCarry
 }
 
-class WPUResp(implicit p:Parameters) extends WPUBundle{
+class WPUResp(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val s0_pred_way_en = UInt(nWays.W)
   val s1_pred_fail = Bool()
 }
 
-class WPUUpdate(implicit p: Parameters) extends WPUBundle{
+class WPUUpdate(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val vaddr = UInt(VAddrBits.W)
   val s1_real_way_en = UInt(nWays.W)
 }
 
-class ConflictPredictIO(implicit p:Parameters) extends WPUBundle{
+class ConflictPredictIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   // pred
   val s0_pc = Input(UInt(VAddrBits.W))
   // update
@@ -56,33 +56,28 @@ class ConflictPredictIO(implicit p:Parameters) extends WPUBundle{
   val s1_dm_hit = Input(Bool())
 }
 
-class IwpuIO(implicit p:Parameters) extends WPUBundle{
+class IwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val req = Flipped(Decoupled(new WPUBaseReq))
-  val resp = ValidIO(new WPUResp)
-  val lookup_upd = Flipped(ValidIO(new WPUUpdate))
-  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate))
+  val resp = ValidIO(new WPUResp(nWays))
+  val lookup_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
+  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
 }
 
-class DwpuIO(implicit p:Parameters) extends WPUBundle{
+class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val req = Flipped(Decoupled(new WPUReplayedReq))
-  val resp = ValidIO(new WPUResp)
-  val lookup_upd = Flipped(ValidIO(new WPUUpdate))
-  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate))
-  val cfpred = new ConflictPredictIO
+  val resp = ValidIO(new WPUResp(nWays))
+  val lookup_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
+  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
+  val cfpred = new ConflictPredictIO(nWays)
 }
 
-class DCacheWPU (implicit p:Parameters) extends WPUModule with HasDCacheParameters {
-  override val cacheParams = dcacheParameters
-  println("cacheParams" + cacheParams.toString)
-  val isIcache = false
-  val io = IO(new DwpuIO)
-
+class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParameters  {
   val wpu = AlgoWPUMap(wpuParam)
-
   val wayConflictPredictor = Module(new WayConflictPredictor)
-  val s0_dmSel = Wire(Bool())
+  val io = IO(new DwpuIO(nWays))
 
   /** pred */
+  val s0_dmSel = Wire(Bool())
   val s0_pred_way_conflict = Wire(Bool())
   val s0_pred_way_en = Wire(UInt(nWays.W))
 
@@ -116,7 +111,7 @@ class DCacheWPU (implicit p:Parameters) extends WPUModule with HasDCacheParamete
   val s1_pred_fail = RegNext(io.resp.valid) && s1_pred_way_en =/= io.lookup_upd.bits.s1_real_way_en
   val s1_hit = RegNext(io.resp.valid) && s1_pred_way_en.orR && s1_pred_way_en === io.lookup_upd.bits.s1_real_way_en
   // FIXME: is replay carry valid && req.valid ?
-  val s0_replay_upd = Wire(new BaseWpuUpdateBundle)
+  val s0_replay_upd = Wire(new BaseWpuUpdateBundle(nWays))
   s0_replay_upd.update_en := io.req.valid && io.req.bits.replayCarry.valid
   s0_replay_upd.update_vaddr := io.req.bits.vaddr
   s0_replay_upd.update_way_en := io.req.bits.replayCarry.real_way_en

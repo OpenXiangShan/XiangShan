@@ -178,14 +178,14 @@ case class XSCoreParameters
     enWPU = true,
     algoName = "mmru",
     enCfPred = false,
-    isIcache = false,
+    isIcache = true,
     portNum = 1
   ),
   dwpuParameters: WPUParameters = WPUParameters(
     enWPU = true,
     algoName = "utag",
     enCfPred = false,
-    isIcache = true,
+    isIcache = false,
     portNum = 1
   ),
   itlbParameters: TLBParameters = TLBParameters(
