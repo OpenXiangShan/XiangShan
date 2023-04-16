@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, OHToUIntStartOne, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
-import xiangshan.cache.wpu.DCacheWPU
+import xiangshan.cache.wpu.DCacheWpuWrapper
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val io = IO(new DCacheBundle {
@@ -99,7 +99,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
   // wpu
-  val wpu = Module(new DCacheWPU)
+  val wpu = Module(new DCacheWpuWrapper)
   // req in s0
   wpu.io.req.bits.vaddr := s0_vaddr
   wpu.io.req.bits.replayCarry := s0_replayCarry
@@ -166,7 +166,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s1_wpu_pred_fail = wpu.io.resp.bits.s1_pred_fail
   val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
-  if(wpuParam.enCfPred || !env.FPGAPlatform){
+  if(dwpuParam.enCfPred || !env.FPGAPlatform){
     wpu.io.cfpred.s0_pc := io.lsu.s0_pc
     wpu.io.cfpred.s1_pc := io.lsu.s1_pc
     // whether direct_map_way miss with valid tag value
@@ -177,7 +177,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s1_tag_match_way_dup_dc = Wire(UInt(nWays.W))
   val s1_tag_match_way_dup_lsu = Wire(UInt(nWays.W))
-  if (wpuParam.enWPU) {
+  if (dwpuParam.enWPU) {
     when(RegNext(wpu.io.resp.valid)) {
       s1_tag_match_way_dup_dc := RegNext(wpu.io.resp.bits.s0_pred_way_en)
       s1_tag_match_way_dup_lsu := RegNext(wpu.io.resp.bits.s0_pred_way_en)
@@ -360,12 +360,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   io.lsu.debug_s2_real_way_num := OHToUIntStartOne(s2_real_way_en)
-  if(wpuParam.enWPU) {
+  if(dwpuParam.enWPU) {
     io.lsu.debug_s2_pred_way_num := OHToUIntStartOne(s2_pred_way_en)
   }else{
     io.lsu.debug_s2_pred_way_num := 0.U
   }
-  if(wpuParam.enWPU && wpuParam.enCfPred || !env.FPGAPlatform){
+  if(dwpuParam.enWPU && dwpuParam.enCfPred || !env.FPGAPlatform){
     io.lsu.debug_s2_dm_way_num :=  s2_dm_way_num + 1.U
   }else{
     io.lsu.debug_s2_dm_way_num := 0.U

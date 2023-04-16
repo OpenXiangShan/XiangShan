@@ -178,14 +178,14 @@ case class XSCoreParameters
     enWPU = true,
     algoName = "mmru",
     enCfPred = false,
-    isIcache = true,
+    isICache = true,
     portNum = 1
   ),
   dwpuParameters: WPUParameters = WPUParameters(
     enWPU = true,
     algoName = "utag",
     enCfPred = false,
-    isIcache = false,
+    isICache = false,
     portNum = 1
   ),
   itlbParameters: TLBParameters = TLBParameters(
@@ -436,7 +436,7 @@ trait HasXSParameter {
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
   val iwpuParam = coreParams.iwpuParameters
-  val wpuParam = coreParams.dwpuParameters
+  val dwpuParam = coreParams.dwpuParameters
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

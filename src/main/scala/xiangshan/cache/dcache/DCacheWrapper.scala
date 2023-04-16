@@ -704,13 +704,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  DCacheSetOffset: " + DCacheSetOffset)
   println("  DCacheTagOffset: " + DCacheTagOffset)
   println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
-  println("  WPUEnable: " + wpuParam.enWPU)
-  println("  WPUEnableCfPred: " + wpuParam.enCfPred)
-  println("  WPUAlgorithm: " + wpuParam.algoName)
+  println("  WPUEnable: " + dwpuParam.enWPU)
+  println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
+  println("  WPUAlgorithm: " + dwpuParam.algoName)
 
   //----------------------------------------
   // core data structures
-  val bankedDataArray = if(wpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
+  val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array
@@ -1099,7 +1099,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
 
   val victimList = VictimList(nSets)
-  if (wpuParam.enCfPred) {
+  if (dwpuParam.enCfPred) {
     when(missQueue.io.replace_pipe_req.valid) {
       victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
     }

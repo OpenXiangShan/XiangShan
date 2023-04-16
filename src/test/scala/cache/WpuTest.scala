@@ -4,7 +4,7 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import top.DefaultConfig
-import xiangshan.cache.wpu.DCacheWPU
+import xiangshan.cache.wpu.DCacheWpuWrapper
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 
 class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -15,7 +15,7 @@ class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       case XSCoreParamsKey => defaultConfig(XSTileKey).head.copy()
     })
     println("========== before test ==========")
-    test(new DCacheWPU()) { c =>
+    test(new DCacheWpuWrapper()) { c =>
       println("========== in test ==========")
       // s0
       // c.io.req.bits.vaddr.poke(0.U)

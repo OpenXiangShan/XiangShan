@@ -71,8 +71,8 @@ class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val cfpred = new ConflictPredictIO(nWays)
 }
 
-class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParameters  {
-  val wpu = AlgoWPUMap(wpuParam)
+class DCacheWpuWrapper(implicit p:Parameters) extends DCacheModule with HasWPUParameters  {
+  val wpu = AlgoWPUMap(dwpuParam)
   val wayConflictPredictor = Module(new WayConflictPredictor)
   val io = IO(new DwpuIO(nWays))
 
@@ -95,7 +95,7 @@ class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParamete
     // way prediction
     s0_pred_way_en := wpu.io.predVec(0).en
 
-    if (wpuParam.enCfPred) {
+    if (dwpuParam.enCfPred) {
       // selective direct mapping
       when(!s0_pred_way_conflict) {
         s0_pred_way_en := UIntToOH(get_direct_map_way(io.req.bits.vaddr))
@@ -112,9 +112,9 @@ class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParamete
   val s1_hit = RegNext(io.resp.valid) && s1_pred_way_en.orR && s1_pred_way_en === io.lookup_upd.bits.s1_real_way_en
   // FIXME: is replay carry valid && req.valid ?
   val s0_replay_upd = Wire(new BaseWpuUpdateBundle(nWays))
-  s0_replay_upd.update_en := io.req.valid && io.req.bits.replayCarry.valid
-  s0_replay_upd.update_vaddr := io.req.bits.vaddr
-  s0_replay_upd.update_way_en := io.req.bits.replayCarry.real_way_en
+  s0_replay_upd.en := io.req.valid && io.req.bits.replayCarry.valid
+  s0_replay_upd.vaddr := io.req.bits.vaddr
+  s0_replay_upd.way_en := io.req.bits.replayCarry.real_way_en
   val s1_replay_upd = RegNext(s0_replay_upd)
 
   wayConflictPredictor.io.update_en := io.lookup_upd.valid
@@ -123,21 +123,21 @@ class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParamete
   wayConflictPredictor.io.update_sa_hit := !s1_dmSel && s1_hit
 
   // look up res
-  wpu.io.lookup_upd(0).update_en := io.lookup_upd.valid
-  wpu.io.lookup_upd(0).update_vaddr := io.lookup_upd.bits.vaddr
-  wpu.io.lookup_upd(0).update_way_en := io.lookup_upd.bits.s1_real_way_en
+  wpu.io.updLookup(0).en := io.lookup_upd.valid
+  wpu.io.updLookup(0).vaddr := io.lookup_upd.bits.vaddr
+  wpu.io.updLookup(0).way_en := io.lookup_upd.bits.s1_real_way_en
 
   // which will update in look up pred fail
-  wpu.io.replaycarry_upd(0) := s1_replay_upd
+  wpu.io.updReplaycarry(0) := s1_replay_upd
 
   // replace / tag write
-  wpu.io.tagwrite_upd(0).update_en := io.tagwrite_upd.valid
-  wpu.io.tagwrite_upd(0).update_vaddr := io.tagwrite_upd.bits.vaddr
-  wpu.io.tagwrite_upd(0).update_way_en := io.tagwrite_upd.bits.s1_real_way_en
+  wpu.io.updTagwrite(0).en := io.tagwrite_upd.valid
+  wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd.bits.vaddr
+  wpu.io.updTagwrite(0).way_en := io.tagwrite_upd.bits.s1_real_way_en
 
   /** predict and response in s0 */
   io.req.ready := true.B
-  if (wpuParam.enWPU) {
+  if (dwpuParam.enWPU) {
     io.resp.valid := io.req.valid
   } else {
     io.resp.valid := false.B
@@ -156,7 +156,7 @@ class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParamete
   XSPerfAccumulate("wpu_real_miss", RegNext(io.resp.valid) && !io.lookup_upd.bits.s1_real_way_en.orR)
   // pred component
   XSPerfAccumulate("wpu_pred_replayCarry", io.req.valid && io.req.bits.replayCarry.valid)
-  if(!wpuParam.enCfPred){
+  if(!dwpuParam.enCfPred){
     XSPerfAccumulate("wpu_pred_wayPrediction", io.req.valid && !io.req.bits.replayCarry.valid)
   }else{
     XSPerfAccumulate("wpu_pred_wayPrediction", io.req.valid && !io.req.bits.replayCarry.valid && s0_pred_way_conflict)
@@ -167,16 +167,15 @@ class DCacheWPU (implicit p:Parameters) extends DCacheModule with HasWPUParamete
   }
 }
 
-/*
-class ICacheWPU (implicit p:Parameters) extends WPUModule {
-  val io = IO(new IwpuIO)
 
-  val wpu = AlgoWPUMap(iwpuParam.algoName, true)
+class ICacheWpuWrapper (implicit p:Parameters) extends WPUModule with HasICacheParameters {
+  val wpu = AlgoWPUMap(iwpuParam)
+  val io = IO(new IwpuIO(nWays))
 
   /** pred in s0*/
-  wpu.io.pred_en := io.req.valid
-  wpu.io.pred_vaddr := io.req.bits.vaddr
-  val s0_pred_way_en = wpu.io.pred_way_en
+  wpu.io.predVec(0).en := io.req.valid
+  wpu.io.predVec(0).vaddr := io.req.bits.vaddr
+  val s0_pred_way_en = wpu.io.predVec(0).way_en
   // io
   io.req.ready := true.B
   if (iwpuParam.enWPU) {
@@ -191,15 +190,15 @@ class ICacheWPU (implicit p:Parameters) extends WPUModule {
   val s1_pred_way_en = RegNext(s0_pred_way_en)
   val s1_pred_fail = RegNext(io.resp.valid) && s1_pred_way_en =/= io.lookup_upd.bits.s1_real_way_en
   // look up res
-  wpu.io.lookup_upd.update_en := io.lookup_upd.valid
-  wpu.io.lookup_upd.update_vaddr := io.lookup_upd.bits.vaddr
-  wpu.io.lookup_upd.update_way_en := io.lookup_upd.bits.s1_real_way_en
+  wpu.io.updLookup(0).en := io.lookup_upd.valid
+  wpu.io.updLookup(0).vaddr := io.lookup_upd.bits.vaddr
+  wpu.io.updLookup(0).way_en := io.lookup_upd.bits.s1_real_way_en
   // which will update in look up pred fail
-  wpu.io.replaycarry_upd := DontCare
+  wpu.io.updReplaycarry := DontCare
   // replace / tag write
-  wpu.io.tagwrite_upd.update_en := io.tagwrite_upd.valid
-  wpu.io.tagwrite_upd.update_vaddr := io.tagwrite_upd.bits.vaddr
-  wpu.io.tagwrite_upd.update_way_en := io.tagwrite_upd.bits.s1_real_way_en
+  wpu.io.updTagwrite(0).en := io.tagwrite_upd.valid
+  wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd.bits.vaddr
+  wpu.io.updTagwrite(0).way_en := io.tagwrite_upd.bits.s1_real_way_en
   // io
   io.resp.bits.s1_pred_fail := s1_pred_fail
 }
@@ -207,7 +206,7 @@ class ICacheWPU (implicit p:Parameters) extends WPUModule {
 /** IdealWPU:
   * req in s1 and resp in s1
   */
-class IdealWPU(implicit p:Parameters) extends WPUModule{
+class IdealWPU(implicit p:Parameters) extends WPUModule with HasDCacheParameters {
   val io = IO(new Bundle{
     val req = Output(new Bundle {
       val valid = Bool()
@@ -228,4 +227,3 @@ class IdealWPU(implicit p:Parameters) extends WPUModule{
   }
   io.resp.s1_pred_way_en := s1_pred_way_en
 }
-*/
