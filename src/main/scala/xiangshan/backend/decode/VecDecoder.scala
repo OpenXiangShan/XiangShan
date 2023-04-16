@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import xiangshan._
-import xiangshan.v2backend.FuType
+import xiangshan.backend.fu.FuType
 import yunsuan.{VfpuType, VipuType}
 
 abstract class VecDecode extends XSDecodeBase {

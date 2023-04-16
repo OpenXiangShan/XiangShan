@@ -19,8 +19,8 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.v2backend.FuConfig
-import xiangshan.v2backend.fu.{FuncUnit, HasPipelineReg}
+import xiangshan.backend.fu.{FuncUnit, HasPipelineReg}
+import xiangshan.backend.fu.FuConfig
 import xiangshan.{FPUCtrlSignals, XSModule}
 
 trait HasUIntToSIntHelper {

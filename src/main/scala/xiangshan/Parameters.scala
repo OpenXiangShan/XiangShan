@@ -20,15 +20,19 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import huancun._
-import huancun.debug._
 import system.SoCParamsKey
+import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler}
+import xiangshan.backend.regfile.{IntPregParams, PregParams, VfPregParams}
+import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import xiangshan.cache.prefetch._
 import xiangshan.frontend._
 import xiangshan.frontend.icache.ICacheParameters
-import xiangshan.v2backend._
 
 import scala.math.min
 
@@ -127,7 +131,6 @@ case class XSCoreParameters
   CommitWidth: Int = 6,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,
@@ -257,19 +260,19 @@ case class XSCoreParameters
     val numRfWrite = intPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntReadPort(0, 2)), Seq(IntReadPort(1, 2)))),
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntReadPort(0, 1)), Seq(IntReadPort(1, 1)))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 2)), Seq(IntRD(1, 2)))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(0, 1)), Seq(IntRD(1, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntReadPort(4, 0)), Seq(IntReadPort(5, 0)))),
-        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntReadPort(6, 0)), Seq(IntReadPort(7, 0)))),
+        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0)))),
+        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntReadPort(4, 1)), Seq(IntReadPort(5, 1)))),
-        ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntReadPort(6, 1)), Seq(IntReadPort(7, 1)))),
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(4, 1)), Seq(IntRD(5, 1)))),
+        ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(7, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(I2fCfg), Seq(VecWB(port = 6, Int.MaxValue)), Seq(Seq(IntReadPort(0, 0)))),
+        ExeUnitParams(Seq(I2fCfg), Seq(VecWB(port = 6, Int.MaxValue)), Seq(Seq(IntRD(0, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
     ),
       numPregs = intPreg.numEntries,
@@ -287,11 +290,11 @@ case class XSCoreParameters
     val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(VfReadPort(0, 0)), Seq(VfReadPort(1, 0)), Seq(VfReadPort(2, 0)))),
-        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfReadPort(3, 0)), Seq(VfReadPort(4, 0)), Seq(VfReadPort(5, 0)))),
+        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)))),
+        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfReadPort(6, 0)), Seq(VfReadPort(7, 0)))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = vfPreg.numEntries,
@@ -309,16 +312,16 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(5, 0), VecWB(4, 0)), Seq(Seq(IntReadPort(8, 0)))),
-        ExeUnitParams(Seq(LduCfg), WBSeq(IntWB(6, 0), VecWB(5, 0)), Seq(Seq(IntReadPort(9, 0)))),
+        ExeUnitParams(Seq(LduCfg), Seq(IntWB(5, 0), VecWB(4, 0)), Seq(Seq(IntRD(8, 0)))),
+        ExeUnitParams(Seq(LduCfg), Seq(IntWB(6, 0), VecWB(5, 0)), Seq(Seq(IntRD(9, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StaCfg), WBSeq(), Seq(Seq(IntReadPort(10, 0)))),
-        ExeUnitParams(Seq(StaCfg), WBSeq(), Seq(Seq(IntReadPort(11, 0)))),
+        ExeUnitParams(Seq(StaCfg), Seq(), Seq(Seq(IntRD(10, 0)))),
+        ExeUnitParams(Seq(StaCfg), Seq(), Seq(Seq(IntRD(11, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StdCfg), WBSeq(), Seq(Seq(IntReadPort(12, 0), VfReadPort(12, 0)))),
-        ExeUnitParams(Seq(StdCfg), WBSeq(), Seq(Seq(IntReadPort(13, 0), VfReadPort(13, 0)))),
+        ExeUnitParams(Seq(StdCfg), Seq(), Seq(Seq(IntRD(12, 0), VfRD(12, 0)))),
+        ExeUnitParams(Seq(StdCfg), Seq(), Seq(Seq(IntRD(13, 0), VfRD(13, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
@@ -330,7 +333,7 @@ case class XSCoreParameters
     )
   }
 
-  def backendParams: BackendParams = BackendParams(Map(
+  def backendParams: BackendParams = backend.BackendParams(Map(
     IntScheduler() -> intSchdParams,
     VfScheduler() -> vfSchdParams,
     MemScheduler() -> memSchdParams,
@@ -449,7 +452,6 @@ trait HasXSParameter {
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
   val FtqSize = coreParams.FtqSize
-  val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)

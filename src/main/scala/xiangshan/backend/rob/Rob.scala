@@ -24,10 +24,11 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.BackendParams
+import xiangshan.backend.fu.FuType
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.v2backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.v2backend.{BackendParams, FuType}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 
 class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries

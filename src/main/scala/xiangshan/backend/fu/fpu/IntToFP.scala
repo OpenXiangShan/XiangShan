@@ -23,7 +23,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{SignExt, ZeroExt}
-import xiangshan.v2backend.{I2fCfg, FuConfig}
+import xiangshan.backend.fu.FuConfig
 
 class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
   val regEnables = IO(Input(Vec(latency, Bool())))
@@ -78,7 +78,7 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
 }
 
 class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
-  override def latency: Int = I2fCfg.latency.latencyVal.get
+  override def latency: Int = cfg.latency.latencyVal.get
   override val dataModule = Module(new IntToFPDataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))

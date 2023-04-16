@@ -22,13 +22,13 @@ import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utility._
 import utils._
-import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.ctrlblock.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.v2backend.Bundles.DynInst
-import xiangshan.v2backend.FuType
+import xiangshan.backend.Bundles.DynInst
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -340,7 +340,7 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
-  val rsIdx = UInt(log2Up(IssQueSize).W)
+  val rsIdx = UInt(log2Up(IQSizeMax).W)
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()

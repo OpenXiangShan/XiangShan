@@ -18,7 +18,7 @@ package xiangshan.backend.dispatch
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
-import chisel3.{ExcitingUtils, _}
+import chisel3._
 import difftest._
 import utility._
 import utils._
@@ -26,8 +26,8 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.RobEnqIO
 import xiangshan.mem.mdp._
-import xiangshan.v2backend.Bundles.DynInst
-import xiangshan.v2backend.FuType
+import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.fu.FuType
 
 case class DispatchParameters
 (

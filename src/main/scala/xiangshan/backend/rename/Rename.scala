@@ -23,11 +23,11 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.mdp._
-import xiangshan.v2backend.Bundles.{DecodedInst, DynInst}
-import xiangshan.v2backend.FuType
+import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new Bundle() {

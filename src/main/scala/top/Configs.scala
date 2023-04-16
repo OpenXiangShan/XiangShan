@@ -28,10 +28,10 @@ import utils._
 import huancun._
 import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend.icache.ICacheParameters
-import xiangshan.v2backend.{IntPregParams, VfPregParams}
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -59,7 +59,6 @@ class MinimalConfig(n: Int = 1) extends Config(
         RenameWidth = 2,
         CommitWidth = 2,
         FetchWidth = 4,
-        IssQueSize = 8,
         NRPhyRegs = 96,
         IntPhyRegs = 96,
         VfPhyRegs = 96,

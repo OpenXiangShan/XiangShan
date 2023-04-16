@@ -19,12 +19,9 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility._
 import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import xiangshan.v2backend.FuConfig
-import xiangshan.v2backend.fu.FuncUnit
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)

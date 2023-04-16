@@ -23,8 +23,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import fudian.{FCMP, FloatPoint}
-import xiangshan._
-import xiangshan.v2backend.{F2fCfg, FuConfig}
+import xiangshan.backend.fu.FuConfig
 
 class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 

@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.dcache.ReplayCarry
-import xiangshan.v2backend.Bundles.{DynInst, MemExuInput}
+import xiangshan.backend.Bundles.{DynInst, MemExuInput}
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -64,7 +64,7 @@ class LsPipelineBundle(implicit val p: Parameters) extends Bundle with HasXSPara
   val ptwBack = Bool()
   val mmio = Bool()
   val atomic = Bool()
-  val rsIdx = UInt(log2Up(IssQueSize).W)
+  val rsIdx = UInt(log2Up(MemIQSizeMax).W)
 
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))

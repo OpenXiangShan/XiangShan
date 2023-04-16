@@ -24,11 +24,11 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.cache._
 import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
-import xiangshan.v2backend.{LduCfg}
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
   val valid = Output(Bool())
@@ -94,7 +94,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIQSizeMax).W))
     val isFirstIssue = Input(Bool())
     val fastpath = Input(new LoadToLoadIO)
     val s0_kill = Input(Bool())
@@ -118,7 +118,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_mask = Wire(UInt(8.W))
   val s0_uop = Wire(new DynInst)
   val s0_isFirstIssue = Wire(Bool())
-  val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
+  val s0_rsIdx = Wire(UInt(log2Up(MemIQSizeMax).W))
   val s0_sqIdx = Wire(new SqPtr)
   val s0_replayCarry = Wire(new ReplayCarry)
   // default value
@@ -706,7 +706,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val redirect = Flipped(ValidIO(new Redirect))
     val feedbackSlow = ValidIO(new RSFeedback)
     val feedbackFast = ValidIO(new RSFeedback)
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIQSizeMax).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
     val sbuffer = new LoadForwardQueryIO

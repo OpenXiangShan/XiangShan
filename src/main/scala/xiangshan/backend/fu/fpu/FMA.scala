@@ -25,7 +25,7 @@ import fudian.utils.Multiplier
 import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.v2backend.FuConfig
+import xiangshan.backend.fu.FuConfig
 
 
 class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit p: Parameters) extends XSBundle {

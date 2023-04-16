@@ -3,10 +3,10 @@ package xiangshan.backend.ctrlblock
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.ValidIO
 import chisel3._
+import xiangshan.backend.BackendParams
 import xiangshan.{CustomCSRCtrlIO, MemPredUpdateReq, Redirect, XSBundle, XSModule}
 import xiangshan.mem.mdp.{DispatchLFSTIO, LFST, SSIT, SSITEntry, WaitTable}
-import xiangshan.v2backend.BackendParams
-import xiangshan.v2backend.Bundles.DynInst
+import xiangshan.backend.Bundles.DynInst
 
 class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemCtrlIO(params))

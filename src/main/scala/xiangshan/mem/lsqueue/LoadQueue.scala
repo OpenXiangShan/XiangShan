@@ -29,7 +29,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import chisel3.ExcitingUtils
 import xiangshan.cache.dcache.ReplayCarry
-import xiangshan.v2backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).LoadQueueSize

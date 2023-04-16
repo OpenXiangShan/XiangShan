@@ -22,7 +22,7 @@ import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, publi
 import chisel3.util._
 import fudian.FDIV
 import utility.{MaskExpand, RegNextWithEnable}
-import xiangshan.v2backend.FuConfig
+import xiangshan.backend.fu.FuConfig
 
 import scala.collection.mutable
 

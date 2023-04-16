@@ -23,7 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
-import xiangshan.v2backend.Bundles._
+import xiangshan.backend.Bundles._
 
 class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {

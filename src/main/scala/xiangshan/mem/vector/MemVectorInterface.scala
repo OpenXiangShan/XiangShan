@@ -23,7 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class VlsqPtr(implicit p: Parameters) extends CircularQueuePtr[VlsqPtr](
   p => p(XSCoreParamsKey).VlsQueueSize

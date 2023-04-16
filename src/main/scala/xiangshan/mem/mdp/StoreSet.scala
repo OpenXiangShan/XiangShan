@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.v2backend.Bundles.DynInst
+import xiangshan.backend.Bundles.DynInst
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details

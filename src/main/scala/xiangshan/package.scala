@@ -21,7 +21,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.vector._
 import xiangshan.backend.issue._
-import xiangshan.v2backend.FuConfig
+import xiangshan.backend.fu.FuConfig
 
 package object xiangshan {
   object SrcType {

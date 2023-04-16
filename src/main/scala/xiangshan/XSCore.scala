@@ -30,7 +30,7 @@ import utils._
 import xiangshan.backend._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
-import xiangshan.v2backend._
+import xiangshan.backend._
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -68,11 +68,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     ptw_to_l2_buffer.node := ptw.node
   }
 
-  val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
-    case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = 16 // Todo
-    )
-  })))
+  val memBlock = LazyModule(new MemBlock)
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase

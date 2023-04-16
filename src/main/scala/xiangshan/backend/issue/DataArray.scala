@@ -1,28 +1,49 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
-
 package xiangshan.backend.issue
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility._
-import utils._
-import xiangshan._
-import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
-import xiangshan.v2backend.Bundles.DynInst
+import utility.AsyncRawDataModuleTemplate
+import utils.{XSDebug, XSError}
+import xiangshan.XSModule
 
+class OHReadBundle[T <: Data](addrLen: Int, gen: T) extends Bundle {
+  val addr = Input(UInt(addrLen.W))
+  val data = Output(gen)
+}
 
+class OHWriteBundle[T <: Data](addrLen: Int, gen: T) extends Bundle {
+  val en = Input(Bool())
+  val addr = Input(UInt(addrLen.W))
+  val data = Input(gen)
+}
+
+class DataArrayIO[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: Int) extends Bundle {
+  val read = Vec(numRead, new OHReadBundle(numEntries, gen))
+  val write = Vec(numWrite, new OHWriteBundle(numEntries, gen))
+}
+
+class DataArray[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: Int)
+  (implicit p: Parameters)
+  extends XSModule {
+
+  val io = IO(new DataArrayIO(gen, numRead, numWrite, numEntries))
+
+  private val dataModule = Module(new AsyncRawDataModuleTemplate(gen, numEntries, io.read.length, io.write.length))
+
+  dataModule.io.rvec  := VecInit(io.read.map(_.addr))
+  io.read.zip(dataModule.io.rdata).foreach { case (l, r) => l.data := r}
+
+  dataModule.io.wvec  := VecInit(io.write.map(_.addr))
+  dataModule.io.wen   := VecInit(io.write.map(_.en))
+  dataModule.io.wdata := VecInit(io.write.map(_.data))
+
+  // check if one entry wroten by multi bundles
+  for (i <- 0 until numEntries) {
+    val wCnt = VecInit(io.write.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
+    XSError(RegNext(PopCount(wCnt) > 1.U), s"why not OH $i?")
+    when(PopCount(wCnt) > 1.U) {
+      XSDebug("ERROR: IssueQueue DataArray write overlap!\n")
+    }
+  }
+}

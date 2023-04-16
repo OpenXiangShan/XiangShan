@@ -24,7 +24,7 @@ import chisel3._
 import chisel3.util._
 import fudian.FCMP
 import utility.SignExt
-import xiangshan.v2backend.{F2iCfg, FuConfig}
+import xiangshan.backend.fu.FuConfig
 
 
 
@@ -134,7 +134,7 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
 
 class FPToInt(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
 
-  override def latency = F2iCfg.latency.latencyVal.get
+  override def latency = cfg.latency.latencyVal.get
 
   override val dataModule = Module(new FPToIntDataModule(latency))
   connectDataModule

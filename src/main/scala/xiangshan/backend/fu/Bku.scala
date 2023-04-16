@@ -23,8 +23,6 @@ import utility.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, ZeroExt}
 import utils.{XSDebug, XSError}
 import xiangshan._
 import xiangshan.backend.fu.util._
-import xiangshan.v2backend.fu.{FuncUnit, HasPipelineReg}
-import xiangshan.v2backend.FuConfig
 
 class CountModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {

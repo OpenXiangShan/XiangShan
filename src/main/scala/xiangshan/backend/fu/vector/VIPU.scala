@@ -22,8 +22,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import utils.XSError
 import xiangshan.HasXSParameter
-import xiangshan.v2backend.FuConfig
-import xiangshan.v2backend.fu.FuncUnit
+import xiangshan.backend.fu.FuncUnit
+import xiangshan.backend.fu.FuConfig
 import yunsuan.vector.VectorIntAdder
 import yunsuan.{VectorElementFormat, VipuType}
 

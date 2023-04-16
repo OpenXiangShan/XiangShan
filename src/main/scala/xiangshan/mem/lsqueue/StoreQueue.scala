@@ -27,7 +27,7 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import difftest._
 import device.RAMHelper
-import xiangshan.v2backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize

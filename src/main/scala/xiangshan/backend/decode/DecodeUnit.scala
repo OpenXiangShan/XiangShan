@@ -25,8 +25,8 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import xiangshan.v2backend.Bundles.{DecodedInst, DynInst, StaticInst}
-import xiangshan.v2backend.FuType
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/

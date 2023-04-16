@@ -24,15 +24,13 @@ import freechips.rocketchip.tile.HasFPUParameters
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TLBNonBlock, TlbReplace, VectorTlbPtwIO}
 import xiangshan.mem._
-import xiangshan.v2backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
-import xiangshan.v2backend.exu.MemExeUnit
-import xiangshan.v2backend.fu.FuncUnit
-import xiangshan.v2backend.{FuConfig, FuType}
+import Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready

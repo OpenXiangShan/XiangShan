@@ -27,7 +27,7 @@ import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.v2backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with HasDCacheParameters{
   val io = IO(new Bundle() {

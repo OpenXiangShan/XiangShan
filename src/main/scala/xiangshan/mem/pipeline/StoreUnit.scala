@@ -24,9 +24,10 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.v2backend.Bundles.{MemExuInput, MemExuOutput}
-import xiangshan.v2backend.{StaCfg}
+import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
+
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB

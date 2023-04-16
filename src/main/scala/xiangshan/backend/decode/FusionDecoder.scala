@@ -23,8 +23,8 @@ import freechips.rocketchip.rocket.Instructions
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.v2backend.Bundles.DecodedInst
-import xiangshan.v2backend.FuType
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.Bundles.DecodedInst
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {

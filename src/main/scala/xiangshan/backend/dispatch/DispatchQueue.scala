@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.v2backend.Bundles.DynInst
+import xiangshan.backend.Bundles.DynInst
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {

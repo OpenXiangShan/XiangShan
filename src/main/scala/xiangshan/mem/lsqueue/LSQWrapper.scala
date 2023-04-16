@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.mem._
-import xiangshan.v2backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
