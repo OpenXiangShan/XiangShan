@@ -78,7 +78,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For load replay
   val isLoadReplay = Bool()
-  val replayCarry = new ReplayCarry
+  val replayCarry = new ReplayCarry(nWays)
 
   // For dcache miss load
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)

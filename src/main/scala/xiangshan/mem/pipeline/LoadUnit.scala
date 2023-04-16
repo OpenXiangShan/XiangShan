@@ -52,7 +52,7 @@ class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle with HasDCachePar
   val can_forward_full_data = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
   val data_invalid_sq_idx = Output(UInt(log2Ceil(StoreQueueSize).W))
-  val replayCarry = Output(new ReplayCarry)
+  val replayCarry = Output(new ReplayCarry(nWays))
   val miss_mshr_id = Output(UInt(log2Up(cfg.nMissEntries).W))
   val data_in_last_beat = Output(Bool())
   val debug = Output(new PerfDebugInfo)
@@ -123,9 +123,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_isFirstIssue = Wire(Bool())
   val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
   val s0_sqIdx = Wire(new SqPtr)
-  val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
+  val s0_replayCarry = Wire(new ReplayCarry(nWays)) // way info for way predict related logic
   // default value
-  s0_replayCarry := ReplayCarry.init
+  s0_replayCarry := ReplayCarry.init(nWays)
 
   io.s0_sqIdx := s0_sqIdx
 

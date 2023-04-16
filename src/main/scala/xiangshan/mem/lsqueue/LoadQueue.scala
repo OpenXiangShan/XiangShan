@@ -136,7 +136,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   println("LoadQueue: size:" + LoadQueueSize)
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
-  val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueSize)(ReplayCarry.init)))
+  val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueSize)(ReplayCarry.init(nWays))))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare

@@ -8,21 +8,21 @@ import xiangshan._
 import xiangshan.cache.{DCacheModule, HasDCacheParameters}
 import xiangshan.frontend.icache.HasICacheParameters
 
-class ReplayCarry(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+class ReplayCarry(nWays: Int)(implicit p: Parameters) extends XSBundle {
   val real_way_en = UInt(nWays.W)
   val valid = Bool()
 }
 
 object ReplayCarry{
-  def apply(rwe: UInt, v: Bool)(implicit p: Parameters): ReplayCarry = {
-    val rcry = Wire(new ReplayCarry)
+  def apply(nWays: Int, rwe: UInt = 0.U, v: Bool = false.B)(implicit p: Parameters): ReplayCarry = {
+    val rcry = Wire(new ReplayCarry(nWays))
     rcry.real_way_en := rwe
     rcry.valid := v
     rcry
   }
 
-  def init(implicit p: Parameters): ReplayCarry = {
-    val rcry = Wire(new ReplayCarry)
+  def init(nWays: Int)(implicit p: Parameters): ReplayCarry = {
+    val rcry = Wire(new ReplayCarry(nWays))
     rcry.real_way_en := 0.U
     rcry.valid := false.B
     rcry
@@ -33,8 +33,8 @@ class WPUBaseReq(implicit p: Parameters) extends BaseWPUBundle{
   val vaddr = UInt(VAddrBits.W)
 }
 
-class WPUReplayedReq(implicit p: Parameters) extends WPUBaseReq {
-  val replayCarry = new ReplayCarry
+class WPUReplayedReq(nWays: Int)(implicit p: Parameters) extends WPUBaseReq {
+  val replayCarry = new ReplayCarry(nWays)
 }
 
 class WPUResp(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
@@ -64,7 +64,7 @@ class IwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
 }
 
 class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
-  val req = Flipped(Decoupled(new WPUReplayedReq))
+  val req = Flipped(Decoupled(new WPUReplayedReq(nWays)))
   val resp = ValidIO(new WPUResp(nWays))
   val lookup_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
   val tagwrite_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
