@@ -96,24 +96,6 @@ class DebugLSIO(implicit p: Parameters) extends XSBundle {
   val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfoBundle))
 }
 
-class DebugInstDB(implicit p: Parameters) extends XSBundle{
-  val globalID = UInt(XLEN.W)
-  val robIdx = UInt(log2Ceil(RobSize).W)
-  val instType = FuType()
-  val exceptType = ExceptionVec()
-  val ivaddr = UInt(VAddrBits.W)
-  val dvaddr = UInt(VAddrBits.W) // the l/s access address
-  val dpaddr = UInt(VAddrBits.W) // need the physical address when the TLB is valid
-  val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
-  // val levelTlbHit = UInt(2.W) // 01, 10, 11(memory)
-  // val otherPerfNoteThing // FIXME: how much?
-  val accessLatency = UInt(XLEN.W)  // RS out time --> write back time
-  val executeLatency = UInt(XLEN.W)
-  val issueLatency = UInt(XLEN.W)
-  val lsInfo = new DebugLsInfo
-  val mdpInfo = new DebugMdpInfo
-}
-
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
   p => p(XSCoreParamsKey).RobSize
 ) with HasCircularQueuePtrHelper {
@@ -432,7 +414,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
-  val debug_microOp = Mem(RobSize, new MicroOp)
+  val debug_microOp = Reg(Vec(RobSize, new MicroOp))
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
   val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
@@ -1097,18 +1079,26 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
   }
 
+  if (env.EnableTopDown) {
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.LOAD,
+                            "rob_first_load", ExcitingUtils.Perf)
+    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.STORE,
+                            "rob_first_store", ExcitingUtils.Perf)
+  }
+
   /**
     * DataBase info:
     * log trigger is at writeback valid
     * */
   if(!env.FPGAPlatform){
-    val instTableName = "InstDB" + p(XSCoreParamsKey).HartId.toString
+    val isWriteInstInfoTable = WireInit(Constantin.createRecord("isWriteInstInfoTable" + p(XSCoreParamsKey).HartId.toString))
+    val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new DebugInstDB)
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
     // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
     for (wb <- exuWriteback) {
       when(wb.valid) {
-        val debug_instData = Wire(new DebugInstDB)
+        val debug_instData = Wire(new InstInfoEntry)
         val idx = wb.bits.uop.robIdx.value
         debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
         debug_instData.robIdx := idx
@@ -1120,10 +1110,12 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
         debug_instData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
         debug_instData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
         debug_instData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
-        debug_instData.exceptType := wb.bits.uop.cf.exceptionVec
+        debug_instData.exceptType := Cat(wb.bits.uop.cf.exceptionVec)
         debug_instData.lsInfo := debug_lsInfo(idx)
         debug_instData.mdpInfo.ssid := wb.bits.uop.cf.ssid
         debug_instData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
+        debug_instData.issueTime := wb.bits.uop.debugInfo.issueTime
+        debug_instData.writebackTime := wb.bits.uop.debugInfo.writebackTime
         debug_instTable.log(
           data = debug_instData,
           en = wb.valid,

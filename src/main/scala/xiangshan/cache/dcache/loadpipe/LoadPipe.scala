@@ -181,7 +181,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
 
   val s1_fake_meta = Wire(new Meta)
-//  s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
+  // s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
   s1_fake_meta.coh := ClientMetadata.onReset
   val s1_fake_tag = get_tag(s1_paddr_dup_dcache)
 
@@ -271,6 +271,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+  // s2 miss merged
+  val s2_miss_merged = io.miss_req.valid && io.miss_resp.merged
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   dontTouch(s2_bank_addr)
@@ -321,12 +323,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // * report a miss if bank conflict is detected
   val real_miss = Wire(Bool())
   when (wpu.io.resp.valid){
-    real_miss := s2_real_way_en.orR
+    real_miss := !s2_real_way_en.orR
   }.otherwise{
     real_miss := !s2_hit_dup_lsu
   }
   // io.debug_s2_cache_miss := real_miss
   resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := resp.bits.miss
@@ -335,6 +338,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.meta_access := s2_hit_access
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
+  resp.bits.debug_robIdx := s2_req.debug_robIdx
 
   XSPerfAccumulate("wpu_pred_fail", s2_wpu_pred_fail && s2_valid)
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
@@ -387,9 +391,35 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.valid := s3_error && s3_valid
 
   // update plru in s3
-  io.replace_access.valid := RegNext(RegNext(RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && !s2_nack_no_mshr)
-  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
-  io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
+  if (!cfg.updateReplaceOn2ndmiss) {
+    // replacement is only updated on 1st miss
+    io.replace_access.valid := RegNext(RegNext(
+      RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && 
+      !s2_nack_no_mshr &&
+      !s2_miss_merged
+    )
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
+  } else {
+    // replacement is updated on both 1st and 2nd miss
+    // timing is worse than !cfg.updateReplaceOn2ndmiss
+    io.replace_access.valid := RegNext(RegNext(
+      RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
+      !s2_nack_no_mshr
+    )
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.way := RegNext(
+      Mux(
+        RegNext(s1_tag_match_dup_dc),
+        RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
+        Mux( // if miss
+          !s2_miss_merged,
+          RegNext(io.replace_way.way), // 1st fire: access new selected replace way
+          OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
+        )
+      )
+    )
+  }
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit

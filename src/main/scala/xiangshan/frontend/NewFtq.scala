@@ -813,6 +813,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifuWbPtr_write := ifuWbPtr + 1.U
   }
 
+  XSError(ifu_wb_valid && isAfter(pdWb.bits.ftqIdx, ifuPtr), "IFU returned a predecode before its req, check IFU")
+
   ftb_entry_mem.io.raddr.head := ifu_wb_idx
   val has_false_hit = WireInit(false.B)
   when (RegNext(hit_pd_valid)) {
@@ -1031,6 +1033,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toBpu.redirect := Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
+  XSError(io.toBpu.redirect.valid && isBefore(io.toBpu.redirect.bits.ftqIdx, commPtr), "Ftq received a redirect after its commit, check backend or replay")
+
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
@@ -1219,7 +1223,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
-  
+
+  val isWriteFTQTable = WireInit(Constantin.createRecord("isWriteFTQTable" + p(XSCoreParamsKey).HartId.toString))
   val ftqBranchTraceDB = ChiselDB.createTable("FTQTable" + p(XSCoreParamsKey).HartId.toString, new FtqDebugBundle)
   // Cfi Info
   for (i <- 0 until PredictWidth) {
@@ -1256,7 +1261,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     ftqBranchTraceDB.log(
       data = logbundle /* hardware of type T */,
-      en = v && do_commit && isCfi,
+      en = isWriteFTQTable.orR && v && do_commit && isCfi,
       site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
       clock = clock,
       reset = reset

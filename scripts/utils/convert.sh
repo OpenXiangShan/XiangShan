@@ -87,20 +87,32 @@ func paramstr(chn, param) {
 }
 
 {
-  $1 = $NF;                         # timestamp
+  echo = $2;
+  user = $3;
+  data_1 = $4;
+  data_2 = $5;
+  data_3 = $6;
+  data_4 = $7;
+  sink = $9;
+  source = $10;
+
+  $1 = $14;                         # timestamp
+  $2 = $NF;                         # name
+  $3 = chnstr($13)                  # channel
   $NF = "";                         # remove log id
-  $5 = paramstr($3, $5)             # param
-  $4 = opstr($3, $4)                # opcode
-  $3 = chnstr($3)                   # channel
-  for(i=8; i<=12; i++){
-    if(i == 8){                     # col 8 is address
-      $i = sprintf("%lx", $i);
-    } else {                        # cols 9-12 are data
-      $i = sprintf("%016lx", $i);
-    }
-  }
-  $13 = sprintf("user: %lx", $13);
-  $14 = sprintf("echo: %lx", $14);
+  $6 = sink;
+  $7 = source;
+  $5 = paramstr($13, $11)           # param
+  $4 = opstr($13, $12)              # opcode
+
+  $8 = sprintf("%lx", $8)           # address
+  $9  = sprintf("%016lx", data_1)
+  $10 = sprintf("%016lx", data_2)
+  $11 = sprintf("%016lx", data_3)
+  $12 = sprintf("%016lx", data_4)
+
+  $13 = sprintf("user: %lx", user);
+  $14 = sprintf("echo: %lx", echo);
 }
 
 1                                   # print every line

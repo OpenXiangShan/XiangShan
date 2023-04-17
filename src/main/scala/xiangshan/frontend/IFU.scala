@@ -389,7 +389,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
   val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
   val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
-  val f3_half_snpc        = RegEnable(next = f2_half_snpc, enable = f2_fire)
+  val f3_half_snpc      = RegEnable(next = f2_half_snpc,   enable = f2_fire)
   val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
   val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
   val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
@@ -582,7 +582,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     !f3_pd(idx).isRVC && checkerOutStage1.fixedRange(idx) && f3_instr_valid(idx) && !checkerOutStage1.fixedTaken(idx) && ! f3_req_is_mmio
   }
 
-  val f3_last_validIdx             = ~ParallelPriorityEncoder(checkerOutStage1.fixedRange.reverse)
+  val f3_last_validIdx       = ParallelPosteriorityEncoder(checkerOutStage1.fixedRange)
 
   val f3_hasLastHalf         = hasLastHalf((PredictWidth - 1).U)
   val f3_false_lastHalf      = hasLastHalf(f3_last_validIdx)
@@ -746,6 +746,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   val checkFlushWb = Wire(Valid(new PredecodeWritebackBundle))
+  val checkFlushWbjalTargetIdx = ParallelPriorityEncoder(VecInit(wb_pd.zip(wb_instr_valid).map{case (pd, v) => v && pd.isJal }))
+  val checkFlushWbTargetIdx = ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred)
   checkFlushWb.valid                  := wb_valid
   checkFlushWb.bits.pc                := wb_pc
   checkFlushWb.bits.pd                := wb_pd
@@ -756,8 +758,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.misOffset.bits    := Mux(wb_half_flush, wb_lastIdx, ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred))
   checkFlushWb.bits.cfiOffset.valid   := ParallelOR(wb_check_result_stage1.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits    := ParallelPriorityEncoder(wb_check_result_stage1.fixedTaken)
-  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result_stage2.fixedTarget(ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred)))
-  checkFlushWb.bits.jalTarget         := wb_check_result_stage2.fixedTarget(ParallelPriorityEncoder(VecInit(wb_pd.zip(wb_instr_valid).map{case (pd, v) => v && pd.isJal })))
+  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result_stage2.fixedTarget(checkFlushWbTargetIdx))
+  checkFlushWb.bits.jalTarget         := wb_check_result_stage2.fixedTarget(checkFlushWbjalTargetIdx)
   checkFlushWb.bits.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
 
   toFtq.pdWb := Mux(wb_valid, checkFlushWb,  mmioFlushWb)
@@ -827,6 +829,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire() )
   XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), io.toIbuffer.fire, 0, PredictWidth + 1, 1)
 
+  val isWriteFetchToIBufferTable = WireInit(Constantin.createRecord("isWriteFetchToIBufferTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteIfuWbToFtqTable = WireInit(Constantin.createRecord("isWriteIfuWbToFtqTable" + p(XSCoreParamsKey).HartId.toString))
   val fetchToIBufferTable = ChiselDB.createTable("FetchToIBuffer" + p(XSCoreParamsKey).HartId.toString, new FetchToIBufferDB)
   val ifuWbToFtqTable = ChiselDB.createTable("IfuWbToFtq" + p(XSCoreParamsKey).HartId.toString, new IfuWbToFtqDB)
 
@@ -848,14 +852,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   fetchToIBufferTable.log(
     data = fetchIBufferDumpData,
-    en = io.toIbuffer.fire(),
+    en = isWriteFetchToIBufferTable.orR && io.toIbuffer.fire,
     site = "IFU" + p(XSCoreParamsKey).HartId.toString,
     clock = clock,
     reset = reset
   )
   ifuWbToFtqTable.log(
     data = ifuWbToFtqDumpData,
-    en = checkFlushWb.valid,
+    en = isWriteIfuWbToFtqTable.orR && checkFlushWb.valid,
     site = "IFU" + p(XSCoreParamsKey).HartId.toString,
     clock = clock,
     reset = reset
