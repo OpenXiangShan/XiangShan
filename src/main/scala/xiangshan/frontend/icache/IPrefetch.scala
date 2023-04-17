@@ -91,6 +91,7 @@ class IPFWritePtrQueue(implicit p: Parameters) extends IPrefetchModule with HasC
   val io = IO(new Bundle{
     val free_ptr = DecoupledIO(UInt(log2Ceil(nIPFBufferSize).W))
     val release_ptr = Flipped(ValidIO(UInt(log2Ceil(nIPFBufferSize).W)))
+    val flush = Input(Bool())
   })
   /* define ptr */
   class IPFPtr(implicit p: Parameters) extends CircularQueuePtr[IPFPtr](
@@ -118,6 +119,12 @@ class IPFWritePtrQueue(implicit p: Parameters) extends IPrefetchModule with HasC
   when (io.release_ptr.valid) {
     queue(enq_ptr.value) := io.release_ptr.bits
     enq_ptr := enq_ptr + 1.U
+  }
+
+  when (io.flush) {
+    queue := RegInit(VecInit((0 until nIPFBufferSize).map(i => i.U(log2Ceil(nIPFBufferSize).W))))
+    enq_ptr := RegInit(IPFPtr(true.B, 0.U))
+    deq_ptr := RegInit(IPFPtr(false.B, 0.U))
   }
 
   XSError(isBefore(enq_ptr, deq_ptr) && !isFull(enq_ptr, deq_ptr), "enq_ptr should not before deq_ptr\n")
@@ -167,6 +174,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val data_buffer = InitQueue(new IPFBufferEntryData, size = nIPFBufferSize)
 
   val ipf_write_ptr_queue = Module(new IPFWritePtrQueue())
+  ipf_write_ptr_queue.io.flush := io.fencei
 
   val meta_buffer_empty_oh = WireInit(VecInit(Seq.fill(nIPFBufferSize)(false.B)))
   (0 until nIPFBufferSize).foreach { i =>
@@ -446,12 +454,16 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
   /** fencei: invalid all entries */
   when(io.fencei) {
-    meta_buffer.foreach{
-      case b =>
-        b.valid := false.B
-        b.move := false.B
-        b.confidence := 0.U
+    meta_buffer.foreach { b =>
+      b.valid := false.B
+      b.move := false.B
+      b.confidence := 0.U
+      b.has_been_hit := false.B
     }
+    r_buffer_hit_s2 := 0.U
+    r_rvalid_s2 := 0.U
+    curr_move_ptr := 0.U
+    curr_hit_ptr := 0.U
   }
 
 }
@@ -651,7 +663,6 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     //write back to Prefetch Buffer
     val piq_write_ipbuffer = DecoupledIO(new IPFBufferWrite)
 
-    //TODO: fencei flush instructions
     val fencei      = Input(Bool())
 
     val prefetch_entry_data = DecoupledIO(new PIQData)
@@ -688,14 +699,10 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
   io.req.ready := state === s_idle
   io.mem_acquire.valid := state === s_memReadReq
 
-  val needFlushReg = RegInit(false.B)
-  when(state === s_idle || state === s_finish){
-    needFlushReg := false.B
-  }
-  when((state === s_memReadReq || state === s_memReadResp || state === s_write_back) && io.fencei){
-    needFlushReg := true.B
-  }
-  val needFlush = needFlushReg || io.fencei
+  val needflush_r = RegInit(false.B)
+  when (state === s_idle) { needflush_r := false.B }
+  when (state =/= s_idle && io.fencei) { needflush_r := true.B }
+  val needflush = needflush_r | io.fencei
 
   //state change
   switch(state){
@@ -728,7 +735,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     }
 
     is(s_write_back){
-      state := Mux(io.piq_write_ipbuffer.fire() || needFlush, s_finish, s_write_back)
+      state := Mux(io.piq_write_ipbuffer.fire() || needflush, s_finish, s_write_back)
     }
 
     is(s_finish){
@@ -738,7 +745,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
 
   //refill write and meta write
   //WARNING: Maybe could not finish refill in 1 cycle
-  io.piq_write_ipbuffer.valid := (state === s_write_back) && !needFlush
+  io.piq_write_ipbuffer.valid := (state === s_write_back) && !needflush
   io.piq_write_ipbuffer.bits.meta.tag := req_tag
   io.piq_write_ipbuffer.bits.meta.index := req_idx
   io.piq_write_ipbuffer.bits.meta.paddr := req.paddr

@@ -78,7 +78,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
     val ongoing_req    = ValidIO(UInt(PAddrBits.W))
-
+    val fencei = Input(Bool())
   })
 
   /** default value for control signals */
@@ -99,6 +99,11 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_corrupt = RegInit(false.B)
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
+
+  val needflush_r = RegInit(false.B)
+  when (state === s_idle) { needflush_r := false.B }
+  when (state =/= s_idle && io.fencei) { needflush_r := true.B }
+  val needflush = needflush_r | io.fencei
 
   //cacheline register
   val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
@@ -149,7 +154,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     }
 
     is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire(), s_wait_resp, s_write_back)
+      state := Mux(io.meta_write.fire() && io.data_write.fire() || needflush, s_wait_resp, s_write_back)
     }
 
     is(s_wait_resp) {
@@ -175,10 +180,10 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   //resp to ifu
   io.resp.valid := state === s_wait_resp
 
-  io.meta_write.valid := (state === s_write_back)
+  io.meta_write.valid := (state === s_write_back && !needflush)
   io.meta_write.bits.generate(tag = req_tag, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
 
-  io.data_write.valid := (state === s_write_back)
+  io.data_write.valid := (state === s_write_back && !needflush)
   io.data_write.bits.generate(data = respDataReg.asUInt,
                               idx  = req_idx,
                               waymask = req_waymask,
@@ -251,7 +256,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
     io.resp(i) <> entry.io.resp
     io.mshr_info(i) <> entry.io.ongoing_req
-
+    entry.io.fencei := io.fencei
 //    XSPerfAccumulate(
 //      "entryPenalty" + Integer.toString(i, 10),
 //      BoolStopWatch(

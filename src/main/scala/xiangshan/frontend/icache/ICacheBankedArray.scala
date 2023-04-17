@@ -62,6 +62,7 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
     val readResp = Vec(ICacheMetaReadPortNum, Output(new ICacheMetaReadRespBundle))
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val cacheOp  = Flipped(new L1CacheInnerOpIO)
+    val fencei   = Input(Bool())
   }}
 
   val set_addrs = Wire(Vec(ICacheMetaReadPortNum, UInt()))
@@ -100,7 +101,7 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
   ))
   // read write bank conflict
   val rw_bank_conflict = (0 until ICacheMetaReadPortNum).map(port_idx =>
-    io.write.valid && write_bank_addr === bank_addrs(port_idx)
+    (io.write.valid && write_bank_addr === bank_addrs(port_idx)) || io.fencei
   )
 
   (0 until ICacheMetaReadPortNum).foreach(port_idx => {
@@ -185,5 +186,10 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
   )
   io.cacheOp.resp.bits.read_tag_ecc := DontCare
 
-
+  // fencei logic : reset valid_array
+  when (io.fencei) {
+    (0 until nWays).foreach( way =>
+      valid_array(way) := 0.U
+    )
+  }
 }
