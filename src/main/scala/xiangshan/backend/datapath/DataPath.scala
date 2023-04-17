@@ -364,8 +364,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         case (toIU, iuIdx) =>
           // IU: issue unit
           val og0resp = toIU.og0resp
-          og0resp.valid := fromIQ(iqIdx)(iuIdx).valid
-          og0resp.bits.respType := Mux(intFromIQFire(iqIdx)(iuIdx), RSFeedbackType.rfArbitSuccess, RSFeedbackType.rfArbitFail)
+          og0resp.valid := fromIQ(iqIdx)(iuIdx).valid && (!intFromIQFire(iqIdx)(iuIdx))
+          og0resp.bits.respType := RSFeedbackType.rfArbitFail
           og0resp.bits.success := false.B
           og0resp.bits.addrOH := fromIQ(iqIdx)(iuIdx).bits.addrOH
 

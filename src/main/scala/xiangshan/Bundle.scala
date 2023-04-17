@@ -50,11 +50,9 @@ object RSFeedbackType {
   val ldVioCheckRedo  = 4.U(4.W)
   val feedbackInvalid = 7.U(4.W)
   val issueSuccess    = 8.U(4.W)
-  val issueFail       = 9.U(4.W)
-  val rfArbitSuccess  = 10.U(4.W)
-  val rfArbitFail     = 11.U(4.W)
-  val fuIdle          = 12.U(4.W)
-  val fuBusy          = 13.U(4.W)
+  val rfArbitFail     = 9.U(4.W)
+  val fuIdle          = 10.U(4.W)
+  val fuBusy          = 11.U(4.W)
 
   def apply() = UInt(4.W)
 
@@ -63,7 +61,7 @@ object RSFeedbackType {
   }
 
   def isBlocked(feedbackType: UInt) = {
-    feedbackType === issueFail || feedbackType === rfArbitFail || feedbackType === fuBusy
+    feedbackType === rfArbitFail || feedbackType === fuBusy
   }
 }
 
