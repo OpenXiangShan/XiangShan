@@ -140,6 +140,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
     val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
+    val fencei   = Input(Bool())
   }}
 
   io.read.ready := !io.write.valid
@@ -207,7 +208,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 //  })
 //  io.readResp.entryValid := validMetas.asTypeOf(Vec(2, Vec(nWays, Bool())))
 
-  io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
+  io.read.ready := !io.write.valid && !io.fencei && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
   //Parity Decode
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
@@ -296,6 +297,13 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   )
   io.cacheOp.resp.bits.read_tag_ecc := DontCare // TODO
   // TODO: deal with duplicated array
+
+  // fencei logic : reset valid_array
+  when (io.fencei) {
+    (0 until nWays).foreach( way =>
+      valid_array(way) := 0.U
+    )
+  }
 }
 
 
@@ -483,6 +491,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   /* CSR control signal */
   val csr_pf_enable = Input(Bool())
   val csr_parity_enable = Input(Bool())
+  val fencei = Input(Bool())
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -632,6 +641,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
+  // fencei
+  metaArray.io.fencei := io.fencei
+  missUnit.io.fencei := io.fencei
 }
 
 class ICachePartWayReadBundle[T <: Data](gen: T, pWay: Int)(implicit p: Parameters)
