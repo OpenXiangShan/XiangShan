@@ -70,6 +70,9 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
   val set_addrs_delay = RegNext(set_addrs)
   val bank_addrs_delay = RegNext(bank_addrs)
   val read_fires_delay = RegNext(read_fires)
+  val write_set_addr = io.write.bits.virIdx(idxBits - 1, ICacheMetaArrayBankIdxBits)
+  val write_bank_addr = io.write.bits.virIdx(ICacheMetaArrayBankIdxBits - 1, 0)
+  val write_meta_bits = cacheParams.tagCode.encode(ICacheMetadata(tag = io.write.bits.phyTag).asUInt)
 
   (0 until ICacheMetaReadPortNum).foreach(port_idx => {
     set_addrs(port_idx) := get_set_addr_from_idx(io.read(port_idx).bits.idx)
@@ -135,9 +138,6 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
   })
 
   // deal write
-  val write_set_addr = io.write.bits.virIdx(idxBits - 1, ICacheMetaArrayBankIdxBits)
-  val write_bank_addr = io.write.bits.virIdx(ICacheMetaArrayBankIdxBits - 1, 0)
-  val write_meta_bits = cacheParams.tagCode.encode(ICacheMetadata(tag = io.write.bits.phyTag).asUInt)
   (0 until ICacheMetaArrayBanks).foreach( bank_idx => {
     val tag_bank = tag_arrays(bank_idx)
     tag_bank.io.w.req.valid := io.write.valid && write_bank_addr === bank_idx.U

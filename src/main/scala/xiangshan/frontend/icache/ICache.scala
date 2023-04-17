@@ -30,6 +30,7 @@ import utils._
 import utility._
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
+import difftest._
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -535,6 +536,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   if(cacheParams.hasPrefetch){
     println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
     println("  nPrefetchBufferEntries: " + cacheParams.nPrefBufferEntries)
+    println("  prefetchPipeNum: " + cacheParams.prefetchPipeNum)
   }
 
   val (bus, edge) = outer.clientNode.out.head
@@ -594,12 +596,16 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.csr_parity_enable := io.csr_parity_enable
 
   if(cacheParams.hasPrefetch){
-    val alloc = PriorityEncoder(prefetchPipes.map(_.io.fromFtq.req.ready))
+    // TODO : perf enhance
+    val prefetchPipe_ready_vec = WireInit(VecInit(Seq.fill(prefetchPipeNum)(false.B)))
+    val alloc = RegInit(0.U(log2Up(prefetchPipeNum).W))
+    alloc := alloc + io.prefetch.req.fire
     (0 until prefetchPipeNum).foreach(i => {
       prefetchPipes(i).io.fromFtq.req.valid := io.prefetch.req.valid && i.U === alloc
       prefetchPipes(i).io.fromFtq.req.bits := io.prefetch.req.bits
+      prefetchPipe_ready_vec(i) := prefetchPipes(i).io.fromFtq.req.ready && i.U === alloc
     })
-    io.prefetch.req.ready := ParallelOR(prefetchPipes.map(_.io.fromFtq.req.ready))
+    io.prefetch.req.ready := prefetchPipe_ready_vec.reduce(_||_)
     when(!io.csr_pf_enable){
       (0 until prefetchPipeNum).foreach(i => {
         prefetchPipes(i).io.fromFtq.req.valid := false.B
@@ -686,6 +692,31 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
+
+  if (env.EnableDifftest) {
+    val metaRefill = Module(new DifftestICacheMetaWrite)
+    metaRefill.io.index := 0.U
+    metaRefill.io.coreid := 0.U
+    metaRefill.io.clock := clock
+    metaRefill.io.valid := bankedMetaArray.io.write.valid
+    metaRefill.io.phyTag := bankedMetaArray.io.write.bits.phyTag
+    metaRefill.io.virIdx := bankedMetaArray.io.write.bits.virIdx
+    metaRefill.io.wayNum := OHToUInt(bankedMetaArray.io.write.bits.waymask)
+    metaRefill.io.timer := GTimer()
+
+    (0 until prefetchPipeNum + 1).map {i =>
+      val bankedMetaDiff = Module(new DifftestICacheBankedMetaRead)
+      bankedMetaDiff.io.coreid := 0.U
+      bankedMetaDiff.io.clock := clock
+      bankedMetaDiff.io.index := i.U
+      bankedMetaDiff.io.valid := RegNext(bankedMetaArray.io.read(i).fire)
+      bankedMetaDiff.io.idx := RegNext(bankedMetaArray.io.read(i).bits.idx)
+      bankedMetaDiff.io.entryValid := bankedMetaArray.io.readResp(i).entryValid
+      bankedMetaDiff.io.metaData := bankedMetaArray.io.readResp(i).metaData.map(_.tag)
+      bankedMetaDiff.io.timer := GTimer()
+      bankedMetaDiff
+    }
+  }
 
 }
 

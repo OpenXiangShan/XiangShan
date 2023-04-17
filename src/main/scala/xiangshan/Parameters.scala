@@ -183,6 +183,8 @@ case class XSCoreParameters
     superNWays = 4,
     superReplacer = Some("plru")
   ),
+  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     normalNSets = 64,

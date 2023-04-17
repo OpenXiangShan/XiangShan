@@ -1158,13 +1158,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   if(cacheParams.hasPrefetch){
     val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
     val diff_prefetch_addr = WireInit(update_target(prefetchPtr.value)) //TODO: remove this
-
+    // TODO : MUST WIDER
     prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
 
     val prefetch_too_late = (isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)) || (prefetchPtr === ifuPtr)
     when(prefetch_too_late){
       when(prefetchPtr =/= bpuPtr){
-        prefetchPtr := ifuPtr + 1.U
+        prefetchPtr := bpuPtr - 1.U
       }.otherwise{
         prefetchPtr := ifuPtr
       }

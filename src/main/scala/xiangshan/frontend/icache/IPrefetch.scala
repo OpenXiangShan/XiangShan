@@ -179,7 +179,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val fr_ptag = (0 until prefetchPipeNum).map (i => get_phy_tag(io.filter_read(i).req.paddr))
 
   val fr_hit_in_buffer = (0 until prefetchPipeNum).map (i => meta_buffer.map(e => e.valid && (e.tag === fr_ptag(i)) && (e.index === fr_vidx(i))).reduce(_||_))
-  val fr_hit_in_s1, fr_hit_in_s2, fr_hit_in_s3 = Vec(prefetchPipeNum, Wire(Bool()))
+  val fr_hit_in_s1, fr_hit_in_s2, fr_hit_in_s3 = Wire(Vec(prefetchPipeNum, Bool()))
 
   (0 until prefetchPipeNum).foreach(i => io.filter_read(i).resp.ipf_hit := fr_hit_in_buffer(i) || fr_hit_in_s1(i) || fr_hit_in_s2(i) || fr_hit_in_s3(i))
 
@@ -522,7 +522,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   fromITLB.ready := true.B
 
-  fromFtq.req.ready :=  !p0_valid || p0_fire || p0_discard
+  fromFtq.req.ready := p0_req_cancel || p1_ready && toITLB.ready && !fromITLB.bits.miss && toIMeta.ready
 
   /** Prefetch Stage 1: check in cache & ICacheMainPipeMSHR */
   val p1_valid =  generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
