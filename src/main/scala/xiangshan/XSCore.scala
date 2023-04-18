@@ -31,6 +31,9 @@ import xiangshan.backend._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.backend._
+import xiangshan.mem.L1PrefetchFuzzer
+
+import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter

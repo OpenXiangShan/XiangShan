@@ -55,6 +55,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val in = Reg(new MemExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
+  val have_sent_first_tlb_req = RegInit(false.B)
   val isLr = in.uop.fuOpType === LSUOpType.lr_w || in.uop.fuOpType === LSUOpType.lr_d
   // paddr after translation
   val paddr = Reg(UInt())
@@ -100,6 +101,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
       state := s_tlb_and_flush_sbuffer_req
+      have_sent_first_tlb_req := false.B
     }
   }
 
@@ -132,11 +134,17 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
+    io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
     // send req to sbuffer to flush it if it is not empty
     io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
 
-    when(io.dtlb.resp.fire){
+    // do not accept tlb resp in the first cycle
+    // this limition is for hw prefetcher
+    // when !have_sent_first_tlb_req, tlb resp may come from hw prefetch
+    have_sent_first_tlb_req := true.B
+
+    when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr := io.dtlb.resp.bits.paddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
@@ -154,6 +162,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
+        io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned) {
           // NOTE: when addrAligned, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing

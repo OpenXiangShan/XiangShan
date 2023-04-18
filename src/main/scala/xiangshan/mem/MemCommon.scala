@@ -69,8 +69,10 @@ class LsPipelineBundle(implicit val p: Parameters) extends Bundle with HasXSPara
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
 
-  //softprefetch
-  val isSoftPrefetch = Bool() 
+  // prefetch
+  val isPrefetch = Bool()
+  val isHWPrefetch = Bool()
+  def isSWPrefetch = isPrefetch && !isHWPrefetch
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -83,6 +85,37 @@ class LsPipelineBundle(implicit val p: Parameters) extends Bundle with HasXSPara
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
 
   val forward_tlDchannel = Bool()
+}
+
+class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
+  val meta_prefetch = Bool()
+  val meta_access = Bool()
+
+  def fromLsPipelineBundle(input: LsPipelineBundle) = {
+    vaddr := input.vaddr
+    paddr := input.paddr
+    mask := input.mask
+    data := input.data
+    uop := input.uop
+    wlineflag := input.wlineflag
+    miss := input.miss
+    tlbMiss := input.tlbMiss
+    ptwBack := input.ptwBack
+    mmio := input.mmio
+    rsIdx := input.rsIdx
+    forwardMask := input.forwardMask
+    forwardData := input.forwardData
+    isPrefetch := input.isPrefetch
+    isHWPrefetch := input.isHWPrefetch
+    isFirstIssue := input.isFirstIssue
+    meta_prefetch := DontCare
+    meta_access := DontCare
+    forward_tlDchannel := DontCare
+    mshrid := DontCare
+    replayCarry := DontCare
+    atomic := DontCare
+    isLoadReplay := DontCare
+  }
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -105,7 +138,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     rsIdx := input.rsIdx
     forwardMask := input.forwardMask
     forwardData := input.forwardData
-    isSoftPrefetch := input.isSoftPrefetch
+    isPrefetch := input.isPrefetch
+    isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid

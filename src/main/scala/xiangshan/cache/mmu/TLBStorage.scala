@@ -18,11 +18,12 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
+import chisel3.experimental.{ExtModule, chiselName}
 import chisel3.util._
 import utils._
 import utility._
 import freechips.rocketchip.formal.PropertyClass
+import xiangshan.backend.fu.util.HasCSRConst
 
 import scala.math.min
 
@@ -97,7 +98,7 @@ class TLBFA(
   io.r.req.map(_.ready := true.B)
 
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
-  val entries = Reg(Vec(nWays, new TlbEntry(normalPage, superPage)))
+  val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
   for (i <- 0 until ports) {
@@ -115,7 +116,9 @@ class TLBFA(
     hitVec.suggestName("hitVec")
 
     val hitVecReg = RegEnable(hitVec, req.fire())
-    assert(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U), s"${parentName} fa port${i} multi-hit")
+    // Sector tlb may trigger multi-hit, see def "wbhit"
+    XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
+    // assert(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U), s"${parentName} fa port${i} multi-hit")
 
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
@@ -127,7 +130,7 @@ class TLBFA(
       resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
 
-    access.sets := get_set_idx(vpn_reg, nSets) // no use
+    access.sets := get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), nSets) // no use
     access.touch_ways.valid := resp.valid && Cat(hitVecReg).orR
     access.touch_ways.bits := OHToUInt(hitVecReg)
 
@@ -140,8 +143,8 @@ class TLBFA(
     v(io.w.bits.wayIdx) := true.B
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
-  // write assert, shoulg not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid) && vi })
+  // write assert, should not duplicate with the existing entries
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, io.csr.satp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
@@ -158,6 +161,7 @@ class TLBFA(
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
   val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.asid))
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.asid, ignoreAsid = true))
+  // Sfence will flush all sectors of an entry when hit
   when (io.sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
@@ -182,11 +186,20 @@ class TLBFA(
   io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).is_normalentry()
   io.victim.out.bits.entry := ns_to_n(entries(victim_idx))
 
-  def ns_to_n(ns: TlbEntry): TlbEntry = {
+  def ns_to_n(ns: TlbSectorEntry): TlbEntry = {
     val n = Wire(new TlbEntry(pageNormal = true, pageSuper = false))
-    n.perm := ns.perm
-    n.ppn := ns.ppn
-    n.tag := ns.tag
+    n.perm.af := ns.perm.af
+    n.perm.pf := ns.perm.pf
+    n.perm.d := ns.perm.d
+    n.perm.a := ns.perm.a
+    n.perm.g := ns.perm.g
+    n.perm.u := ns.perm.u
+    n.perm.x := ns.perm.x
+    n.perm.w := ns.perm.w
+    n.perm.r := ns.perm.r
+    n.perm.pm := ns.perm.pm(OHToUInt(ns.pteidx))
+    n.ppn := Cat(ns.ppn, ns.ppn_low(OHToUInt(ns.pteidx)))
+    n.tag := Cat(ns.tag, OHToUInt(ns.pteidx))
     n.asid := ns.asid
     n
   }
@@ -255,7 +268,18 @@ class TLBSA(
     resp.bits.hit := hit
     for (d <- 0 until nDups) {
       resp.bits.ppn(d) := data(d).genPPN()(vpn_reg)
-      resp.bits.perm(d) := data(d).perm
+      resp.bits.perm(d).pf := data(d).perm.pf
+      resp.bits.perm(d).af := data(d).perm.af
+      resp.bits.perm(d).d := data(d).perm.d
+      resp.bits.perm(d).a := data(d).perm.a
+      resp.bits.perm(d).g := data(d).perm.g
+      resp.bits.perm(d).u := data(d).perm.u
+      resp.bits.perm(d).x := data(d).perm.x
+      resp.bits.perm(d).w := data(d).perm.w
+      resp.bits.perm(d).r := data(d).perm.r
+      for (i <- 0 until tlbcontiguous) {
+        resp.bits.perm(d).pm(i) := data(d).perm.pm
+      }
     }
 
     resp.valid := { RegNext(req.valid) }
@@ -274,7 +298,7 @@ class TLBSA(
     get_set_idx(io.w.bits.data.entry.tag, nSets),
     get_set_idx(io.victim.in.bits.entry.tag, nSets))
   entries.io.wdata := Mux(io.w.valid,
-    (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
+    (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish(OHToUInt(io.w.bits.data.pteidx)))),
     io.victim.in.bits.entry)
 
   when (io.victim.in.valid) {
@@ -337,6 +361,77 @@ class TLBSA(
   println(s"${parentName} tlb_sa: nSets:${nSets} nWays:${nWays}")
 }
 
+@chiselName
+class TLBFakeSP(
+             ports: Int,
+             nSets: Int,
+             nWays: Int,
+             useDmode: Boolean = false
+           )(implicit p: Parameters) extends TlbModule with HasCSRConst{
+
+  val io = IO(new TlbStorageIO(nSets, nWays, ports))
+  io.r.req.map(_.ready := true.B)
+  val mode = if (useDmode) io.csr.priv.dmode else io.csr.priv.imode
+  val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
+    else (io.csr.satp.mode === 8.U && (mode < ModeM))
+
+  for (i <- 0 until ports) {
+    val req = io.r.req(i)
+    val resp = io.r.resp(i)
+
+    val helper = Module(new PTEHelper())
+    helper.clock := clock
+    helper.satp := io.csr.satp.ppn
+    helper.enable := req.fire && vmEnable
+    helper.vpn := req.bits.vpn
+
+    val pte = helper.pte.asTypeOf(new PteBundle)
+    val ppn = pte.ppn
+    val vpn_reg = RegNext(req.bits.vpn)
+    val pf = helper.pf
+    val level = helper.level
+
+    resp.valid := RegNext(req.valid)
+    resp.bits.hit := true.B
+    resp.bits.perm(0).pf := pf
+    resp.bits.perm(0).af := false.B
+    resp.bits.perm(0).d := pte.perm.d
+    resp.bits.perm(0).a := pte.perm.a
+    resp.bits.perm(0).g := pte.perm.g
+    resp.bits.perm(0).u := pte.perm.u
+    resp.bits.perm(0).x := pte.perm.x
+    resp.bits.perm(0).w := pte.perm.w
+    resp.bits.perm(0).r := pte.perm.r
+    resp.bits.perm(0).pm := DontCare
+
+    resp.bits.ppn(0) := MuxLookup(level, 0.U, Seq(
+      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
+      1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
+      2.U -> ppn)
+    )
+  }
+
+  io.access := DontCare
+  io.victim.out := DontCare
+
+}
+
+@chiselName
+class TLBFakeNP(
+             ports: Int,
+             nDups: Int,
+             nSets: Int,
+             nWays: Int
+           )(implicit p: Parameters) extends TlbModule {
+
+  val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
+
+  io.r.req.map(_.ready :=  true.B)
+  io.r.resp := DontCare
+  io.access := DontCare
+  io.victim.out := DontCare
+}
+
 object TlbStorage {
   def apply
   (
@@ -348,16 +443,30 @@ object TlbStorage {
     nWays: Int,
     saveLevel: Boolean = false,
     normalPage: Boolean,
-    superPage: Boolean
+    superPage: Boolean,
+    useDmode: Boolean,
+    SoftTLB: Boolean
   )(implicit p: Parameters) = {
-    if (associative == "fa") {
-       val storage = Module(new TLBFA(parentName, ports, nSets, nWays, saveLevel, normalPage, superPage))
-       storage.suggestName(s"${parentName}_fa")
-       storage.io
+    if (SoftTLB) {
+      if (superPage == true) {
+        val storage = Module(new TLBFakeSP(ports, nSets, nWays, useDmode))
+        storage.suggestName(s"${parentName}_fakesp")
+        storage.io
+      } else {
+        val storage = Module(new TLBFakeNP(ports, nDups, nSets, nWays))
+        storage.suggestName(s"${parentName}_fakenp")
+        storage.io
+      }
     } else {
-       val storage = Module(new TLBSA(parentName, ports, nDups, nSets, nWays, normalPage, superPage))
-       storage.suggestName(s"${parentName}_sa")
-       storage.io
+      if (associative == "fa") {
+        val storage = Module(new TLBFA(parentName, ports, nSets, nWays, saveLevel, normalPage, superPage))
+        storage.suggestName(s"${parentName}_fa")
+        storage.io
+      } else {
+        val storage = Module(new TLBSA(parentName, ports, nDups, nSets, nWays, normalPage, superPage))
+        storage.suggestName(s"${parentName}_sa")
+        storage.io
+      }
     }
   }
 }
@@ -375,7 +484,9 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     nWays = q.normalNWays,
     saveLevel = q.saveLevel,
     normalPage = true,
-    superPage = false
+    superPage = false,
+    useDmode = q.useDmode,
+    SoftTLB = coreParams.softTLB
   )
   val superPage = TlbStorage(
     parentName = q.name + "_sp_storage",
@@ -385,6 +496,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     nWays = q.superNWays,
     normalPage = q.normalAsVictim,
     superPage = true,
+    useDmode = q.useDmode,
+    SoftTLB = coreParams.softTLB
   )
 
   for (i <- 0 until ports) {
@@ -412,12 +525,23 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     rp.bits.hit := np.bits.hit || sp.bits.hit
     for (d <- 0 until nDups) {
       rp.bits.ppn(d) := Mux(sp.bits.hit, sp.bits.ppn(0), np.bits.ppn(d))
-      rp.bits.perm(d) := Mux(sp.bits.hit, sp.bits.perm(0), np.bits.perm(d))
+      rp.bits.perm(d).pf := Mux(sp.bits.hit, sp.bits.perm(0).pf, np.bits.perm(d).pf)
+      rp.bits.perm(d).af := Mux(sp.bits.hit, sp.bits.perm(0).af, np.bits.perm(d).af)
+      rp.bits.perm(d).d := Mux(sp.bits.hit, sp.bits.perm(0).d, np.bits.perm(d).d)
+      rp.bits.perm(d).a := Mux(sp.bits.hit, sp.bits.perm(0).a, np.bits.perm(d).a)
+      rp.bits.perm(d).g := Mux(sp.bits.hit, sp.bits.perm(0).g, np.bits.perm(d).g)
+      rp.bits.perm(d).u := Mux(sp.bits.hit, sp.bits.perm(0).u, np.bits.perm(d).u)
+      rp.bits.perm(d).x := Mux(sp.bits.hit, sp.bits.perm(0).x, np.bits.perm(d).x)
+      rp.bits.perm(d).w := Mux(sp.bits.hit, sp.bits.perm(0).w, np.bits.perm(d).w)
+      rp.bits.perm(d).r := Mux(sp.bits.hit, sp.bits.perm(0).r, np.bits.perm(d).r)
+      rp.bits.perm(d).pm := DontCare
     }
     rp.bits.super_hit := sp.bits.hit
     rp.bits.super_ppn := sp.bits.ppn(0)
-    rp.bits.spm := np.bits.perm(0).pm
-    assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
+    rp.bits.spm := np.bits.perm(0).pm(0)
+    // Sector tlb may trigger multi-hit, see def "wbhit"
+    XSPerfAccumulate(s"port${i}_np_sp_multi_hit", !(!np.bits.hit || !sp.bits.hit || !rp.valid))
+    //assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
 
   normalPage.victim.in <> superPage.victim.out

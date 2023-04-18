@@ -184,8 +184,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // specific cycles to block
   val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   block_cycles_tlb := io.tlbReplayDelayCycleCtrl
-  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+
+  XSPerfAccumulate("block_in_last", PopCount((0 until LoadQueueSize).map(i => block_ptr_cache(i) === 3.U)))
 
   val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
 
@@ -349,7 +351,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   })
 
   (0 until LoadPipelineWidth).map(i => {
-    vaddrModule.io.raddr(LoadPipelineWidth + i) := loadReplaySelGen(i)
+    // vaddrModule rport 0 and 1 is used by exception and mmio 
+    vaddrModule.io.raddr(2 + i) := loadReplaySelGen(i)
   })
 
   (0 until LoadPipelineWidth).map(i => {
@@ -383,7 +386,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.isLoadReplay := true.B
     io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
-    io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
+    io.loadOut(i).bits.forward_tlDchannel := !cache_hited(replayIdx)
 
     when(io.loadOut(i).fire) {
       replayRemFire(i) := true.B
@@ -519,13 +522,15 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       */
     when(io.replayFast(i).valid){
       val idx = io.replayFast(i).ld_idx
-      val needreplay = !io.replayFast(i).ld_ld_check_ok || !io.replayFast(i).st_ld_check_ok || !io.replayFast(i).cache_bank_no_conflict
-      
+
       ld_ld_check_ok(idx) := io.replayFast(i).ld_ld_check_ok
       st_ld_check_ok(idx) := io.replayFast(i).st_ld_check_ok
       cache_bank_no_conflict(idx) := io.replayFast(i).cache_bank_no_conflict
 
-      when(needreplay) {
+      // update tlbReqFirstTime
+      uop(idx).debugInfo := io.replayFast(i).debug
+
+      when(io.replayFast(i).needreplay) {
         creditUpdate(idx) := block_cycles_others(block_ptr_others(idx))
         block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
         // try to replay this load in next cycle
@@ -540,7 +545,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     when(io.replaySlow(i).valid){
       val idx = io.replaySlow(i).ld_idx
-      val needreplay = !io.replaySlow(i).tlb_hited || !io.replaySlow(i).st_ld_check_ok || !io.replaySlow(i).cache_no_replay || !io.replaySlow(i).forward_data_valid || !io.replaySlow(i).cache_hited
 
       tlb_hited(idx) := io.replaySlow(i).tlb_hited
       st_ld_check_ok(idx) := io.replaySlow(i).st_ld_check_ok
@@ -549,20 +553,23 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       replayCarryReg(idx) := io.replaySlow(i).replayCarry
       cache_hited(idx) := io.replaySlow(i).cache_hited
 
+      // update tlbReqFirstTime
+      uop(idx).debugInfo := io.replaySlow(i).debug
+
       val invalid_sq_idx = io.replaySlow(i).data_invalid_sq_idx
 
-      when(needreplay) {
+      when(io.replaySlow(i).needreplay) {
         // update credit and ptr
         val data_in_last_beat = io.replaySlow(i).data_in_last_beat
         creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
-                              Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat,
-                               Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)), 0.U)))
+                              Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)),
+                               Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat, 0.U)))
         when(!io.replaySlow(i).tlb_hited) {
           block_ptr_tlb(idx) := Mux(block_ptr_tlb(idx) === 3.U(2.W), block_ptr_tlb(idx), block_ptr_tlb(idx) + 1.U(2.W))
-        }.elsewhen(!io.replaySlow(i).cache_hited) {
-          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }.elsewhen(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok) {
           block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
+        }.elsewhen(!io.replaySlow(i).cache_hited) {
+          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }
       }
 
@@ -577,9 +584,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       }
 
       // special case: cache miss
-      miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
-      block_by_cache_miss(idx) := io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok && // this load tlb hit and no cache replay
-                                  !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data && // cache miss
+      val true_cache_miss = io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok &&
+                            !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data
+      when(true_cache_miss) {
+        miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
+      }
+      block_by_cache_miss(idx) := true_cache_miss && // cache miss
                                   !(io.refill.valid && io.refill.bits.id === io.replaySlow(i).miss_mshr_id) && // no refill in this cycle
                                   creditUpdate(idx) =/= 0.U // credit is not zero
     }
@@ -936,6 +946,7 @@ def detectRollback(i: Int) = {
 
   dataModule.io.uncache.raddr := deqPtrExtNext.value
 
+  io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
   io.uncache.req.bits.data := DontCare

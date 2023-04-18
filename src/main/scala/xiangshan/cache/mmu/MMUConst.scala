@@ -90,7 +90,13 @@ trait HasTlbConst extends HasXSParameter {
   val vpnnLen = 9
   val vpnLen  = VAddrBits - offLen
   val flagLen = 8
-  val pteResLen = XLEN - ppnLen - 2 - flagLen
+  val pteResLen = XLEN - 44 - 2 - flagLen
+  val ppnHignLen = 44 - ppnLen
+
+  val tlbcontiguous = 8
+  val sectortlbwidth = log2Up(tlbcontiguous)
+  val sectorppnLen = ppnLen - sectortlbwidth
+  val sectorvpnLen = vpnLen - sectortlbwidth
 
   val sramSinglePort = true
 
@@ -137,7 +143,7 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
-  implicit def ptwresp_to_tlbperm(ptwResp: PtwResp): TlbPermBundle = {
+  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorRespwithMemIdx): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
@@ -173,7 +179,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // ptwl2: 8-way group-associated
   val l2tlbParams.l2nWays = l2tlbParams.l2nWays
   val PtwL2SetNum = l2tlbParams.l2nSets
-  val PtwL2SectorSize = blockBits /XLEN
+  val PtwL2SectorSize = blockBits / XLEN
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2SetNum)

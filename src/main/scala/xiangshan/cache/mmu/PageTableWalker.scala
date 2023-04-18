@@ -47,7 +47,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   }))
   val resp = DecoupledIO(new Bundle {
     val source = UInt(bSourceWidth.W)
-    val resp = new PtwResp
+    val resp = new PtwMergeResp
   })
 
   val llptw = DecoupledIO(new LLPTWInBundle())
@@ -101,7 +101,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val pageFault = memPte.isPf(level)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
-  val find_pte = memPte.isLeaf() || pageFault
+  val ppn_af = memPte.isAf()
+  val find_pte = memPte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
 
@@ -113,7 +114,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.resp.valid := idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault))
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level,level), memPte, vpn, satp.asid)
+  io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), memPte, vpn, satp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
   io.llptw.bits.req_info.source := source
@@ -216,6 +217,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("fsm_busy", !idle)
   XSPerfAccumulate("fsm_idle", idle)
   XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
+  XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)

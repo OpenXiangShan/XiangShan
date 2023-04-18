@@ -107,7 +107,7 @@ def process_one(path, head):
     csv_file['ifu2id_allNO_slots'] = use('ifu2id_allNO_cycle') * 6
     csv_file['ifu2id_hvButNotFull_slots'] = use('fetch_bubbles') - use('ifu2id_allNO_slots')
 
-    stall_cycles_core = use('stall_cycle_fp') + use('stall_cycle_int') + use('stall_cycle_rob') + use('stall_cycle_int_dq') + use('stall_cycle_fp_dq') + use('ls_dq_bound_cycles')
+    stall_cycles_core = use('stall_cycle_fp') + use('stall_cycle_int') + use('stall_cycle_rob_blame') + use('stall_cycle_int_blame') + use('stall_cycle_fp_blame') + use('ls_dq_bound_cycles')
 
     top = TopDown("Top", 1.0)
 
@@ -146,9 +146,9 @@ def process_one(path, head):
     loads_bound = memory_bound.add_down("Loads Bound", use('load_bound_cycles') / use('total_cycles'))
 
 # top->backend_bound->core_bound
-    integer_dq = core_bound.add_down("Integer DQ", core_bound * use('stall_cycle_int_dq') / stall_cycles_core)
-    floatpoint_dq = core_bound.add_down("Floatpoint DQ", core_bound * use('stall_cycle_fp_dq') / stall_cycles_core)
-    rob = core_bound.add_down("ROB", core_bound * use('stall_cycle_rob') / stall_cycles_core)
+    integer_dq = core_bound.add_down("Integer DQ", core_bound * use('stall_cycle_int_blame') / stall_cycles_core)
+    floatpoint_dq = core_bound.add_down("Floatpoint DQ", core_bound * use('stall_cycle_fp_blame') / stall_cycles_core)
+    rob = core_bound.add_down("ROB", core_bound * use('stall_cycle_rob_blame') / stall_cycles_core)
     integer_prf = core_bound.add_down("Integer PRF", core_bound * use('stall_cycle_int') / stall_cycles_core)
     floatpoint_prf = core_bound.add_down("Floatpoint PRF", core_bound * use('stall_cycle_fp') / stall_cycles_core)
     lsu_ports = core_bound.add_down("LSU Ports", core_bound * use('ls_dq_bound_cycles') / stall_cycles_core)

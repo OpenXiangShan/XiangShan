@@ -97,7 +97,8 @@ package object xiangshan {
   }
 
   object ExceptionVec {
-    def apply() = Vec(16, Bool())
+    val ExceptionVecSize = 16
+    def apply() = Vec(ExceptionVecSize, Bool())
   }
 
   object PMAMode {

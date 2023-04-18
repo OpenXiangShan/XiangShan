@@ -235,13 +235,14 @@ class ITTageTable
 
   val resp_selected = Mux1H(s1_bank_req_1h, table_banks_r)
   val s1_req_rhit = validArray(s1_idx) && resp_selected.tag === s1_tag
+  val resp_invalid_by_write = Wire(Bool())
 
-  io.resp.valid := (if (tagLen != 0) s1_req_rhit else true.B) // && s1_mask(b)
+  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) // && s1_mask(b)
   io.resp.bits.ctr := resp_selected.ctr
   io.resp.bits.u := us.io.rdata(0)
   io.resp.bits.target := resp_selected.target
 
-
+  val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
   // Use fetchpc to compute hash
   val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
@@ -249,7 +250,11 @@ class ITTageTable
   val update_idx_in_bank = get_bank_idx(update_idx)
   val update_target = io.update.target
   val update_wdata = Wire(new ITTageEntry)
-  
+
+
+
+  resp_invalid_by_write := Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
+
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
       valid   = io.update.valid && update_req_bank_1h(b),
@@ -260,7 +265,7 @@ class ITTageTable
   }
 
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
-  io.req.ready := !io.update.valid
+  io.req.ready := true.B // !io.update.valid
   // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"ittage_table_bank_conflict", bank_conflict)
 
