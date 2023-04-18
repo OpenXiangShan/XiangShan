@@ -813,6 +813,8 @@ def detectRollback(i: Int) = {
   io.rollback.bits.cfiUpdate := DontCare
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
+  io.rollback.bits.debugIsCtrl := DontCare
+  io.rollback.bits.debugIsMemVio := DontCare
   // io.rollback.bits.pc := DontCare
 
   io.rollback.valid := rollbackLqVReg.reduce(_|_) &&

@@ -299,6 +299,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
   val debug_runahead_checkpoint_id = UInt(64.W)
+  val debugIsCtrl = Bool()
+  val debugIsMemVio = Bool()
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)

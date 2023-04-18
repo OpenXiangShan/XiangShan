@@ -87,6 +87,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := exuOut.valid && exuOut.bits.redirect.cfiUpdate.isMisPred
     redirect.bits := exuOut.bits.redirect
+    redirect.bits.debugIsCtrl := true.B
+    redirect.bits.debugIsMemVio := false.B
     redirect
   }
 
@@ -288,6 +290,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
   flushRedirect.bits := RegEnable(rob.io.flushOut.bits, rob.io.flushOut.valid)
+  flushRedirect.bits.debugIsCtrl := false.B
+  flushRedirect.bits.debugIsMemVio := false.B
 
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
@@ -310,7 +314,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     !io.memoryViolation.bits.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)),
     init = false.B
   )
-  loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
+  val memVioBits = WireDefault(io.memoryViolation.bits)
+  memVioBits.debugIsCtrl := false.B
+  memVioBits.debugIsMemVio := true.B
+  loadReplay.bits := RegEnable(memVioBits, io.memoryViolation.valid)
   pcMem.io.raddr(2) := redirectGen.io.redirectPcRead.ptr.value
   redirectGen.io.redirectPcRead.data := pcMem.io.rdata(2).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
   pcMem.io.raddr(3) := redirectGen.io.memPredPcRead.ptr.value
