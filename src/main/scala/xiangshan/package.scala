@@ -787,48 +787,46 @@ package object xiangshan {
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
-}
 
+  object TopDownCounters extends Enumeration {
+    val NoStall = Value("NoStall")  // Base
+    // frontend
+    val ICacheMissStall = Value("ICacheMissStall")
+    val ITlbMissStall = Value("ITlbMissStall")
 
+    val ControlRedirectBubble = Value("ControlRedirectBubble")
+    val MemVioRedirectBubble = Value("MemVioRedirectBubble")
+    val OtherRedirectBubble = Value("OtherRedirectBubble")
 
-object TopDownCounters extends Enumeration {
-  val NoStall = Value("NoStall")  // Base
-  // frontend
-  val ICacheMissStall = Value("ICacheMissStall")
-  val ITlbMissStall = Value("ITlbMissStall")
+    val BTBMissBubble = Value("BTBMissBubble")
+    val OverridingBubble = Value("OverridingBubble")
+    val FetchFragBubble = Value("FetchFragBubble")
 
-  val ControlRedirectBubble = Value("ControlRedirectBubble")
-  val MemVioRedirectBubble = Value("MemVioRedirectBubble")
-  val OtherRedirectBubble = Value("OtherRedirectBubble")
+    // backend
+    // long inst bound at rob head
+    val DivBound = Value("DivBound") // int div, float div/sqrt
+    val IntNotReadyBound = Value("IntNotReadyBound")
+    val FPNotReadyBound = Value("FPNotReadyBound")
+    val OtherCoreBound = Value("OtherCoreBound")
 
-  val BTBMissBubble = Value("BTBMissBubble")
-  val OverridingBubble = Value("OverridingBubble")
-  val FetchFragBubble = Value("FetchFragBubble")
+    // memblock
+    val LoadTLBStall = Value("LoadTLBStall")
+    val LoadL1Bound = Value("LoadL1Bound")
+    val LoadL2Bound = Value("LoadL2Bound")
+    val LoadL3Bound = Value("LoadL3Bound")
+    val LoadMemBound = Value("LoadMemBound")
+    val StoreBound = Value("StoreBound")
+    val AtomicBound = Value("AtomicBound") //atomic, load reserved, store conditional
 
-  // backend
-  // long inst bound at rob head
-  val DivBound = Value("DivBound") // int div, float div/sqrt
-  val IntNotReadyBound = Value("IntNotReadyBound")
-  val FPNotReadyBound = Value("FPNotReadyBound")
-  val OtherCoreBound = Value("OtherCoreBound")
+    // bad speculation
+    val ControlRecoveryStall = Value("ControlRecoveryStall")
+    val MemVioRecoveryStall = Value("MemVioRecoveryStall")
+    val OtherRecoveryStall = Value("OthersRecoveryStall")
 
-  // memblock
-  val LoadTLBStall = Value("LoadTLBStall")
-  val LoadL1Bound = Value("LoadL1Bound")
-  val LoadL2Bound = Value("LoadL2Bound")
-  val LoadL3Bound = Value("LoadL3Bound")
-  val LoadMemBound = Value("LoadMemBound")
-  val StoreBound = Value("StoreBound")
-  val AtomicBound = Value("AtomicBound") //atomic, load reserved, store conditional
+    val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
 
-  // bad speculation
-  val ControlRecoveryStall = Value("ControlRecoveryStall")
-  val MemVioRecoveryStall = Value("MemVioRecoveryStall")
-  val OtherRecoveryStall = Value("OthersRecoveryStall")
+    val OtherCoreStall = Value("OtherCoreStall")
 
-  val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
-
-  val OtherCoreStall = Value("OtherCoreStall")
-
-  val NumStallReasons = Value("NumStallReasons")
+    val NumStallReasons = Value("NumStallReasons")
+  }
 }

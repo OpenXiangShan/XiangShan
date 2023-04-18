@@ -413,6 +413,7 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
@@ -660,4 +661,9 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
+}
+
+class StallReasonIO(width: Int) extends Bundle {
+  val reason = Output(Vec(width, UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+  val backReason = Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
 }

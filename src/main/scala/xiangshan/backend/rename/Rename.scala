@@ -48,6 +48,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // debug arch ports
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    // perf only
+    val stallReason = new Bundle {
+      val in = Flipped(new StallReasonIO(RenameWidth))
+      val out = new StallReasonIO(RenameWidth)
+    }
   })
 
   // create free list and rat

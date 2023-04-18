@@ -37,6 +37,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // perf only
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+    val stallReason = new Bundle {
+      val in = Flipped(new StallReasonIO(DecodeWidth))
+      val out = new StallReasonIO(DecodeWidth)
+    }
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))

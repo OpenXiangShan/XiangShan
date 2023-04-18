@@ -70,6 +70,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val singleStep = Input(Bool())
     // lfst
     val lfst = new DispatchLFSTIO
+    // perf only
+    val stallReason = Flipped(new StallReasonIO(RenameWidth))
   })
 
   /**
