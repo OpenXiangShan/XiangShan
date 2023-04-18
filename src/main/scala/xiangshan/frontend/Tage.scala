@@ -244,9 +244,10 @@ class TageTable
 )(implicit p: Parameters)
   extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
-    val req    = Flipped(DecoupledIO(new TageReq))
-    val resps  = Output(Vec(numBr, Valid(new TageResp)))
-    val update = Input(new TageUpdate)
+    val req          = Flipped(DecoupledIO(new TageReq))
+    val resps        = Output(Vec(numBr, Valid(new TageResp)))
+    val update_resps = Output(Vec(numBr, Valid(new TageResp)))
+    val update       = Input(new TageUpdate)
   })
 
   // Constants
@@ -345,7 +346,7 @@ class TageTable
   )
 
   val tableBanks_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt((TageCtrBits * 2).W), perBankWrbypassEntries, 1, tagWidth = tagLen))
+    Module(new WrBypass(UInt((TageCtrBits * 2).W), perBankWrbypassEntries, log2Ceil(bankSize)))
   )) // let it corresponds to logical brIdx
 
 
@@ -462,6 +463,16 @@ class TageTable
   // Always ready since WrBypass added in
   io.req.ready := true.B
 
+  for (b <- 0 until numBr) {
+    val wrbypass_io  = tableBanks_wrbypasses.map(_(b).io)
+    val wrbypass_hit = VecInit(wrbypass_io.map(e => e.hit && e.hit_data(0).valid)).asUInt & update_reqBankOH.asUInt
+    val wrbypass_ctr = Mux1H(wrbypass_hit, wrbypass_io.map(_.hit_data(0).bits))
+    io.update_resps(b).valid := wrbypass_hit.orR
+    io.update_resps(b).bits.ctr_down := wrbypass_ctr(TageCtrBits - 1, 0)
+    io.update_resps(b).bits.ctr_up := wrbypass_ctr(TageCtrBits * 2 - 1, TageCtrBits)
+    XSError(PopCount(wrbypass_hit) > 1.U && io.update.mask(b), s"tage_bank${b}_wrbypass_multihit")
+  }
+
 
   // Update signal gen
   for (b <- 0 until nBanks) {
@@ -541,7 +552,6 @@ class TageTable
       val brPhyIdx = get_phy_br_idx(update_unhashedIdx, brLogicIdx)
       wrbypass.io.wen := io.update.mask(brLogicIdx) && update_reqBankOH(b)
       wrbypass.io.write_idx := get_bank_idx(update_idx)
-      wrbypass.io.write_tag.foreach(_ := update_tag)
       val entry = Mux1H(UIntToOH(brPhyIdx, numBr), update_phyWCtr(b))
       wrbypass.io.write_data(0) := Cat(entry.up, entry.down)
     }
@@ -553,7 +563,7 @@ class TageTable
     (0 until nBanks).map(b => tagBanks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
   XSPerfAccumulate(f"tage_table_bank_conflict", perf_bankConflict)
 
-  val lastAllocPC = RegEnable(io.update.pc, io.update.alloc.asUInt.orR)
+  val lastAllocPC  = RegEnable(io.update.pc, io.update.alloc.asUInt.orR)
   val lastAllocTag = RegEnable(update_tag, io.update.alloc.asUInt.orR)
   XSPerfAccumulate(f"tage_table_duplicate_update",
     lastAllocPC === io.update.pc && lastAllocTag === update_tag && io.update.alloc.asUInt.orR
@@ -752,26 +762,32 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   //---------------- Update logics below ------------------//
   // These signals will be directly connect to TageTables and BaseTable
-  val update_valid                             = io.update.valid
-  val update_data                              = io.update.bits
-  val update_misPred                           = update_data.mispred_mask
-  val update_meta                              = update_data.meta.asTypeOf(new TageMeta)
-  val update_tageResp                          = update_meta.tagResps
-  val update_condition                         = VecInit((0 until numBr).map(w =>
+  val update_valid                                      = io.update.valid
+  val update_data                                       = io.update.bits
+  val update_resps        : Vec[Vec[ValidIO[TageResp]]] = VecInit(taggedTables.map(_.io.update_resps))
+  val update_misPred                                    = update_data.mispred_mask
+  val update_meta                                       = update_data.meta.asTypeOf(new TageMeta)
+  val update_tageResp     : Vec[Vec[TageResp]]          = update_meta.tagResps
+  val update_newResp      : Seq[Vec[TageResp]]          = (update_tageResp, update_resps).zipped.map((a, b) => {
+    VecInit((a, b).zipped.map((predict, wrbypass) => {
+      Mux(wrbypass.valid, wrbypass.bits, predict)
+    }))
+  }).toSeq
+  val update_condition                                  = VecInit((0 until numBr).map(w =>
     update_data.ftb_entry.brValids(w) &&
       update_valid &&
       !update_data.ftb_entry.always_taken(w) && // Always taken branch does not enter TAGE
       !(PriorityEncoder(update_data.br_taken_mask) < w.U) // No update for latter branch if former branch taken
   ))
-  val update_foldedHistory: AllFoldedHistories = update_data.spec_info.folded_hist
+  val update_foldedHistory: AllFoldedHistories          = update_data.spec_info.folded_hist
   // These signal is generated below
-  val update_mask                              = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val update_takens                            = Wire(Vec(numBr, Vec(TageNTables, Bool())))
-  val update_allocMask                         = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val update_decayMask                         = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val update_baseCnt                           = Wire(Vec(numBr, UInt(2.W)))
-  val update_baseUpdateValid                   = WireDefault(0.U.asTypeOf(Vec(numBr, Bool())))
-  val update_baseTakens                        = Wire(Vec(numBr, Bool()))
+  val update_mask                                       = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_takens                                     = Wire(Vec(numBr, Vec(TageNTables, Bool())))
+  val update_allocMask                                  = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_decayMask                                  = WireDefault(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
+  val update_baseCnt                                    = Wire(Vec(numBr, UInt(2.W)))
+  val update_baseUpdateValid                            = WireDefault(0.U.asTypeOf(Vec(numBr, Bool())))
+  val update_baseTakens                                 = Wire(Vec(numBr, Bool()))
 
   // Connect to submodules
   for (i <- 0 until numBr) {
@@ -804,10 +820,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val tableHitMask      = update_meta.tagHits(i)
     val providerValid     = update_meta.providers(i).valid
     val providerIdx       = update_meta.providers(i).bits
-    val providerResp      = update_tageResp(i)(providerIdx)
+    val providerResp      = update_newResp(i)(providerIdx)
     val nextProviderValid = update_meta.nextProviders(i).valid
     val nextProviderIdx   = update_meta.nextProviders(i).bits
-    val nextProviderResp  = update_tageResp(i)(nextProviderIdx)
+    val nextProviderResp  = update_newResp(i)(nextProviderIdx)
 
     val longestHitIdx          = Mux(providerValid,
       ParallelPriorityMux(tableHitMask.zipWithIndex.reverse.map(e => (e._1, e._2.asUInt))),
