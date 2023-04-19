@@ -78,8 +78,8 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vmsif_m -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt(),
     VipuType.vmsof_m -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt(),
 
-    VipuType.viota_m -> Cat(VAluOpcode.viota, mask, uSew, uSew).asUInt(),
-    VipuType.vid_v -> Cat(VAluOpcode.vid, mask, uSew, uSew).asUInt()
+    VipuType.viota_m -> Cat(VAluOpcode.viota, uSew, uSew, uSew).asUInt(),
+    VipuType.vid_v -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt()
 
   )).asTypeOf(new VIAluDecodeResultBundle)
 
@@ -111,10 +111,21 @@ class VIAluWrapper(implicit p: Parameters)  extends VPUDataModule{
   vialu.io.in.bits.srcType(0) := decoder.io.out.srcType2
   vialu.io.in.bits.srcType(1) := decoder.io.out.srcType1
   vialu.io.in.bits.vdType := decoder.io.out.vdType
+  val lmul = MuxLookup(in.uop.ctrl.vconfig.vtype.vlmul , 1.U(4.W), Array(
+    "b001".U -> 2.U,
+    "b010".U -> 4.U,
+    "b011".U -> 8.U
+  ))
   val needClearVs1 = (VipuType.vcpop_m === in.uop.ctrl.fuOpType && in.uop.ctrl.uopIdx === 0.U) || 
                      (VipuType.viota_m === in.uop.ctrl.fuOpType && in.uop.ctrl.uopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
                      (VipuType.vid_v   === in.uop.ctrl.fuOpType && in.uop.ctrl.uopIdx(log2Up(MaxUopSize)-1,1) === 0.U)     // dirty code TODO:  inset into IAlu
-  vialu.io.in.bits.vs1 := Mux(needClearVs1, 0.U, vs1)
+  val needShiftVs1 = (VipuType.vwredsumu_vs === in.uop.ctrl.fuOpType || VipuType.vwredsum_vs === in.uop.ctrl.fuOpType) && 
+                     in.uop.ctrl.uopIdx < lmul
+  vialu.io.in.bits.vs1 := Mux1H(Seq(
+    needClearVs1 -> 0.U,
+    needShiftVs1 -> SignExt(vs1(127,64), 128),
+    ((!needClearVs1)&&(!needShiftVs1)) -> vs1
+  ))
   vialu.io.in.bits.vs2 := vs2
   vialu.io.in.bits.old_vd := in.src(2)
   vialu.io.in.bits.mask := mask

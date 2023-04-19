@@ -34,7 +34,7 @@ trait VectorConstants {
   val MAX_VLMUL = 8
   val INT_VCONFIG = 32
   val FP_TMP_REG_MV = 32
-  val VECTOR_TMP_REG_LMUL = 32 // 32~38  ->  7
+  val VECTOR_TMP_REG_LMUL = 32 // 32~46  ->  15
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -119,6 +119,7 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_M0X         -> (lmul +& 1.U),
     UopDivType.VEC_MVV         -> (Cat(lmul, 0.U(1.W)) -1.U),
     UopDivType.VEC_M0X_VFIRST  -> 2.U,
+    UopDivType.VEC_VWW         -> Cat(lmul, 0.U(1.W)),
   ))
 
   val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
@@ -821,6 +822,30 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
       csBundle(1).ctrl.fpu.div := false.B
       csBundle(1).ctrl.fpu.sqrt := false.B
       csBundle(1).ctrl.fpu.fcvt := false.B
+    }
+
+    is(UopDivType.VEC_VWW) {
+      for (i <- 0 until MAX_VLMUL*2) {
+        when(i.U < lmul){
+          csBundle(i).ctrl.srcType(2) := SrcType.DC
+          csBundle(i).ctrl.lsrc(0) := src2 + i.U
+          csBundle(i).ctrl.lsrc(1) := src2 + i.U
+          // csBundle(i).ctrl.lsrc(2) := dest + (2 * i).U
+          csBundle(i).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).ctrl.uopIdx :=  i.U
+        } otherwise {
+          csBundle(i).ctrl.srcType(2) := SrcType.DC
+          csBundle(i).ctrl.lsrc(0) := VECTOR_TMP_REG_LMUL.U + Cat((i.U-lmul),0.U(1.W)) + 1.U
+          csBundle(i).ctrl.lsrc(1) := VECTOR_TMP_REG_LMUL.U + Cat((i.U-lmul),0.U(1.W))
+          // csBundle(i).ctrl.lsrc(2) := dest + (2 * i).U
+          csBundle(i).ctrl.ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).ctrl.uopIdx := i.U
+        }
+        csBundle(numOfUop-1.U).ctrl.srcType(2) := SrcType.vp
+        csBundle(numOfUop-1.U).ctrl.lsrc(0) := src1
+        csBundle(numOfUop-1.U).ctrl.lsrc(2) := dest
+        csBundle(numOfUop-1.U).ctrl.ldest := dest
+      }
     }
   }
 
