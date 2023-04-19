@@ -287,7 +287,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   import FuType._
   private val dispatchCfg: Seq[(Seq[Int], Int)] = Seq(
     (Seq(ldu), 2),
-    (Seq(stu), 2),
+    (Seq(stu, mou), 2),
   )
 
   private val enqLsqIO = io.enqLsqIO.get
@@ -347,7 +347,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }.otherwise {
       enqLsqIO.needAlloc(i) := 1.U // load
     }
-    enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i) && !iqNotAllReady && !lsqCannotAccept
+    enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i) && !iqNotAllReady && !lsqCannotAccept && !FuType.isAMO(io.in(i).bits.fuType)
     enqLsqIO.req(i).bits := io.in(i).bits
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }

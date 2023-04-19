@@ -161,7 +161,6 @@ class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
 
 class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemExeUnitIO)
-  require(exuParams.fuConfigs.size == 1, "[MemExeUnit] only support one fu yet")
   val fu = exuParams.fuConfigs.head.fuGen(p, exuParams.fuConfigs.head)
   fu.io.flush             := io.flush
   fu.io.in.valid          := io.in.valid
