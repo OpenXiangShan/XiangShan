@@ -357,6 +357,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     printRenameInfo(x, y)
   }
 
+  // FIXME: temp workaround
+  io.stallReason.in.backReason := io.stallReason.out.backReason
+  io.stallReason.out.reason.zip(io.stallReason.in.reason).map { case (out, in) =>
+    out := Mux(io.stallReason.out.backReason.valid, io.stallReason.out.backReason.bits, in)
+  }
+
   XSDebug(io.robCommits.isWalk, p"Walk Recovery Enabled\n")
   XSDebug(io.robCommits.isWalk, p"validVec:${Binary(io.robCommits.walkValid.asUInt)}\n")
   for (i <- 0 until CommitWidth) {

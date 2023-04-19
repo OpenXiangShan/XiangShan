@@ -401,6 +401,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   decode.io.in <> io.frontend.cfVec
+  decode.io.stallReason.in <> io.frontend.stallReason
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
@@ -486,6 +487,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rename.io.ssit <> ssit.io.rdata
   rename.io.debug_int_rat <> rat.io.debug_int_rat
   rename.io.debug_fp_rat <> rat.io.debug_fp_rat
+  rename.io.stallReason.in <> decode.io.stallReason.out
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -499,6 +501,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
+  dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> redirectForExu

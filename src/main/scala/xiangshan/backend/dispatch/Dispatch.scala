@@ -279,6 +279,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
+  // FIXME: temp workaround
+  io.stallReason.backReason := DontCare
+
   if (env.EnableTopDown) {
     val rob_first_load = WireDefault(false.B)
     val rob_first_store = WireDefault(false.B)
