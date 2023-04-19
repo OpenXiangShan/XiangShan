@@ -179,7 +179,7 @@ case class XSCoreParameters
     algoName = "mmru",
     enCfPred = false,
     isICache = true,
-    portNum = 1
+    portNum = 2
   ),
   dwpuParameters: WPUParameters = WPUParameters(
     enWPU = true,

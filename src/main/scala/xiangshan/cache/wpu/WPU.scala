@@ -173,7 +173,7 @@ class UtagWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wp
     val req_utag = get_hash_utag(pred.vaddr)
     val pred_way_en = Wire(UInt(nWays.W))
     when(pred.en) {
-      pred_way_en := Cat((0 until nWays).map(i => req_utag === utag_regs(req_setIdx)(i) && valid_regs(req_setIdx)(i)).reverse)
+      pred_way_en := VecInit((0 until nWays).map(i => req_utag === utag_regs(req_setIdx)(i) && valid_regs(req_setIdx)(i))).asUInt
     }.otherwise {
       pred_way_en := 0.U(nWays.W)
     }

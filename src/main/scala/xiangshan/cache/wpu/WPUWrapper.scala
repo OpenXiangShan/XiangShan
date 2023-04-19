@@ -56,11 +56,11 @@ class ConflictPredictIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val s1_dm_hit = Input(Bool())
 }
 
-class IwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
-  val req = Flipped(Decoupled(new WPUBaseReq))
-  val resp = ValidIO(new WPUResp(nWays))
-  val lookup_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
-  val tagwrite_upd = Flipped(ValidIO(new WPUUpdate(nWays)))
+class IwpuIO(nWays:Int, nPorts: Int)(implicit p:Parameters) extends BaseWPUBundle{
+  val req = Vec(nPorts, Flipped(Decoupled(new WPUBaseReq)))
+  val resp = Vec(nPorts, ValidIO(new WPUResp(nWays)))
+  val lookup_upd = Vec(nPorts, Flipped(ValidIO(new WPUUpdate(nWays))))
+  // val tagwrite_upd = Vec(nPorts, Flipped(ValidIO(new WPUUpdate(nWays))))
 }
 
 class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
@@ -168,39 +168,43 @@ class DCacheWpuWrapper(implicit p:Parameters) extends DCacheModule with HasWPUPa
 }
 
 
-class ICacheWpuWrapper (implicit p:Parameters) extends WPUModule with HasICacheParameters {
+class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule with HasICacheParameters {
   val wpu = AlgoWPUMap(iwpuParam)
-  val io = IO(new IwpuIO(nWays))
+  val io = IO(new IwpuIO(nWays, nPorts))
 
   /** pred in s0*/
-  wpu.io.predVec(0).en := io.req.valid
-  wpu.io.predVec(0).vaddr := io.req.bits.vaddr
-  val s0_pred_way_en = wpu.io.predVec(0).way_en
-  // io
-  io.req.ready := true.B
-  if (iwpuParam.enWPU) {
-    io.resp.valid := io.req.valid
-  } else {
-    io.resp.valid := false.B
-  }
-  io.resp.bits.s0_pred_way_en := s0_pred_way_en
-  assert(PopCount(io.resp.bits.s0_pred_way_en) <= 1.U, "tag should not match with more than 1 way")
+  for (i <- 0 until nPorts){
+    wpu.io.predVec(i).en := io.req(i).valid
+    wpu.io.predVec(i).vaddr := io.req(i).bits.vaddr
+    val s0_pred_way_en = wpu.io.predVec(i).way_en
+    // io
+    io.req(i).ready := true.B
+    if (iwpuParam.enWPU) {
+      io.resp(i).valid := io.req(i).valid
+    } else {
+      io.resp(i).valid := false.B
+    }
+    io.resp(i).bits.s0_pred_way_en := s0_pred_way_en
+    assert(PopCount(io.resp(i).bits.s0_pred_way_en) <= 1.U, "tag should not match with more than 1 way")
 
-  /** update in s1*/
-  val s1_pred_way_en = RegNext(s0_pred_way_en)
-  val s1_pred_fail = RegNext(io.resp.valid) && s1_pred_way_en =/= io.lookup_upd.bits.s1_real_way_en
-  // look up res
-  wpu.io.updLookup(0).en := io.lookup_upd.valid
-  wpu.io.updLookup(0).vaddr := io.lookup_upd.bits.vaddr
-  wpu.io.updLookup(0).way_en := io.lookup_upd.bits.s1_real_way_en
-  // which will update in look up pred fail
-  wpu.io.updReplaycarry := DontCare
-  // replace / tag write
-  wpu.io.updTagwrite(0).en := io.tagwrite_upd.valid
-  wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd.bits.vaddr
-  wpu.io.updTagwrite(0).way_en := io.tagwrite_upd.bits.s1_real_way_en
-  // io
-  io.resp.bits.s1_pred_fail := s1_pred_fail
+    /** update in s1 */
+    val s1_pred_way_en = RegNext(s0_pred_way_en)
+    val s1_pred_fail = RegNext(io.resp(i).valid) && s1_pred_way_en =/= io.lookup_upd(i).bits.s1_real_way_en
+    // look up res
+    wpu.io.updLookup(i).en := io.lookup_upd(i).valid
+    wpu.io.updLookup(i).vaddr := io.lookup_upd(i).bits.vaddr
+    wpu.io.updLookup(i).way_en := io.lookup_upd(i).bits.s1_real_way_en
+    // which will update in look up pred fail
+    wpu.io.updReplaycarry := DontCare
+    // replace / tag write
+    wpu.io.updTagwrite := DontCare
+//    wpu.io.updTagwrite(0).en := io.tagwrite_upd(i).valid
+//    wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd(i).bits.vaddr
+//    wpu.io.updTagwrite(0).way_en := io.tagwrite_upd(i).bits.s1_real_way_en
+    // io
+    io.resp(i).bits.s1_pred_fail := s1_pred_fail
+  }
+
 }
 
 /** IdealWPU:
