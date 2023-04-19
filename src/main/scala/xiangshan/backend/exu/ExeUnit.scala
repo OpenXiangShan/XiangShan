@@ -38,7 +38,9 @@ class ExeUnitImp(
 
   val busy = RegInit(false.B)
   val robIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
-  when (robIdx.needFlush(io.flush)) {
+  when (io.in.fire && io.in.bits.robIdx.needFlush(io.flush)) {
+    busy := false.B
+  }.elsewhen(busy && robIdx.needFlush(io.flush)){
     busy := false.B
   }.elsewhen(io.out.fire) {
     busy := false.B
