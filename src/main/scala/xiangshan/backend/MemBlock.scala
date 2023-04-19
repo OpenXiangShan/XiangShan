@@ -135,27 +135,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val atomicsUnit = Module(new AtomicsUnit)
 
-  // Atom inst comes from sta / std, then its result
-  // will be writebacked using load writeback port
-  //
-  // However, atom exception will be writebacked to rob
-  // using store writeback port
-
-  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
-  val ldOut0 = Wire(Decoupled(new MemExuOutput))
-  ldOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
-  ldOut0.bits  := loadWritebackOverride
-  atomicsUnit.io.out.ready := ldOut0.ready
-  loadUnits.head.io.ldout.ready := ldOut0.ready
-  when(atomicsUnit.io.out.valid){
-    ldOut0.bits.uop.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
-  }
-
-  val ldExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  io.writeback <> VecInit(loadUnits.map(_.io.ldout)) ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
-  val stOut = io.writeback.drop(LduCnt).dropRight(StaCnt)
+  val stOut = io.writeback.drop(LduCnt).dropRight(StdCnt)
 
   val lsq     = Module(new LsqWrappper)
   val vlsq    = Module(new DummyVectorLsq)
@@ -433,6 +416,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.writeback(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
+  atomicsUnit.io.out.ready := stOut(0).ready
 
   // Uncahce
   uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
