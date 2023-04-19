@@ -344,7 +344,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    writeIntRf = false,
+    writeIntRf = true,
     writeFpRf = false,
     latency = UncertainLatency(),
     exceptionOut = (LduCfg.exceptionOut ++ StaCfg.exceptionOut ++ StdCfg.exceptionOut).distinct
