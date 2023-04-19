@@ -434,7 +434,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
       slowResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackSlow.bits.rsIdx)
       slowResp.bits.success          := memIO.feedbackIO(i).feedbackSlow.bits.hit
-      slowResp.bits.respType         := memIO.feedbackIO(i).feedbackSlow.bits.sourceType
+      slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, 0.U, RSFeedbackType.feedbackInvalid)
       slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
     }
 
