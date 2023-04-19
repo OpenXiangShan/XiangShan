@@ -63,7 +63,7 @@ object RSFeedbackType {
   }
 
   def isBlocked(feedbackType: UInt) = {
-    feedbackType === issueFail || feedbackType === rfArbitFail || feedbackType === fuBusy
+    feedbackType === issueFail || feedbackType === rfArbitFail || feedbackType === fuBusy || feedbackType === feedbackInvalid
   }
 }
 
