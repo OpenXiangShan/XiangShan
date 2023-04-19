@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utility.DelayN
 import utils._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
@@ -114,7 +115,11 @@ class ExeUnitImp(
   io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
   io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
 
-  io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach(fuio => exuio <> fuio)))
+  io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach{
+    fuio =>
+      exuio <> fuio
+      fuio.exception := DelayN(exuio.exception, 2)
+  }))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
 
