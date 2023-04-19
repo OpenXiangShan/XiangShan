@@ -823,7 +823,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
   XSPerfAccumulate("pipereg_valid", miss_req_pipe_reg.reg_valid())
 
-  val acquire_sources = entries.map(_.io.mem_acquire) ++ Seq(acquire_from_pipereg)
+  val acquire_sources = Seq(acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
