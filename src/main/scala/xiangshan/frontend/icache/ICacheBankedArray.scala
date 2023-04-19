@@ -193,3 +193,160 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
     )
   }
 }
+
+class ICacheDataReadReqBundle(implicit p: Parameters) extends ICacheBundle {
+  val way_en = UInt(nWays.W)
+  val idx = UInt(idxBits.W)
+}
+
+class ICacheDataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
+  val data = UInt(blockBits.W)
+  val code = UInt(dataCodeEntryBits.W)
+}
+
+class ICacheBankedDataArray(readPortNum: Int)(implicit p: Parameters) extends ICacheArray
+{
+  val ICacheDataReadPortNum = readPortNum
+  val ICacheDataArrayBanks = 8
+  val ICacheDataArrayBankIdxBits = log2Up(ICacheDataArrayBanks)
+
+  def get_set_addr_from_idx(idx: UInt) = {
+    idx(idxBits - 1, ICacheDataArrayBankIdxBits)
+  }
+  def get_bank_addr_from_idx(idx: UInt) = {
+    idx(ICacheDataArrayBankIdxBits - 1, 0)
+  }
+
+  def getECCFromEncUnit(encUnit: UInt) = {
+    require(encUnit.getWidth == encDataUnitBits)
+    if (encDataUnitBits == dataCodeUnit) {
+      0.U.asTypeOf(UInt(1.W))
+    } else {
+      encUnit(encDataUnitBits - 1, dataCodeUnit)
+    }
+  }
+
+  def getECCFromBlock(cacheblock: UInt) = {
+    // require(cacheblock.getWidth == blockBits)
+    VecInit((0 until dataCodeUnitNum).map { w =>
+      val unit = cacheblock(dataCodeUnit * (w + 1) - 1, dataCodeUnit * w)
+      getECCFromEncUnit(cacheParams.dataCode.encode(unit))
+    })
+  }
+
+  val io = IO{new Bundle{
+    val read     = Vec(ICacheDataReadPortNum, Flipped(DecoupledIO(new ICacheDataReadReqBundle)))
+    /* just support one way read */
+    val readResp = Vec(ICacheDataReadPortNum, Output(new ICacheDataReadRespBundle))
+    val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
+    val cacheOp  = Flipped(new L1CacheInnerOpIO)
+    val fencei   = Input(Bool())
+  }}
+
+  val set_addrs = Wire(Vec(ICacheDataReadPortNum, UInt()))
+  val bank_addrs = Wire(Vec(ICacheDataReadPortNum, UInt()))
+  val way_addrs = Wire(Vec(ICacheDataReadPortNum, UInt()))
+  val read_fires = Wire(Vec(ICacheDataReadPortNum, Bool()))
+  val write_set_addr = io.write.bits.virIdx(idxBits - 1, ICacheDataArrayBankIdxBits)
+  val write_bank_addr = io.write.bits.virIdx(ICacheDataArrayBankIdxBits - 1, 0)
+  val write_way_addr = OHToUInt(io.write.bits.waymask)
+  val bank_addrs_delay = RegNext(bank_addrs)
+  val way_ohs = Wire(Vec(ICacheDataReadPortNum, UInt()))
+  val way_ohs_delay = RegNext(way_ohs)
+  (0 until ICacheDataReadPortNum).foreach(i => {
+    set_addrs(i) := get_set_addr_from_idx(io.read(i).bits.idx)
+    bank_addrs(i) := get_bank_addr_from_idx(io.read(i).bits.idx)
+    way_addrs(i) := OHToUInt(io.read(i).bits.way_en)
+    way_ohs(i) := io.read(i).bits.way_en
+    read_fires(i) := io.read(i).fire
+  })
+
+  val data_arrays = (0 until ICacheDataArrayBanks).map { bank =>
+    (0 until nWays).map { way =>
+      val data_array = Module(new SRAMTemplate(
+        UInt(blockBits.W),
+        set = nSets / ICacheDataArrayBanks,
+        way = 1,
+        shouldReset = true,
+        holdRead = true,
+        singlePort = true
+      ))
+      data_array
+    }
+  }
+
+  val code_arrays = (0 until ICacheDataArrayBanks).map { bank =>
+    (0 until nWays).map { way =>
+      val code_array = Module(new SRAMTemplate(
+        UInt(dataCodeEntryBits.W),
+        set = nSets / ICacheDataArrayBanks,
+        way = 1,
+        shouldReset = true,
+        holdRead = true,
+        singlePort = true
+      ))
+      code_array
+    }
+  }
+
+  // deal read
+  // read read conflict
+  val rr_conflict = Seq.tabulate(ICacheDataReadPortNum)(x => Seq.tabulate(ICacheDataReadPortNum)(y =>
+    io.read(x).valid && io.read(y).valid && bank_addrs(x) === bank_addrs(y) && way_addrs(x) === way_addrs(y) && set_addrs(x) =/= set_addrs(y)
+  ))
+  // read write conflict
+  val rw_conflict = (0 until ICacheDataReadPortNum).map(port_idx =>
+    (io.write.valid && write_bank_addr === bank_addrs(port_idx) && write_way_addr === way_addrs(port_idx)) || io.fencei
+  )
+
+  (0 until ICacheDataReadPortNum).foreach(port_idx => {
+    io.read(port_idx).ready := ~(rw_conflict(port_idx) || io.cacheOp.req.valid ||
+      (if (port_idx == 0) false.B else (0 until ICacheDataReadPortNum).map(rr_conflict(_)(port_idx)).reduce(_||_)))
+  })
+
+  val data_read_ens = Wire(Vec(ICacheDataArrayBanks, Vec(nWays, Vec(ICacheDataReadPortNum, Bool()))))
+  val read_datas = Wire(Vec(ICacheDataArrayBanks, Vec(nWays, UInt(blockBits.W))))
+  val read_codes = Wire(Vec(ICacheDataArrayBanks, Vec(nWays, UInt(dataCodeEntryBits.W))))
+  (0 until ICacheDataArrayBanks).foreach( bank_idx => {
+    (0 until nWays).foreach( way_idx => {
+      val data_sram = data_arrays(bank_idx)(way_idx)
+      val code_sram = code_arrays(bank_idx)(way_idx)
+      (0 until ICacheDataReadPortNum).foreach(i =>
+        data_read_ens(bank_idx)(way_idx)(i) := bank_addrs(i) === bank_idx.U && way_addrs(i) === way_idx.U && io.read(i).valid )
+      val read_set_addr = PriorityMux(Seq.tabulate(ICacheDataReadPortNum)(i => data_read_ens(bank_idx)(way_idx)(i) -> set_addrs(i)))
+      data_sram.io.r.req.valid := data_read_ens(bank_idx)(way_idx).reduce(_||_)
+      data_sram.io.r.req.bits.apply(setIdx = read_set_addr)
+      code_sram.io.r.req.valid := data_read_ens(bank_idx)(way_idx).reduce(_||_)
+      code_sram.io.r.req.bits.apply(setIdx = read_set_addr)
+
+      read_datas(bank_idx)(way_idx) := data_sram.io.r.resp.asTypeOf(UInt(blockBits.W))
+      read_codes(bank_idx)(way_idx) := code_sram.io.r.resp.asTypeOf(UInt(dataCodeEntryBits.W))
+    })
+  })
+
+  (0 until ICacheDataReadPortNum).foreach(port_idx => {
+    io.readResp(port_idx).data := Mux1H(way_ohs_delay(port_idx), read_datas(bank_addrs_delay(port_idx)))
+    io.readResp(port_idx).code := Mux1H(way_ohs_delay(port_idx), read_codes(bank_addrs_delay(port_idx)))
+  })
+
+  // deal write
+  val write_data_code = getECCFromBlock(io.write.bits.data).asUInt
+  (0 until ICacheDataArrayBanks).foreach( bank_idx => {
+    (0 until nWays).foreach( way_idx => {
+      val data_sram = data_arrays(bank_idx)(way_idx)
+      val code_sram = code_arrays(bank_idx)(way_idx)
+      val sram_write_en = io.write.valid && write_bank_addr === bank_idx.U && write_way_addr === way_idx.U
+      data_sram.io.w.req.valid := sram_write_en
+      data_sram.io.w.req.bits.apply(data = io.write.bits.data, setIdx = write_set_addr, waymask = true.B)
+      code_sram.io.w.req.valid := sram_write_en
+      code_sram.io.w.req.bits.apply(data = write_data_code, setIdx = write_set_addr, waymask = true.B)
+    })
+  })
+  io.write.ready := !io.cacheOp.req.valid
+
+  // TODO : deal cache op
+  require(nWays <= 32)
+  io.cacheOp.resp.bits := DontCare
+  io.cacheOp.resp.valid := false.B
+
+}
