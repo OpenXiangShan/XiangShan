@@ -110,7 +110,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
       PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
-        intScheduler.io.toDataPath(i)(j).fire && intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.redirect))
+        intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush))
       intScheduler.io.fromDataPath(i)(j) := dataPath.io.toIntIQ(i)(j)
     }
   }
@@ -132,7 +132,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
       PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
-        dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
+        Mux(dataPath.io.toIntExu(i)(j).fire,
+          dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
+          intExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
     }
   }
 
@@ -159,7 +161,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until vfExuBlock.io.in.size) {
     for (j <- 0 until vfExuBlock.io.in(i).size) {
       PipelineConnect(dataPath.io.toFpExu(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
-        dataPath.io.toFpExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
+        Mux(dataPath.io.toFpExu(i)(j).fire,
+          dataPath.io.toFpExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
+          vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
     }
   }
   vfExuBlock.io.frm.get := csrio.fpu.frm
