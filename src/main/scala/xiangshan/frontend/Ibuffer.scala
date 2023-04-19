@@ -31,9 +31,12 @@ class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
 
 class IBufferIO(implicit p: Parameters) extends XSBundle {
   val flush = Input(Bool())
+  val ControlRedirect = Input(Bool())
+  val MemVioRedirect = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchToIBuffer))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val full = Output(Bool())
+  val stallReason = new StallReasonIO(DecodeWidth)
 }
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
@@ -89,6 +92,28 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
+  dontTouch(io.stallReason)
+
+  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  dontTouch(topdown_stage)
+  topdown_stage := io.in.bits.topdown_info
+  when (io.flush) {
+    when (io.ControlRedirect) {
+      topdown_stage.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+    } .elsewhen (io.MemVioRedirect) {
+      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    } .otherwise {
+      topdown_stage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+    }
+  }
+  
+  
+  val dequeueInsufficient = Wire(Bool())
+  val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
+
+  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
+  dontTouch(matchBubble)
+  val matchBubbleVec = WireInit(VecInit(topdown_stage.reasons.zipWithIndex.map{case (r, i) => matchBubble === i.U}))
 
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth))
 
@@ -132,6 +157,32 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     ((1 << DecodeWidth) - 1).U,
     UIntToMask(validEntries(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
   )
+  val deqValidCount = PopCount(validVec.asBools)
+  val deqWasteCount = DecodeWidth.U - deqValidCount
+  dequeueInsufficient := deqValidCount < DecodeWidth.U
+
+  io.stallReason.reason.map(_ := 0.U)
+  for (i <- 0 until DecodeWidth) {
+    when (i.U < deqWasteCount) {
+      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
+    }
+  }
+
+  when (!(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR)) {
+        // should set reason for FetchFragmentationStall
+        // topdown_stage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
+        for (i <- 0 until DecodeWidth) {
+          when (i.U < deqWasteCount) {
+            io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
+          }
+        }
+  }
+
+  when (io.stallReason.backReason.valid) {
+    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
+  }
+
+
   val deqData = Reg(Vec(DecodeWidth, new IBufEntry))
   for (i <- 0 until DecodeWidth) {
     io.out(i).valid := validVec(i)
@@ -207,6 +258,18 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val ibuffer_IDWidth_hvButNotFull = afterInit && (validEntries =/= 0.U) && (validEntries < DecodeWidth.U) && !headBubble
     XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", ibuffer_IDWidth_hvButNotFull)
   }
+
+  XSPerfAccumulate("ICacheMissBubble", Mux(matchBubbleVec(TopDownCounters.ICacheMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("ITLBMissBubble", Mux(matchBubbleVec(TopDownCounters.ITLBMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("ControlRedirectBubble", Mux(matchBubbleVec(TopDownCounters.ControlRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("MemVioRedirectBubble", Mux(matchBubbleVec(TopDownCounters.MemVioRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("OtherRedirectBubble", Mux(matchBubbleVec(TopDownCounters.OtherRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("BTBMissBubble", Mux(matchBubbleVec(TopDownCounters.BTBMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("OverrideBubble", Mux(matchBubbleVec(TopDownCounters.OverrideBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FtqUpdateBubble", Mux(matchBubbleVec(TopDownCounters.FtqUpdateBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FtqFullStall", Mux(matchBubbleVec(TopDownCounters.FtqFullStall.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FetchFragmentBubble", 
+  Mux(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR, 0.U, deqWasteCount))
 
   val perfEvents = Seq(
     ("IBuffer_Flushed  ", io.flush                                                                     ),

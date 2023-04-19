@@ -461,7 +461,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   io.bpuInfo := DontCare
 
-  val backendRedirect = Wire(Valid(new Redirect))
+  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  dontTouch(topdown_stage)
+  // only driven by clock, not valid-ready
+  topdown_stage := io.fromBpu.resp.bits.topdown_info
+  io.toIfu.req.bits.topdown_info := topdown_stage
+
+  val backendRedirect = Wire(Valid(new BranchPredictionRedirect))
   val backendRedirectReg = RegNext(backendRedirect)
 
   val stage2Flush = backendRedirect.valid
@@ -894,11 +900,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ***************************************************************************
   // **************************** redirect from ifu ****************************
   // ***************************************************************************
-  val fromIfuRedirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
+  val fromIfuRedirect = WireInit(0.U.asTypeOf(Valid(new BranchPredictionRedirect)))
   fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush
   fromIfuRedirect.bits.ftqIdx := pdWb.bits.ftqIdx
   fromIfuRedirect.bits.ftqOffset := pdWb.bits.misOffset.bits
   fromIfuRedirect.bits.level := RedirectLevel.flushAfter
+  fromIfuRedirect.bits.BTBMissBubble := true.B
+  fromIfuRedirect.bits.debugIsMemVio := false.B
+  fromIfuRedirect.bits.debugIsCtrl := false.B
 
   val ifuRedirectCfiUpdate = fromIfuRedirect.bits.cfiUpdate
   ifuRedirectCfiUpdate.pc := pdWb.bits.pc(pdWb.bits.misOffset.bits)
@@ -908,7 +917,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ifuRedirectCfiUpdate.taken := pdWb.bits.cfiOffset.valid
   ifuRedirectCfiUpdate.isMisPred := pdWb.bits.misOffset.valid
 
-  val ifuRedirectReg = RegNext(fromIfuRedirect, init=0.U.asTypeOf(Valid(new Redirect)))
+  val ifuRedirectReg = RegNext(fromIfuRedirect, init=0.U.asTypeOf(Valid(new BranchPredictionRedirect)))
   val ifuRedirectToBpu = WireInit(ifuRedirectReg)
   ifuFlush := fromIfuRedirect.valid || ifuRedirectToBpu.valid
 
@@ -927,8 +936,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** wb from exu ****************************
   // *********************************************************************
 
-  backendRedirect := io.fromBackend.redirect
+  backendRedirect.valid := io.fromBackend.redirect.valid
+  backendRedirect.bits.connectRedirect(io.fromBackend.redirect.bits)
+  backendRedirect.bits.BTBMissBubble := false.B
 
+  
   def extractRedirectInfo(wb: Valid[Redirect]) = {
     val ftqPtr = wb.bits.ftqIdx
     val ftqOffset = wb.bits.ftqOffset
@@ -967,6 +979,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     updateCfiInfo(backendRedirectReg)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
+  }
+
+  when (backendRedirectReg.valid) {
+    when (backendRedirectReg.bits.ControlRedirectBubble) {
+      topdown_stage.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      io.toIfu.req.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+    } .elsewhen (backendRedirectReg.bits.MemVioRedirectBubble) {
+      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      io.toIfu.req.bits.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    } .otherwise {
+      topdown_stage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      io.toIfu.req.bits.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+    }
+  } .elsewhen (ifuRedirectReg.valid) {
+    topdown_stage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    io.toIfu.req.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
   }
 
   // ***********************************************************************************

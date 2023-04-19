@@ -25,6 +25,26 @@ import utils._
 import utility._
 import scala.math._
 
+object FrontendTopDown {
+  def OverrideBubble = 0
+  def FtqUpdateBubble = 1
+  def ControlRedirectBubble = 2
+  def MemVioRedirectBubble = 3
+  def OtherRedirectBubble = 4
+  def FtqFullStall = 5
+  def ICacheMissBubble = 6
+  def ITLBMissBubble = 7
+  def BTBMissBubble = 8
+  def FetchFragmentationStall = 9
+  def FetchStallReason = 10
+  def FrontendTopDownSize = 11
+}
+
+class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
+  val reasons = Vec(TopDownCounters.NumStallReasons.id, Bool())
+  val stallWidth = UInt(log2Ceil(PredictWidth).W)
+}
+
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
@@ -35,6 +55,8 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   //slow path
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+
+  val topdown_info    = new FrontendTopDownBundle
 
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
 
@@ -74,6 +96,8 @@ class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParame
 class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val icacheReady       = Output(Bool())
   val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+  val topdownIcacheMiss = Output(Bool())
+  val topdownItlbMiss = Output(Bool())
 }
 
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
@@ -121,6 +145,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val acf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
+
+  val topdown_info = new FrontendTopDownBundle
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {
@@ -569,6 +595,8 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val last_stage_spec_info = new SpeculativeInfo
   val last_stage_ftb_entry = new FTBEntry
 
+  val topdown_info = new FrontendTopDownBundle
+
   def selectedResp ={
     val res =
       PriorityMux(Seq(
@@ -637,6 +665,22 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   //     p"\n"
 
   // }
+
+  // TODO: backend should pass topdown signals here
+  // must not change its parent since BPU has used asTypeOf(this type) from its parent class
+  require(isInstanceOf[Redirect])
+  val BTBMissBubble = Bool()
+  def ControlRedirectBubble = debugIsCtrl
+  def MemVioRedirectBubble = debugIsMemVio
+  def OtherRedirectBubble = !debugIsCtrl && !debugIsMemVio
+
+  def connectRedirect(source: Redirect): Unit = {
+    for ((name, data) <- this.elements) {
+      if (source.elements.contains(name)) {
+        data := source.elements(name)
+      }
+    }
+  }
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"-----------BranchPredictionRedirect----------- \n")

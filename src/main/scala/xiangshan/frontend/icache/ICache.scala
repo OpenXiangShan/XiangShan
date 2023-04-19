@@ -585,6 +585,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
 
   io.fetch.resp     <>    mainPipe.io.fetch.resp
+  io.fetch.topdownIcacheMiss := mainPipe.io.fetch.topdownIcacheMiss
+  io.fetch.topdownItlbMiss   := mainPipe.io.fetch.topdownItlbMiss
 
   for(i <- 0 until PortNumber){
     missUnit.io.req(i)           <>   mainPipe.io.mshr(i).toMSHR

@@ -792,15 +792,16 @@ package object xiangshan {
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall")  // Base
     // frontend
-    val ICacheMissBubble = Value("ICacheMissBubble")
-    val ITLBMissBubble = Value("ITLBMissBubble")
-
+    val OverrideBubble = Value("OverrideBubble")
+    val FtqUpdateBubble = Value("FtqUpdateBubble")
     val ControlRedirectBubble = Value("ControlRedirectBubble")
     val MemVioRedirectBubble = Value("MemVioRedirectBubble")
     val OtherRedirectBubble = Value("OtherRedirectBubble")
+    val FtqFullStall = Value("FtqFullStall")
 
+    val ICacheMissBubble = Value("ICacheMissBubble")
+    val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
-    val OverrideBubble = Value("OverrideBubble")
     val FetchFragBubble = Value("FetchFragBubble")
 
     // backend

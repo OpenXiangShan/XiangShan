@@ -133,6 +133,46 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   def isLastInCacheline(addr: UInt): Bool = addr(blockOffBits - 1, 1) === 0.U
 
+  def numOfStage = 3
+  require(numOfStage > 1, "BPU numOfStage must be greater than 1")
+  val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
+  dontTouch(topdown_stages)
+  // bubble events in IFU, only happen in stage 1
+  val icacheMissBubble = Wire(Bool())
+  val itlbMissBubble =Wire(Bool())
+
+  // only driven by clock, not valid-ready
+  topdown_stages(0) := fromFtq.req.bits.topdown_info
+  for (i <- 1 until numOfStage) {
+    topdown_stages(i) := topdown_stages(i - 1)
+  }
+  when (icacheMissBubble) {
+    topdown_stages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
+  }
+  when (itlbMissBubble) {
+    topdown_stages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
+  }
+  io.toIbuffer.bits.topdown_info := topdown_stages(numOfStage - 1)
+  when (fromFtq.redirect.valid) {
+    // only redirect from backend, IFU redirect itself is handled elsewhere
+    when (fromFtq.redirect.bits.debugIsCtrl) {
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+    } .elsewhen (fromFtq.redirect.bits.debugIsMemVio) {
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    } .otherwise {
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+    }
+  }
+  
   class TlbExept(implicit p: Parameters) extends XSBundle{
     val pageFault = Bool()
     val accessFault = Bool()
@@ -179,6 +219,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
   fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
+
+
+  when (wb_redirect) {
+    when (f3_wb_not_flush) {
+      topdown_stages(2).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    }
+    for (i <- 0 until numOfStage - 1) {
+      topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    }
+  }
 
   /** <PERF> f0 fetch bubble */
 
@@ -246,6 +296,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_icache_all_resp_reg        = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
+
+  icacheMissBubble := io.icacheInter.topdownIcacheMiss
+  itlbMissBubble   := io.icacheInter.topdownItlbMiss
 
   io.icacheStop := !f3_ready
 

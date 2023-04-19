@@ -51,6 +51,8 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 {
   val req  = Flipped(Decoupled(new FtqToICacheRequestBundle))
   val resp = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+  val topdownIcacheMiss = Output(Bool())
+  val topdownItlbMiss = Output(Bool())
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
@@ -269,6 +271,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready
 
+  def numOfStage = 3
+  val itlbMissStage = RegInit(VecInit(Seq.fill(numOfStage - 1)(0.B)))
+  itlbMissStage(0) := !tlbRespAllValid
+  for (i <- 1 until numOfStage - 1) {
+    itlbMissStage(i) := itlbMissStage(i - 1)
+  }
+  
+
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
@@ -351,6 +361,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
   val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
   val s2_tag_match_vec = RegEnable(s1_tag_match_vec, s1_fire)
+
+  val icacheMissStage = RegInit(VecInit(Seq.fill(numOfStage - 2)(0.B)))
+  icacheMissStage(0) := !s2_hit
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
 
@@ -716,6 +729,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       io.errors(i).source.l2        := true.B
     }
   }
+  io.fetch.topdownIcacheMiss := !s2_hit
+  io.fetch.topdownItlbMiss := itlbMissStage(0)
 
   io.perfInfo.only_0_hit    := only_0_hit_latch
   io.perfInfo.only_0_miss   := only_0_miss_latch
