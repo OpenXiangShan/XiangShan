@@ -791,37 +791,41 @@ package object xiangshan {
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall")  // Base
     // frontend
-    val ICacheMissStall = Value("ICacheMissStall")
-    val ITlbMissStall = Value("ITlbMissStall")
+    val ICacheMissBubble = Value("ICacheMissBubble")
+    val ITLBMissBubble = Value("ITLBMissBubble")
 
     val ControlRedirectBubble = Value("ControlRedirectBubble")
     val MemVioRedirectBubble = Value("MemVioRedirectBubble")
     val OtherRedirectBubble = Value("OtherRedirectBubble")
 
     val BTBMissBubble = Value("BTBMissBubble")
-    val OverridingBubble = Value("OverridingBubble")
+    val OverrideBubble = Value("OverrideBubble")
     val FetchFragBubble = Value("FetchFragBubble")
 
     // backend
-    // long inst bound at rob head
-    val DivBound = Value("DivBound") // int div, float div/sqrt
-    val IntNotReadyBound = Value("IntNotReadyBound")
-    val FPNotReadyBound = Value("FPNotReadyBound")
-    val OtherCoreBound = Value("OtherCoreBound")
+    // long inst stall at rob head
+    val DivStall = Value("DivStall") // int div, float div/sqrt
+    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
+    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
+    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
-    val LoadL1Bound = Value("LoadL1Bound")
-    val LoadL2Bound = Value("LoadL2Bound")
-    val LoadL3Bound = Value("LoadL3Bound")
-    val LoadMemBound = Value("LoadMemBound")
-    val StoreBound = Value("StoreBound")
-    val AtomicBound = Value("AtomicBound") //atomic, load reserved, store conditional
+    val LoadL1Stall = Value("LoadL1Stall")
+    val LoadL2Stall = Value("LoadL2Stall")
+    val LoadL3Stall = Value("LoadL3Stall")
+    val LoadMemStall = Value("LoadMemStall")
+    val StoreStall = Value("StoreStall") // include store tlb miss
+    val AtomicStall = Value("AtomicStall") // atomic, load reserved, store conditional
+
+    // xs replay (different to gem5)
+    val VioReplayStall = Value("VioReplayStall")
+    val OtherReplayStall = Value("OtherReplayStall")
 
     // bad speculation
     val ControlRecoveryStall = Value("ControlRecoveryStall")
     val MemVioRecoveryStall = Value("MemVioRecoveryStall")
-    val OtherRecoveryStall = Value("OthersRecoveryStall")
+    val OtherRecoveryStall = Value("OtherRecoveryStall")
 
     val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
 
