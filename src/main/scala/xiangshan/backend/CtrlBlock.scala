@@ -216,6 +216,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val sqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
@@ -501,7 +502,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
+  dispatch.io.robHead := rob.io.debugRobHead
   dispatch.io.stallReason <> rename.io.stallReason.out
+  dispatch.io.sqCanAccept := io.sqCanAccept
+  dispatch.io.robHeadNotReady := rob.io.headNotReady
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> redirectForExu

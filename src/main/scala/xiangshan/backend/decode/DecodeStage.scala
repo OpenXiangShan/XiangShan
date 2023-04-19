@@ -76,10 +76,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
 
-  // decode stage is non-blocking
   io.stallReason.in.backReason := io.stallReason.out.backReason
-  io.stallReason.out.reason.zip(io.stallReason.in.reason).map { case (out, in) =>
-    out := Mux(io.stallReason.out.backReason.valid, io.stallReason.out.backReason.bits, in)
+  io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
+    out := Mux(io.stallReason.out.backReason.valid,
+               io.stallReason.out.backReason.bits,
+               Mux(valid, TopDownCounters.NoStall.id.U, in))
   }
 
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))

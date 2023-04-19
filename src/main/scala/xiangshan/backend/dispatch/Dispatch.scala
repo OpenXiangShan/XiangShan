@@ -71,7 +71,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // lfst
     val lfst = new DispatchLFSTIO
     // perf only
+    val robHead = Input(new MicroOp)
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
+    val sqCanAccept = Input(Bool())
+    val robHeadNotReady = Input(Bool())
   })
 
   /**
@@ -279,8 +282,40 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  // FIXME: temp workaround
-  io.stallReason.backReason := DontCare
+  val Seq(vioReplay, otherReplay, tlbStall, l1Stall, l2Stall, l3Stall, memStall) = Seq.fill(7)(WireDefault(false.B))
+  // TODO: add sink
+  val ldReason = MuxCase(TopDownCounters.MemNotReadyStall.id.U, Seq(
+    vioReplay   -> TopDownCounters.VioReplayStall.id.U,
+    otherReplay -> TopDownCounters.OtherReplayStall.id.U,
+    tlbStall    -> TopDownCounters.LoadTLBStall.id.U,
+    l1Stall     -> TopDownCounters.LoadL1Stall.id.U,
+    l2Stall     -> TopDownCounters.LoadL2Stall.id.U,
+    l3Stall     -> TopDownCounters.LoadL3Stall.id.U,
+    memStall    -> TopDownCounters.LoadMemStall.id.U
+  ))
+
+  val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
+  val realFired = io.recv.zip(io.fromRename.map(_.valid)).map(x => x._1 && x._2)
+  io.stallReason.backReason.valid := !io.recv.head
+  io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U // need further analysis in dispatch stage
+  stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).map { case (((update, in), recv), fire) =>
+    import FuType._
+    import TopDownCounters._
+    val fuType = io.robHead.ctrl.fuType
+    val notRdy = io.robHeadNotReady
+    update := MuxCase(OtherCoreStall.id.U, Seq(
+      (fire                                       ) -> NoStall.id.U          ,
+      (in =/= OtherCoreStall.id.U                 ) -> in                    ,
+      (fuType === mou                    && notRdy) -> AtomicStall.id.U      ,
+      (!io.sqCanAccept || fuType === stu && notRdy) -> StoreStall.id.U       ,
+      (fuType === ldu                    && notRdy) -> ldReason              ,
+      (isDivSqrt(fuType)                 && notRdy) -> DivStall.id.U         ,
+      (isIntExu(fuType)                  && notRdy) -> IntNotReadyStall.id.U ,
+      (isFpExu(fuType)                   && notRdy) -> FPNotReadyStall.id.U  ,
+    ))
+  }
+
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
 
   if (env.EnableTopDown) {
     val rob_first_load = WireDefault(false.B)

@@ -99,6 +99,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
+      val sqCanAccept = Output(Bool())
     }
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val csrUpdate = new DistributedCSRUpdateReq
@@ -545,6 +546,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.memoryViolation    <> lsq.io.rollback
+  io.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   // lsq.io.uncache        <> uncache.io.lsq
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)

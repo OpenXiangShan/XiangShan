@@ -68,7 +68,7 @@ package object xiangshan {
 
     def ldu          = "b1100".U
     def stu          = "b1101".U
-    def mou          = "b1111".U // for amo, lr, sc, fence
+    def mou          = "b1111".U // for amo, lr, sc
 
     def X            = BitPat("b????")
 
@@ -84,6 +84,7 @@ package object xiangshan {
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
     def isAMO(fuType: UInt) = fuType(1)
     def isFence(fuType: UInt) = fuType === fence
+    def isDivSqrt(fuType: UInt) = fuType === div || fuType === fDivSqrt
     def isSvinvalBegin(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && !flush
     def isSvinval(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.sfence && !flush
     def isSvinvalEnd(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && flush
