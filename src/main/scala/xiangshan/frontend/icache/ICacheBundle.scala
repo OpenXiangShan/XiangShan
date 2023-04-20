@@ -43,23 +43,21 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
   val errors     = Vec(2, Vec(nWays ,Bool() ))
+  val entryValid = Vec(2, Vec(nWays, Bool()))
 
   def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
-  def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx  = UInt(idxBits.W)
   val phyTag  = UInt(tagBits.W)
-  val coh     = new ClientMetadata
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def generate(tag:UInt, coh: ClientMetadata, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx
     this.phyTag  := tag
-    this.coh     := coh
     this.waymask := waymask
     this.bankIdx   := bankIdx
   }
@@ -94,22 +92,4 @@ class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
 {
     val req     = Flipped(DecoupledIO(new ICacheReadBundle))
     val resp = Output(new ICacheMetaRespBundle)
-}
-
-class ICacheCommonReadBundle(isMeta: Boolean)(implicit p: Parameters) extends ICacheBundle
-{
-    val req     = Flipped(DecoupledIO(new ICacheReadBundle))
-    val resp    = if(isMeta) Output(new ICacheMetaRespBundle) else Output(new ICacheDataRespBundle)
-}
-
-class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
-  val miss = Bool()
-  val probe_param = UInt(TLPermissions.bdWidth.W)
-  val addr = UInt(PAddrBits.W)
-  val vaddr = UInt(VAddrBits.W)
-}
-
-class ICacheVictimInfor(implicit p: Parameters) extends ICacheBundle {
-  val valid = Bool()
-  val vidx  = UInt(idxBits.W)
 }
