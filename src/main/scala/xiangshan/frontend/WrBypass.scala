@@ -43,9 +43,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     val hit_data = Vec(numWays, Valid(gen))
   })
 
-  class WrBypassPtr extends CircularQueuePtr[WrBypassPtr](numEntries){
-  }
-
   class Idx_Tag extends Bundle {
     val idx = UInt(idxWidth.W)
     val tag = if (hasTag) Some(UInt(tagWidth.W)) else None
@@ -72,6 +69,10 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     io.hit_data(i).bits  := data_mem.read(hit_idx)(i)
   }
 
+  // Replacer
+  // Because data_mem can only write to one index
+  // Implementing a per-way replacer is meaningless
+  // So here use one replacer for all ways
   val replacer = ReplacementPolicy.fromString("plru", numEntries) // numEntries in total
   val replacer_touch_ways = Wire(Vec(1, Valid(UInt(log2Ceil(numEntries).W)))) // One index at a time
   val enq_idx = replacer.way
