@@ -1110,10 +1110,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   sourceVaddr.bits := debug_lsInfo(deqPtr.value).s1.vaddr_bits
   sourcePaddr.valid := debug_lsInfo(deqPtr.value).s2.paddr_valid
   sourcePaddr.bits := debug_lsInfo(deqPtr.value).s2.paddr_bits
-  ExcitingUtils.addSource(sourceVaddr, "rob_head_vaddr", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(sourcePaddr, "rob_head_paddr", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourceVaddr), "rob_head_vaddr", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourcePaddr), "rob_head_paddr", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourceVaddr), s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourcePaddr), s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /**
     * DataBase info:
