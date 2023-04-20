@@ -253,28 +253,28 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         }),
         0.U
       ) // |  when N cycle is 2 latency, N+1 cycle could not 1 latency
-//      val isLNumVecOg1 = -1.S.asTypeOf(isLNumVec)
-//      val isLNumVecOg0 = Mux(resps(1)(i).valid && (resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail || resps(1)(i).bits.respType === RSFeedbackType.fuBusy),
-//        ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
-//          val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
-//          val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og0Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
-//          isLNum
-//        }), 0.U(1.W))),
-//        ~0.U
-//      )
-      // & ~
-      // val isLNumVecOg1 = -1.S.asTypeOf(isLNumVec)
-      // if(resps.length == 3){
-      //   isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
-      //     ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
-      //       val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
-      //       val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
-      //       isLNum
-      //     }), 0.U(2.W))),
-      //     ~0.U
-      //   )
-      //   // & ~
-      // }
+      val isLNumVecOg0 = WireInit(~(0.U.asTypeOf(isLNumVec)))
+      isLNumVecOg0 := Mux(resps(1)(i).valid && (resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail || resps(1)(i).bits.respType === RSFeedbackType.fuBusy),
+        ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
+          val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
+          val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og0Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
+          isLNum
+        }), 0.U(1.W))),
+        ~(0.U.asTypeOf(isLNumVec))
+        // & ~
+      )
+      val isLNumVecOg1 = WireInit(~(0.U.asTypeOf(isLNumVec)))
+      if(resps.length == 3){
+        isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
+          ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
+            val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
+            val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
+            isLNum
+          }), 0.U(2.W))),
+          ~(0.U.asTypeOf(isLNumVec))
+        )
+        // & ~
+      }
 
       fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLNumVec) // & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
     }
