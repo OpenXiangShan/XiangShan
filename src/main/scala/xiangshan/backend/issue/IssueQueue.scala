@@ -56,8 +56,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
   val latencyCertains: Seq[Boolean] = deqFuCfgs.map(x => x.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _))
-  val fuLatencyMaps :  Seq[Option[Seq[List[Int]]]] = latencyCertains.zip(deqFuCfgs).map{case (x, y) => if (x) Some(y.map(y => List(y.fuType, y.latency.latencyVal.get))) else None}
-  val latencyValMaxs: Seq[Option[Int]] = fuLatencyMaps.map(x => if (x.nonEmpty) Some(x.get.map(_.last).max) else None )
+  val fuLatencyMaps :  Seq[Option[Seq[List[Int]]]] = params.exuBlockParams.map(x => x.fuLatencyMap)
+  val latencyValMaxs: Seq[Option[Int]] = params.exuBlockParams.map(x => x.latencyValMax)
   val allDeqFuCfgs: Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
@@ -71,7 +71,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val payloadArray  = Module(new DataArray(Output(new DynInst), params.numDeq, params.numEnq, params.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
   val subDeqPolicies  = deqFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
-  val fuBusyTable = latencyValMaxs.map { case y => if (y.nonEmpty && y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None } // 0 |1 2|
+  val fuBusyTable = latencyValMaxs.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
 
   // Wires
   val resps = params.schdType match {
@@ -252,41 +252,41 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
           isLNum
         }),
         0.U
-      ) // |
-      val isLNumVecOg0 = Mux(resps(1)(i).valid && (resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail || resps(1)(i).bits.respType === RSFeedbackType.fuBusy),
-        ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
-          val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
-          val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og0Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
-          isLNum
-        }), 0.U(1.W))),
-        ~0.U
-      )
+      ) // |  when N cycle is 2 latency, N+1 cycle could not 1 latency
+//      val isLNumVecOg1 = -1.S.asTypeOf(isLNumVec)
+//      val isLNumVecOg0 = Mux(resps(1)(i).valid && (resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail || resps(1)(i).bits.respType === RSFeedbackType.fuBusy),
+//        ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
+//          val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
+//          val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og0Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
+//          isLNum
+//        }), 0.U(1.W))),
+//        ~0.U
+//      )
       // & ~
-      val isLNumVecOg1 = -1.S.asTypeOf(isLNumVec)
-      if(resps.length == 3){
-        isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
-          ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
-            val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
-            val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
-            isLNum
-          }), 0.U(2.W))),
-          ~0.U
-        )
-        // & ~
-      }
+      // val isLNumVecOg1 = -1.S.asTypeOf(isLNumVec)
+      // if(resps.length == 3){
+      //   isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
+      //     ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
+      //       val lNumFuType = fuLatencyMaps(i).get.filter(_.last == num+1).map(_.head) // futype with latency equal to num+1
+      //       val isLNum = Cat(lNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
+      //       isLNum
+      //     }), 0.U(2.W))),
+      //     ~0.U
+      //   )
+      //   // & ~
+      // }
 
-      fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLNumVec) & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
+      fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLNumVec) // & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
     }
   }
   // fuBusyTable read
-  //  latencyCertains.zipWithIndex.foreach{ case (x, idx) =>
   for (i <- 0 until params.numDeq){
     if(fuBusyTable(i).nonEmpty){
-      val isLNumVecVec = fuBusyTable(i).get.asBools().reverse.zipWithIndex.map { case (en, idx) =>
+      val isRLNumVecVec = fuBusyTable(i).get.asBools().reverse.zipWithIndex.map { case (en, idx) =>
         val isLNumVec = WireInit(0.U(params.numEntries.W))
         when(en) {
           isLNumVec := VecInit(fuTypeRegVec.map { case futype =>
-            val lNumFuType = fuLatencyMaps(i).get.filter(_.last == idx+1).map(_.head)
+            val lNumFuType = fuLatencyMaps(i).get.filter(_.last == idx).map(_.head)
             val isLNum = Cat(lNumFuType.map(_.U === futype)).asUInt().orR()
             isLNum
           }).asUInt()
@@ -294,9 +294,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         isLNumVec
       }
       if ( latencyValMaxs(i).get > 1 ){
-        fuBusyTableMask(i) := isLNumVecVec.reduce(_ | _)
+        fuBusyTableMask(i) := isRLNumVecVec.reduce(_ | _)
       }else{
-        fuBusyTableMask(i) := isLNumVecVec.head
+        fuBusyTableMask(i) := isRLNumVecVec.head
       }
     } else {
       fuBusyTableMask(i) := 0.U(params.numEntries.W) // TODO:

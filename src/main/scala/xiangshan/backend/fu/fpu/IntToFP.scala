@@ -82,5 +82,5 @@ class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(c
   override val dataModule = Module(new IntToFPDataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
-  connectNonPipedCtrlSingal // Todo: make it piped
+  // connectNonPipedCtrlSingal // Todo: make it piped
 }

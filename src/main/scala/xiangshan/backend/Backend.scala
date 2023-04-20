@@ -132,7 +132,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
       PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
-        dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
+        dataPath.io.toIntExu(i)(j).fire && dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.redirect))
     }
   }
 

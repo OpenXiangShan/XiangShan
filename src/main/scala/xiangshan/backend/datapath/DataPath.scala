@@ -229,9 +229,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   vfRFReadArbiter.io.out.map(_.bits.addr).zip(vfRfRaddr).foreach{ case(source, sink) => sink := source }
 
-  // fromIQFire(i): flattened the i-th deq port fired
-  private val fromIQFire: IndexedSeq[Bool] = fromIQ.flatten.map(_.fire)
-
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat
   }

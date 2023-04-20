@@ -80,6 +80,11 @@ trait HasPipelineReg { this: FuncUnit =>
   val validVec = io.in.valid +: Seq.fill(latency)(RegInit(false.B))
   val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ io.out.ready
   val robIdxVec = io.in.bits.robIdx +: Array.fill(latency)(Reg(chiselTypeOf(io.in.bits.robIdx)))
+  val pdestVec = io.in.bits.pdest +: Array.fill(latency)(Reg(chiselTypeOf(io.in.bits.pdest)))
+
+  val pcVec = io.in.bits.pc.map(x => x) +: Array.fill(latency)( io.in.bits.pc.map(x => Reg(chiselTypeOf(x)))) // Reg(chiselTypeOf(io.in.bits.pc.get))
+  val preDecodeVec = io.in.bits.preDecode.map(x => x) +: Array.fill(latency)(io.in.bits.preDecode.map(x => Reg(chiselTypeOf(x))))
+  val fpuVec = io.in.bits.fpu.map(x => x) +: Array.fill(latency)(io.in.bits.fpu.map(x => Reg(chiselTypeOf(x))))
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
   val flushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
@@ -92,6 +97,10 @@ trait HasPipelineReg { this: FuncUnit =>
     when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
       validVec(i) := validVec(i - 1)
       robIdxVec(i) := robIdxVec(i - 1)
+      pdestVec(i) := pdestVec(i - 1)
+      pcVec(i).zip(pcVec(i - 1)).foreach{case (l,r) => l := r}
+      preDecodeVec(i).zip(preDecodeVec(i - 1)).foreach{case (l,r) => l := r}
+      fpuVec(i).zip(fpuVec(i - 1)).foreach{case (l,r) => l := r}
     }.elsewhen(flushVec(i) || rdyVec(i)){
       validVec(i) := false.B
     }
@@ -100,6 +109,10 @@ trait HasPipelineReg { this: FuncUnit =>
   io.in.ready := rdyVec(0)
   io.out.valid := validVec.last
   io.out.bits.robIdx := robIdxVec.last
+  io.out.bits.pdest := pdestVec.last
+  io.out.bits.pc.zip(pcVec.last).foreach{case (l,r) => l := r}
+  io.out.bits.preDecode.zip(preDecodeVec.last).foreach{case (l,r) => l := r}
+  io.out.bits.fpu.zip(fpuVec.last).foreach{case (l,r) => l := r}
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
 
