@@ -200,6 +200,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // (1) resources are ready
   // (2) previous instructions are ready
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ, Dispatch Queue
@@ -272,6 +273,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_int_dq", stall_int_dq)
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
+
+  XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
+  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
+  XSPerfHistogram("slots_valid_pure", PopCount(io.enqRob.req.map(_.valid)), thisActualOut(0), 0, RenameWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   if (env.EnableTopDown) {
     val rob_first_load = WireDefault(false.B)
