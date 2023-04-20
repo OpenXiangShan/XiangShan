@@ -240,7 +240,6 @@ class ICacheBankedDataArray(readPortNum: Int)(implicit p: Parameters) extends IC
     val readResp = Vec(ICacheDataReadPortNum, Output(new ICacheDataReadRespBundle))
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val cacheOp  = Flipped(new L1CacheInnerOpIO)
-    val fencei   = Input(Bool())
   }}
 
   val set_addrs = Wire(Vec(ICacheDataReadPortNum, UInt()))
@@ -296,7 +295,7 @@ class ICacheBankedDataArray(readPortNum: Int)(implicit p: Parameters) extends IC
   ))
   // read write conflict
   val rw_conflict = (0 until ICacheDataReadPortNum).map(port_idx =>
-    (io.write.valid && write_bank_addr === bank_addrs(port_idx) && write_way_addr === way_addrs(port_idx)) || io.fencei
+    (io.write.valid && write_bank_addr === bank_addrs(port_idx) && write_way_addr === way_addrs(port_idx))
   )
 
   (0 until ICacheDataReadPortNum).foreach(port_idx => {
