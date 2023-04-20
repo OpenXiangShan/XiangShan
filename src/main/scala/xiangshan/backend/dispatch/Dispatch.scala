@@ -282,12 +282,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  val Seq(vioReplay, otherReplay, tlbStall, l1Stall, l2Stall, l3Stall, memStall) = Seq.fill(7)(WireDefault(false.B))
+  val Seq(tlbStall, vioReplay, mshrReplay, l1Stall, l2Stall, l3Stall, memStall) = Seq.fill(7)(WireDefault(false.B))
   // TODO: add sink
   val ldReason = MuxCase(TopDownCounters.MemNotReadyStall.id.U, Seq(
-    vioReplay   -> TopDownCounters.VioReplayStall.id.U,
-    otherReplay -> TopDownCounters.OtherReplayStall.id.U,
     tlbStall    -> TopDownCounters.LoadTLBStall.id.U,
+    vioReplay   -> TopDownCounters.LoadVioReplayStall.id.U,
+    mshrReplay  -> TopDownCounters.LoadMSHRReplayStall.id.U,
     l1Stall     -> TopDownCounters.LoadL1Stall.id.U,
     l2Stall     -> TopDownCounters.LoadL2Stall.id.U,
     l3Stall     -> TopDownCounters.LoadL3Stall.id.U,
@@ -297,7 +297,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
   val realFired = io.recv.zip(io.fromRename.map(_.valid)).map(x => x._1 && x._2)
   io.stallReason.backReason.valid := !io.recv.head
-  io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U // need further analysis in dispatch stage
+  io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).map { case (((update, in), recv), fire) =>
     import FuType._
     import TopDownCounters._

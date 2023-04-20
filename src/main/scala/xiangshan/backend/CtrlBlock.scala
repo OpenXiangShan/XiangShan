@@ -532,6 +532,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       lsqCtrl.io.lqCancelCnt := io.lqCancelCnt
       lsqCtrl.io.sqCancelCnt := io.sqCancelCnt
       io.enqLsq <> lsqCtrl.io.enqLsq
+      rob.io.debugEnqLsq := io.enqLsq
     }
   }
   for ((dp2In, i) <- outer.dispatch2.flatMap(_.module.io.in).zipWithIndex) {

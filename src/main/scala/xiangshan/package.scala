@@ -820,8 +820,8 @@ package object xiangshan {
     val AtomicStall = Value("AtomicStall") // atomic, load reserved, store conditional
 
     // xs replay (different to gem5)
-    val VioReplayStall = Value("VioReplayStall")
-    val OtherReplayStall = Value("OtherReplayStall")
+    val LoadVioReplayStall = Value("LoadVioReplayStall")
+    val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
 
     // bad speculation
     val ControlRecoveryStall = Value("ControlRecoveryStall")

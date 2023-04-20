@@ -26,6 +26,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
+import xiangshan.mem.{LsqEnqIO, LqPtr}
 
 class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val ssid = UInt(SSIDWidth.W)
@@ -396,6 +397,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val wfi_enable = Input(Bool())
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new MicroOp)
+    val debugEnqLsq = Input(new LsqEnqIO)
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -434,6 +436,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
   val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
+  val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(false.B))
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -527,6 +530,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.tlbFirstReqTime := timer
       debug_microOp(enqIndex).debugInfo.tlbRespTime := timer
       debug_lsInfo(enqIndex) := DebugLsInfo.init
+      debug_lqIdxValid(enqIndex) := false.B
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -558,6 +562,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   when (!io.wfi_enable) {
     hasWFI := false.B
+  }
+
+  // lqEnq
+  io.debugEnqLsq.needAlloc.map(_(0)).zip(io.debugEnqLsq.req).foreach { case (alloc, req) =>
+    when(io.debugEnqLsq.canAccept && alloc && req.valid) {
+      debug_microOp(req.bits.robIdx.value).lqIdx := req.bits.lqIdx
+      debug_lqIdxValid(req.bits.robIdx.value) := true.B
+    }
   }
 
   /**
@@ -1105,15 +1117,21 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
 
   val sourceVaddr = Wire(Valid(UInt(VAddrBits.W)))
-  val sourcePaddr = Wire(Valid(UInt(PAddrBits.W)))
   sourceVaddr.valid := debug_lsInfo(deqPtr.value).s1.vaddr_valid
-  sourceVaddr.bits := debug_lsInfo(deqPtr.value).s1.vaddr_bits
+  sourceVaddr.bits  := debug_lsInfo(deqPtr.value).s1.vaddr_bits
+  val sourcePaddr = Wire(Valid(UInt(PAddrBits.W)))
   sourcePaddr.valid := debug_lsInfo(deqPtr.value).s2.paddr_valid
-  sourcePaddr.bits := debug_lsInfo(deqPtr.value).s2.paddr_bits
+  sourcePaddr.bits  := debug_lsInfo(deqPtr.value).s2.paddr_bits
+  val sourceLqIdx = Wire(Valid(new LqPtr))
+  sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
+  sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
   ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
+  // TODO: remove dummy sinks
   ExcitingUtils.addSink(WireDefault(sourceVaddr), s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(WireDefault(sourcePaddr), s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /**
     * DataBase info:
