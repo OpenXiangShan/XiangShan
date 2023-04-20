@@ -84,6 +84,8 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
   val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
 
+  val ICacheMainPipeReadPortNum = 4
+
   def PortNumber = 2
 
   def partWayNum = 4
@@ -550,16 +552,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val metaArray      = Module(new ICacheMetaArray)
+  val metaArray = Module(new ICacheBankedMetaArray(ICacheMainPipeReadPortNum))
   val bankedMetaArray = Module(new ICacheBankedMetaArray(prefetchPipeNum + 1)) // need add 1 port for IPF filter
-  val dataArray      = Module(new ICacheDataArray)
+  val dataArray = Module(new ICacheBankedDataArray(ICacheMainPipeReadPortNum))
   val mainPipe       = Module(new ICacheMainPipe)
   val missUnit      = Module(new ICacheMissUnit(edge))
   val prefetchPipes = (0 until prefetchPipeNum).map( i => Module(new IPrefetchPipe))
   val ipfBuffer  = Module(new PrefetchBuffer)
-
-  val meta_read_arb   = Module(new Arbiter(new ICacheReadBundle,  1))
-  val data_read_arb   = Module(new Arbiter(Vec(partWayNum, new ICacheReadBundle),  1))
   val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
   val prefetch_req_arb = Module(new Arbiter(new PIQReq, prefetchPipeNum))
@@ -575,18 +574,18 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   ipfBuffer.io.write <> missUnit.io.piq_write_ipbuffer
 
-  meta_read_arb.io.in(0)      <> mainPipe.io.metaArray.toIMeta
-  metaArray.io.read                     <> meta_read_arb.io.out
+  (0 until ICacheMainPipeReadPortNum).foreach(i => {
+    metaArray.io.read(i) <> mainPipe.io.metaArray(i).toIMeta
+    mainPipe.io.metaArray(i).fromIMeta <> metaArray.io.readResp(i)
+    dataArray.io.read(i) <> mainPipe.io.dataArray(i).toIData
+    mainPipe.io.dataArray(i).fromIData <> dataArray.io.readResp(i)
+  })
+
   bankedMetaArray.io.read(0) <> ipfBuffer.io.meta_filter_read_req
   (0 until prefetchPipeNum).foreach(i => bankedMetaArray.io.read(i + 1) <> prefetchPipes(i).io.toIMeta)
 
-  mainPipe.io.metaArray.fromIMeta       <> metaArray.io.readResp
   ipfBuffer.io.meta_filter_read_resp <> bankedMetaArray.io.readResp(0)
   (0 until prefetchPipeNum).foreach(i => bankedMetaArray.io.readResp(i + 1) <> prefetchPipes(i).io.fromIMeta)
-
-  data_read_arb.io.in(0)    <> mainPipe.io.dataArray.toIData
-  dataArray.io.read                   <> data_read_arb.io.out
-  mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
