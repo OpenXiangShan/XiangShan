@@ -6,17 +6,17 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 object StatusArrayMain extends App {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
     val backendParams = config(XSCoreParamsKey).backendParams
 
     val iqParams: IssueBlockParams = backendParams.intSchdParams.get.issueBlockParams.head
 
     Generator.execute(
       firrtlOpts,
-      DisableMonitors(p => StatusArray(p.alterPartial({
-        case XSCoreParamsKey => XSCoreParameters()
-      }), iqParams))(config),
-      firrtlComplier
+      DisableMonitors(p => StatusArray(p, iqParams))(config),
+      firrtlComplier,
+      firtoolOpts
     )
   }
 }

@@ -711,6 +711,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInsts := decodedInst
 
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
+  decodedInst.debug_globalID := 0.U // DontCare
 
   //-------------------------------------------------------------
   // Debug Info

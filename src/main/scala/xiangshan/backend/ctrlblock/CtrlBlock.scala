@@ -294,7 +294,7 @@ class CtrlBlockImp(
   }
 
   // currently, we only update mdp info when isReplay
-  memCtrl.io.redirect <> s1_s3_redirect
+  memCtrl.io.redirect := s1_s3_redirect
   memCtrl.io.csrCtrl := io.csrCtrl                          // RegNext in memCtrl
   memCtrl.io.stIn := io.fromMem.stIn                        // RegNext in memCtrl
   memCtrl.io.memPredUpdate := redirectGen.io.memPredUpdate  // RegNext in memCtrl
@@ -327,7 +327,7 @@ class CtrlBlockImp(
   }
 
   dispatch.io.hartId := io.fromTop.hartId
-  dispatch.io.redirect <> s1_s3_redirect
+  dispatch.io.redirect := s1_s3_redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
@@ -392,10 +392,10 @@ class CtrlBlockImp(
   }
 
   rob.io.hartId := io.fromTop.hartId
-  rob.io.redirect <> s1_s3_redirect
+  rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
 
-  io.redirect <> s1_s3_redirect
+  io.redirect := s1_s3_redirect
 
   // rob to int block
   io.robio.csr <> rob.io.csr

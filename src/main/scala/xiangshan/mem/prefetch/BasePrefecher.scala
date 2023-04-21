@@ -8,7 +8,7 @@ import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem.{LdPrefetchTrainBundle, L1PrefetchReq}
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
-  val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
+  val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pf_addr = ValidIO(UInt(PAddrBits.W))
   val l1_req = DecoupledIO(new L1PrefetchReq())

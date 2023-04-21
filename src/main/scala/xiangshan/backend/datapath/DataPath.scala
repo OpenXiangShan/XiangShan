@@ -376,6 +376,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og1resp.bits.addrOH := s1_addrOHs(iqIdx)(iuIdx)
       }
   }
+
   for (i <- toExu.indices) {
     for (j <- toExu(i).indices) {
       // s1Reg --[Ctrl]--> exu(s1) ---------- begin

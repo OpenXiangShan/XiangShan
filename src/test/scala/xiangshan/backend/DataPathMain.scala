@@ -9,8 +9,7 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 object DataPathMain extends App {
   override def main(args: Array[String]): Unit = {
-    val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
-    implicit val config: Parameters = new BaseConfig(1).alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
 
     val backendParams = config(XSCoreParamsKey).backendParams
     val dataPath = LazyModule(new DataPath(backendParams)(config))
@@ -18,7 +17,8 @@ object DataPathMain extends App {
     Generator.execute(
       firrtlOpts,
       dataPath.module,
-      firrtlComplier
+      firrtlComplier,
+      firtoolOpts
     )
   }
 }

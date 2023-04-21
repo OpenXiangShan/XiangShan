@@ -5,7 +5,7 @@ import chisel3.stage._
 import chiseltest._
 import chiseltest.ChiselScalatestTester
 import chiseltest.VerilatorBackendAnnotation
-import chiseltest.simulator.{VerilatorFlags, VerilatorCFlags}
+import chiseltest.simulator.{VerilatorCFlags, VerilatorFlags}
 import freechips.rocketchip.util.HasRocketChipStageUtils
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
@@ -15,6 +15,7 @@ import firrtl.options.TargetDirAnnotation
 import top.ArgParser
 import utility.FileRegisters
 import xiangshan.backend.decode.DecodeUnit
+import xiangshan.backend.regfile.IntPregParams
 
 object DecodeMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
@@ -26,7 +27,11 @@ object DecodeMain extends App with HasRocketChipStageUtils {
       // Get XSCoreParams and pass it to the "small module"
       case XSCoreParamsKey => config(XSTileKey).head.copy(
         // Example of how to change params
-        IssQueSize = 12
+        intPreg = IntPregParams(
+          numEntries = 64,
+          numRead = 14,
+          numWrite = 8,
+        ),
       )
     })
     (new ChiselStage).execute(args, Seq(

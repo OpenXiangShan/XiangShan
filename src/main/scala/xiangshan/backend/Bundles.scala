@@ -83,6 +83,7 @@ object Bundles {
     val isVset        = Bool()
     val commitType    = CommitType() // Todo: remove it
 
+    val debug_globalID = UInt(XLEN.W) // Todo: rename it
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, selImm)
 

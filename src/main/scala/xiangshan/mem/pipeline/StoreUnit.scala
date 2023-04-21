@@ -76,7 +76,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.wlineflag := io.in.bits.uop.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
-  when(io.in.valid && io.isFirstIssue) {
+  when(io.in.valid && io.in.bits.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
 

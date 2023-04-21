@@ -106,8 +106,6 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val prefetch_in = Flipped(ValidIO(new L1PrefetchReq))
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
-    val rsIdx = Input(UInt(log2Up(MemIQSizeMax).W))
-    val isFirstIssue = Input(Bool())
     val fastpath = Input(new LoadToLoadIO)
     val s0_kill = Input(Bool())
     // wire from lq to load pipeline
@@ -207,8 +205,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   // prefetch related ctrl signal
   val isPrefetch = WireInit(false.B)
-  val isPrefetchRead = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r)
-  val isPrefetchWrite = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w)
+  val isPrefetchRead = WireInit(s0_uop.fuOpType === LSUOpType.prefetch_r)
+  val isPrefetchWrite = WireInit(s0_uop.fuOpType === LSUOpType.prefetch_w)
   val isHWPrefetch = lfsrc_hwprefetch_select
 
   // query DTLB
@@ -219,7 +217,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     Mux(isPrefetchWrite, TlbCmd.write, TlbCmd.read),
     TlbCmd.read
   )
-  io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
+  io.dtlbReq.bits.size := LSUOpType.size(s0_uop.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := true.B
   io.dtlbReq.bits.memidx.is_st := false.B
@@ -227,7 +225,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.bits.debug.robIdx := s0_uop.robIdx
   // hw prefetch addr does not need to be translated
   io.dtlbReq.bits.no_translate := lfsrc_hwprefetch_select
-  io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbReq.bits.debug.pc := s0_uop.pc
   io.dtlbReq.bits.debug.isFirstIssue := s0_isFirstIssue
 
   // query DCache
@@ -288,10 +286,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_vaddr := io.in.bits.src(0) + SignExt(imm12, VAddrBits)
     s0_mask := genWmask(s0_vaddr, io.in.bits.uop.fuOpType(1,0))
     s0_uop := io.in.bits.uop
-    s0_isFirstIssue := io.isFirstIssue
-    s0_rsIdx := io.rsIdx
+    s0_isFirstIssue := io.in.bits.isFirstIssue
+    s0_rsIdx := io.in.bits.iqIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
-    val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.ctrl.fuOpType))
+    val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.fuOpType))
     when (issueUopIsPrefetch) {
       isPrefetch := true.B
     }
@@ -359,13 +357,13 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   XSPerfAccumulate("in_fire", io.in.fire)
   XSPerfAccumulate("in_fire_first_issue", s0_valid && s0_isFirstIssue)
   XSPerfAccumulate("lsq_fire_first_issue", io.lsqOut.valid && io.lsqOut.bits.isFirstIssue)
-  XSPerfAccumulate("ldu_fire_first_issue", io.in.valid && io.isFirstIssue)
+  XSPerfAccumulate("ldu_fire_first_issue", io.in.valid && io.in.bits.isFirstIssue)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
   XSPerfAccumulate("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
   XSPerfAccumulate("addr_spec_success", io.out.fire && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("addr_spec_failed", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_success_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.in.bits.isFirstIssue)
+  XSPerfAccumulate("addr_spec_failed_once", io.out.fire && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.in.bits.isFirstIssue)
   XSPerfAccumulate("forward_tlDchannel", io.out.bits.forward_tlDchannel)
   XSPerfAccumulate("hardware_prefetch_fire", io.out.fire && lfsrc_hwprefetch_select)
   XSPerfAccumulate("software_prefetch_fire", io.out.fire && isPrefetch && lfsrc_intloadFirstIssue_select)
@@ -848,8 +846,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val redirect = Flipped(ValidIO(new Redirect))
     val feedbackSlow = ValidIO(new RSFeedback)
     val feedbackFast = ValidIO(new RSFeedback)
-    val rsIdx = Input(UInt(log2Up(MemIQSizeMax).W))
-    val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
@@ -897,8 +893,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s0.io.in <> io.ldin
   load_s0.io.dtlbReq <> io.tlb.req
   load_s0.io.dcacheReq <> io.dcache.req
-  load_s0.io.rsIdx := io.rsIdx
-  load_s0.io.isFirstIssue := io.isFirstIssue
   load_s0.io.s0_kill := false.B
 
   // we try pointerchasing if lfsrc_l2lForward_select condition is satisfied
@@ -957,8 +951,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       val spec_vaddr = s1_data.vaddr
       val vaddr = Cat(spec_vaddr(VAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W))
       load_s1.io.in.bits.vaddr := vaddr
-      load_s1.io.in.bits.rsIdx := io.rsIdx
-      load_s1.io.in.bits.isFirstIssue := io.isFirstIssue
+      load_s1.io.in.bits.rsIdx := io.ldin.bits.iqIdx
+      load_s1.io.in.bits.isFirstIssue := io.ldin.bits.isFirstIssue
       // We need to replace vaddr(5, 3).
       val spec_paddr = io.tlb.resp.bits.paddr(0)
       load_s1.io.dtlbResp.bits.paddr.foreach(_ := Cat(spec_paddr(PAddrBits - 1, 6), s1_pointerChasingVAddr(5, 3), 0.U(3.W)))
@@ -1016,7 +1010,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   if (env.FPGAPlatform)
     io.dcache.s2_pc := DontCare
   else
-    io.dcache.s2_pc := load_s2.io.out.bits.uop.cf.pc
+    io.dcache.s2_pc := load_s2.io.out.bits.uop.pc
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
   load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)

@@ -54,10 +54,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // csr control
     decoders(i).io.csrCtrl := io.csrCtrl
 
-    io.out(i).valid      := io.in(i).valid
-    io.out(i).bits       := decoders(i).io.deq.cf_ctrl
-    io.in(i).ready       := io.out(i).ready
-
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.intRat(i)(1).addr := io.out(i).bits.lsrc(1)
@@ -81,9 +77,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
-  io.out.zip(decoders.map(_.io.deq)).foreach { case (out, decodeOut) =>
+  io.out.zip(decoders.map(_.io.deq)).zipWithIndex.foreach { case ((out, decodeOut), i) =>
     out.bits := decodeOut.decodedInsts
-    out.bits.debug_globalID := debug_globalCounter + PopCount((0 until i+1).map(io.out(_).fire))
+    out.bits.debug_globalID := debug_globalCounter + PopCount((0 until i + 1).map(io.out(_).fire))
   }
   io.out.zip(io.in).foreach { case (out, in) =>
     out.valid := in.valid

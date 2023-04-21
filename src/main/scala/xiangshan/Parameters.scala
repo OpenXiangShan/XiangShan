@@ -317,6 +317,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+
     ),
       numPregs = vfPreg.numEntries,
       numRfReadWrite = Some((numRfRead, numRfWrite)),

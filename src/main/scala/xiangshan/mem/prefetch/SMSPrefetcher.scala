@@ -936,7 +936,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
 class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper {
 
-  require(exuParameters.LduCnt == 2)
+  require(backendParams.LduCnt == 2)
 
   val io_agt_en = IO(Input(Bool()))
   val io_stride_en = IO(Input(Bool()))
@@ -1011,8 +1011,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val train_region_m1_tag_s0 = RegEnable(train_region_m1_tag, train_vld)
   val train_allow_cross_region_p1_s0 = RegEnable(train_allow_cross_region_p1, train_vld)
   val train_allow_cross_region_m1_s0 = RegEnable(train_allow_cross_region_m1, train_vld)
-  val train_pht_tag_s0 = RegEnable(pht_tag(train_ld.uop.cf.pc), train_vld)
-  val train_pht_index_s0 = RegEnable(pht_index(train_ld.uop.cf.pc), train_vld)
+  val train_pht_tag_s0 = RegEnable(pht_tag(train_ld.uop.pc), train_vld)
+  val train_pht_index_s0 = RegEnable(pht_index(train_ld.uop.pc), train_vld)
   val train_region_offset_s0 = RegEnable(train_region_offset, train_vld)
   val train_region_p1_cross_page_s0 = RegEnable(train_region_p1_cross_page, train_vld)
   val train_region_m1_cross_page_s0 = RegEnable(train_region_m1_cross_page, train_vld)
@@ -1039,7 +1039,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   stride.io.stride_en := io_stride_en
   stride.io.s0_lookup.valid := train_vld_s0
-  stride.io.s0_lookup.bits.pc := train_s0.uop.cf.pc(STRIDE_PC_BITS - 1, 0)
+  stride.io.s0_lookup.bits.pc := train_s0.uop.pc(STRIDE_PC_BITS - 1, 0)
   stride.io.s0_lookup.bits.vaddr := Cat(
     train_region_vaddr_s0, train_region_offset_s0, 0.U(log2Up(dcacheParameters.blockBytes).W)
   )

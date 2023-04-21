@@ -3,20 +3,26 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.LazyModule
 import top.{ArgParser, BaseConfig, Generator}
-import xiangshan.{XSCoreParameters, XSCoreParamsKey}
+import xiangshan.backend.regfile.IntPregParams
+import xiangshan.{XSCoreParameters, XSCoreParamsKey, XSTileKey}
 
 object BackendMain extends App {
   override def main(args: Array[String]): Unit = {
-    val (_, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
-    implicit val config: Parameters = new BaseConfig(1).alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
 
-    val backendParams = config(XSCoreParamsKey).backendParams
-    val backend = LazyModule(new Backend(backendParams)(config))
+    val defaultConfig = config.alterPartial({
+      // Get XSCoreParams and pass it to the "small module"
+      case XSCoreParamsKey => config(XSTileKey).head
+    })
+
+    val backendParams = defaultConfig(XSCoreParamsKey).backendParams
+    val backend = LazyModule(new Backend(backendParams)(defaultConfig))
 
     Generator.execute(
       firrtlOpts,
-      backend.intScheduler.get.module,
-      firrtlComplier
+      backend.module,
+      firrtlComplier,
+      firtoolOpts
     )
     println("done")
   }

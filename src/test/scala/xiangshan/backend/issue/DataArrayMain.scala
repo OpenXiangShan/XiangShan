@@ -7,7 +7,8 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 object DataArrayMain extends App {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
     val backendParams = config(XSCoreParamsKey).backendParams
 
     val iqParams: IssueBlockParams = backendParams.intSchdParams.get.issueBlockParams.head
@@ -16,11 +17,9 @@ object DataArrayMain extends App {
       firrtlOpts,
       // DataArray
       DisableMonitors(p =>
-        new DataArray(Vec(iqParams.dataBitsMax, Bool()), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries)(
-          p.alterPartial({
-            case XSCoreParamsKey => XSCoreParameters()
-          })))(config),
-      firrtlComplier
+        new DataArray(Vec(iqParams.dataBitsMax, Bool()), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries)(p))(config),
+      firrtlComplier,
+      firtoolOpts
     )
   }
 }
