@@ -175,6 +175,22 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
+
+    val perf_pending_prefetch = Output(Bool())
+    val perf_pending_normal   = Output(Bool())
+
+    val rob_head_query = new DCacheBundle {
+      val vaddr = Input(UInt(VAddrBits.W))
+      val query_valid = Input(Bool())
+
+      val resp = Output(Bool())
+
+      def hit(e_vaddr: UInt): Bool = {
+        require(e_vaddr.getWidth == VAddrBits)
+        query_valid && vaddr(VAddrBits - 1, DCacheLineOffset) === e_vaddr(VAddrBits - 1, DCacheLineOffset)
+      }
+    }
+
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -231,6 +247,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   val req_handled_by_this_entry = primary_fire || secondary_fire
 
+  // for perf use
+  val secondary_fired = RegInit(false.B)
+
+  io.perf_pending_prefetch := req_valid && prefetch && !secondary_fired
+  io.perf_pending_normal   := req_valid && (!prefetch || secondary_fired)
+
+  if(env.EnableTopDown) {
+    io.rob_head_query.resp   := io.rob_head_query.hit(req.vaddr) && req_valid
+  }else {
+    io.rob_head_query.resp   := false.B
+  }
+
   io.req_handled_by_this_entry := req_handled_by_this_entry
 
   when (release_entry && req_valid) {
@@ -276,6 +304,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     error := false.B
     prefetch := input_req_is_prefetch
     access := false.B
+    secondary_fired := false.B
   }
 
   when (secondary_fire) {
@@ -299,6 +328,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     when (!input_req_is_prefetch) {
       access := true.B // when merge non-prefetch req, set access bit
     }
+    secondary_fired := true.B
   }
 
   when (io.mem_acquire.fire()) {
@@ -781,6 +811,28 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
+
+  XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
+
+  if(env.EnableTopDown) {
+    val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
+    val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
+    val lq_doing_other_replay = WireInit(false.B)
+
+    ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+    ExcitingUtils.addSink(lq_doing_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf)
+
+    entries.foreach {
+      case e => {
+        e.io.rob_head_query.query_valid := sourceVaddr.valid
+        e.io.rob_head_query.vaddr := sourceVaddr.bits
+      }
+    }
+
+    ExcitingUtils.addSource(!rob_head_miss_in_dcache && !lq_doing_other_replay, s"load_l1_cache_stall_without_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
+  }
 
   val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
   val perfEvents = Seq(
