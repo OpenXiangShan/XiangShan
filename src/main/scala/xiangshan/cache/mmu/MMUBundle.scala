@@ -210,7 +210,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   }
 
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    val perm_g = this.perm.g
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid || perm_g === true.B)
 
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
@@ -540,7 +541,9 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    val perm_g = perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).g;
+    //val ignore_asid = if(perm_g) true else ignoreAsid
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid || perm_g)
     if (allType) {
       require(hasLevel)
       val hit0 = tag(tagLen - 1,    vpnnLen*2) === vpn(tagLen - 1, vpnnLen*2)
@@ -615,7 +618,11 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   }
 
   def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false) = {
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
+    val perms_g = permsInner.map(_.g)
+    val hit_g = perms_g.zipWithIndex.map {case(g, i) => g && i.U === sectorIdxClip(vpn, level)}
+    //perms_g[sectorIdxClip(vpn, level)] == 1
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid || hit_g.reduce(_ || _))
     asid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }
 
