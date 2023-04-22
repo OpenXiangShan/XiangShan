@@ -327,22 +327,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
 
-  if (env.EnableTopDown) {
-    val rob_first_load = WireDefault(false.B)
-    val rob_first_store = WireDefault(false.B)
-    ExcitingUtils.addSink(rob_first_load, "rob_first_load", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(rob_first_store, "rob_first_store", ExcitingUtils.Perf)
-    val rob_first_ls = rob_first_load || rob_first_store
-
-    XSPerfAccumulate("stall_cycle_rob_blame", stall_rob && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_int_blame", stall_int_dq && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_fp_blame", stall_fp_dq && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_ls_blame", stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls))
-    val stall_ls_blame = stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls)
-    ExcitingUtils.addSource(stall_ls_blame, "stall_ls_blame", ExcitingUtils.Perf)
-    // TODO: we may need finer counters to count responding slots more precisely, i.e. per-slot granularity.
-  }
-
   val perfEvents = Seq(
     ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),
     ("dispatch_empty",              !hasValidInstr                                                                 ),

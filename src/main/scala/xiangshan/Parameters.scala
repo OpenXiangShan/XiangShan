@@ -286,8 +286,7 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
-  UseDRAMSim: Boolean = false,
-  EnableTopDown: Boolean = false
+  UseDRAMSim: Boolean = false
 )
 
 trait HasXSParameter {

@@ -1087,18 +1087,6 @@ def detectRollback(i: Int) = {
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
-  if (env.EnableTopDown) {
-    val stall_loads_bound = WireDefault(0.B)
-    ExcitingUtils.addSink(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
-    val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
-    val l1d_loads_bound = stall_loads_bound && !have_miss_entry
-    ExcitingUtils.addSource(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
-    XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
-    val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
-    ExcitingUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(WireInit(0.U), "stall_l1d_load_miss", ExcitingUtils.Perf)
-  }
-
   val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
 
   ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
@@ -1141,7 +1129,6 @@ def detectRollback(i: Int) = {
   ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
-
 
   val perfValidCount = RegNext(validCount)
 

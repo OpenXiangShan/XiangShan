@@ -1109,13 +1109,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
   }
 
-  if (env.EnableTopDown) {
-    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.LOAD,
-                            "rob_first_load", ExcitingUtils.Perf)
-    ExcitingUtils.addSource(commit_v(0) && !commit_w(0) && state =/= s_walk && io.commits.info(0).commitType === CommitType.STORE,
-                            "rob_first_store", ExcitingUtils.Perf)
-  }
-
   val sourceVaddr = Wire(Valid(UInt(VAddrBits.W)))
   sourceVaddr.valid := debug_lsInfo(deqPtr.value).s1.vaddr_valid
   sourceVaddr.bits  := debug_lsInfo(deqPtr.value).s1.vaddr_bits

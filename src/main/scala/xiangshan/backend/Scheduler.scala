@@ -543,24 +543,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
 
-  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
-    val stall_ls_blame = WireDefault(0.B)
-    ExcitingUtils.addSink(stall_ls_blame, "stall_ls_blame", ExcitingUtils.Perf)
-    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val st_rs_full = !rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val rob_first_load = WireDefault(false.B)
-    val rob_first_store = WireDefault(false.B)
-    ExcitingUtils.addSink(rob_first_load, "rob_first_load", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(rob_first_store, "rob_first_store", ExcitingUtils.Perf)
-    val stall_stores_bound = stall_ls_blame && (st_rs_full || io.extra.sqFull || rob_first_store)
-    val stall_loads_bound = stall_ls_blame && (ld_rs_full || io.extra.lqFull || rob_first_load)
-    val stall_ls_bandwidth_bound = stall_ls_blame && !(st_rs_full || io.extra.sqFull || rob_first_store) && !(ld_rs_full || io.extra.lqFull || rob_first_load)
-    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
-    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
-    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
-    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
-  }
-
   val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
   val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))
   val schedulerPerf = Seq(
