@@ -42,7 +42,7 @@ case class SoCParameters
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
-    name = "l3",
+    name = "L3",
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank

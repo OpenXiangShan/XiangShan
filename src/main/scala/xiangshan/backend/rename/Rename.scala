@@ -363,6 +363,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val ctrlRecStall = Mux(io.redirect.valid, io.redirect.bits.debugIsCtrl, io.robCommits.isWalk && debugRedirect.debugIsCtrl)
   val mvioRecStall = Mux(io.redirect.valid, io.redirect.bits.debugIsMemVio, io.robCommits.isWalk && debugRedirect.debugIsMemVio)
   val otherRecStall = recStall && !(ctrlRecStall || mvioRecStall)
+  XSPerfAccumulate("recovery_stall", recStall)
+  XSPerfAccumulate("control_recovery_stall", ctrlRecStall)
+  XSPerfAccumulate("mem_violation_recovery_stall", mvioRecStall)
+  XSPerfAccumulate("other_recovery_stall", otherRecStall)
   // other stall
   val otherStall = !io.out.head.valid && !recStall
 
@@ -371,7 +375,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     ctrlRecStall  -> TopDownCounters.ControlRecoveryStall.id.U,
     mvioRecStall  -> TopDownCounters.MemVioRecoveryStall.id.U,
     otherRecStall -> TopDownCounters.OtherRecoveryStall.id.U,
-    otherStall    -> TopDownCounters.OtherCoreStall.id.U // need further analysis in dispatch stage
+    otherStall    -> TopDownCounters.OtherCoreStall.id.U // will be analyzed in dispatch stage
   )))
   io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
     out := Mux(io.stallReason.in.backReason.valid,
@@ -397,7 +401,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
-  XSPerfAccumulate("recovery_bubbles", PopCount(io.in.map(_.valid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)))
 
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire && out.bits.ctrl.isMove)))
   val is_fused_lui_load = io.out.map(o => o.fire && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)

@@ -1128,9 +1128,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
-  // TODO: remove dummy sinks
-  ExcitingUtils.addSink(WireDefault(sourceVaddr), s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourcePaddr), s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  // dummy sink
   ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /**

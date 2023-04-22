@@ -282,16 +282,26 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  val Seq(tlbStall, vioReplay, mshrReplay, l1Stall, l2Stall, l3Stall, memStall) = Seq.fill(7)(WireDefault(false.B))
-  // TODO: add sink
+  val Seq(tlbReplay, tlbMiss, vioReplay, mshrReplay, l1WithConf, l1WithoutConf, l2Stall, l3Stall, memStall) =
+    Seq.fill(9)(WireDefault(false.B))
+  ExcitingUtils.addSink(tlbReplay, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(tlbMiss, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(vioReplay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(mshrReplay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l1WithConf, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l1WithoutConf, s"load_l1_cache_stall_without_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l2Stall, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l3Stall, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
   val ldReason = MuxCase(TopDownCounters.MemNotReadyStall.id.U, Seq(
-    tlbStall    -> TopDownCounters.LoadTLBStall.id.U,
-    vioReplay   -> TopDownCounters.LoadVioReplayStall.id.U,
-    mshrReplay  -> TopDownCounters.LoadMSHRReplayStall.id.U,
-    l1Stall     -> TopDownCounters.LoadL1Stall.id.U,
-    l2Stall     -> TopDownCounters.LoadL2Stall.id.U,
-    l3Stall     -> TopDownCounters.LoadL3Stall.id.U,
-    memStall    -> TopDownCounters.LoadMemStall.id.U
+    tlbReplay     -> TopDownCounters.LoadTLBStall.id.U,
+    tlbMiss       -> TopDownCounters.LoadTLBStall.id.U,
+    vioReplay     -> TopDownCounters.LoadVioReplayStall.id.U,
+    mshrReplay    -> TopDownCounters.LoadMSHRReplayStall.id.U,
+    l1WithConf    -> TopDownCounters.LoadL1Stall.id.U,
+    l1WithoutConf -> TopDownCounters.LoadL1Stall.id.U,
+    l2Stall       -> TopDownCounters.LoadL2Stall.id.U,
+    l3Stall       -> TopDownCounters.LoadL3Stall.id.U,
+    memStall      -> TopDownCounters.LoadMemStall.id.U
   ))
 
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))

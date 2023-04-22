@@ -1099,51 +1099,49 @@ def detectRollback(i: Int) = {
     ExcitingUtils.addSink(WireInit(0.U), "stall_l1d_load_miss", ExcitingUtils.Perf)
   }
 
-  if(env.EnableTopDown) {
-    val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
+  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
 
-    ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
 
-    val uop_wrapper = Wire(Vec(LoadQueueSize, new XSBundleWithMicroOp))
-    (uop_wrapper.zipWithIndex).foreach {
-      case (u, i) => {
-        u.uop := uop(i)
-      }
+  val uop_wrapper = Wire(Vec(LoadQueueSize, new XSBundleWithMicroOp))
+  (uop_wrapper.zipWithIndex).foreach {
+    case (u, i) => {
+      u.uop := uop(i)
     }
-    val lq_match_vec = (debug_vaddr.zip(allocated)).map{case(va, alloc) => alloc && (va === sourceVaddr.bits)}
-    val rob_head_lq_match = ParallelOperation(lq_match_vec.zip(uop_wrapper), (a: Tuple2[Bool, XSBundleWithMicroOp], b: Tuple2[Bool, XSBundleWithMicroOp]) => {
-      val (a_v, a_uop) = (a._1, a._2)
-      val (b_v, b_uop) = (b._1, b._2)
-
-      val res = Mux(a_v && b_v, Mux(isAfter(a_uop.uop.robIdx, b_uop.uop.robIdx), b_uop, a_uop), 
-                    Mux(a_v, a_uop, 
-                        Mux(b_v, b_uop, 
-                                  a_uop)))
-      (a_v || b_v, res)
-    })
-
-    val lq_match_bits = rob_head_lq_match._2.uop
-    val lq_match = rob_head_lq_match._1 && sourceVaddr.valid
-    val lq_match_idx = lq_match_bits.lqIdx.value
-
-    val rob_head_tlb_miss        = lq_match && !tlb_hited(lq_match_idx)
-    val rob_head_vio_replay      = lq_match && !st_ld_check_ok(lq_match_idx)
-    val rob_head_mshrfull_replay = lq_match && !cache_no_replay(lq_match_idx)
-    val rob_head_confilct_replay = lq_match && !cache_bank_no_conflict(lq_match_idx)
-    val rob_head_other_replay    = lq_match && (!ld_ld_check_ok(lq_match_idx) || !forward_data_valid(lq_match_idx))
-    
-    ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf)
-
-    val rob_head_miss_in_dtlb = WireInit(false.B)
-    ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
-
-    ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-    ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-    ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-    ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-    ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
-
   }
+  val lq_match_vec = (debug_vaddr.zip(allocated)).map{case(va, alloc) => alloc && (va === sourceVaddr.bits)}
+  val rob_head_lq_match = ParallelOperation(lq_match_vec.zip(uop_wrapper), (a: Tuple2[Bool, XSBundleWithMicroOp], b: Tuple2[Bool, XSBundleWithMicroOp]) => {
+    val (a_v, a_uop) = (a._1, a._2)
+    val (b_v, b_uop) = (b._1, b._2)
+
+    val res = Mux(a_v && b_v, Mux(isAfter(a_uop.uop.robIdx, b_uop.uop.robIdx), b_uop, a_uop), 
+                  Mux(a_v, a_uop, 
+                      Mux(b_v, b_uop, 
+                                a_uop)))
+    (a_v || b_v, res)
+  })
+
+  val lq_match_bits = rob_head_lq_match._2.uop
+  val lq_match = rob_head_lq_match._1 && sourceVaddr.valid
+  val lq_match_idx = lq_match_bits.lqIdx.value
+
+  val rob_head_tlb_miss        = lq_match && !tlb_hited(lq_match_idx)
+  val rob_head_vio_replay      = lq_match && !st_ld_check_ok(lq_match_idx)
+  val rob_head_mshrfull_replay = lq_match && !cache_no_replay(lq_match_idx)
+  val rob_head_confilct_replay = lq_match && !cache_bank_no_conflict(lq_match_idx)
+  val rob_head_other_replay    = lq_match && (!ld_ld_check_ok(lq_match_idx) || !forward_data_valid(lq_match_idx))
+    
+  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  val rob_head_miss_in_dtlb = WireInit(false.B)
+  ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
+
 
   val perfValidCount = RegNext(validCount)
 
