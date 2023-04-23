@@ -6,19 +6,24 @@ import freechips.rocketchip.util._
 
 
 trait HasTokenBucketParameters {
-  val tokenBucketSizeWidth = 32
-  val tokenBucketFreqWidth = 32
-  val tokenBucketDataWidth = 32
+  val tokenBucketInformSize = 16
+  val tokenBucketSizeWidth = 64
+  val tokenBucketFreqWidth = 64
+  val tokenBucketDataWidth = 64
 }
 
 class BucketBundle(implicit p: Parameters) extends Bundle with HasTokenBucketParameters {
   val size = UInt(tokenBucketSizeWidth.W)
   val freq = UInt(tokenBucketFreqWidth.W)
   val inc  = UInt(tokenBucketSizeWidth.W)
-  // allow controller to directly block a bucket
-  // val block = Bool()
 
-  //override def cloneType = (new BucketBundle).asInstanceOf[this.type]
+  def apply(size: UInt, freq: UInt, inc: UInt) = {
+    val bucketParams = Wire(this)
+    bucketParams.size := size
+    bucketParams.freq := freq
+    bucketParams.inc := inc
+    bucketParams
+  }
 }
 
 

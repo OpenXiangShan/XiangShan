@@ -30,7 +30,7 @@ object log2Safe {
 // case object NL3CacheWays extends Field[Int](8)
 
 
-trait HasControlPlaneParameters{
+trait HasControlPlaneParameters extends HasTokenBucketParameters{
   implicit val p: Parameters
   val tiles = p(XSTileKey)
   val nTiles = tiles.size
@@ -50,6 +50,11 @@ trait HasControlPlaneParameters{
   def CP_WAYMASK = 0x20
   def CP_NOHYPE_BARRIER = 0x28
   def CP_HARTNUM = 0x30
+
+  def CP_BUCKET_FREQ = 0x38
+  def CP_BUCKET_SIZE = 0x40
+  def CP_BUCKET_INC = 0x48
+  def CP_TRAFFIC = 0x50
 
 }
 
@@ -103,18 +108,52 @@ class CPToHuanCunIO(implicit p: Parameters) extends CPBundle {
   val autocat_en = Output(Bool())*/
 }
 
-class BucketState(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters with HasTokenBucketParameters {
-  val nToken = SInt(tokenBucketSizeWidth.W)
-  val traffic = UInt(tokenBucketSizeWidth.W)
-  val counter = UInt(32.W)
+// class CPTokenBucketReq(implicit p: Parameters) extends CPBundle
+// {
+//   val dsid = UInt(dsidWidth.W)
+//   val cmd = UInt(tbCMDWidth.W)
+//   val setData = UInt(tbDataWidth.W)
+// }
+
+// class CPTokenBucketResp(implicit p: Parameters) extends CPBundle
+// {
+//   val inData = UInt(tbDataWidth.W)
+// }
+
+class BucketState(implicit p: Parameters) extends CPBundle {
+  val nToken = SInt(tokenBucketSizeWidth.W) //actual tokens
+  val traffic = UInt(tokenBucketDataWidth.W) //traffic counters
+  val counter = UInt(tokenBucketSizeWidth.W) //count down timer
   val enable = Bool()
+
+  def apply(nToken: SInt, traffic: UInt, counter: UInt, enable: Bool): BucketState = {
+    val state = Wire(new BucketState)
+    state.nToken := nToken
+    state.traffic := traffic
+    state.counter := counter
+    state.enable := enable
+    state
+  }
 }
 
-class BucketIO(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters with HasTokenBucketParameters {
-  val dsid = Input(UInt(dsidWidth.W))
-  val size = Input(UInt(tokenBucketSizeWidth.W))
-  val fire = Input(Bool())
-  val enable = Output(Bool())
+class BucketUpdateEnableReq(implicit p: Parameters) extends CPBundle {
+  val dsid = UInt(dsidWidth.W)
+  val setFlag = Bool()
+}
+
+class BucketInformFireReq(implicit p: Parameters) extends CPBundle {
+  val dsid = UInt(dsidWidth.W)
+  val size = UInt(tokenBucketInformSize.W)
+}
+
+class BucketIO(implicit p: Parameters) extends CPBundle {
+//  val dsid = Input(UInt(dsidWidth.W))
+//  val size = Input(UInt(tokenBucketSizeWidth.W))
+//  val fire = Input(Bool())
+//  val enable = Output(Bool())
+
+  val updateEnableReq = ValidIO(new BucketUpdateEnableReq())
+  val informFireReq = Flipped(ValidIO(new BucketInformFireReq()))
 }
 
 class CPToCore(implicit val p: Parameters) extends Bundle with HasControlPlaneParameters
@@ -184,21 +223,18 @@ with HasTokenBucketParameters
         }
     }
 
-    val waymasks  = RegInit(VecInit(Seq.fill(1 << dsidWidth){ ((1L << llcWays) - 1).U }))
+    val waymasks  = RegInit(VecInit(Seq.fill(nDSID){ ((1L << llcWays) - 1).U }))
 
     //token buckets
     private val bucket_debug = false
 
-    /*val bucketParams = RegInit(VecInit(Seq.fill(nDSID){
-      Cat(128.U(tokenBucketSizeWidth.W), 128.U(tokenBucketFreqWidth.W), 128.U(tokenBucketSizeWidth.W)).asTypeOf(new BucketBundle)
+    val bucketParams = RegInit(VecInit(Seq.fill(nDSID){
+      (new BucketBundle).apply(128.U, 128.U, 128.U)
     }))
 
     val bucketState = RegInit(VecInit(Seq.fill(nDSID){
-      Cat(0.U(tokenBucketSizeWidth.W), 0.U(tokenBucketSizeWidth.W), 0.U(32.W), true.B).asTypeOf(new BucketState)
-    }))*/
-    val bucketParams = RegInit(VecInit(Seq.fill(nDSID){0.U.asTypeOf(new BucketBundle)}))
-
-    val bucketState = RegInit(VecInit(Seq.fill(nDSID){0.U.asTypeOf(new BucketState)}))
+      (new BucketState).apply(0.S, 0.U, 0.U, true.B)
+    }))
 
     val bucketIO = IO(Vec(nTiles, new BucketIO()))
 
@@ -207,7 +243,9 @@ with HasTokenBucketParameters
 
     bucketState.zipWithIndex.foreach { case (state, i) =>
       state.counter := Mux(state.counter >= bucketParams(i).freq, 0.U, state.counter + 1.U)
-      val req_sizes = bucketIO.map{bio => Mux(bio.dsid === i.U && bio.fire, bio.size, 0.U) }
+      val req_sizes = bucketIO.map{bio => Mux(
+        bio.informFireReq.bits.dsid === i.U && bio.informFireReq.fire,
+        bio.informFireReq.bits.size, 0.U) }
       val req_all = req_sizes.reduce(_ + _)
       val updating = state.counter >= bucketParams(i).freq
       val inc_size = Mux(updating, bucketParams(i).inc.asSInt(), 0.S)
@@ -215,7 +253,8 @@ with HasTokenBucketParameters
       val calc_next = state.nToken + inc_size - req_all.asSInt
       val limit_next = Mux(calc_next < bucketParams(i).size.asSInt, calc_next, bucketParams(i).size.asSInt)
 
-      val has_requester = bucketIO.map{bio => bio.dsid === i.U && bio.fire}.reduce(_ || _)
+      val has_requester = bucketIO.map{bio =>
+        bio.informFireReq.bits.dsid === i.U && bio.informFireReq.fire}.reduce(_ || _)
       when (has_requester) {
         state.traffic := state.traffic + req_all.asUInt
       }
@@ -232,12 +271,31 @@ with HasTokenBucketParameters
       }
     }
 
-    bucketIO.foreach { bio =>
-      bio.enable := bucketState(bio.dsid).enable
+    val tb_old_enables = RegInit(VecInit(Seq.fill(nDSID){true.B}))
+    val tb_need_update_enables = RegInit(VecInit(Seq.fill(nDSID){false.B}))
+    bucketState zip tb_old_enables zip tb_need_update_enables foreach {
+      case ((bucket,old_en),update_flag) =>
+        when (bucket.enable =/= old_en) {
+          update_flag := true.B
+          old_en := bucket.enable
+        }
     }
-    
-    
-    
+
+    val tb_enables_update_queue = Module(new Queue(new BucketUpdateEnableReq, 2, pipe = true, flow=true))
+    val tb_enables_enq = tb_enables_update_queue.io.enq
+    tb_enables_enq.valid := tb_need_update_enables.reduceTree(_ || _)
+    val tb_next_update_dsid = PriorityEncoder(tb_need_update_enables)
+    tb_enables_enq.bits.dsid := tb_next_update_dsid
+    tb_enables_enq.bits.setFlag := bucketState(tb_next_update_dsid).enable
+    when (tb_enables_enq.fire) {
+      tb_need_update_enables(tb_next_update_dsid) := false.B
+    }
+    val tb_enables_deq = tb_enables_update_queue.io.deq
+    bucketIO.foreach { case bio =>
+      bio.updateEnableReq.valid := tb_enables_deq.valid
+      bio.updateEnableReq.bits := tb_enables_deq.bits
+    }
+    tb_enables_deq.ready := true.B
     /**
       * waymask set.
       */
@@ -312,6 +370,12 @@ with HasTokenBucketParameters
       )),
       CP_NOHYPE_BARRIER -> Seq(RegField(64, nohypeBarrier)),
       CP_HARTNUM -> Seq(RegField(64, nTilesReg)),
+      // tokenbuckets
+      CP_BUCKET_SIZE -> Seq(RegField(64, bucketParams(dsidSel).size)),
+      CP_BUCKET_FREQ -> Seq(RegField(64, bucketParams(dsidSel).freq)),
+      CP_BUCKET_INC  -> Seq(RegField(64, bucketParams(dsidSel).inc)),
+      CP_TRAFFIC -> Seq(RegField(64, bucketState(dsidSel).traffic)),
+
     )
 
   }

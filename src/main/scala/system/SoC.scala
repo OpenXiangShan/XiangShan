@@ -255,9 +255,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
+  val tokenBuckets = Array.fill(NumCores) { LazyModule(new TokenBucketNode()) }
+
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=*
       TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
+      tokenBuckets(i).node :=
       TLBuffer() :=
       core_out
   }
@@ -372,6 +375,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val cp2l3IO = if (LvnaEnable) Some(IO(new CPToHuanCunIO)) else None
     if (LvnaEnable) {
       cp2l3IO.get <> controlPlane.module.io.huancun
+    }
+
+    if (LvnaEnable) {
+      val cpTBIO = controlPlane.module.bucketIO
+      val tbIOs = tokenBuckets.map(_.module.bucketIO)
+      cpTBIO zip tbIOs foreach{case (cptb, tb) => tb <> cptb }
     }
   }
 }
