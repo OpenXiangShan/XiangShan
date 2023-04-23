@@ -1221,7 +1221,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val misPred = commit_mispredict(i)
     // val ghist = commit_spec_meta.ghist.predHist
     val histPtr = commit_spec_meta.histPtr
-    val predCycle = commit_meta.meta(63, 0)
+    val predCycle = commit_meta.meta(93, 30)
     val target = commit_target
     
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
@@ -1232,7 +1232,24 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")*/
     val isRet = isJmp && commit_pd.hasRet
-    XSDebug(v && do_commit && isRet && misPred, p"cfi_update: isRet(${isRet}) pc(${Hexadecimal(pc)}) " +
+    val isCall = isJmp && commit_pd.hasCall
+    XSDebug(v && do_commit && isCfi, p"cfi_update: isCall(${isCall}) pc(${Hexadecimal(pc)}) " +
+    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
+    p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+    p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
+
+    XSDebug(v && do_commit && isRet , p"cfi_update: isRet(${isRet}) pc(${Hexadecimal(pc)}) " +
+      p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
+     // p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+      p"target(${Hexadecimal(target)})\n")
+
+
+    XSDebug(v && do_commit && isRet && misPred, p"cfi_update: mipred_isRet(${isRet}) pc(${Hexadecimal(pc)}) " +
+      p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
+     // p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+      p"target(${Hexadecimal(target)})\n")
+
+    XSDebug(v && do_commit && isCall && misPred, p"cfi_update: mipred_isCall(${isRet}) pc(${Hexadecimal(pc)}) " +
       p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
      // p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
       p"target(${Hexadecimal(target)})\n")
@@ -1395,7 +1412,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   for((key, value) <- perfCountsMap) {
     XSPerfAccumulate(key, value)
   }
-
+  assert(PopCount(mbpRWrongs) <= 200.U)
   // --------------------------- Debug --------------------------------
   // XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
   XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)

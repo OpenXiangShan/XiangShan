@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2020-2021 Peng Cheng Laboratory
+  *
+  * XiangShan is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+  * You may obtain a copy of Mulan PSL v2 at:
+  *          http://license.coscl.org.cn/MulanPSL2
+  *
+  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+  *
+  * See the Mulan PSL v2 for more details.
+  ***************************************************************************************/
 package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
@@ -25,8 +25,8 @@ import xiangshan._
 import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
-    val retAddr = UInt(VAddrBits.W)
-    val ctr = UInt(8.W) // layer of nested call functions
+  val retAddr = UInt(VAddrBits.W)
+  val ctr = UInt(8.W) // layer of nested call functions
 }
 
 class RASPtr(implicit p: Parameters) extends CircularQueuePtr[RASPtr](
@@ -85,7 +85,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
   }
 
-  
+
   @chiselName
   class RASStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircularQueuePtrHelper {
     val io = IO(new Bundle {
@@ -196,7 +196,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
           ret := getCommitTop(currentSsp)
         }
       }
-      
+
       ret
     }
 
@@ -209,11 +209,11 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     def specPtrInc(ptr: RASPtr) = ptr + 1.U
     def specPtrDec(ptr: RASPtr) = ptr - 1.U
 
-    
 
-    
 
-    
+
+
+
     when (io.redirect_valid && io.redirect_isCall) {
       writeBypassValid := true.B
     } .elsewhen (io.redirect_valid) {
@@ -239,7 +239,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     writeEntry.ctr := Mux(io.redirect_valid && io.redirect_isCall,
       Mux(redirectTopEntry.retAddr === io.redirect_callAddr && redirectTopEntry.ctr < ctrMax, io.redirect_meta_sctr + 1.U, 0.U),
       Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
-    
+
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
       io.redirect_meta_NOS, TOSR)
 
@@ -261,22 +261,23 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val realWriteEntry = Mux(io.redirect_isCall, realWriteEntry_next,
       Mux(io.s3_missed_push, s3_missPushEntry,
-      realWriteEntry_next))
-    
+        realWriteEntry_next))
+
     val realWriteAddr_next = RegEnable(Mux(io.redirect_valid && io.redirect_isCall, io.redirect_meta_TOSW, TOSW), io.s2_fire || (io.redirect_valid && io.redirect_isCall))
     val realWriteAddr = Mux(io.redirect_isCall, realWriteAddr_next,
       Mux(io.s3_missed_push, s3_missPushAddr,
-      realWriteAddr_next))
+        realWriteAddr_next))
     val realNos_next = RegEnable(Mux(io.redirect_valid && io.redirect_isCall, io.redirect_meta_TOSR, TOSR), io.s2_fire || (io.redirect_valid && io.redirect_isCall))
     val realNos = Mux(io.redirect_isCall, realNos_next,
       Mux(io.s3_missed_push, s3_missPushNos,
-      realNos_next))
+        realNos_next))
     val realPush = (io.s3_fire && (!io.s3_cancel || io.s3_missed_push)) || RegNext(io.redirect_valid && io.redirect_isCall)
 
     when (realPush) {
       spec_queue(realWriteAddr.value) := realWriteEntry
       spec_nos(realWriteAddr.value) := realNos
     }
+    XSDebug(realPush, "real_write_addr = %x, is_redirect_next = %b\n", realWriteEntry.retAddr,RegNext(io.redirect_valid && io.redirect_isCall))
 
     def specPush(retAddr: UInt, currentSsp: UInt, currentSctr: UInt, currentTOSR: RASPtr, currentTOSW: RASPtr, topEntry: RASEntry) = {
       TOSR := currentTOSW
@@ -298,6 +299,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     when (io.spec_push_valid) {
       specPush(io.spec_push_addr, ssp, sctr, TOSR, TOSW, topEntry)
     }
+    XSDebug(io.spec_push_valid, "io_spec_push_addr = %x, ssp = %x\n", io.spec_push_addr, ssp)
     def specPop(currentSsp: UInt, currentSctr: UInt, currentTOSR: RASPtr, currentTOSW: RASPtr, currentTopNos: RASPtr) = {
       // TOSR is only maintained when spec queue is not empty
       when (TOSRinRange(currentTOSR, currentTOSW)) {
@@ -329,7 +331,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     io.ssp := ssp
     io.sctr := sctr
     io.nsp := nsp
-
+    XSDebug(io.spec_pop_valid, "io_spec_pop_addr = %x, ssp = %x\n", io.spec_pop_addr, ssp)
     when (io.s3_cancel) {
       // recovery of all related pointers
       TOSR := io.s3_meta.TOSR
@@ -371,7 +373,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val commit_push_addr = spec_queue(io.commit_meta_TOSW.value).retAddr
 
-    
+
 
     when (io.commit_push_valid) {
       val nsp_update = Wire(UInt(log2Up(rasSize).W))
@@ -395,11 +397,11 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         BOS := specPtrInc(io.commit_meta_TOSW)
         spec_overflowed := false.B
       }
-      
+
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
     }
-    
+
     when (io.redirect_valid) {
       TOSR := io.redirect_meta_TOSR
       TOSW := io.redirect_meta_TOSW
@@ -424,6 +426,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s2_spec_push = WireInit(false.B)
   val s2_spec_pop = WireInit(false.B)
   val s2_full_pred = io.in.bits.resp_in(0).s2.full_pred
+  val s3_full_pred = io.in.bits.resp_in(0).s3.full_pred
   // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
   val s2_spec_new_addr = s2_full_pred.fallThroughAddr + Mux(s2_full_pred.last_may_be_rvi_call, 2.U, 0.U)
   stack.spec_push_valid := s2_spec_push
@@ -446,16 +449,16 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     // FIXME: should use s1 globally
   }
   s2_last_target_out := Mux(s2_is_jalr, s2_jalr_target, s2_last_target_in)
-  
+
   val s2_meta = Wire(new RASMeta)
   s2_meta.ssp := stack.ssp
   s2_meta.sctr := stack.sctr
   s2_meta.TOSR := stack.TOSR
   s2_meta.TOSW := stack.TOSW
   s2_meta.NOS := stack.NOS
-  
+
   val s3_top = RegEnable(stack.spec_pop_addr, io.s2_fire)
-  val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire)
+  val s3_spec_new_addr_1 = RegEnable(s2_spec_new_addr, io.s2_fire)
 
   val s3_jalr_target = io.out.s3.full_pred.jalr_target
   val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred.targets.last
@@ -473,8 +476,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire)
   val s3_push = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_call
   val s3_pop  = io.in.bits.resp_in(0).s3.full_pred.hit_taken_on_ret
-
-  val s3_cancel = io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
+  val s3_cancel = WireInit(false.B)
+  s3_cancel := io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
+  //val s3_cancel = io.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop) || ((s3_push ===0.U && s3_pushed_in_s2 === 0.U) || (s3_pop ===0.U && s3_popped_in_s2 === 0.U))
   stack.s2_fire := io.s2_fire
   stack.s3_fire := io.s3_fire
 
@@ -485,6 +489,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.s3_meta := s3_meta
   stack.s3_missed_pop := s3_pop && !s3_popped_in_s2
   stack.s3_missed_push := s3_push && !s3_pushed_in_s2
+  val s3_spec_new_addr_2 = s3_full_pred.fallThroughAddr + Mux(s3_full_pred.last_may_be_rvi_call, 2.U, 0.U)
+  val use_s3 = (s3_full_pred.hit && (s3_spec_new_addr_2 =/= s3_spec_new_addr_1)) || (s3_push && !s3_pushed_in_s2)
+  val s3_spec_new_addr = Mux(use_s3, s3_spec_new_addr_2, s3_spec_new_addr_1)
+  //val s3_spec_new_addr = s3_spec_new_addr_2
   stack.s3_pushAddr := s3_spec_new_addr
 
   // no longer need the top Entry, but TOSR, TOSW, ssp sctr
@@ -519,7 +527,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val update = io.update.bits
   val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
   val updateValid = io.update.valid
-  
+
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken
   stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)
@@ -533,25 +541,25 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
   XSPerfAccumulate("ras_s3_and_redirect_recover_at_the_same_time", s3_cancel && redirect.valid)
 
-  
+
   val spec_debug = stack.debug
-  XSDebug(io.s2_fire, "----------------RAS----------------\n")
-  XSDebug(io.s2_fire, " TopRegister: 0x%x\n",stack.spec_pop_addr)
-  XSDebug(io.s2_fire, "  index       addr           ctr           nos (spec part)\n")
-  for(i <- 0 until RasSpecSize){
-      XSDebug(io.s2_fire, "  (%d)   0x%x      %d       %d",i.U,spec_debug.spec_queue(i).retAddr,spec_debug.spec_queue(i).ctr, spec_debug.spec_nos(i).value)
-      when(i.U === stack.TOSW.value){XSDebug(io.s2_fire, "   <----TOSW")}
-      when(i.U === stack.TOSR.value){XSDebug(io.s2_fire, "   <----TOSR")}
-      when(i.U === stack.BOS.value){XSDebug(io.s2_fire, "   <----BOS")}
-      XSDebug(io.s2_fire, "\n")
-  }
-  XSDebug(io.s2_fire, "  index       addr           ctr   (committed part)\n")
-  for(i <- 0 until RasSize){
-      XSDebug(io.s2_fire, "  (%d)   0x%x      %d",i.U,spec_debug.commit_stack(i).retAddr,spec_debug.commit_stack(i).ctr)
-      when(i.U === stack.ssp){XSDebug(io.s2_fire, "   <----ssp")}
-      when(i.U === stack.nsp){XSDebug(io.s2_fire, "   <----nsp")}
-      XSDebug(io.s2_fire, "\n")
-  }
+  /*  XSDebug(io.s2_fire, "----------------RAS----------------\n")
+    XSDebug(io.s2_fire, " TopRegister: 0x%x\n",stack.spec_pop_addr)
+    XSDebug(io.s2_fire, "  index       addr           ctr           nos (spec part)\n")
+    for(i <- 0 until RasSpecSize){
+        XSDebug(io.s2_fire, "  (%d)   0x%x      %d       %d",i.U,spec_debug.spec_queue(i).retAddr,spec_debug.spec_queue(i).ctr, spec_debug.spec_nos(i).value)
+        when(i.U === stack.TOSW.value){XSDebug(io.s2_fire, "   <----TOSW")}
+        when(i.U === stack.TOSR.value){XSDebug(io.s2_fire, "   <----TOSR")}
+        when(i.U === stack.BOS.value){XSDebug(io.s2_fire, "   <----BOS")}
+        XSDebug(io.s2_fire, "\n")
+    }
+    XSDebug(io.s2_fire, "  index       addr           ctr   (committed part)\n")
+    for(i <- 0 until RasSize){
+        XSDebug(io.s2_fire, "  (%d)   0x%x      %d",i.U,spec_debug.commit_stack(i).retAddr,spec_debug.commit_stack(i).ctr)
+        when(i.U === stack.ssp){XSDebug(io.s2_fire, "   <----ssp")}
+        when(i.U === stack.nsp){XSDebug(io.s2_fire, "   <----nsp")}
+        XSDebug(io.s2_fire, "\n")
+    }*/
   /*
   XSDebug(s2_spec_push, "s2_spec_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
   s2_spec_new_addr,spec_debug.spec_push_entry.ctr,spec_debug.spec_alloc_new,spec_debug.sp.asUInt)
