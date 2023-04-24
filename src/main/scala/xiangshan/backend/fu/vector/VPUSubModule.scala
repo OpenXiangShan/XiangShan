@@ -25,11 +25,15 @@ import utility._
 
 abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
+  val rm = IO(Input(UInt(3.W)))
+  val fflags = IO(Output(UInt(5.W)))
   val vstart = IO(Input(UInt(XLEN.W)))
   val vxrm = IO(Input(UInt(2.W)))
   val vxsat = IO(Output(UInt(1.W)))
   val needReverse = Wire(Bool())
   val needClearMask = Wire(Bool())
+  val src1Sew = Wire(UInt(2.W))
+  val src1NeedSew = Wire(Bool())
 
   // rename signal
   val in = io.in.bits
@@ -37,10 +41,15 @@ abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends Fun
   val vtype = ctrl.vconfig.vtype
 
   // for generate src1 and src2
-  val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
-  val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm,
-             Mux(in.uop.ctrl.srcType(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0))))
-  val _vs2 = in.src(1)
+  src1NeedSew := true.B
+  src1Sew := vtype.vsew(1,0)
+  private val immExt = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, src1Sew, ctrl.imm))).asUInt
+  private val imm = Mux(src1NeedSew, immExt, ctrl.imm(4,0))
+  private val src1Ext = VecExtractor(src1Sew, in.src(0))
+  private val src1 = Mux(SrcType.isFp(ctrl.srcType(0))&&src1NeedSew, src1Ext, in.src(0))
+  private val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm, src1)
+  private val _vs2 = in.src(1)
+
   // generate src1 and src2
   val vs1 = Mux(needReverse, _vs2, _vs1)
   val vs2 = Mux(needReverse, _vs1, _vs2)
@@ -49,12 +58,16 @@ abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends Fun
   // connect io
   io.out.bits.uop := DontCare
   io.in.ready := DontCare
+  fflags := DontCare
+  vxsat := DontCare
 
 }
 
 
 abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends FunctionUnit(len: Int)
 {
+  val rm = IO(Input(UInt(3.W)))
+  val fflags = IO(Output(UInt(5.W)))
   val vstart = IO(Input(UInt(XLEN.W)))
   val vxrm = IO(Input(UInt(2.W)))
   val vxsat = IO(Output(UInt(1.W)))
@@ -100,12 +113,14 @@ abstract class VPUSubModule(len: Int = 128)(implicit p: Parameters) extends Func
     dataModule.zipWithIndex.foreach{ case(l, i) =>
       l.io.in.bits <> io.in.bits
       l.io.redirectIn := DontCare
+      l.rm := rm
       l.vxrm := vxrm
       l.vstart := vstart
       l.io.in.valid := io.in.valid && state === s_idle && select(i)
       l.io.out.ready := io.out.ready
     }
     vxsat := Mux1H(s0_selectReg, dataModule.map(_.vxsat))
+    fflags := Mux1H(s0_selectReg, dataModule.map(_.fflags))
 
     io.out.bits.data :=  Mux(state === s_compute && outFire, dataWire, dataReg)
     io.out.bits.uop := s0_uopReg
@@ -136,5 +151,20 @@ object VecImmExtractor {
   def apply(immType: UInt, sew: UInt, imm: UInt): UInt = {
     val _imm = Mux(immType === SelImm.IMM_OPIVIS, Imm_OPIVIS(imm), Imm_OPIVIU(imm))
     imm_sew(sew, _imm(7,0))
+  }
+}
+
+object VecExtractor{
+  def xf2v_sew(sew: UInt, xf:UInt): UInt = {
+    LookupTree(sew(1, 0), List(
+      "b00".U -> VecInit(Seq.fill(16)(xf(7, 0))).asUInt,
+      "b01".U -> VecInit(Seq.fill(8)(xf(15, 0))).asUInt,
+      "b10".U -> VecInit(Seq.fill(4)(xf(31, 0))).asUInt,
+      "b11".U -> VecInit(Seq.fill(2)(xf(63, 0))).asUInt,
+    ))
+  }
+
+  def apply(sew: UInt, xf: UInt): UInt = {
+    xf2v_sew(sew, xf)
   }
 }

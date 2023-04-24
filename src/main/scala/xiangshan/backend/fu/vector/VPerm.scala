@@ -88,11 +88,12 @@ class VPermWrapper(implicit p: Parameters)  extends VPUDataModule {
   })
   srcVdType := VpermType.getSrcVdType(in.uop.ctrl.fuOpType, in.uop.ctrl.vconfig.vtype.vsew(1,0)).asTypeOf(srcVdType.cloneType)
   VPerm.io.in.bits.srcType(0) := srcVdType.srcType2
+  src1Sew := srcVdType.srcType1(1,0)
+  src1NeedSew := !VpermType.notNeedSew(in.uop.ctrl.fuOpType)
   VPerm.io.in.bits.srcType(1) := srcVdType.srcType1
   VPerm.io.in.bits.vdType := srcVdType.vdType
   // dirty code for VSLIDEUP_VX/VSLIDEDOWN_VX
-  val vs1Mux = Mux(VpermType.isVsilde(in.uop.ctrl.fuOpType), Mux(SrcType.isFp(in.uop.ctrl.srcType(0)), in.src(0)(63,0), ctrl.imm(4,0)), vs1)
-  VPerm.io.in.bits.vs1 := vs1Mux
+  VPerm.io.in.bits.vs1 := vs1
   VPerm.io.in.bits.vs2 := vs2
   VPerm.io.in.bits.old_vd := in.src(2)
   VPerm.io.in.bits.mask := in.src(3)

@@ -118,8 +118,8 @@ object VecDecoder extends DecodeConstants {
     VOR_VV          -> OPIVV(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VV     -> OPIVV(FuType.vipu, VipuType.dummy, T, F, F),
-    VRGATHEREI16_VV -> OPIVV(FuType.vipu, VipuType.dummy, T, F, F),
+    VRGATHER_VV     -> OPIVV(FuType.vppu, VpermType.vrgather, T, F, F, UopDivType.VEC_RGATHER),
+    VRGATHEREI16_VV -> OPIVV(FuType.vppu, VpermType.vrgatherei16, T, F, F, UopDivType.VEC_RGATHEREI16),
 
     VADC_VVM        -> OPIVV(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
     VMADC_VVM       -> OPIVV(FuType.vialuF, VialuFixType.vmadc_vvm, F, T, F, UopDivType.VEC_VVM),
@@ -159,8 +159,8 @@ object VecDecoder extends DecodeConstants {
     VNCLIPU_WV      -> OPIVV(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, UopDivType.VEC_WVV),
     VNCLIP_WV       -> OPIVV(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, UopDivType.VEC_WVV),
 
-    VWREDSUMU_VS    -> OPIVV(FuType.vipu, VipuType.vwredsumu_vs, T, F, F),
-    VWREDSUM_VS     -> OPIVV(FuType.vipu, VipuType.vwredsum_vs, T, F, F),
+    VWREDSUMU_VS    -> OPIVV(FuType.vipu, VipuType.vwredsumu_vs, T, F, F, UopDivType.VEC_VWW),
+    VWREDSUM_VS     -> OPIVV(FuType.vipu, VipuType.vwredsum_vs, T, F, F, UopDivType.VEC_VWW),
   )
 
   val opivx: Array[(BitPat, XSDecodeBase)] = Array(
@@ -177,7 +177,7 @@ object VecDecoder extends DecodeConstants {
     VOR_VX        -> OPIVX(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VX   -> OPIVX(FuType.vipu, VipuType.dummy, T, F, F),
+    VRGATHER_VX   -> OPIVX(FuType.vppu, VpermType.vrgather_vx, T, F, F, UopDivType.VEC_RGATHER_VX),
 
     VSLIDEUP_VX   -> OPIVX(FuType.vppu, VpermType.vslideup, T, F, F, UopDivType.VEC_SLIDEUP),
     VSLIDEDOWN_VX -> OPIVX(FuType.vppu, VpermType.vslidedown, T, F, F, UopDivType.VEC_SLIDEDOWN),
@@ -231,7 +231,7 @@ object VecDecoder extends DecodeConstants {
     VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VI   -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, selImm = SelImm.IMM_OPIVIU),
+    VRGATHER_VI   -> OPIVI(FuType.vppu, VpermType.vrgather, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_RGATHER),
 
     VSLIDEUP_VI   -> OPIVI(FuType.vppu, VpermType.vslideup, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_ISLIDEUP),
     VSLIDEDOWN_VI -> OPIVI(FuType.vppu, VpermType.vslidedown, T, F, F, selImm = SelImm.IMM_OPIVIU, uopDivType = UopDivType.VEC_ISLIDEDOWN),
@@ -340,10 +340,10 @@ object VecDecoder extends DecodeConstants {
   )
 
   val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
-    VAADD_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vaadd_vv, F, T, F),
-    VAADDU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vaaddu_vv, F, T, F),
-    VASUB_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vasub_vv, F, T, F),
-    VASUBU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F),
+    VAADD_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vaadd_vv, F, T, F, UopDivType.VEC_VXV),
+    VAADDU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vaaddu_vv, F, T, F, UopDivType.VEC_VXV),
+    VASUB_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vasub_vv, F, T, F, UopDivType.VEC_VXV),
+    VASUBU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F, UopDivType.VEC_VXV),
     VDIV_VX        -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VDIVU_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
     VMACC_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
