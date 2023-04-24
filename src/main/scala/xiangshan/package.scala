@@ -587,6 +587,9 @@ package object xiangshan {
     def VEC_MVV          = "b101010".U // VEC_MVV  VMV
     def VEC_M0X_VFIRST   = "b101011".U // 
     def VEC_VWW          = "b101100".U // 
+    def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
+    def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
+    def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U

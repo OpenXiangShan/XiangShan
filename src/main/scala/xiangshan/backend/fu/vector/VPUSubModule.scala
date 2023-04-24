@@ -32,6 +32,7 @@ abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends Fun
   val vxsat = IO(Output(UInt(1.W)))
   val needReverse = Wire(Bool())
   val needClearMask = Wire(Bool())
+  val src1Sew = Wire(UInt(2.W))
 
   // rename signal
   val in = io.in.bits
@@ -39,9 +40,11 @@ abstract class VPUDataModule(len: Int = 128)(implicit p: Parameters) extends Fun
   val vtype = ctrl.vconfig.vtype
 
   // for generate src1 and src2
-  val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, vtype.vsew, ctrl.imm))).asUInt
+  src1Sew := vtype.vsew(1,0)
+  private val imm = VecInit(Seq.fill(VLEN/XLEN)(VecImmExtractor(ctrl.selImm, src1Sew, ctrl.imm))).asUInt
+  private val src1 = VecExtractor(src1Sew, io.in.bits.src(0))
   val _vs1 = Mux(SrcType.isImm(ctrl.srcType(0)), imm,
-             Mux(in.uop.ctrl.srcType(0) === SrcType.vp, io.in.bits.src(0), VecExtractor(vtype.vsew, io.in.bits.src(0))))
+             Mux(in.uop.ctrl.srcType(0) === SrcType.vp, io.in.bits.src(0), src1))
   val _vs2 = in.src(1)
   // generate src1 and src2
   val vs1 = Mux(needReverse, _vs2, _vs1)

@@ -90,6 +90,15 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     "b010".U -> 10.U,
     "b011".U -> 36.U
   ))
+  val numOfUopVrgather = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(log2Up(maxNumOfUop+1).W), Array(
+    "b001".U -> 4.U,
+    "b010".U -> 16.U,
+    "b011".U -> 64.U
+  ))
+  val numOfUopVrgatherei16 = Mux((!simple.io.vconfig.vtype.vsew.orR()) && (simple.io.vconfig.vtype.vlmul =/= "b011".U), 
+                                  Cat(numOfUopVrgather, 0.U(1.W)), 
+                                  numOfUopVrgather
+                                )
   //number of uop
   val numOfUop = MuxLookup(typeOfDiv, 1.U(log2Up(maxNumOfUop+1).W), Array(
     UopDivType.VEC_0XV         -> 2.U,
@@ -120,6 +129,9 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
     UopDivType.VEC_MVV         -> (Cat(lmul, 0.U(1.W)) -1.U),
     UopDivType.VEC_M0X_VFIRST  -> 2.U,
     UopDivType.VEC_VWW         -> Cat(lmul, 0.U(1.W)),
+    UopDivType.VEC_RGATHER     -> numOfUopVrgather,
+    UopDivType.VEC_RGATHER_VX  -> (numOfUopVrgather +& 1.U),
+    UopDivType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
   ))
 
   val src1 = Cat(0.U(1.W), ctrl_flow.instr(19, 15))
@@ -845,6 +857,162 @@ class DecodeUnitComp(maxNumOfUop : Int)(implicit p : Parameters) extends XSModul
         csBundle(numOfUop-1.U).ctrl.lsrc(0) := src1
         csBundle(numOfUop-1.U).ctrl.lsrc(2) := dest
         csBundle(numOfUop-1.U).ctrl.ldest := dest
+      }
+    }
+
+    is(UopDivType.VEC_RGATHER) {
+      def genCsBundle_VEC_RGATHER(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            // csBundle(i * len + j).ctrl.srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).ctrl.srcType(1) := SrcType.vp
+            // csBundle(i * len + j).ctrl.srcType(2) := SrcType.vp
+            csBundle(i * len + j).ctrl.lsrc(0) := src1 + i.U
+            csBundle(i * len + j).ctrl.lsrc(1) := src2 + j.U
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j - 1).U
+            csBundle(i * len + j).ctrl.lsrc(2) := vd_old
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j).ctrl.ldest := vd
+            csBundle(i * len + j).ctrl.uopIdx := (i * len + j).U
+          }
+      }
+      switch(simple.io.vconfig.vtype.vlmul) {
+        is("b001".U ){
+          genCsBundle_VEC_RGATHER(2)
+        }
+
+        is("b010".U ){
+          genCsBundle_VEC_RGATHER(4)
+        }
+
+        is("b011".U ){
+          genCsBundle_VEC_RGATHER(8)
+        }
+      }
+    }
+
+    is(UopDivType.VEC_RGATHER_VX) {
+      def genCsBundle_RGATHER_VX(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            csBundle(i * len + j + 1).ctrl.srcType(0) := SrcType.fp
+            // csBundle(i * len + j + 1).ctrl.srcType(1) := SrcType.vp
+            // csBundle(i * len + j + 1).ctrl.srcType(2) := SrcType.vp
+            csBundle(i * len + j + 1).ctrl.lsrc(0) := FP_TMP_REG_MV.U
+            csBundle(i * len + j + 1).ctrl.lsrc(1) := src2 + j.U
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j - 1).U
+            csBundle(i * len + j + 1).ctrl.lsrc(2) := vd_old
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j + 1).ctrl.ldest := vd
+            csBundle(i * len + j + 1).ctrl.uopIdx := (i * len + j).U
+          }
+      }
+
+      // FMV.D.X
+      csBundle(0).ctrl.srcType(0) := SrcType.reg
+      csBundle(0).ctrl.srcType(1) := SrcType.imm
+      csBundle(0).ctrl.lsrc(1) := 0.U
+      csBundle(0).ctrl.ldest := FP_TMP_REG_MV.U
+      csBundle(0).ctrl.fuType := FuType.i2f
+      csBundle(0).ctrl.rfWen := false.B
+      csBundle(0).ctrl.fpWen := true.B
+      csBundle(0).ctrl.vecWen := false.B
+      csBundle(0).ctrl.fpu.isAddSub := false.B
+      csBundle(0).ctrl.fpu.typeTagIn := FPU.D
+      csBundle(0).ctrl.fpu.typeTagOut := FPU.D
+      csBundle(0).ctrl.fpu.fromInt := true.B
+      csBundle(0).ctrl.fpu.wflags := false.B
+      csBundle(0).ctrl.fpu.fpWen := true.B
+      csBundle(0).ctrl.fpu.div := false.B
+      csBundle(0).ctrl.fpu.sqrt := false.B
+      csBundle(0).ctrl.fpu.fcvt := false.B
+
+      switch(simple.io.vconfig.vtype.vlmul) {
+        is("b000".U ){
+          genCsBundle_RGATHER_VX(1)
+        }
+
+        is("b001".U ){
+          genCsBundle_RGATHER_VX(2)
+        }
+
+        is("b010".U ){
+          genCsBundle_RGATHER_VX(4)
+        }
+
+        is("b011".U ){
+          genCsBundle_RGATHER_VX(8)
+        }
+      }
+    }
+
+    is(UopDivType.VEC_RGATHEREI16) {
+      def genCsBundle_VEC_RGATHEREI16_SEW8(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old0 = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j*2-1).U
+            val vd0 = (VECTOR_TMP_REG_LMUL + j*2 ).U
+            // csBundle(i * len + j).ctrl.srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).ctrl.srcType(1) := SrcType.vp
+            // csBundle(i * len + j).ctrl.srcType(2) := SrcType.vp
+            csBundle((i * len + j)*2+0).ctrl.lsrc(0) := src1 + (i*2+0).U
+            csBundle((i * len + j)*2+0).ctrl.lsrc(1) := src2 + j.U
+            csBundle((i * len + j)*2+0).ctrl.lsrc(2) := vd_old0
+            csBundle((i * len + j)*2+0).ctrl.ldest := vd0
+            csBundle((i * len + j)*2+0).ctrl.uopIdx := ((i * len + j)*2+0).U
+
+            val vd_old1 = (VECTOR_TMP_REG_LMUL + j*2).U
+            val vd1 = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j*2+1 ).U
+            csBundle((i * len + j)*2+1).ctrl.lsrc(0) := src1 + (i*2+1).U
+            csBundle((i * len + j)*2+1).ctrl.lsrc(1) := src2 + j.U
+            csBundle((i * len + j)*2+1).ctrl.lsrc(2) := vd_old1
+            csBundle((i * len + j)*2+1).ctrl.ldest := vd1
+            csBundle((i * len + j)*2+1).ctrl.uopIdx := ((i * len + j)*2+1).U
+          }
+      }
+      def genCsBundle_VEC_RGATHEREI16(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j-1).U
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            // csBundle(i * len + j).ctrl.srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).ctrl.srcType(1) := SrcType.vp
+            // csBundle(i * len + j).ctrl.srcType(2) := SrcType.vp
+            csBundle(i * len + j).ctrl.lsrc(0) := src1 + i.U
+            csBundle(i * len + j).ctrl.lsrc(1) := src2 + j.U
+            csBundle(i * len + j).ctrl.lsrc(2) := vd_old
+            csBundle(i * len + j).ctrl.ldest := vd
+            csBundle(i * len + j).ctrl.uopIdx := (i * len + j).U
+          }
+      }
+      switch(simple.io.vconfig.vtype.vlmul) {
+        is("b000".U ){
+          when(!simple.io.vconfig.vtype.vsew.orR()){
+            genCsBundle_VEC_RGATHEREI16_SEW8(1)
+          } .otherwise{
+            genCsBundle_VEC_RGATHEREI16(1)
+          }
+        }
+
+        is("b001".U) {
+          when(!simple.io.vconfig.vtype.vsew.orR()) {
+            genCsBundle_VEC_RGATHEREI16_SEW8(2)
+          }.otherwise {
+            genCsBundle_VEC_RGATHEREI16(2)
+          }
+        }
+
+        is("b010".U) {
+          when(!simple.io.vconfig.vtype.vsew.orR()) {
+            genCsBundle_VEC_RGATHEREI16_SEW8(4)
+          }.otherwise {
+            genCsBundle_VEC_RGATHEREI16(4)
+          }
+        }
+
+        is("b011".U) {
+            genCsBundle_VEC_RGATHEREI16(8)
+        }
       }
     }
   }
