@@ -80,14 +80,12 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val update_way_mask = io.write_way_mask.getOrElse(full_mask)
 
   // write data on every request
-  replacer_touch_ways(0).valid := false.B // Default false
-  replacer_touch_ways(0).bits := 0.U
   when (io.wen) {
     val data_write_idx = Mux(hit, hit_idx, enq_idx)
     data_mem.write(data_write_idx, io.write_data, update_way_mask)
-    replacer_touch_ways(0).valid := true.B
-    replacer_touch_ways(0).bits := data_write_idx
   }
+  replacer_touch_ways(0).valid := io.wen
+  replacer_touch_ways(0).bits := Mux(hit, hit_idx, enq_idx)
   replacer.access(replacer_touch_ways)
 
   // update valids
