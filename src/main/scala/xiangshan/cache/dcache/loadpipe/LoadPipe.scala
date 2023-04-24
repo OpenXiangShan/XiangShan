@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utility.ParallelPriorityMux
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
 
