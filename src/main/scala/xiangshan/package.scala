@@ -789,7 +789,11 @@ package object xiangshan {
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
+  // indicates where the memory access request comes from
+  // a dupliacte of this is in HuanCun.common
   object MemReqSource extends Enumeration {
+    val NoWhere = Value("NoWhere")
+
     val CPUInst = Value("CPUInst")
     val CPUData = Value("CPUData")
     val L1InstPrefetch = Value("L1InstPrefetch")
@@ -797,6 +801,8 @@ package object xiangshan {
     val PTW = Value("PTW")
     val L2Prefetch = Value("L2Prefetch")
     val ReqSourceCount = Value("ReqSourceCount")
+
+    val reqSourceBits = log2Ceil(ReqSourceCount.id)
   }
 
   object TopDownCounters extends Enumeration {
