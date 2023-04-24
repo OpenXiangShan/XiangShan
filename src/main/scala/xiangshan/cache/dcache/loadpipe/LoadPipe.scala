@@ -412,7 +412,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // timing is worse than !cfg.updateReplaceOn2ndmiss
     io.replace_access.valid := RegNext(RegNext(
       RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
-      !s2_nack_no_mshr
+      !s2_nack_no_mshr &&
+      // replacement is updated on 2nd miss only when this req is firstly issued
+      (!s2_miss_merged || s2_req.isFirstIssue)
     )
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
     io.replace_access.bits.way := RegNext(
