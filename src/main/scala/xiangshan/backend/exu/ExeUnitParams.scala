@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.datapath.WbConfig.{FpWB, IntWB, WbConfig}
+import xiangshan.backend.datapath.WbConfig.{VfWB, IntWB, WbConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
 
@@ -103,9 +103,9 @@ case class ExeUnitParams(
     }
   }
 
-  def getFpWBPort = {
+  def getVfWBPort = {
     wbPortConfigs.collectFirst {
-      case x: FpWB => x
+      case x: VfWB => x
     }
   }
 

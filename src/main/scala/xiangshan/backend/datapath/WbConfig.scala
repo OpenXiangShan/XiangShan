@@ -31,15 +31,7 @@ object WbConfig {
     override def numPreg: Int = 160
   }
 
-  case class FpWB(
-    port    : Int = -1,
-    priority: Int = Int.MaxValue,
-  ) extends PregWB {
-    def dataCfg: DataConfig = FpData()
-    override def numPreg: Int = 160
-  }
-
-  case class VecWB(
+  case class VfWB(
     port    : Int = -1,
     priority: Int = Int.MaxValue,
   ) extends PregWB {
