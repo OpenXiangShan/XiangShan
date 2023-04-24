@@ -42,7 +42,14 @@ class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
       addr, param, voluntary, hasData)
   }
 }
+class WbPerfAccExtr extends Bundle {
+  val wb_release = Bool()
+  val wb_probe_resp = Bool()
+  val wb_probe_ttob_fix = Bool()
+  val penalty_blocked_by_channel_C = Bool()
+  val penalty_waiting_for_channel_D = Bool()
 
+}
 class WritebackReqData(implicit p: Parameters) extends DCacheBundle {
   val data = UInt((cfg.blockBytes * 8).W)
 }
@@ -141,6 +148,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val probe_ttob_check_req = Flipped(ValidIO(new ProbeToBCheckReq))
     val probe_ttob_check_resp = ValidIO(new ProbeToBCheckResp)
+
+    val debug_perfAccExtr = Output(new WbPerfAccExtr)
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
@@ -522,6 +531,12 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   assert(!RegNext(!s_data_merge && !s_data_override))
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+  io.debug_perfAccExtr.wb_release := state === s_release_req && release_done && req.voluntary
+  io.debug_perfAccExtr.wb_probe_resp := state_dup_0 === s_release_req && release_done && !req.voluntary
+  io.debug_perfAccExtr.wb_probe_ttob_fix := io.probe_ttob_check_resp.valid && io.probe_ttob_check_resp.bits.toN
+  io.debug_perfAccExtr.penalty_blocked_by_channel_C := io.mem_release.valid && !io.mem_release.ready
+  io.debug_perfAccExtr.penalty_waiting_for_channel_D := io.mem_grant.ready && !io.mem_grant.valid && state_dup_1 === s_release_resp
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
@@ -650,6 +665,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
+
+
+  XSPerfAccumulate("total_wb_release", PopCount(entries.map(_.io.debug_perfAccExtr.wb_release)))
+  XSPerfAccumulate("total_wb_probe_resp", PopCount(entries.map(_.io.debug_perfAccExtr.wb_probe_resp)))
+  XSPerfAccumulate("total_wb_probe_ttob_fix", PopCount(entries.map(_.io.debug_perfAccExtr.wb_probe_ttob_fix)))
+  XSPerfAccumulate("total_penalty_blocked_by_channel_C", PopCount(entries.map(_.io.debug_perfAccExtr.penalty_blocked_by_channel_C)))
+  XSPerfAccumulate("penalty_waiting_for_channel_D", PopCount(entries.map(_.io.debug_perfAccExtr.penalty_waiting_for_channel_D)))
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(

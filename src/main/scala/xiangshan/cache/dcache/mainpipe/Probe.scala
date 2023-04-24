@@ -45,6 +45,13 @@ class ProbeResp(implicit p: Parameters) extends DCacheBundle {
   val id = UInt(log2Up(cfg.nProbeEntries).W)
 }
 
+class PbPerfAccExtr extends Bundle {
+  val probe_req = Bool()
+  val probe_penalty = Bool()
+  val probe_penalty_blocked_by_lrsc = Bool()
+  val probe_penalty_blocked_by_pipeline = Bool()
+}
+
 class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new ProbeReq))
@@ -55,6 +62,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
 
     // the block we are probing
     val block_addr  = Output(Valid(UInt()))
+
+    val debug_perfAccExtr = Output(new PbPerfAccExtr)
   })
 
   val s_invalid :: s_pipe_req :: s_wait_resp :: Nil = Enum(3)
@@ -119,6 +128,11 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
       state := s_invalid
     }
   }
+///////////////////////////////////////////////////////////////////////////
+  io.debug_perfAccExtr.probe_req := state === s_invalid && io.req.fire()
+  io.debug_perfAccExtr.probe_penalty := state === s_invalid && io.req.fire()
+  io.debug_perfAccExtr.probe_penalty_blocked_by_lrsc := state === s_pipe_req && io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr)
+  io.debug_perfAccExtr.probe_penalty_blocked_by_pipeline := state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready
 
   // perfoemance counters
   XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
@@ -230,7 +244,11 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   }
-
+//////////////////////////////////////////////////////////////////////////////////////////
+  XSPerfAccumulate("total_probe_req", PopCount(entries.map(_.io.debug_perfAccExtr.probe_req)))
+  XSPerfAccumulate("total_probe_penalty", PopCount(entries.map(_.io.debug_perfAccExtr.probe_penalty)))
+  XSPerfAccumulate("total_probe_penalty_blocked_by_lrsc", PopCount(entries.map(_.io.debug_perfAccExtr.probe_penalty_blocked_by_lrsc)))
+  XSPerfAccumulate("total_probe_penalty_blocked_by_pipeline", PopCount(entries.map(_.io.debug_perfAccExtr.probe_penalty_blocked_by_pipeline)))
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
     ("dcache_probq_req      ", io.pipe_req.fire()),

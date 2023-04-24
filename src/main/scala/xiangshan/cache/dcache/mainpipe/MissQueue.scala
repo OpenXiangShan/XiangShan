@@ -113,6 +113,17 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out
   }
 }
+class PerfAccExtr extends Bundle {
+
+  val primary_fire = Bool()
+  val secondary_fire = Bool()
+  val load_miss = Bool()
+  val main_pipe_penalty = Bool()
+  val penalty_blocked_by_channel_A = Bool()
+  val penalty_waiting_for_channel_D = Bool()
+  val penalty_waiting_for_channel_E = Bool()
+  val penalty_from_grant_to_refill = Bool()
+}
 
 class MissResp(implicit p: Parameters) extends DCacheBundle {
   val id = UInt(log2Up(cfg.nMissEntries).W)
@@ -164,7 +175,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val main_pipe_resp = Input(Bool())
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
-
+    val debug_perf_acc = Output(new PerfAccExtr())
     val debug_early_replace = ValidIO(new Bundle() {
       // info about the block that has been replaced
       val idx = UInt(idxBits.W) // vaddr
@@ -553,6 +564,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
 
+  io.debug_perf_acc.primary_fire := primary_fire
+  io.debug_perf_acc.secondary_fire := secondary_fire
+  io.debug_perf_acc.load_miss := should_refill_data && BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
+  io.debug_perf_acc.main_pipe_penalty := BoolStopWatch(io.main_pipe_req.fire(), io.main_pipe_resp)
+  io.debug_perf_acc.penalty_blocked_by_channel_A := io.mem_acquire.valid && !io.mem_acquire.ready
+  io.debug_perf_acc.penalty_waiting_for_channel_D := s_acquire && !w_grantlast && !io.mem_grant.valid
+  io.debug_perf_acc.penalty_waiting_for_channel_E := io.mem_finish.valid && !io.mem_finish.ready
+  io.debug_perf_acc.penalty_from_grant_to_refill := !w_refill_resp && w_grantlast
+
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
   XSPerfAccumulate("load_miss_penalty_to_use",
@@ -762,6 +782,21 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     difftest.io.addr := io.refill_to_ldq.bits.addr
     difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
   }
+
+
+  val debug_primary_fire = Cat(entries.map(_.io.debug_perf_acc.primary_fire)).orR
+  val debug_secondary_fire = Cat(entries.map(_.io.debug_perf_acc.secondary_fire)).orR
+
+
+  XSPerfAccumulate("total_miss_req_primary", debug_primary_fire) //allocate current miss queue entry for a miss req
+  XSPerfAccumulate("total_miss_req_merged", debug_secondary_fire) // merge miss req to current miss queue entry
+  XSPerfAccumulate("total_load_miss_penalty_to_use", PopCount(entries.map(_.io.debug_perf_acc.load_miss)))
+  XSPerfAccumulate("total_main_pipe_penalty", PopCount(entries.map(_.io.debug_perf_acc.main_pipe_penalty)))
+  XSPerfAccumulate("total_penalty_blocked_by_channel_A", PopCount(entries.map(_.io.debug_perf_acc.penalty_blocked_by_channel_A)))
+  XSPerfAccumulate("total_penalty_waiting_for_channel_D", PopCount(entries.map(_.io.debug_perf_acc.penalty_waiting_for_channel_D)))
+  XSPerfAccumulate("total_penalty_waiting_for_channel_E", PopCount(entries.map(_.io.debug_perf_acc.penalty_waiting_for_channel_E)))
+  XSPerfAccumulate("total_penalty_from_grant_to_refill", PopCount(entries.map(_.io.debug_perf_acc.penalty_from_grant_to_refill)))
+  XSPerfAccumulate("total_soft_prefetch_number", debug_primary_fire && io.req.bits.source === SOFT_PREFETCH.U)
 
   // Perf count
   XSPerfAccumulate("miss_req", io.req.fire())
