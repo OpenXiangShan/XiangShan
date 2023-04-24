@@ -356,8 +356,8 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg), Seq(IntWB(5, 0), VecWB(4, 0)), Seq(Seq(IntRD(8, 0)))),
-        ExeUnitParams(Seq(LduCfg), Seq(IntWB(6, 0), VecWB(5, 0)), Seq(Seq(IntRD(9, 0)))),
+        ExeUnitParams(Seq(LduCfg), Seq(IntWB(5, 0), VfWB(4, 0)), Seq(Seq(IntRD(8, 0)))),
+        ExeUnitParams(Seq(LduCfg), Seq(IntWB(6, 0), VfWB(5, 0)), Seq(Seq(IntRD(9, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(StaCfg, MouCfg), Seq(IntWB(5, 1)), Seq(Seq(IntRD(10, 0)))),
