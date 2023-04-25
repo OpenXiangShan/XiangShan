@@ -129,10 +129,17 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  LoadQueueNWriteBanks: Int = 8,
+  LoadQueueFlagSize: Int = 80,
+  LoadQueueRARSize: Int = 80,
+  LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  RollbackGroupSize: Int = 8,
+  LoadQueueReplaySize: Int = 80,
+  LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
-  StoreQueueNWriteBanks: Int = 8,
+  StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
+  StoreQueueForwardWithMask: Boolean = true,
+  StoreWaitCyclePow2: Int = 4,
+  StoreHasHigherPriority: Boolean = false,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
@@ -390,10 +397,17 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueFlagSize = coreParams.LoadQueueFlagSize
+  val LoadQueueRARSize = coreParams.LoadQueueRARSize
+  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  val RollbackGroupSize = coreParams.RollbackGroupSize
+  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
+  val StoreWaitCyclePow2 = coreParams.StoreWaitCyclePow2
+  val StoreHasHigherPriority = coreParams.StoreHasHigherPriority
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
@@ -463,7 +477,7 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
-
+  val LFSTEnable = false
   val loadExuConfigs = coreParams.loadExuConfigs
   val storeExuConfigs = coreParams.storeExuConfigs
 

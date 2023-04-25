@@ -18,7 +18,7 @@ import xiangshan.backend.decode.DecodeUnit
 
 object DecodeMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
     // //val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     // If Complex Params are needed, wrap it with a Top Module to do dirty works,
     // and use "chisel3.aop.Select.collectDeep[ModuleWanted](WrapperModule){case a: ModuleWanted => a}.head.Params"
