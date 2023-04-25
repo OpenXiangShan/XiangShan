@@ -460,7 +460,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       b.confidence := 0.U
       b.has_been_hit := false.B
     }
-    r_buffer_hit_s2 := 0.U
+    (0 until PortNumber).foreach(i => r_buffer_hit_s2(i) := 0.U )
     r_rvalid_s2 := 0.U
     curr_move_ptr := 0.U
     curr_hit_ptr := 0.U
