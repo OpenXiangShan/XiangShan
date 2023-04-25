@@ -32,6 +32,11 @@ class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
 class IBufferIO(implicit p: Parameters) extends XSBundle {
   val flush = Input(Bool())
   val ControlRedirect = Input(Bool())
+  val ControlBTBMissBubble = Input(Bool())
+  val TAGEMissBubble = Input(Bool())
+  val SCMissBubble = Input(Bool())
+  val ITTAGEMissBubble = Input(Bool())
+  val RASMissBubble = Input(Bool())
   val MemVioRedirect = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchToIBuffer))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
@@ -99,7 +104,17 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   topdown_stage := io.in.bits.topdown_info
   when (io.flush) {
     when (io.ControlRedirect) {
-      topdown_stage.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      when (io.ControlBTBMissBubble) {
+        topdown_stage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      } .elsewhen (io.TAGEMissBubble) {
+        topdown_stage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+      } .elsewhen (io.SCMissBubble) {
+        topdown_stage.reasons(TopDownCounters.SCMissBubble.id) := true.B
+      } .elsewhen (io.ITTAGEMissBubble) {
+        topdown_stage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+      } .elsewhen (io.RASMissBubble) {
+        topdown_stage.reasons(TopDownCounters.RASMissBubble.id) := true.B
+      }
     } .elsewhen (io.MemVioRedirect) {
       topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
     } .otherwise {
@@ -257,17 +272,23 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val ibuffer_IDWidth_hvButNotFull = afterInit && (validEntries =/= 0.U) && (validEntries < DecodeWidth.U) && !headBubble
   XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", ibuffer_IDWidth_hvButNotFull)
-  // XSPerfAccumulate("ICacheMissBubble", Mux(matchBubbleVec(TopDownCounters.ICacheMissBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("ITLBMissBubble", Mux(matchBubbleVec(TopDownCounters.ITLBMissBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("ControlRedirectBubble", Mux(matchBubbleVec(TopDownCounters.ControlRedirectBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("MemVioRedirectBubble", Mux(matchBubbleVec(TopDownCounters.MemVioRedirectBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("OtherRedirectBubble", Mux(matchBubbleVec(TopDownCounters.OtherRedirectBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("BTBMissBubble", Mux(matchBubbleVec(TopDownCounters.BTBMissBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("OverrideBubble", Mux(matchBubbleVec(TopDownCounters.OverrideBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("FtqUpdateBubble", Mux(matchBubbleVec(TopDownCounters.FtqUpdateBubble.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("FtqFullStall", Mux(matchBubbleVec(TopDownCounters.FtqFullStall.id), deqWasteCount, 0.U))
-  // XSPerfAccumulate("FetchFragmentBubble", 
-  // Mux(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR, 0.U, deqWasteCount))
+  /*
+  XSPerfAccumulate("ICacheMissBubble", Mux(matchBubbleVec(TopDownCounters.ICacheMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("ITLBMissBubble", Mux(matchBubbleVec(TopDownCounters.ITLBMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("ControlRedirectBubble", Mux(matchBubbleVec(TopDownCounters.ControlRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("MemVioRedirectBubble", Mux(matchBubbleVec(TopDownCounters.MemVioRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("OtherRedirectBubble", Mux(matchBubbleVec(TopDownCounters.OtherRedirectBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("BTBMissBubble", Mux(matchBubbleVec(TopDownCounters.BTBMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("OverrideBubble", Mux(matchBubbleVec(TopDownCounters.OverrideBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FtqUpdateBubble", Mux(matchBubbleVec(TopDownCounters.FtqUpdateBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FtqFullStall", Mux(matchBubbleVec(TopDownCounters.FtqFullStall.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("FetchFragmentBubble", 
+  Mux(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR, 0.U, deqWasteCount))
+  XSPerfAccumulate("TAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.TAGEMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("SCMissBubble", Mux(matchBubbleVec(TopDownCounters.SCMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("ITTAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.ITTAGEMissBubble.id), deqWasteCount, 0.U))
+  XSPerfAccumulate("RASMissBubble", Mux(matchBubbleVec(TopDownCounters.RASMissBubble.id), deqWasteCount, 0.U))
+  */
 
   val perfEvents = Seq(
     ("IBuffer_Flushed  ", io.flush                                                                     ),

@@ -153,14 +153,42 @@ class NewIFU(implicit p: Parameters) extends XSModule
     topdown_stages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
   }
   io.toIbuffer.bits.topdown_info := topdown_stages(numOfStage - 1)
-  when (fromFtq.redirect.valid) {
+  when (fromFtq.topdown_redirect.valid) {
     // only redirect from backend, IFU redirect itself is handled elsewhere
-    when (fromFtq.redirect.bits.debugIsCtrl) {
+    when (fromFtq.topdown_redirect.bits.debugIsCtrl) {
+      /*
       for (i <- 0 until numOfStage) {
         topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
       }
       io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
-    } .elsewhen (fromFtq.redirect.bits.debugIsMemVio) {
+      */
+      when (fromFtq.topdown_redirect.bits.ControlBTBMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.TAGEMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.SCMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.ITTAGEMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.RASMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+      }
+    } .elsewhen (fromFtq.topdown_redirect.bits.debugIsMemVio) {
       for (i <- 0 until numOfStage) {
         topdown_stages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
       }

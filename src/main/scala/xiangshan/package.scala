@@ -810,7 +810,11 @@ package object xiangshan {
     // frontend
     val OverrideBubble = Value("OverrideBubble")
     val FtqUpdateBubble = Value("FtqUpdateBubble")
-    val ControlRedirectBubble = Value("ControlRedirectBubble")
+    // val ControlRedirectBubble = Value("ControlRedirectBubble")
+    val TAGEMissBubble = Value("TAGEMissBubble")
+    val SCMissBubble = Value("SCMissBubble")
+    val ITTAGEMissBubble = Value("ITTAGEMissBubble")
+    val RASMissBubble = Value("RASMissBubble")
     val MemVioRedirectBubble = Value("MemVioRedirectBubble")
     val OtherRedirectBubble = Value("OtherRedirectBubble")
     val FtqFullStall = Value("FtqFullStall")

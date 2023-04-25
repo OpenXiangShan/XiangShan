@@ -71,6 +71,11 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
   val FlushMemVioRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
+  val FlushControlBTBMiss = Wire(Bool())
+  val FlushTAGEMiss = Wire(Bool())
+  val FlushSCMiss = Wire(Bool())
+  val FlushITTAGEMiss = Wire(Bool())
+  val FlushRASMiss = Wire(Bool())
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -154,6 +159,18 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   ibuffer.io.ControlRedirect := FlushControlRedirect
   ibuffer.io.MemVioRedirect := FlushMemVioRedirect
+  ibuffer.io.ControlBTBMissBubble := FlushControlBTBMiss
+  ibuffer.io.TAGEMissBubble := FlushTAGEMiss
+  ibuffer.io.SCMissBubble := FlushSCMiss
+  ibuffer.io.ITTAGEMissBubble := FlushITTAGEMiss
+  ibuffer.io.RASMissBubble := FlushRASMiss
+
+  FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
+  FlushTAGEMiss := ftq.io.TAGEMissBubble
+  FlushSCMiss := ftq.io.SCMissBubble
+  FlushITTAGEMiss := ftq.io.ITTAGEMissBubble
+  FlushRASMiss := ftq.io.RASMissBubble
+
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
   dontTouch(io.backend.stallReason)

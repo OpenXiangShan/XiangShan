@@ -89,7 +89,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val histPtr = new CGHPtr
   val specCnt = Vec(numBr, UInt(10.W))
   // need pipeline update
-  val br_hit = Bool()
+  val br_hit = Bool() // if in ftb entry
+  val jr_hit = Bool() // if in ftb entry
+  val sc_hit = Bool() // if used in ftb entry, invalid if !br_hit
   val predTaken = Bool()
   val target = UInt(VAddrBits.W)
   val taken = Bool()

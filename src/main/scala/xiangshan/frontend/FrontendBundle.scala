@@ -24,21 +24,7 @@ import xiangshan.frontend.icache._
 import utils._
 import utility._
 import scala.math._
-
-object FrontendTopDown {
-  def OverrideBubble = 0
-  def FtqUpdateBubble = 1
-  def ControlRedirectBubble = 2
-  def MemVioRedirectBubble = 3
-  def OtherRedirectBubble = 4
-  def FtqFullStall = 5
-  def ICacheMissBubble = 6
-  def ITLBMissBubble = 7
-  def BTBMissBubble = 8
-  def FetchFragmentationStall = 9
-  def FetchStallReason = 10
-  def FrontendTopDownSize = 11
-}
+import java.util.ResourceBundle.Control
 
 class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val reasons = Vec(TopDownCounters.NumStallReasons.id, Bool())
@@ -671,6 +657,12 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   require(isInstanceOf[Redirect])
   val BTBMissBubble = Bool()
   def ControlRedirectBubble = debugIsCtrl
+  // if mispred br not in ftb, count as BTB miss
+  def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
+  def TAGEMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
+  def SCMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
+  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
+  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
   def MemVioRedirectBubble = debugIsMemVio
   def OtherRedirectBubble = !debugIsCtrl && !debugIsMemVio
 

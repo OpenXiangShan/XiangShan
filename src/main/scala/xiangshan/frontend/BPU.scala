@@ -25,6 +25,7 @@ import utils._
 import utility._
 
 import scala.math.min
+import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
   val MaxMetaLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
@@ -251,6 +252,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // following can only happen on s1
   val controlRedirectBubble = Wire(Bool())
+  val ControlBTBMissBubble = Wire(Bool())
+  val TAGEMissBubble = Wire(Bool())
+  val SCMissBubble = Wire(Bool())
+  val ITTAGEMissBubble = Wire(Bool())
+  val RASMissBubble = Wire(Bool())
+
   val memVioRedirectBubble = Wire(Bool())
   val otherRedirectBubble = Wire(Bool())
   val btbMissBubble = Wire(Bool())
@@ -710,6 +717,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // TODO: signals for memVio and other Redirects
   controlRedirectBubble := do_redirect.valid && do_redirect.bits.ControlRedirectBubble
+  ControlBTBMissBubble := do_redirect.bits.ControlBTBMissBubble
+  TAGEMissBubble := do_redirect.bits.TAGEMissBubble
+  SCMissBubble := do_redirect.bits.SCMissBubble
+  ITTAGEMissBubble := do_redirect.bits.ITTAGEMissBubble
+  RASMissBubble := do_redirect.bits.RASMissBubble
+
   memVioRedirectBubble := do_redirect.valid && do_redirect.bits.MemVioRedirectBubble
   otherRedirectBubble := do_redirect.valid && do_redirect.bits.OtherRedirectBubble
   btbMissBubble := do_redirect.valid && do_redirect.bits.BTBMissBubble
@@ -723,9 +736,32 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // topdown handling logic here
   when (controlRedirectBubble) {
+    /*
     for (i <- 0 until numOfStage)
       topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
     io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+    */
+    when (ControlBTBMissBubble) {
+      for (i <- 0 until numOfStage)
+        topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    } .elsewhen (TAGEMissBubble) {
+      for (i <- 0 until numOfStage)
+        topdown_stages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+    } .elsewhen (SCMissBubble) {
+      for (i <- 0 until numOfStage)
+        topdown_stages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
+      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+    } .elsewhen (ITTAGEMissBubble) {
+      for (i <- 0 until numOfStage)
+        topdown_stages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+    } .elsewhen (RASMissBubble) {
+      for (i <- 0 until numOfStage)
+        topdown_stages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
+      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+    }
   }
   when (memVioRedirectBubble) {
     for (i <- 0 until numOfStage)
