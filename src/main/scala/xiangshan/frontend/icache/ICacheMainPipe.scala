@@ -256,6 +256,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s1 control */
 
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = false.B, lastFlush = false.B)
+  val s1_resend_can_go = Wire(Bool())
+  val replay_read_valid = Wire(Bool())
+  val s1_wpu_pred_fail_and_real_hit_vec = Wire(Vec(PortNumber, Bool()))
+  val s1_wpu_pred_fail_and_real_hit = Wire(Bool())
 
   val s1_req_vaddr   = RegEnable(s0_final_vaddr, s0_fire)
   val s1_req_vsetIdx = RegEnable(s0_final_vsetIdx, s0_fire)
@@ -295,8 +299,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val tlbRespValid = VecInit((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i)))
   val tlbRespAllValid = Cat(tlbRespValid).andR
-  s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && s2_ready
+  s1_ready := s2_ready && tlbRespAllValid && s1_resend_can_go || !s1_valid
+  s1_fire  := s1_valid && tlbRespAllValid && s1_resend_can_go && s2_ready
 
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
@@ -317,23 +321,26 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_bank_miss         = VecInit(Seq(!s1_tag_match(0) && s1_valid && !tlbExcp(0), !s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcp(1) ))
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
 
-  val s1_wpu_pred_fail_and_real_hit = VecInit((0 until PortNumber).map{ i =>
-    tlbRespValid(i) && s1_pred_way_en(i)=/=s1_tag_match_vec(i).asUInt && s1_port_hit(i)
-  }).asUInt.orR
-  // TODO lyq: wpu_pred_fail should send to wpu
   for (i <- 0 until PortNumber) {
     wpu.io.lookup_upd(i).valid := s1_valid
     wpu.io.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
     // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
     wpu.io.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
   }
-  // replay data
-  reToData.valid := s1_valid && s1_wpu_pred_fail_and_real_hit && !missSwitchBit
+  // replay read
+  s1_wpu_pred_fail_and_real_hit_vec := VecInit((0 until PortNumber).map{ i =>
+    tlbRespValid(i) && s1_pred_way_en(i)=/=s1_tag_match_vec(i).asUInt && s1_port_hit(i)
+  })
+  s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail_and_real_hit_vec.asUInt.orR
+  s1_resend_can_go := !s1_wpu_pred_fail_and_real_hit || reToData.ready && reToMeta.ready
+  replay_read_valid := s1_valid && s1_wpu_pred_fail_and_real_hit && (!missSwitchBit || missSwitchBit && s2_fire)
+
+  reToData.valid := replay_read_valid
   reToData.bits := s1_toDataBits
   for (i <- 0 until partWayNum) {
     reToData.bits(i).way_en := VecInit(s1_tag_match_vec.map(x=>x.asUInt))
   }
-  reToMeta.valid := s1_valid && s1_wpu_pred_fail_and_real_hit && !missSwitchBit
+  reToMeta.valid := replay_read_valid
   reToMeta.bits := s1_toMetaBits
   // val s1_pred_hit_datas = VecInit(s1_datas.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
 
@@ -394,11 +401,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_req_ptags    = RegEnable(s1_req_ptags, s1_fire)
   val s2_only_first   = RegEnable(s1_only_first, s1_fire)
   val s2_double_line  = RegEnable(s1_double_line, s1_fire)
-  val s2_hit          = RegEnable(s1_hit   , s1_fire)
-  val s2_bank_miss    = RegEnable(s1_bank_miss, s1_fire)
+
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
   val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
   val s2_tag_match_vec = RegEnable(s1_tag_match_vec, s1_fire)
+  val s2_wpu_pred_fail_and_real_hit_vec = RegEnable(s1_wpu_pred_fail_and_real_hit_vec, s1_fire)
   val s2_wpu_pred_fail_and_real_hit = RegEnable(s1_wpu_pred_fail_and_real_hit, s1_fire)
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
@@ -413,11 +420,25 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_re_tag_match_vec = VecInit((0 until PortNumber).map(k => VecInit(s2_re_tag_eq_vec(k).zipWithIndex.map { case (way_tag_eq, w) => way_tag_eq && s2_re_meta_cohs(k)(w).isValid() })))
   val s2_re_tag_match = VecInit(s2_re_tag_match_vec.map(vector => ParallelOR(vector)))
   val s2_re_port_hit = VecInit(Seq(s2_re_tag_match(0) && s2_valid, s2_re_tag_match(1) && s2_valid && s2_double_line))
+  val s2_re_hit = (s2_re_port_hit(0) && s2_re_port_hit(1)) || (!s2_double_line && s2_re_port_hit(0))
   /** selected needed data */
-  val s2_port_hit = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_port_hit, RegEnable(s1_port_hit, s1_fire))
-  val s2_meta_errors = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_meta_errors, RegEnable(s1_meta_errors, s1_fire))
-  val s2_data_errorBits = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_data_errorBits, RegEnable(s1_data_errorBits, s1_fire))
-  val s2_datas = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_datas, RegEnable(s1_datas, s1_fire))
+  val s2_port_hit = Wire(s1_port_hit.cloneType)
+  val s2_meta_errors = Wire(s1_meta_errors.cloneType)
+  val s2_data_errorBits = Wire(s1_data_errorBits.cloneType)
+  val s2_datas = Wire(s1_datas.cloneType)
+  (0 until PortNumber) foreach ( i =>
+    when(s2_wpu_pred_fail_and_real_hit_vec(i)){
+      s2_port_hit(i) := s2_re_port_hit(i)
+      s2_meta_errors(i) := s2_re_meta_errors(i)
+      s2_data_errorBits(i) := s2_re_data_errorBits(i)
+      s2_datas(i) := s2_re_datas(i)
+    }.otherwise{
+      s2_port_hit(i) := RegEnable(s1_port_hit(i), s1_fire)
+      s2_meta_errors(i) := RegEnable(s1_meta_errors(i), s1_fire)
+      s2_data_errorBits(i) := RegEnable(s1_data_errorBits(i), s1_fire)
+      s2_datas(i) := RegEnable(s1_datas(i), s1_fire)
+    }
+  )
 
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */

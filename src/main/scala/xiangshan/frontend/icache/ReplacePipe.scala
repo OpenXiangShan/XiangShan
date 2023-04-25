@@ -142,8 +142,8 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     */  
   
   val r1_valid = generatePipeControl(lastFire = r0_fire, thisFire = r1_fire, thisFlush = false.B, lastFlush = false.B)
-  r1_ready := r2_ready  || !r1_valid
-  r1_fire  := r1_valid && r2_ready
+  r1_ready := reToMeta.ready && reToData.ready && r2_ready  || !r1_valid
+  r1_fire  := r1_valid && r1_ready
 
 
   val r1_req = RegEnable(r0_req, r0_fire)
