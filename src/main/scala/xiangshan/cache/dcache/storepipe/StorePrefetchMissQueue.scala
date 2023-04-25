@@ -36,7 +36,7 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule with H
         val deq = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
     })
     require(StorePipelineWidth == 2)
-    val QueueSize = 64
+    val QueueSize = 32
     val valids = RegInit(VecInit(List.tabulate(QueueSize){_ => false.B}))
     val datas = RegInit(VecInit(List.tabulate(QueueSize){_ => 0.U.asTypeOf(new StorePrefetchReq)}))
     val cancel_mask = Wire(Vec(QueueSize, Bool()))

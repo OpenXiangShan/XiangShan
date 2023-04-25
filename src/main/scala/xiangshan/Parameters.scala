@@ -247,7 +247,7 @@ case class XSCoreParameters
     nMissEntries = 16,
     nProbeEntries = 8,
     nReleaseEntries = 18,
-    nMaxPrefetchEntry = 4,
+    nMaxPrefetchEntry = 6,
   )),
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",

@@ -191,7 +191,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.bits.miss := s1_tlb_miss
 
   // kill dcache write intent request when tlb miss or exception
-  io.s1_kill := io.in.valid && (s1_tlb_miss || s1_exception || s1_mmio)
+  io.s1_kill := (s1_tlb_miss || s1_exception || s1_mmio)
 
   // mmio inst with exception will be writebacked immediately
   // io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
@@ -232,7 +232,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val is_mmio = io.in.bits.mmio || pmp.mmio
 
   // kill dcache write intent request when mmio or exception
-  io.s2_kill := io.in.valid && (is_mmio || s2_exception)
+  io.s2_kill := (is_mmio || s2_exception)
 
   io.in.ready := true.B
   io.out.bits := io.in.bits

@@ -203,7 +203,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
-  val spb = Module(new StorePrefetchBursts())
+  // val spb = Module(new StorePrefetchBursts())
   val lpb = Module(new LoadPrefetchBursts())
 
   val sbuffer_out_s0_fire = Wire(Bool())
@@ -362,11 +362,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
-  for(i <- 0 until EnsbufferWidth) {
-    spb.io.sbuffer_enq(i).valid := io.in(i).fire
-    spb.io.sbuffer_enq(i).bits := DontCare
-    spb.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-  }
+  // for(i <- 0 until EnsbufferWidth) {
+  //   spb.io.sbuffer_enq(i).valid := io.in(i).fire
+  //   spb.io.sbuffer_enq(i).bits := DontCare
+  //   spb.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
+  // }
 
   lpb.io.lq_deq <> io.lq_deq
 
@@ -486,7 +486,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     io.sb_prefetch(i).bits.paddr := Mux(lpb.io.prefetch_req(i).valid, lpb.io.prefetch_req(i).bits.paddr, io.in(i).bits.addr)
     
     lpb.io.prefetch_req(i).ready := io.sb_prefetch(i).ready
-    spb.io.prefetch_req(i).ready := false.B
+    // spb.io.prefetch_req(i).ready := false.B
 
     XSPerfAccumulate(s"sbuffer_lpb${i}_prefetch", io.sb_prefetch(i).fire && lpb.io.prefetch_req(i).valid)
     XSPerfAccumulate(s"sbuffer_commit${i}_prefetch", io.sb_prefetch(i).fire && !lpb.io.prefetch_req(i).valid)

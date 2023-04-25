@@ -670,11 +670,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     when(io.req.bits.isFromLoad) {
       source_except_load_cnt := 0.U
     }.otherwise {
-      source_except_load_cnt := source_except_load_cnt + 1.U
+      when(io.req.bits.isFromStore) {
+        source_except_load_cnt := source_except_load_cnt + 1.U
+      }
     }
   }
   val Threshold = 16
   val memSetPattenDetected = source_except_load_cnt >= Threshold.U
+
+  XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {

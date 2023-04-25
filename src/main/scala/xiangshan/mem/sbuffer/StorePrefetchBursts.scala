@@ -205,10 +205,10 @@ class LoadPrefetchBursts(implicit p: Parameters) extends DCacheModule {
     }
 
     // meta for SPB 
-    val N = BigInt(48)
+    val N = BigInt(15)
     val last_ld_block_addr = RegInit(0.U(VAddrBits.W))
     val saturate_counter = RegInit(0.U(4.W))
-    val load_count = RegInit(0.U(log2Up(N).W))
+    val load_count = RegInit(0.U(6.W))
     val burst_engine = Module(new PrefetchBurstGenerator(is_store = false))
 
     val lq_deq_fire = io.lq_deq.fire
