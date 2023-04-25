@@ -52,6 +52,7 @@ class LoadToLsqSlowIO(implicit p: Parameters) extends XSBundle with HasDCachePar
   val can_forward_full_data = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
   val data_invalid_sq_idx = Output(UInt(log2Ceil(StoreQueueSize).W))
+  val addr_invalid_sq_idx = Output(new SqPtr)
   val replayCarry = Output(new ReplayCarry)
   val miss_mshr_id = Output(UInt(log2Up(cfg.nMissEntries).W))
   val data_in_last_beat = Output(Bool())
@@ -530,6 +531,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
     val pmpResp = Flipped(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val dataInvalidSqIdx = Input(UInt())
+    val addrInvalidSqIdx = Input(new SqPtr)
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val s2_dcache_require_replay = Output(Bool())
@@ -615,6 +617,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
     io.loadViolationQueryResp.bits.have_violation &&
     RegNext(io.csrCtrl.ldld_vio_check_enable)
   val s2_data_invalid = io.lsq.dataInvalid && !s2_ldld_violation && !s2_exception
+  val s2_wait_store = io.in.bits.uop.cf.storeSetHit && 
+                      !io.lsq.issued &&
+                      io.lsq.addrInvalid &&
+                      !s2_mmio &&
+                      !s2_is_prefetch
 
   io.s2_forward_fail := s2_forward_fail
   io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
@@ -765,7 +772,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   // request replay from load replay queue, fast port
   io.replaySlow.valid := io.in.valid && !s2_is_hw_prefetch // hardware prefetch flow should not be reported to load replay queue
   io.replaySlow.tlb_hited := !s2_tlb_miss
-  io.replaySlow.st_ld_check_ok := !needReExecute || s2_is_prefetch // Note: soft prefetch does not care about ld-st dependency
+  io.replaySlow.st_ld_check_ok := !needReExecute || !s2_wait_store || s2_is_prefetch // Note: soft prefetch does not care about ld-st dependency
   if (EnableFastForward) {
     io.replaySlow.cache_no_replay := !s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || fullForward
   }else {
@@ -776,6 +783,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper wi
   io.replaySlow.can_forward_full_data := io.dataForwarded
   io.replaySlow.ld_idx := io.in.bits.uop.lqIdx.value
   io.replaySlow.data_invalid_sq_idx := io.dataInvalidSqIdx
+  io.replaySlow.addr_invalid_sq_idx := io.addrInvalidSqIdx
   io.replaySlow.replayCarry := io.dcacheResp.bits.replayCarry
   io.replaySlow.miss_mshr_id := io.dcacheResp.bits.mshr_id
   io.replaySlow.data_in_last_beat := io.in.bits.paddr(log2Up(refillBytes))
@@ -1023,13 +1031,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2
   load_s2.io.lsq.dataInvalid <> io.lsq.forward.dataInvalid
   load_s2.io.lsq.matchInvalid <> io.lsq.forward.matchInvalid
+  load_s2.io.lsq.addrInvalid <> io.lsq.forward.addrInvalid
+  load_s2.io.lsq.issued <> io.lsq.forward.issued
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.sbuffer.forwardMaskFast <> io.sbuffer.forwardMaskFast // should not be used in load_s2
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
+  load_s2.io.sbuffer.addrInvalid := DontCare // useless
+  load_s2.io.sbuffer.issued := DontCare // useless
   load_s2.io.dataForwarded <> io.lsq.s2_load_data_forwarded
   load_s2.io.dataInvalidSqIdx := io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
+  load_s2.io.addrInvalidSqIdx <> io.lsq.forward.addrInvalidSqIdx // provide addrInvalidSqIdx to make wakeup faster
   load_s2.io.loadViolationQueryResp <> io.lsq.loadViolationQuery.resp
   load_s2.io.csrCtrl <> io.csrCtrl
   load_s2.io.sentFastUop := io.fastUop.valid

@@ -378,6 +378,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val canForward1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask) & allValidVec.asUInt
     val canForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W)) & allValidVec.asUInt
     val needForward = Mux(differentFlag, ~deqMask | forwardMask, deqMask ^ forwardMask)
+    val mdpMatchVec = WireInit(VecInit((0 until StoreQueueSize).map(j => uop(j).cf.storeSetHit && uop(j).cf.ssid === io.forward(i).uop.cf.ssid)))
 
     XSDebug(p"$i f1 ${Binary(canForward1)} f2 ${Binary(canForward2)} " +
       p"sqIdx ${io.forward(i).sqIdx} pa ${Hexadecimal(io.forward(i).paddr)}\n"
@@ -429,6 +430,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val dataInvalidMaskRegWire = Wire(UInt(StoreQueueSize.W))
     dataInvalidMaskRegWire := dataInvalidMaskReg // make chisel happy
     io.forward(i).dataInvalidSqIdx := PriorityEncoder(dataInvalidMaskRegWire)
+
+    // check whether false fail
+    // check flag
+    val s2_differentFlag = RegNext(differentFlag)
+    val s2_enqPtrExt = RegNext(enqPtrExt(0))
+    val s2_deqPtrExt = RegNext(deqPtrExt(0))
+
+    // addr invalid sq index
+    // make chisel happy
+    val addrInvalidMask = Wire(UInt(StoreQueueSize.W))
+    addrInvalidMask := RegNext(needForward) & RegNext(~addrValidVec.asUInt) & RegNext(mdpMatchVec.asUInt)
+    val (addrInvalidSqIdx, mdpMatchFlag) = PriorityEncoderWithFlag(addrInvalidMask) 
+    when (mdpMatchFlag) {
+      io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
+      io.forward(i).addrInvalidSqIdx.value := addrInvalidSqIdx
+    } .otherwise {
+      // mayby store inst has been written to sbuffer already.
+      io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
+    }
+    io.forward(i).addrInvalid := addrInvalidMask =/= 0.U
+    io.forward(i).issued := !(RegNext(needForward) & RegNext(mdpMatchVec.asUInt)).orR
   }
 
   /**

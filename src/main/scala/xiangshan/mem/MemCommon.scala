@@ -169,6 +169,15 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   // be replayed from RS. Feedback type should be RSFeedbackType.dataInvalid
   val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
 
+  // addrInvalid suggests store to load forward found forward should happen,
+  // but address (SSID) is not available for now. If addrInvalid, load inst should
+  // be replayed from RS. Feedback type should be RSFeedbackType.addrInvalid
+  val addrInvalid = Input(Bool())
+
+  // issued suggests store to load forward found forward should happen,
+  // but address (SSID) is not match for now.
+  val issued = Input(Bool())
+
   // matchInvalid suggests in store to load forward logic, paddr cam result does
   // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
   // should be raised to flush SQ and committed sbuffer.
@@ -188,6 +197,7 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
   val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
+  val addrInvalidSqIdx = Input(new SqPtr)
 }
 
 // Query load queue for ld-ld violation
