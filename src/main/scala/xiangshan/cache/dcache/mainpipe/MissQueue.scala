@@ -492,7 +492,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // trigger prefetch
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
-  io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUData.id.U)
+  when(prefetch && !secondary_fired) {
+    io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
+  }.otherwise {
+    io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUData.id.U)
+  }
   // prefer not to cache data in L2 by default
   io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   require(nSets <= 256)
