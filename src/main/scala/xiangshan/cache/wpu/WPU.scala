@@ -22,16 +22,15 @@ case class WPUParameters
   algoName: String = "mru",
   enCfPred: Boolean = false,
   isICache: Boolean = false,
-  portNum: Int = 1
   // how to impelement a extend inlcude hasL1Cache and L2 Cache
 )
 
 trait HasWPUParameters extends HasL1CacheParameters{
-  def AlgoWPUMap(wpuParam: WPUParameters): BaseWPU = {
+  def AlgoWPUMap(wpuParam: WPUParameters, nPorts: Int): BaseWPU = {
     wpuParam.algoName.toLowerCase match {
-      case "mru" => Module(new MruWPU(wpuParam))
-      case "mmru" => Module(new MmruWPU(wpuParam))
-      case "utag" => Module(new UtagWPU(wpuParam))
+      case "mru" => Module(new MruWPU(wpuParam, nPorts))
+      case "mmru" => Module(new MmruWPU(wpuParam, nPorts))
+      case "utag" => Module(new UtagWPU(wpuParam, nPorts))
       case t => throw new IllegalArgumentException(s"unknown WPU Algorithm $t")
     }
   }
@@ -59,29 +58,24 @@ class WPUBaseIO(portNum: Int, nWays: Int)(implicit p:Parameters) extends BaseWPU
   val updTagwrite = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
 }
 
-abstract class BaseWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends WPUModule {
+abstract class BaseWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends WPUModule {
   val cacheParams: L1CacheParameters = if (wpuParam.isICache) icacheParameters else dcacheParameters
 
-  val setSize = if (wpuParam.isICache) nSets/2 else nSets
+  val setSize = nSets
   val nTagIdx = nWays
   // auxiliary 1 bit is used to judge whether cache miss
   val auxWayBits = wayBits + 1
   val TagIdxBits = log2Up(nTagIdx)
   val utagBits = 8
 
-  val io = IO(new WPUBaseIO(wpuParam.portNum, nWays))
+  val io = IO(new WPUBaseIO(nPorts, nWays))
 
   def get_wpu_idx(addr: UInt): UInt = {
-    if (wpuParam.isICache) {
-      // NOTE: in icache, set[0] indicates which bank to choose
-      addr(untagBits - 1, blockOffBits + 1)
-    } else {
-      addr(untagBits - 1, blockOffBits)
-    }
+    addr(untagBits - 1, blockOffBits)
   }
 }
 
-class MruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wpuParam){
+class MruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
   val predict_regs = RegInit(VecInit(Seq.fill(setSize)(0.U(wayBits.W))))
 
   def write(upd: BaseWpuUpdateBundle): Unit = {
@@ -100,7 +94,7 @@ class MruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wpu
     }
   }
 
-  for(i <- 0 until wpuParam.portNum){
+  for(i <- 0 until nPorts){
     predict(io.predVec(i))
     write(io.updLookup(i))
     write(io.updReplaycarry(i))
@@ -109,7 +103,7 @@ class MruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wpu
 
 }
 
-class MmruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wpuParam){
+class MmruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
   val predict_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nTagIdx)(0.U(auxWayBits.W))))))
 
   def write(upd: BaseWpuUpdateBundle): Unit = {
@@ -132,7 +126,7 @@ class MmruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wp
     }
   }
 
-  for(i <- 0 until wpuParam.portNum){
+  for(i <- 0 until nPorts){
     predict(io.predVec(i))
     write(io.updLookup(i))
     write(io.updReplaycarry(i))
@@ -141,7 +135,7 @@ class MmruWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wp
 
 }
 
-class UtagWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wpuParam){
+class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
   val utag_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nWays)(0.U(utagBits.W))))))
   val valid_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nWays)(false.B)))))
 
@@ -181,7 +175,7 @@ class UtagWPU(wpuParam: WPUParameters)(implicit p:Parameters) extends BaseWPU(wp
     pred.way_en := UIntToOH(OHToUInt(pred_way_en))
   }
 
-  for(i <- 0 until wpuParam.portNum){
+  for(i <- 0 until nPorts){
     predict(io.predVec(i))
     // FIXME: There should be no known timing
     val s1_pred_way_en = RegNext(io.predVec(i).way_en)

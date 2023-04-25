@@ -44,6 +44,8 @@ class WPUResp(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
 
 class WPUUpdate(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val vaddr = UInt(VAddrBits.W)
+//  val s1_pred_fail = Bool()
+//  val s1_pred_way_en = UInt(nWays.W)
   val s1_real_way_en = UInt(nWays.W)
 }
 
@@ -71,8 +73,8 @@ class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val cfpred = new ConflictPredictIO(nWays)
 }
 
-class DCacheWpuWrapper(implicit p:Parameters) extends DCacheModule with HasWPUParameters  {
-  val wpu = AlgoWPUMap(dwpuParam)
+class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheModule with HasWPUParameters  {
+  val wpu = AlgoWPUMap(dwpuParam, nPorts)
   val wayConflictPredictor = Module(new WayConflictPredictor)
   val io = IO(new DwpuIO(nWays))
 
@@ -169,7 +171,7 @@ class DCacheWpuWrapper(implicit p:Parameters) extends DCacheModule with HasWPUPa
 
 
 class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule with HasICacheParameters {
-  val wpu = AlgoWPUMap(iwpuParam)
+  val wpu = AlgoWPUMap(iwpuParam, nPorts)
   val io = IO(new IwpuIO(nWays, nPorts))
 
   /** pred in s0*/
