@@ -25,6 +25,7 @@ import xiangshan.cache.mmu._
 import utils._
 import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import xiangshan.cache.wpu.ICacheWpuWrapper
 import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle}
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
@@ -91,6 +92,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   /*** internal interface ***/
   val metaArray   = new ICacheMetaReqBundle
   val dataArray   = new ICacheDataReqBundle
+  val reMetaArray = new ICacheMetaReqBundle
+  val reDataArray = new ICacheDataReqBundle
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
@@ -118,6 +121,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (fromFtq, toIFU)    = (io.fetch.req, io.fetch.resp)
   val (toMeta, metaResp)  = (io.metaArray.toIMeta, io.metaArray.fromIMeta)
   val (toData, dataResp)  = (io.dataArray.toIData,  io.dataArray.fromIData)
+  val (reToMeta, reMetaResp) = (io.reMetaArray.toIMeta,  io.reMetaArray.fromIMeta)
+  val (reToData, reDataResp) = (io.reDataArray.toIData,  io.reDataArray.fromIData)
   val (toMSHR, fromMSHR)  = (io.mshr.map(_.toMSHR), io.mshr.map(_.fromMSHR))
   val (toITLB, fromITLB)  = (io.itlb.map(_.req), io.itlb.map(_.resp))
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
@@ -156,17 +161,24 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_vsetIdx      = s0_req_vsetIdx.head
   val s0_final_only_first   = s0_only_first.head
   val s0_final_double_line  = s0_double_line.head
-  // val s0_pred_way_en = Wire(UInt(nWays.W))
+  val s0_pred_way_en = Wire(Vec(PortNumber, UInt(nWays.W)))
 
   /** WPU */
-/*  val wpu = Module(new ICacheWPU)
-  wpu.io.req.valid := s0_fire
-  wpu.io.req.bits.vaddr := s0_final_vaddr
-  when(wpu.io.resp.valid){
-    s0_pred_way_en := wpu.io.resp.bits
-  }.otherwise{
-    s0_pred_way_en := ~0.U(nWays.W)
-  }*/
+  val wpu = Module(new ICacheWpuWrapper(PortNumber))
+  for(i <- 0 until PortNumber){
+    wpu.io.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
+    wpu.io.req(i).bits.vaddr := s0_final_vaddr(i)
+    // TODO lyq: the enWPU does not come into paly
+    if(iwpuParam.enWPU){
+      when(wpu.io.resp(i).valid) {
+        s0_pred_way_en(i) := wpu.io.resp(i).bits.s0_pred_way_en
+      }.otherwise {
+        s0_pred_way_en(i) := 0.U(nWays.W)
+      }
+    }else{
+      s0_pred_way_en(i) := ~0.U(nWays.W)
+    }
+  }
 
   /** SRAM request */
   //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
@@ -187,12 +199,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toData.valid                  := ftq_req_to_data_valid(i) && !missSwitchBit
     toData.bits(i).isDoubleLine   := ftq_req_to_data_doubleline(i)
     toData.bits(i).vSetIdx        := ftq_req_to_data_vset_idx(i)
-    // toData.bits(i).way_en := s0_pred_way_en
+    toData.bits(i).way_en := s0_pred_way_en
   }
 
   toMeta.valid               := s0_valid && !missSwitchBit
   toMeta.bits.isDoubleLine   := ftq_req_to_meta_doubleline
   toMeta.bits.vSetIdx        := ftq_req_to_meta_vset_idx
+  toMeta.bits.way_en := DontCare
 
 
   toITLB(0).valid         := s0_valid  
@@ -248,6 +261,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_vsetIdx = RegEnable(s0_final_vsetIdx, s0_fire)
   val s1_only_first  = RegEnable(s0_final_only_first, s0_fire)
   val s1_double_line = RegEnable(s0_final_double_line, s0_fire)
+  val s1_pred_way_en = RegEnable(s0_pred_way_en, s0_fire)
+  val s1_toDataBits = RegEnable(toData.bits, s0_fire)
+  val s1_toMetaBits = RegEnable(toMeta.bits, s0_fire)
 
   /** tlb response latch for pipeline stop */
   val tlb_back = fromITLB.map(_.fire())
@@ -277,7 +293,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbExcpAF = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.excp(0).af.instr) && tlb_need_back(i)))
   val tlbExcp = VecInit((0 until PortNumber).map(i => tlbExcpPF(i) || tlbExcpPF(i)))
 
-  val tlbRespAllValid = Cat((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i))).andR
+  val tlbRespValid = VecInit((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i)))
+  val tlbRespAllValid = Cat(tlbRespValid).andR
   s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready
 
@@ -289,7 +306,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
 
-  val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
+  val s1_datas                   = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
@@ -299,6 +316,26 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_port_hit          = VecInit(Seq(s1_tag_match(0) && s1_valid  && !tlbExcp(0),  s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcp(1) ))
   val s1_bank_miss         = VecInit(Seq(!s1_tag_match(0) && s1_valid && !tlbExcp(0), !s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcp(1) ))
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
+
+  val s1_wpu_pred_fail_and_real_hit = VecInit((0 until PortNumber).map{ i =>
+    tlbRespValid(i) && s1_pred_way_en(i)=/=s1_tag_match_vec(i).asUInt && s1_port_hit(i)
+  }).asUInt.orR
+  // TODO lyq: wpu_pred_fail should send to wpu
+  for (i <- 0 until PortNumber) {
+    wpu.io.lookup_upd(i).valid := s1_valid
+    wpu.io.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
+    // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
+    wpu.io.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
+  }
+  // replay data
+  reToData.valid := s1_valid && s1_wpu_pred_fail_and_real_hit && !missSwitchBit
+  reToData.bits := s1_toDataBits
+  for (i <- 0 until partWayNum) {
+    reToData.bits(i).way_en := VecInit(s1_tag_match_vec.map(x=>x.asUInt))
+  }
+  reToMeta.valid := s1_valid && s1_wpu_pred_fail_and_real_hit && !missSwitchBit
+  reToMeta.bits := s1_toMetaBits
+  // val s1_pred_hit_datas = VecInit(s1_datas.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
 
   /** choose victim cacheline */
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
@@ -358,47 +395,47 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_only_first   = RegEnable(s1_only_first, s1_fire)
   val s2_double_line  = RegEnable(s1_double_line, s1_fire)
   val s2_hit          = RegEnable(s1_hit   , s1_fire)
-  val s2_port_hit     = RegEnable(s1_port_hit, s1_fire)
   val s2_bank_miss    = RegEnable(s1_bank_miss, s1_fire)
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
   val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
   val s2_tag_match_vec = RegEnable(s1_tag_match_vec, s1_fire)
+  val s2_wpu_pred_fail_and_real_hit = RegEnable(s1_wpu_pred_fail_and_real_hit, s1_fire)
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
+
+  /** s2 resend meta check */
+  val s2_re_meta_ptags = ResultHoldBypass(data = reMetaResp.tags, valid = RegNext(s1_fire))
+  val s2_re_meta_cohs = ResultHoldBypass(data = reMetaResp.cohs, valid = RegNext(s1_fire))
+  val s2_re_meta_errors = ResultHoldBypass(data = reMetaResp.errors, valid = RegNext(s1_fire))
+  val s2_re_datas = ResultHoldBypass(data = reDataResp.datas, valid = RegNext(s1_fire))
+  val s2_re_data_errorBits = ResultHoldBypass(data = reDataResp.codes, valid = RegNext(s1_fire))
+  val s2_re_tag_eq_vec = VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s2_re_meta_ptags(p)(w) === s2_req_ptags(p)))))
+  val s2_re_tag_match_vec = VecInit((0 until PortNumber).map(k => VecInit(s2_re_tag_eq_vec(k).zipWithIndex.map { case (way_tag_eq, w) => way_tag_eq && s2_re_meta_cohs(k)(w).isValid() })))
+  val s2_re_tag_match = VecInit(s2_re_tag_match_vec.map(vector => ParallelOR(vector)))
+  val s2_re_port_hit = VecInit(Seq(s2_re_tag_match(0) && s2_valid, s2_re_tag_match(1) && s2_valid && s2_double_line))
+  /** selected needed data */
+  val s2_port_hit = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_port_hit, RegEnable(s1_port_hit, s1_fire))
+  val s2_meta_errors = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_meta_errors, RegEnable(s1_meta_errors, s1_fire))
+  val s2_data_errorBits = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_data_errorBits, RegEnable(s1_data_errorBits, s1_fire))
+  val s2_datas = Mux(s2_wpu_pred_fail_and_real_hit, s2_re_datas, RegEnable(s1_datas, s1_fire))
+
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */
   val sec_meet_vec = Wire(Vec(2, Bool()))
   val s2_fixed_hit_vec = VecInit((0 until 2).map(i => s2_port_hit(i) || sec_meet_vec(i)))
   val s2_fixed_hit = (s2_valid && s2_fixed_hit_vec(0) && s2_fixed_hit_vec(1) && s2_double_line) || (s2_valid && s2_fixed_hit_vec(0) && !s2_double_line)
 
-  val s2_meta_errors    = RegEnable(s1_meta_errors,    s1_fire)
-  val s2_data_errorBits = RegEnable(s1_data_errorBits, s1_fire)
-  val s2_data_cacheline = RegEnable(s1_data_cacheline, s1_fire)
-
-  val s2_data_errors    = Wire(Vec(PortNumber,Vec(nWays, Bool())))
-
+  val s2_data_errors    = Wire(Vec(PortNumber,Bool()))
   (0 until PortNumber).map{ i =>
-    val read_datas = s2_data_cacheline(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeUnit.W))))
-    val read_codes = s2_data_errorBits(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeBits.W))))
-    val data_full_wayBits = VecInit((0 until nWays).map( w =>
-                                  VecInit((0 until dataCodeUnitNum).map(u =>
-                                        Cat(read_codes(w)(u), read_datas(w)(u))))))
-    val data_error_wayBits = VecInit((0 until nWays).map( w =>
-                                  VecInit((0 until dataCodeUnitNum).map(u =>
-                                       cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
     if(i == 0){
-      (0 until nWays).map{ w =>
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_)
-      }
+      s2_data_errors(i) := get_data_errors(s2_datas(i), s2_data_errorBits(i), s1_fire)
     } else {
-      (0 until nWays).map{ w =>
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(RegNext(s1_double_line)) && RegNext(data_error_wayBits(w)).reduce(_||_)
-      }
+      s2_data_errors(i) := get_data_errors(s2_datas(i), s2_data_errorBits(i), s1_fire && s1_double_line)
     }
   }
 
   val s2_parity_meta_error  = VecInit((0 until PortNumber).map(i => s2_meta_errors(i).reduce(_||_) && io.csr_parity_enable))
-  val s2_parity_data_error  = VecInit((0 until PortNumber).map(i => s2_data_errors(i).reduce(_||_) && io.csr_parity_enable))
+  val s2_parity_data_error  = VecInit((0 until PortNumber).map(i => s2_data_errors(i) && io.csr_parity_enable))
   val s2_parity_error       = VecInit((0 until PortNumber).map(i => RegNext(s2_parity_meta_error(i)) || s2_parity_data_error(i)))
 
   for(i <- 0 until PortNumber){
@@ -690,10 +727,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   //** use hit one-hot select data
-  val s2_hit_datas    = VecInit(s2_data_cacheline.zipWithIndex.map { case(bank, i) =>
-    val port_hit_data = Mux1H(s2_tag_match_vec(i).asUInt, bank)
-    port_hit_data
-  })
+  // val s2_real_hit_datas = VecInit(s2_datas.zipWithIndex.map { case (bank, i) => Mux1H(s2_tag_match_vec(i).asUInt, bank) })
+  val s2_hit_datas = s2_datas
 
   val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W)))
 
@@ -712,6 +747,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     //when select is high, use sramData. Otherwise, use registerData.
     toIFU(i).bits.registerData  := s2_register_datas(i)
     toIFU(i).bits.sramData  := s2_hit_datas(i)
+    // TODO: select --> pred
     toIFU(i).bits.select    := s2_port_hit(i)
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)

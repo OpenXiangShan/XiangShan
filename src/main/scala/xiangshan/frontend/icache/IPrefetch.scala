@@ -98,6 +98,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
   toIMeta.bits.vSetIdx(1) := DontCare
   toIMeta.bits.isDoubleLine := false.B
+  toIMeta.bits.way_en := DontCare
 
   toITLB.valid         := p0_valid
   toITLB.bits.size     := 3.U // TODO: fix the size

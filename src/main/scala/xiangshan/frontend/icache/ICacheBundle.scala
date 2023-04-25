@@ -28,7 +28,7 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val isDoubleLine  = Bool()
   val vSetIdx       = Vec(2,UInt(log2Ceil(nSets).W))
-  // val way_en = UInt(nWays.W)
+  val way_en = Vec(PortNumber, UInt(nWays.W))
 
   def port_0_read_0 =  !vSetIdx(0)(0)
   def port_0_read_1 =   vSetIdx(0)(0)
@@ -87,8 +87,8 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val datas = Vec(2, Vec(nWays,  UInt(blockBits.W)))
-  val codes = Vec(2, Vec(nWays , UInt(dataCodeEntryBits.W)))
+  val datas = Vec(PortNumber, UInt(blockBits.W))
+  val codes = Vec(PortNumber, UInt(dataCodeEntryBits.W))
 }
 
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle

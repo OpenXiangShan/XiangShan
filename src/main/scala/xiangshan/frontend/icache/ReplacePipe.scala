@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermission
 import xiangshan._
 import utils._
 import utility._
+import xiangshan.cache.wpu.ICacheWpuWrapper
 
 class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -47,11 +48,15 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
     val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
+    val meta_response = Input(new ICacheMetaRespBundle)
+    val data_response = Input(new ICacheDataRespBundle)
 
     val error      = Output(new L1CacheErrorInfo)
 
-    val meta_response     = Input(new ICacheMetaRespBundle)
-    val data_response     = Input(new ICacheDataRespBundle)
+    val re_meta_read = DecoupledIO(new ICacheReadBundle)
+    val re_data_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
+    val re_meta_response = Input(new ICacheMetaRespBundle)
+    val re_data_response = Input(new ICacheDataRespBundle)
 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
@@ -72,6 +77,9 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val (toData, dataResp) =  (io.data_read, io.data_response.datas(0))
   val (metaError, codeResp) = (io.meta_response.errors(0), io.data_response.codes(0))
 
+  val (reToMeta, reMetaResp) =  (io.re_meta_read, io.re_meta_response)
+  val (reToData, reDataResp) = (io.re_data_read, io.re_data_response)
+
   val r0_ready, r1_ready, r2_ready = WireInit(false.B)
   val r0_fire,  r1_fire , r2_fire, r3_fire  = WireInit(false.B)
 
@@ -85,23 +93,42 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r0_req         = RegEnable(io.pipe_req.bits, enable = io.pipe_req.fire())
   val r0_req_vidx    = r0_req.vidx
+  val r0_way_mask = r0_req.waymask
 
   val array_req = List(toMeta, toData)
 
   r0_ready := array_req(0).ready && array_req(1).ready && r1_ready  || !r0_valid
   r0_fire  := r0_valid && r0_ready
 
+  val wpu = Module(new ICacheWpuWrapper(1))
+  val p0_pred_way_en = Wire(UInt(nWays.W))
+  wpu.io.req(0).valid := r0_valid && r0_req.isProbe
+  wpu.io.req(0).bits.vaddr := r0_req.vaddr
+  if (iwpuParam.enWPU) {
+    when(wpu.io.resp(0).valid) {
+      p0_pred_way_en := wpu.io.resp(0).bits.s0_pred_way_en
+    }.otherwise {
+      p0_pred_way_en := 0.U(nWays.W)
+    }
+  } else {
+    p0_pred_way_en := ~0.U(nWays.W)
+  }
+
   for(i <- 0 until partWayNum) {
     toData.valid                    :=  r0_valid
     toData.bits(i).isDoubleLine     :=  false.B
     toData.bits(i).vSetIdx(0)        :=  r0_req_vidx
     toData.bits(i).vSetIdx(1)        :=  DontCare
+    // read one data
+    toData.bits(i).way_en := VecInit(Seq(Mux(r0_req.isProbe, p0_pred_way_en, r0_way_mask), 0.U(nWays.W)))
   }
 
   toMeta.valid               := r0_valid
   toMeta.bits.isDoubleLine   :=false.B
   toMeta.bits.vSetIdx(0)        := r0_req_vidx
   toMeta.bits.vSetIdx(1)        := DontCare
+  // read all meta
+  toMeta.bits.way_en := DontCare
 
   io.pipe_req.ready := array_req(0).ready && array_req(1).ready && r1_ready
   
@@ -120,19 +147,37 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
 
   val r1_req = RegEnable(r0_req, r0_fire)
+  val r1_toDataBits = RegEnable(toData.bits, r0_fire)
+  val r1_toMetaBits = RegEnable(toMeta.bits, r0_fire)
+  val p1_pred_way_en = RegEnable(p0_pred_way_en, r0_fire)
 
   val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
   val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
   val r1_meta_errors             = ResultHoldBypass(data = metaError, valid = RegNext(r0_fire))
 
-  val r1_data_cacheline          = ResultHoldBypass(data = VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
-  val r1_data_errorBits          = ResultHoldBypass(data = VecInit(codeResp.map(way => way)), valid = RegNext(r0_fire))
+  val r1_datas = ResultHoldBypass(data = dataResp, valid = RegNext(r0_fire))
+  val r1_data_errorBits = ResultHoldBypass(data = codeResp, valid = RegNext(r0_fire))
 
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
   val probe_hit_vec   = VecInit(r1_meta_ptags.zip(r1_meta_cohs).map{case(way_tag,way_coh) => way_tag === probe_phy_tag && way_coh.isValid()})
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
+
+  /** wpu */
+  val p1_pred_fail_and_real_hit = r1_valid && r1_req.isProbe && p1_pred_way_en =/= probe_hit_vec.asUInt && probe_hit_vec.asUInt.orR
+  wpu.io.lookup_upd(0).valid := r1_valid
+  wpu.io.lookup_upd(0).bits.vaddr := r1_req.vaddr
+  // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
+  wpu.io.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
+
+  reToData.valid := r1_valid && p1_pred_fail_and_real_hit
+  reToData.bits := r1_toDataBits
+  for (i <- 0 until partWayNum) {
+    reToData.bits(i).way_en := VecInit(Seq(probe_hit_vec.asUInt, 0.U(nWays.W)))
+  }
+  reToMeta.valid := r1_valid && p1_pred_fail_and_real_hit
+  reToMeta.bits := r1_toMetaBits
 
   /*** for Release way select ***/
   val release_waymask  = r1_req.waymask
@@ -158,35 +203,30 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   r2_fire       := r2_valid && io.release_req.ready
 
   val r2_req = RegEnable(r1_req, r1_fire)
-  val r2_data_cacheline = RegEnable(r1_data_cacheline, r1_fire)
+  val p2_pred_fail_and_real_hit = RegEnable(p1_pred_fail_and_real_hit, r1_fire)
+  val r2_datas = RegEnable(r1_datas, r1_fire)
+  val r2_probe_hit_ptag = RegEnable(probe_phy_tag, r1_fire)
 
   /*** for Probe hit mux ***/
-  val r2_probe_hit_ptag =   RegEnable(probe_phy_tag, r1_fire)
-  val r2_probe_hit_vec = RegEnable(probe_hit_vec, r1_fire)
-  val r2_probe_hit_coh = RegEnable(probe_hit_coh, r1_fire)
-  val r2_probe_hit_data = Mux1H(r2_probe_hit_vec, r2_data_cacheline)
+  // recheck resend-meta
+  val r2_re_meta_ptags = ResultHoldBypass(data = VecInit(reMetaResp.metaData(0).map(way => way.tag)), valid = RegNext(r1_fire))
+  val r2_re_meta_cohs = ResultHoldBypass(data = VecInit(reMetaResp.metaData(0).map(way => way.coh)), valid = RegNext(r1_fire))
+  val r2_re_meta_errors = ResultHoldBypass(data = reMetaResp.errors(0), valid = RegNext(r1_fire))
+  val r2_re_datas = ResultHoldBypass(data = reDataResp.datas(0), valid = RegNext(r1_fire))
+  val r2_re_data_errorBits = ResultHoldBypass(data = reDataResp.codes(0), valid = RegNext(r1_fire))
+  val re_probe_hit_vec = VecInit(r2_re_meta_ptags.zip(r2_re_meta_cohs).map { case (way_tag, way_coh) => way_tag === r2_probe_hit_ptag && way_coh.isValid() })
+  val re_probe_hit_coh = Mux1H(re_probe_hit_vec, r2_re_meta_cohs)
+
+  val r2_probe_hit_data = Mux(p2_pred_fail_and_real_hit, r2_re_datas, r2_datas)
+  val r2_data_errorBits = Mux(p2_pred_fail_and_real_hit, r2_re_data_errorBits, RegEnable(r1_data_errorBits, r1_fire))
+  val r2_meta_errors = Mux(p2_pred_fail_and_real_hit, r2_re_meta_errors, RegEnable(r1_meta_errors, r1_fire))
+  val r2_probe_hit_coh = Mux(p2_pred_fail_and_real_hit, re_probe_hit_coh, RegEnable(probe_hit_coh, r1_fire))
+  val r2_probe_hit_vec = Mux(p2_pred_fail_and_real_hit, re_probe_hit_vec, RegEnable(probe_hit_vec, r1_fire))
 
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = r2_probe_hit_coh.onProbe(r2_req.param)
 
-
-
-  val r2_meta_errors    = RegEnable(r1_meta_errors,    r1_fire)
-  val r2_data_errorBits = RegEnable(r1_data_errorBits, r1_fire)
-
-  val r2_data_errors    = Wire(Vec(nWays, Bool()))
-
-  val read_datas = r2_data_cacheline.asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeUnit.W))))
-  val read_codes = r2_data_errorBits.asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeBits.W))))
-  val data_full_wayBits = VecInit((0 until nWays).map( w => 
-                                VecInit((0 until dataCodeUnitNum).map(u => 
-                                      Cat(read_codes(w)(u), read_datas(w)(u))))))
-  val data_error_wayBits = VecInit((0 until nWays).map( w => 
-                                VecInit((0 until dataCodeUnitNum).map(u => 
-                                      cacheParams.dataCode.decode(data_full_wayBits(w)(u)).error ))))
-  (0 until nWays).map{ w => r2_data_errors(w) := RegNext(RegNext(r1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_) } 
-
   val r2_parity_meta_error = r2_meta_errors.reduce(_||_) && io.csr_parity_enable
-  val r2_parity_data_error = r2_data_errors.reduce(_||_) && io.csr_parity_enable
+  val r2_parity_data_error = get_data_errors(r2_probe_hit_data, r2_data_errorBits, r1_fire) && io.csr_parity_enable
   val r2_parity_error      = RegNext(r2_parity_meta_error) || r2_parity_data_error
 
 
@@ -207,7 +247,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   /*** for Release mux ***/
   val r2_release_ptag = RegEnable(release_tag, r1_fire)
   val r2_release_coh  = RegEnable(release_coh, r1_fire)
-  val r2_release_data = Mux1H(r2_req.waymask, r2_data_cacheline)
+  val r2_release_data = r2_datas
   val r2_release_addr = RegEnable(release_addr, r1_fire)
 
   val release_need_send = r2_valid &&  r2_req.isRelease && r2_release_coh.isValid()
