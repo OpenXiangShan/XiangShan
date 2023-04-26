@@ -174,11 +174,15 @@ class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule w
   val wpu = AlgoWPUMap(iwpuParam, nPorts)
   val io = IO(new IwpuIO(nWays, nPorts))
 
+  val s1_pred_fail = Wire(Vec(nPorts, Bool()))
+  val s0_pred_way_en = Wire(Vec(nPorts, UInt(nWays.W)))
+  val s1_pred_way_en = Wire(Vec(nPorts, UInt(nWays.W)))
+  val s1_real_way_en = Wire(Vec(nPorts, UInt(nWays.W)))
   /** pred in s0*/
   for (i <- 0 until nPorts){
     wpu.io.predVec(i).en := io.req(i).valid
     wpu.io.predVec(i).vaddr := io.req(i).bits.vaddr
-    val s0_pred_way_en = wpu.io.predVec(i).way_en
+    s0_pred_way_en(i) := wpu.io.predVec(i).way_en
     // io
     io.req(i).ready := true.B
     if (iwpuParam.enWPU) {
@@ -186,12 +190,13 @@ class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule w
     } else {
       io.resp(i).valid := false.B
     }
-    io.resp(i).bits.s0_pred_way_en := s0_pred_way_en
+    io.resp(i).bits.s0_pred_way_en := s0_pred_way_en(i)
     assert(PopCount(io.resp(i).bits.s0_pred_way_en) <= 1.U, "tag should not match with more than 1 way")
 
     /** update in s1 */
-    val s1_pred_way_en = RegNext(s0_pred_way_en)
-    val s1_pred_fail = RegNext(io.resp(i).valid) && s1_pred_way_en =/= io.lookup_upd(i).bits.s1_real_way_en
+    s1_pred_way_en(i) := RegNext(s0_pred_way_en(i))
+    s1_real_way_en(i) := io.lookup_upd(i).bits.s1_real_way_en
+    s1_pred_fail(i) := RegNext(io.resp(i).valid) && s1_pred_way_en(i) =/= s1_real_way_en(i)
     // look up res
     wpu.io.updLookup(i).en := io.lookup_upd(i).valid
     wpu.io.updLookup(i).vaddr := io.lookup_upd(i).bits.vaddr
@@ -204,8 +209,25 @@ class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule w
 //    wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd(i).bits.vaddr
 //    wpu.io.updTagwrite(0).way_en := io.tagwrite_upd(i).bits.s1_real_way_en
     // io
-    io.resp(i).bits.s1_pred_fail := s1_pred_fail
+    io.resp(i).bits.s1_pred_fail := s1_pred_fail(i)
   }
+
+  XSPerfAccumulate("wpu_pred_total", PopCount(io.resp.map(x => RegNext(x.valid))))
+  XSPerfAccumulate("wpu_pred_succ", PopCount(io.resp.zipWithIndex.map{case(x, i) => RegNext(x.valid) && !s1_pred_fail(i)}))
+  XSPerfAccumulate("wpu_pred_fail", PopCount(io.resp.zipWithIndex.map{case(x, i) => RegNext(x.valid) && s1_pred_fail(i)}))
+  XSPerfAccumulate("wpu_pred_miss", PopCount(io.resp.zipWithIndex.map{case(x, i) => RegNext(x.valid) && !RegNext(s0_pred_way_en(i)).orR}))
+  XSPerfAccumulate("wpu_real_miss", PopCount(io.resp.zipWithIndex.map{case(x, i) => RegNext(x.valid) && !RegNext(s1_real_way_en(i)).orR}))
+  // pred component
+//  XSPerfAccumulate("wpu_pred_replayCarry", io.req.valid && io.req.bits.replayCarry.valid)
+//  if (!dwpuParam.enCfPred) {
+//    XSPerfAccumulate("wpu_pred_wayPrediction", io.req.valid && !io.req.bits.replayCarry.valid)
+//  } else {
+//    XSPerfAccumulate("wpu_pred_wayPrediction", io.req.valid && !io.req.bits.replayCarry.valid && s0_pred_way_conflict)
+//    XSPerfAccumulate("wpu_pred_directMap", io.req.valid && !io.req.bits.replayCarry.valid && !s0_pred_way_conflict)
+//    // dm situation
+//    XSPerfAccumulate("direct_map_all", io.lookup_upd.valid)
+//    XSPerfAccumulate("direct_map_ok", io.lookup_upd.valid && io.cfpred.s1_dm_hit)
+//  }
 
 }
 

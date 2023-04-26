@@ -87,8 +87,8 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val datas = Vec(PortNumber, UInt(blockBits.W))
-  val codes = Vec(PortNumber, UInt(dataCodeEntryBits.W))
+  val datas = Vec(PortNumber, Vec(nWays,  UInt(blockBits.W)))
+  val codes = Vec(PortNumber, Vec(nWays,  UInt(dataCodeEntryBits.W)))
 }
 
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle

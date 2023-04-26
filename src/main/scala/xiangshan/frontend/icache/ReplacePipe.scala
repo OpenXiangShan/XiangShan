@@ -150,13 +150,14 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r1_toDataBits = RegEnable(toData.bits, r0_fire)
   val r1_toMetaBits = RegEnable(toMeta.bits, r0_fire)
   val p1_pred_way_en = RegEnable(p0_pred_way_en, r0_fire)
+  val r1_way_mask = RegEnable(r0_way_mask, r0_fire)
 
   val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
   val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
   val r1_meta_errors             = ResultHoldBypass(data = metaError, valid = RegNext(r0_fire))
 
-  val r1_datas = ResultHoldBypass(data = dataResp, valid = RegNext(r0_fire))
-  val r1_data_errorBits = ResultHoldBypass(data = codeResp, valid = RegNext(r0_fire))
+  val r1_datas_line = ResultHoldBypass(data = dataResp, valid = RegNext(r0_fire))
+  val r1_data_errorBits_line = ResultHoldBypass(data = codeResp, valid = RegNext(r0_fire))
 
 
   /*** for Probe hit check ***/
@@ -165,19 +166,38 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
 
   /** wpu */
-  val p1_pred_fail_and_real_hit = r1_valid && r1_req.isProbe && p1_pred_way_en =/= probe_hit_vec.asUInt && probe_hit_vec.asUInt.orR
   wpu.io.lookup_upd(0).valid := r1_valid
   wpu.io.lookup_upd(0).bits.vaddr := r1_req.vaddr
   // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
   wpu.io.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
 
-  reToData.valid := r1_valid && p1_pred_fail_and_real_hit
-  reToData.bits := r1_toDataBits
-  for (i <- 0 until partWayNum) {
-    reToData.bits(i).way_en := VecInit(Seq(probe_hit_vec.asUInt, 0.U(nWays.W)))
+  val r1_datas = Wire(UInt(blockBits.W))
+  val r1_data_errorBits = Wire(UInt(dataCodeEntryBits.W))
+  val p1_pred_fail_and_real_hit = Wire(Bool())
+  if(iwpuParam.enWPU){
+    val r1_way_en = Mux(r1_req.isProbe, p1_pred_way_en, r1_way_mask)
+    r1_datas := Mux1H(r1_way_en, r1_datas_line)
+    r1_data_errorBits := Mux1H(r1_way_en, r1_data_errorBits_line)
+
+    p1_pred_fail_and_real_hit := r1_valid && r1_req.isProbe && p1_pred_way_en =/= probe_hit_vec.asUInt && probe_hit_vec.asUInt.orR
+    reToData.valid := r1_valid && p1_pred_fail_and_real_hit
+    reToData.bits := r1_toDataBits
+    for (i <- 0 until partWayNum) {
+      reToData.bits(i).way_en := VecInit(Seq(probe_hit_vec.asUInt, 0.U(nWays.W)))
+    }
+    reToMeta.valid := r1_valid && p1_pred_fail_and_real_hit
+    reToMeta.bits := r1_toMetaBits
+  }else{
+    val r1_way_en = Mux(r1_req.isProbe, probe_hit_vec.asUInt, r1_way_mask)
+    r1_datas := Mux1H(r1_way_en, r1_datas_line)
+    r1_data_errorBits := Mux1H(r1_way_en, r1_data_errorBits_line)
+
+    p1_pred_fail_and_real_hit := false.B
+    reToData.valid := false.B
+    reToData.bits := DontCare
+    reToMeta.valid := false.B
+    reToMeta.bits := DontCare
   }
-  reToMeta.valid := r1_valid && p1_pred_fail_and_real_hit
-  reToMeta.bits := r1_toMetaBits
 
   /*** for Release way select ***/
   val release_waymask  = r1_req.waymask
@@ -212,10 +232,12 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_re_meta_ptags = ResultHoldBypass(data = VecInit(reMetaResp.metaData(0).map(way => way.tag)), valid = RegNext(r1_fire))
   val r2_re_meta_cohs = ResultHoldBypass(data = VecInit(reMetaResp.metaData(0).map(way => way.coh)), valid = RegNext(r1_fire))
   val r2_re_meta_errors = ResultHoldBypass(data = reMetaResp.errors(0), valid = RegNext(r1_fire))
-  val r2_re_datas = ResultHoldBypass(data = reDataResp.datas(0), valid = RegNext(r1_fire))
-  val r2_re_data_errorBits = ResultHoldBypass(data = reDataResp.codes(0), valid = RegNext(r1_fire))
+  val r2_re_datas_line = ResultHoldBypass(data = reDataResp.datas(0), valid = RegNext(r1_fire))
+  val r2_re_data_errorBits_line = ResultHoldBypass(data = reDataResp.codes(0), valid = RegNext(r1_fire))
   val re_probe_hit_vec = VecInit(r2_re_meta_ptags.zip(r2_re_meta_cohs).map { case (way_tag, way_coh) => way_tag === r2_probe_hit_ptag && way_coh.isValid() })
   val re_probe_hit_coh = Mux1H(re_probe_hit_vec, r2_re_meta_cohs)
+  val r2_re_datas = Mux1H(re_probe_hit_vec.asUInt, r2_re_datas_line)
+  val r2_re_data_errorBits = Mux1H(re_probe_hit_vec.asUInt, r2_re_data_errorBits_line)
 
   val r2_probe_hit_data = Mux(p2_pred_fail_and_real_hit, r2_re_datas, r2_datas)
   val r2_data_errorBits = Mux(p2_pred_fail_and_real_hit, r2_re_data_errorBits, RegEnable(r1_data_errorBits, r1_fire))

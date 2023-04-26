@@ -376,11 +376,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       read_datas(port)(w) := dataArrays(w / pWay).io.read.resp.rdata(port).asTypeOf(Vec(pWay, UInt(blockBits.W)))(w % pWay)
     }
   }
-
-  val bank_read_datas_res = read_datas.zipWithIndex.map{case(portData,i) => Mux1H(bank_read_way_en_reg(i), portData)}
-  io.readResp.datas(0) := Mux( port_0_read_1_reg, bank_read_datas_res(1) , bank_read_datas_res(0))
-  io.readResp.datas(1) := Mux( port_1_read_0_reg, bank_read_datas_res(0) , bank_read_datas_res(1))
-
+  io.readResp.datas(0) := Mux(port_0_read_1_reg, read_datas(1), read_datas(0))
+  io.readResp.datas(1) := Mux(port_1_read_0_reg, read_datas(0), read_datas(1))
 
   val write_data_code = Wire(UInt(dataCodeEntryBits.W))
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
@@ -425,9 +422,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
   }
-  val read_codes_res = read_codes.zipWithIndex.map{case(portData,i) => Mux1H(bank_read_way_en(i), portData)}
-  io.readResp.codes(0) := Mux(port_0_read_1_reg, read_codes_res(1), read_codes_res(0))
-  io.readResp.codes(1) := Mux(port_1_read_0_reg, read_codes_res(0), read_codes_res(1))
+  io.readResp.codes(0) := Mux(port_0_read_1_reg, read_codes(1), read_codes(0))
+  io.readResp.codes(1) := Mux(port_1_read_0_reg, read_codes(0), read_codes(1))
 
   //Parity Encode
   val write = io.write.bits
@@ -792,9 +788,8 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
         holdRead = true,
         singlePort = true
       ))
-      // FIXME lyq: rmask
-      // sramBank.io.r.req.valid := io.read.req(bank).valid && io.read.req(bank).bits.rmask(way)
-      sramBank.io.r.req.valid := io.read.req(bank).valid
+      sramBank.io.r.req.valid := io.read.req(bank).valid && io.read.req(bank).bits.rmask(way)
+      // sramBank.io.r.req.valid := io.read.req(bank).valid
       sramBank.io.r.req.bits.apply(setIdx = io.read.req(bank).bits.ridx)
 
       if (bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx && io.write.bits.wmask(way)

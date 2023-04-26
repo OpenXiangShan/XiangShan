@@ -168,7 +168,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   for(i <- 0 until PortNumber){
     wpu.io.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
     wpu.io.req(i).bits.vaddr := s0_final_vaddr(i)
-    // TODO lyq: the enWPU does not come into paly
     if(iwpuParam.enWPU){
       when(wpu.io.resp(i).valid) {
         s0_pred_way_en(i) := wpu.io.resp(i).bits.s0_pred_way_en
@@ -310,8 +309,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
 
-  val s1_datas                   = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
-  val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
+  val s1_data_cacheline = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
+  val s1_data_errorline = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
   val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
@@ -327,22 +326,41 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
     wpu.io.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
   }
-  // replay read
-  s1_wpu_pred_fail_and_real_hit_vec := VecInit((0 until PortNumber).map{ i =>
-    tlbRespValid(i) && s1_pred_way_en(i)=/=s1_tag_match_vec(i).asUInt && s1_port_hit(i)
-  })
-  s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail_and_real_hit_vec.asUInt.orR
+
+  val s1_datas = Wire(Vec(PortNumber, UInt(blockBits.W)))
+  val s1_data_errorBits = Wire(Vec(PortNumber, UInt(dataCodeEntryBits.W)))
+  if(iwpuParam.enWPU){
+    // pred result
+    s1_datas := VecInit(s1_data_cacheline.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
+    s1_data_errorBits := VecInit(s1_data_errorline.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
+    s1_wpu_pred_fail_and_real_hit_vec := VecInit((0 until PortNumber).map { i =>
+      tlbRespValid(i) && s1_pred_way_en(i) =/= s1_tag_match_vec(i).asUInt && s1_port_hit(i)
+    })
+    s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail_and_real_hit_vec.asUInt.orR
+
+    reToData.valid := replay_read_valid
+    reToData.bits := s1_toDataBits
+    for (i <- 0 until partWayNum) {
+      reToData.bits(i).way_en := VecInit(s1_tag_match_vec.map(x => x.asUInt))
+    }
+    reToMeta.valid := replay_read_valid
+    reToMeta.bits := s1_toMetaBits
+  }else{
+    // timing problem
+    s1_datas := VecInit(s1_data_cacheline.zipWithIndex.map { case (bank, i) => Mux1H(s1_tag_match_vec(i).asUInt, bank) })
+    s1_data_errorBits := VecInit(s1_data_errorline.zipWithIndex.map { case (bank, i) => Mux1H(s1_tag_match_vec(i).asUInt, bank) })
+    s1_wpu_pred_fail_and_real_hit_vec := VecInit(Seq(false.B, false.B))
+    s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail_and_real_hit_vec.asUInt.orR
+
+    reToData.valid := false.B
+    reToData.bits := DontCare
+    reToMeta.valid := false.B
+    reToMeta.bits := DontCare
+  }
+
+  // replay read when wpu is enable
   s1_resend_can_go := !s1_wpu_pred_fail_and_real_hit || reToData.ready && reToMeta.ready
   replay_read_valid := s1_valid && s1_wpu_pred_fail_and_real_hit && (!missSwitchBit || missSwitchBit && s2_fire)
-
-  reToData.valid := replay_read_valid
-  reToData.bits := s1_toDataBits
-  for (i <- 0 until partWayNum) {
-    reToData.bits(i).way_en := VecInit(s1_tag_match_vec.map(x=>x.asUInt))
-  }
-  reToMeta.valid := replay_read_valid
-  reToMeta.bits := s1_toMetaBits
-  // val s1_pred_hit_datas = VecInit(s1_datas.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
 
   /** choose victim cacheline */
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
@@ -414,13 +432,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_re_meta_ptags = ResultHoldBypass(data = reMetaResp.tags, valid = RegNext(s1_fire))
   val s2_re_meta_cohs = ResultHoldBypass(data = reMetaResp.cohs, valid = RegNext(s1_fire))
   val s2_re_meta_errors = ResultHoldBypass(data = reMetaResp.errors, valid = RegNext(s1_fire))
-  val s2_re_datas = ResultHoldBypass(data = reDataResp.datas, valid = RegNext(s1_fire))
-  val s2_re_data_errorBits = ResultHoldBypass(data = reDataResp.codes, valid = RegNext(s1_fire))
+  val s2_re_datas_line = ResultHoldBypass(data = reDataResp.datas, valid = RegNext(s1_fire))
+  val s2_re_data_errorBits_line = ResultHoldBypass(data = reDataResp.codes, valid = RegNext(s1_fire))
   val s2_re_tag_eq_vec = VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s2_re_meta_ptags(p)(w) === s2_req_ptags(p)))))
   val s2_re_tag_match_vec = VecInit((0 until PortNumber).map(k => VecInit(s2_re_tag_eq_vec(k).zipWithIndex.map { case (way_tag_eq, w) => way_tag_eq && s2_re_meta_cohs(k)(w).isValid() })))
   val s2_re_tag_match = VecInit(s2_re_tag_match_vec.map(vector => ParallelOR(vector)))
   val s2_re_port_hit = VecInit(Seq(s2_re_tag_match(0) && s2_valid, s2_re_tag_match(1) && s2_valid && s2_double_line))
   val s2_re_hit = (s2_re_port_hit(0) && s2_re_port_hit(1)) || (!s2_double_line && s2_re_port_hit(0))
+  val s2_re_datas = VecInit(s2_re_datas_line.zipWithIndex.map { case (bank, i) => Mux1H(s2_re_tag_match_vec(i).asUInt, bank) })
+  val s2_re_data_errorBits = VecInit(s2_re_data_errorBits_line.zipWithIndex.map { case (bank, i) => Mux1H(s2_re_tag_match_vec(i).asUInt, bank) })
   /** selected needed data */
   val s2_port_hit = Wire(s1_port_hit.cloneType)
   val s2_meta_errors = Wire(s1_meta_errors.cloneType)
