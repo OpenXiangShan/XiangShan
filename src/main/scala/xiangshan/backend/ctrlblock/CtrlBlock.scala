@@ -30,6 +30,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}

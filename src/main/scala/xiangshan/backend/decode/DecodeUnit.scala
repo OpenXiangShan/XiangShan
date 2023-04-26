@@ -27,6 +27,8 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.decode.isa.bitfield.{InstVType, RiscvVecInst}
+import xiangshan.backend.fu.vector.Bundles.VType
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -556,6 +558,7 @@ case class Imm_OPIVIS() extends Imm(5){
     instr(19, 15)
   }
 }
+
 case class Imm_OPIVIU() extends Imm(5){
   override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
@@ -563,6 +566,7 @@ case class Imm_OPIVIU() extends Imm(5){
     instr(19, 15)
   }
 }
+
 case class Imm_VSETVLI() extends Imm(11){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
@@ -570,11 +574,29 @@ case class Imm_VSETVLI() extends Imm(11){
     instr(30, 20)
   }
 }
-case class Imm_VSETIVLI() extends Imm(15){
+
+case class Imm_VSETIVLI() extends Imm(13){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
-    Cat(instr(19, 15), instr(29, 20))
+    val rvInst: RiscvVecInst = instr.asTypeOf(new RiscvVecInst)
+    val uimm5 = rvInst.UIMM_VSETIVLI
+    val vtype8 = rvInst.ZIMM_VTYPE
+    Cat(uimm5, vtype8)
+  }
+  /**
+    * get VType from extended imm
+    * @param extedImm
+    * @return VType
+    */
+  def getVType(extedImm: UInt): InstVType = {
+    val vtype = Wire(new InstVType)
+    vtype := extedImm(7, 0).asTypeOf(new InstVType)
+    vtype
+  }
+
+  def getAvl(extedImm: UInt): UInt = {
+    extedImm(12, 8)
   }
 }
 object ImmUnion {

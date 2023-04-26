@@ -11,6 +11,7 @@ import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataPath, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO}
 import xiangshan.backend.issue.Scheduler
 import xiangshan.backend.rob.RobLsqIO

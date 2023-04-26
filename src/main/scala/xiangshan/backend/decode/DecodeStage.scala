@@ -24,6 +24,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents

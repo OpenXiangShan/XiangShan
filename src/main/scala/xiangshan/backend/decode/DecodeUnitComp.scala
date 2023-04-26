@@ -29,6 +29,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
+import xiangshan.backend.fu.vector.Bundles.VType
 import yunsuan.VpermType
 
 import scala.collection.Seq

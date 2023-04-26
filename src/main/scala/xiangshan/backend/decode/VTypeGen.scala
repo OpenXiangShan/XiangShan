@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class VTypeGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle(){

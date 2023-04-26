@@ -29,6 +29,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -610,16 +611,4 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
-}
-
-class VType(implicit p: Parameters) extends XSBundle {
-  val vma   = Bool()
-  val vta   = Bool()
-  val vsew = UInt(3.W)
-  val vlmul = UInt(3.W)
-}
-
-class VConfig(implicit p: Parameters) extends XSBundle {
-  val vl    = UInt(8.W)
-  val vtype = new VType
 }
