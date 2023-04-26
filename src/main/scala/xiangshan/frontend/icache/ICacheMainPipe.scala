@@ -19,7 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.DifftestRefillEvent
+import difftest._
 import freechips.rocketchip.tilelink.ClientStates
 import xiangshan._
 import xiangshan.cache.mmu._
@@ -897,6 +897,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
+  /** way pred pref */
+  val s2_req_valid = VecInit(Seq(s2_valid, s2_valid && s2_double_line))
+  (0 until PortNumber).foreach(i => {
+    XSPerfAccumulate("icache_port_" + i + "_way_pred_hit", s2_fire && s2_way_pred_hit(i) && s2_req_valid(i))
+    XSPerfAccumulate("icache_port_" + i + "_way_pred_resend", s2_fire && s2_use_resend_data(i) && s2_req_valid(i))
+    XSPerfAccumulate("icache_port_" + i + "_s1_resend_miss",
+      s2_fire && s2_use_resend_data(i) && !s2_resend_hit(i) && s2_req_valid(i))
+  })
+
+
   XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
   XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
   XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
@@ -929,5 +939,25 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
         .otherwise { diffMainPipeOut.io.idtfr := 4.U }
       diffMainPipeOut
     }
+
+    val diffICacheReq = Module(new DifftestICacheReq)
+    diffICacheReq.io.clock := clock
+    diffICacheReq.io.coreid := 0.U
+    diffICacheReq.io.index := 0.U
+    diffICacheReq.io.valid_0 := s0_fire
+    diffICacheReq.io.vaddr_0 := s0_final_vaddr(0)
+    diffICacheReq.io.valid_1 := s0_fire && s0_final_double_line
+    diffICacheReq.io.vaddr_1 := s0_final_vaddr(1)
+    diffICacheReq.io.timer := GTimer()
+
+    val diffICacheResp = Module(new DifftestICacheReq)
+    diffICacheResp.io.clock := clock
+    diffICacheResp.io.coreid := 0.U
+    diffICacheResp.io.index := 1.U
+    diffICacheResp.io.valid_0 := s2_fire
+    diffICacheResp.io.vaddr_0 := s2_req_vaddr(0)
+    diffICacheResp.io.valid_1 := s2_fire && s2_double_line
+    diffICacheResp.io.vaddr_1 := s2_req_vaddr(1)
+    diffICacheResp.io.timer := GTimer()
   }
 }

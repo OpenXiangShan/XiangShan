@@ -33,7 +33,7 @@ import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
 import difftest._
 
 case class ICacheParameters(
-    nSets: Int = 256,
+    nSets: Int = 128,
     nWays: Int = 8,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
@@ -727,6 +727,43 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
       bankedMetaDiff.io.metaData := bankedMetaArray.io.readResp(i).metaData.map(_.tag)
       bankedMetaDiff.io.timer := GTimer()
       bankedMetaDiff
+    }
+
+    (0 until ICacheMainPipeReadPortNum).map { i =>
+      val metaArrayDiff = Module(new DifftestICacheBankedMetaRead)
+      metaArrayDiff.io.coreid := 0.U
+      metaArrayDiff.io.clock := clock
+      metaArrayDiff.io.index := (i + prefetchPipeNum + 1).U
+      metaArrayDiff.io.valid := RegNext(metaArray.io.read(i).fire)
+      metaArrayDiff.io.idx := RegNext(metaArray.io.read(i).bits.idx)
+      metaArrayDiff.io.entryValid := metaArray.io.readResp(i).entryValid
+      metaArrayDiff.io.metaData := metaArray.io.readResp(i).metaData.map(_.tag)
+      metaArrayDiff.io.timer := GTimer()
+      metaArrayDiff
+    }
+
+    val dataRefill = Module(new DifftestICacheBankedDataWrite)
+    dataRefill.io.index := 0.U
+    dataRefill.io.coreid := 0.U
+    dataRefill.io.clock := clock
+    dataRefill.io.valid := dataArray.io.write.valid
+    dataRefill.io.idx := dataArray.io.write.bits.virIdx
+    dataRefill.io.wayNum := OHToUInt(dataArray.io.write.bits.waymask)
+    dataRefill.io.data := dataArray.io.write.bits.data.asTypeOf(Vec(8, UInt(64.W)))
+    dataRefill.io.timer := GTimer()
+
+    (0 until ICacheMainPipeReadPortNum).map { i =>
+      val dataArrayDiff = Module(new DifftestICacheBankedDataRead)
+      dataArrayDiff.io.coreid := 0.U
+      dataArrayDiff.io.clock := clock
+      dataArrayDiff.io.index := i.U
+      dataArrayDiff.io.valid := RegNext(dataArray.io.read(i).fire)
+      dataArrayDiff.io.idx := RegNext(dataArray.io.read(i).bits.idx)
+      dataArrayDiff.io.wayNum := RegNext(OHToUInt(dataArray.io.read(i).bits.way_en))
+      dataArrayDiff.io.entryValid := metaArray.io.readResp(i).entryValid(dataArrayDiff.io.wayNum)
+      dataArrayDiff.io.data := dataArray.io.readResp(i).data.asTypeOf(Vec(8, UInt(64.W)))
+      dataArrayDiff.io.timer := GTimer()
+      dataArrayDiff
     }
   }
 
