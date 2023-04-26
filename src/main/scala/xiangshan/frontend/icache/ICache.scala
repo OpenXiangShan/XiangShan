@@ -706,30 +706,30 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
-  if (env.EnableDifftest) {
-    val metaRefill = Module(new DifftestICacheMetaWrite)
-    metaRefill.io.index := 0.U
-    metaRefill.io.coreid := 0.U
-    metaRefill.io.clock := clock
-    metaRefill.io.valid := bankedMetaArray.io.write.valid
-    metaRefill.io.phyTag := bankedMetaArray.io.write.bits.phyTag
-    metaRefill.io.virIdx := bankedMetaArray.io.write.bits.virIdx
-    metaRefill.io.wayNum := OHToUInt(bankedMetaArray.io.write.bits.waymask)
-    metaRefill.io.timer := GTimer()
-
-    (0 until prefetchPipeNum + 1).map {i =>
-      val bankedMetaDiff = Module(new DifftestICacheBankedMetaRead)
-      bankedMetaDiff.io.coreid := 0.U
-      bankedMetaDiff.io.clock := clock
-      bankedMetaDiff.io.index := i.U
-      bankedMetaDiff.io.valid := RegNext(bankedMetaArray.io.read(i).fire)
-      bankedMetaDiff.io.idx := RegNext(bankedMetaArray.io.read(i).bits.idx)
-      bankedMetaDiff.io.entryValid := bankedMetaArray.io.readResp(i).entryValid
-      bankedMetaDiff.io.metaData := bankedMetaArray.io.readResp(i).metaData.map(_.tag)
-      bankedMetaDiff.io.timer := GTimer()
-      bankedMetaDiff
-    }
-  }
+//  if (env.EnableDifftest) {
+//    val metaRefill = Module(new DifftestICacheMetaWrite)
+//    metaRefill.io.index := 0.U
+//    metaRefill.io.coreid := 0.U
+//    metaRefill.io.clock := clock
+//    metaRefill.io.valid := bankedMetaArray.io.write.valid
+//    metaRefill.io.phyTag := bankedMetaArray.io.write.bits.phyTag
+//    metaRefill.io.virIdx := bankedMetaArray.io.write.bits.virIdx
+//    metaRefill.io.wayNum := OHToUInt(bankedMetaArray.io.write.bits.waymask)
+//    metaRefill.io.timer := GTimer()
+//
+//    (0 until prefetchPipeNum + 1).map {i =>
+//      val bankedMetaDiff = Module(new DifftestICacheBankedMetaRead)
+//      bankedMetaDiff.io.coreid := 0.U
+//      bankedMetaDiff.io.clock := clock
+//      bankedMetaDiff.io.index := i.U
+//      bankedMetaDiff.io.valid := RegNext(bankedMetaArray.io.read(i).fire)
+//      bankedMetaDiff.io.idx := RegNext(bankedMetaArray.io.read(i).bits.idx)
+//      bankedMetaDiff.io.entryValid := bankedMetaArray.io.readResp(i).entryValid
+//      bankedMetaDiff.io.metaData := bankedMetaArray.io.readResp(i).metaData.map(_.tag)
+//      bankedMetaDiff.io.timer := GTimer()
+//      bankedMetaDiff
+//    }
+//  }
 
 }
 
