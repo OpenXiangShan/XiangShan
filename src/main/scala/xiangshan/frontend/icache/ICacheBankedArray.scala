@@ -106,7 +106,7 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
 
   (0 until ICacheMetaReadPortNum).foreach(port_idx => {
     io.read(port_idx).ready := ~(rw_bank_conflict(port_idx) || io.cacheOp.req.valid ||
-      (if (port_idx == 0) false.B else (0 until ICacheMetaReadPortNum).map(rr_bank_conflict(_)(port_idx)).reduce(_||_)))
+      (if (port_idx == 0) false.B else (0 until port_idx).map(rr_bank_conflict(_)(port_idx)).reduce(_||_)))
   })
 
   val bank_read_ens = Wire(Vec(ICacheMetaArrayBanks, Vec(ICacheMetaReadPortNum, Bool())))
@@ -300,7 +300,7 @@ class ICacheBankedDataArray(readPortNum: Int)(implicit p: Parameters) extends IC
 
   (0 until ICacheDataReadPortNum).foreach(port_idx => {
     io.read(port_idx).ready := ~(rw_conflict(port_idx) || io.cacheOp.req.valid ||
-      (if (port_idx == 0) false.B else (0 until ICacheDataReadPortNum).map(rr_conflict(_)(port_idx)).reduce(_||_)))
+      (if (port_idx == 0) false.B else (0 until port_idx).map(rr_conflict(_)(port_idx)).reduce(_||_)))
   })
 
   val data_read_ens = Wire(Vec(ICacheDataArrayBanks, Vec(nWays, Vec(ICacheDataReadPortNum, Bool()))))
