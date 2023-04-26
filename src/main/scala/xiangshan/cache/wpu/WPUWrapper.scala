@@ -95,7 +95,7 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
     s0_pred_way_en := io.req.bits.replayCarry.real_way_en
   }.otherwise {
     // way prediction
-    s0_pred_way_en := wpu.io.predVec(0).en
+    s0_pred_way_en := wpu.io.predVec(0).way_en
 
     if (dwpuParam.enCfPred) {
       // selective direct mapping
