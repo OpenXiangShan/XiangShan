@@ -31,7 +31,7 @@ import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import utility.ChiselDB
 import difftest._
-import huancun.ReqSourceKey
+import huancun.{ReqSourceField, ReqSourceKey}
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -39,7 +39,8 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
+    )),
+    requestFields = Seq(ReqSourceField())
   )))
 
   lazy val module = new L2TLBImp(this)
