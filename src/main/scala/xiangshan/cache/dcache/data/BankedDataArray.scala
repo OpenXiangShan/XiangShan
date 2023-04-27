@@ -467,8 +467,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // readline port
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(RegNext(line_div_addr))(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
-    io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) && io.readline_resp(i).error_delayed.asUInt().orR
   })
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) &&
+    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt().orR
 
   // write data_banks & ecc_banks
   val sram_waddr = addr_to_dcache_div_set(io.write.bits.addr)
@@ -577,10 +578,17 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
 
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  for (bank_index <- 0 until DCacheBanks) {
-    io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).raw_data
-	  eccReadResult(bank_index) := read_result(cacheOpDivAddr)(bank_index)(RegNext(cacheOpWayNum)).ecc
+  for (div_index <- 0 until DCacheSetDiv){
+    for (bank_index <- 0 until DCacheBanks) {
+      for (way_index <- 0 until DCacheWays){
+        when(RegNext(cacheOpDivAddr) === div_index.U && RegNext(cacheOpWayNum) === way_index.U){
+          io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(div_index)(bank_index)(way_index).raw_data
+          eccReadResult(bank_index) := ecc_banks(div_index)(bank_index)(way_index).io.r.resp.data(0)
+        }
+      }
+    }
   }
+
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
     eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
     0.U
