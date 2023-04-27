@@ -677,12 +677,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
     val s1_bimCtr = bt.io.s1_cnt(i)
+    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_tageTakens(i) := 
-      Mux(!provided || providerInfo.use_alt_on_unconf,
+      Mux(s1_altUsed(i),
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
-    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
