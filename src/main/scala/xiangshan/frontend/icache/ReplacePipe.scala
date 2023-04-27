@@ -19,11 +19,10 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import xiangshan._
+import freechips.rocketchip.tilelink.TLPermissions
 import utils._
-import utility._
-import xiangshan.cache.wpu.ICacheWpuWrapper
+import xiangshan._
+import xiangshan.cache.wpu.IwpuBaseIO
 
 class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -45,7 +44,7 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val io = IO(new Bundle{
     val pipe_req = Flipped(DecoupledIO(new ReplacePipeReq))
-
+    val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = 1))
     val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
     val meta_response = Input(new ICacheMetaRespBundle)
@@ -100,13 +99,12 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   r0_ready := array_req(0).ready && array_req(1).ready && r1_ready  || !r0_valid
   r0_fire  := r0_valid && r0_ready
 
-  val wpu = Module(new ICacheWpuWrapper(1))
   val p0_pred_way_en = Wire(UInt(nWays.W))
-  wpu.io.req(0).valid := r0_valid && r0_req.isProbe
-  wpu.io.req(0).bits.vaddr := r0_req.vaddr
+  io.iwpu.req(0).valid := r0_valid && r0_req.isProbe
+  io.iwpu.req(0).bits.vaddr := r0_req.vaddr
   if (iwpuParam.enWPU) {
-    when(wpu.io.resp(0).valid) {
-      p0_pred_way_en := wpu.io.resp(0).bits.s0_pred_way_en
+    when(io.iwpu.resp(0).valid) {
+      p0_pred_way_en := io.iwpu.resp(0).bits.s0_pred_way_en
     }.otherwise {
       p0_pred_way_en := 0.U(nWays.W)
     }
@@ -166,10 +164,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
 
   /** wpu */
-  wpu.io.lookup_upd(0).valid := r1_valid
-  wpu.io.lookup_upd(0).bits.vaddr := r1_req.vaddr
+  io.iwpu.lookup_upd(0).valid := r1_valid
+  io.iwpu.lookup_upd(0).bits.vaddr := r1_req.vaddr
   // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
-  wpu.io.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
+  io.iwpu.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
 
   val r1_datas = Wire(UInt(blockBits.W))
   val r1_data_errorBits = Wire(UInt(dataCodeEntryBits.W))
@@ -288,7 +286,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   //release not write back
   io.meta_write.valid := r2_fire && r2_req.isProbe
-  io.meta_write.bits.generate(tag = r2_probe_hit_ptag, coh = probe_new_coh, idx = r2_req.vidx, waymask = r2_probe_hit_vec.asUInt, bankIdx = r2_req.vidx(0))
+  io.meta_write.bits.generate(vaddr = r2_req.vaddr, tag = r2_probe_hit_ptag, coh = probe_new_coh, idx = r2_req.vidx, waymask = r2_probe_hit_vec.asUInt, bankIdx = r2_req.vidx(0))
 
   //NToN Release should not been send to slave
   io.release_req.valid          := r2_valid && (r2_req.isProbe || release_need_send)

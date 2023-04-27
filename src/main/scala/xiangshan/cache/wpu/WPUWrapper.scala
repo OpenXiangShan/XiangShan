@@ -58,11 +58,14 @@ class ConflictPredictIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   val s1_dm_hit = Input(Bool())
 }
 
-class IwpuIO(nWays:Int, nPorts: Int)(implicit p:Parameters) extends BaseWPUBundle{
+class IwpuBaseIO(nWays:Int, nPorts: Int)(implicit p:Parameters) extends BaseWPUBundle{
   val req = Vec(nPorts, Flipped(Decoupled(new WPUBaseReq)))
   val resp = Vec(nPorts, ValidIO(new WPUResp(nWays)))
   val lookup_upd = Vec(nPorts, Flipped(ValidIO(new WPUUpdate(nWays))))
-  // val tagwrite_upd = Vec(nPorts, Flipped(ValidIO(new WPUUpdate(nWays))))
+}
+
+class IwpuIO(nWays:Int, nPorts: Int)(implicit p:Parameters) extends IwpuBaseIO(nWays, nPorts){
+  val tagwrite_upd = Vec(nPorts, Flipped(ValidIO(new WPUUpdate(nWays))))
 }
 
 class DwpuIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{

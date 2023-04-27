@@ -237,7 +237,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val miss_new_coh = ClientMetadata(missCohGen(grant_param, is_dirty))
 
   io.meta_write.valid := (state === s_write_back)
-  io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
+  io.meta_write.bits.generate(vaddr = req.vaddr, tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
 
   io.data_write.valid := (state === s_write_back)
   io.data_write.bits.generate(data = respDataReg.asUInt,

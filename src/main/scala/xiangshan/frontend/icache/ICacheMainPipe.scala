@@ -19,14 +19,13 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.ClientStates
-import xiangshan._
-import xiangshan.cache.mmu._
-import utils._
 import utility._
+import utils._
+import xiangshan._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import xiangshan.cache.wpu.ICacheWpuWrapper
-import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle}
+import xiangshan.cache.mmu._
+import xiangshan.cache.wpu.IwpuBaseIO
+import xiangshan.frontend.FtqToICacheRequestBundle
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -94,6 +93,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val dataArray   = new ICacheDataReqBundle
   val reMetaArray = new ICacheMetaReqBundle
   val reDataArray = new ICacheDataReqBundle
+  val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = PortNumber))
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
@@ -163,14 +163,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_double_line  = s0_double_line.head
   val s0_pred_way_en = Wire(Vec(PortNumber, UInt(nWays.W)))
 
-  /** WPU */
-  val wpu = Module(new ICacheWpuWrapper(PortNumber))
   for(i <- 0 until PortNumber){
-    wpu.io.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
-    wpu.io.req(i).bits.vaddr := s0_final_vaddr(i)
+    io.iwpu.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
+    io.iwpu.req(i).bits.vaddr := s0_final_vaddr(i)
     if(iwpuParam.enWPU){
-      when(wpu.io.resp(i).valid) {
-        s0_pred_way_en(i) := wpu.io.resp(i).bits.s0_pred_way_en
+      when(io.iwpu.resp(i).valid) {
+        s0_pred_way_en(i) := io.iwpu.resp(i).bits.s0_pred_way_en
       }.otherwise {
         s0_pred_way_en(i) := 0.U(nWays.W)
       }
@@ -321,10 +319,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
 
   for (i <- 0 until PortNumber) {
-    wpu.io.lookup_upd(i).valid := s1_valid
-    wpu.io.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
+    io.iwpu.lookup_upd(i).valid := s1_valid
+    io.iwpu.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
     // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
-    wpu.io.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
+    io.iwpu.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
   }
 
   val s1_datas = Wire(Vec(PortNumber, UInt(blockBits.W)))

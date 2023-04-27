@@ -29,7 +29,8 @@ import xiangshan.cache._
 import utils._
 import utility._
 import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
+import xiangshan.cache.mmu.{TlbReq, TlbRequestIO}
+import xiangshan.cache.wpu.ICacheWpuWrapper
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -567,6 +568,22 @@ if(cacheParams.hasPrefetch){
   replacePipe.io.data_response        <> dataArray.io.readResp
   mainPipe.io.reDataArray.fromIData   <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
+
+  /** wpu: unified predict */
+  val iwpu = Module(new ICacheWpuWrapper(PortNumber + 1))
+  for(i <- 0 until PortNumber){
+    iwpu.io.req(i) <> mainPipe.io.iwpu.req(i)
+    iwpu.io.lookup_upd(i) <> mainPipe.io.iwpu.lookup_upd(i)
+    mainPipe.io.iwpu.resp(i) <> iwpu.io.resp(i)
+  }
+  iwpu.io.req(PortNumber) <> replacePipe.io.iwpu.req.head
+  iwpu.io.lookup_upd(PortNumber) <> replacePipe.io.iwpu.lookup_upd.head
+  replacePipe.io.iwpu.resp.head <> iwpu.io.resp(PortNumber)
+  // tag write update
+  iwpu.io.tagwrite_upd <> DontCare
+  iwpu.io.tagwrite_upd.head.valid := metaArray.io.write.valid
+  iwpu.io.tagwrite_upd.head.bits.vaddr := metaArray.io.write.bits.vaddr
+  iwpu.io.tagwrite_upd.head.bits.s1_real_way_en := metaArray.io.write.bits.waymask
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
