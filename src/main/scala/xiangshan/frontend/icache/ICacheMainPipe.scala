@@ -862,7 +862,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
         .elsewhen(s2_prefetch_hit(i)) {
           when (s2_prefetch_hit_in_ipf(i)) { diffMainPipeOut.io.idtfr := 2.U  }
             .elsewhen(s2_prefetch_hit_in_piq(i)) { diffMainPipeOut.io.idtfr := 3.U }
-            .otherwise { XSError(true.B, "should not in this situation\n")}
+            .otherwise { XSWarn(true.B, "should not in this situation\n")}
         }
         .otherwise { diffMainPipeOut.io.idtfr := 4.U }
       diffMainPipeOut
