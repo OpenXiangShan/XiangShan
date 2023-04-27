@@ -557,7 +557,7 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
-  object UopDivType {
+  object UopSplitType {
     def SCA_SIM          = "b000000".U //
     def DIR              = "b010001".U // dirty: vset
     def VEC_VVV          = "b010010".U // VEC_VVV
@@ -597,7 +597,7 @@ package object xiangshan {
     def X = BitPat("b000000")
 
     def apply() = UInt(6.W)
-    def needSplit(UopDivType: UInt) = UopDivType(4) || UopDivType(5)
+    def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
   }
 
   object ExceptionNO {

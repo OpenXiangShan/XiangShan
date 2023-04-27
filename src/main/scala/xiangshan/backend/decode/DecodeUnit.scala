@@ -46,9 +46,9 @@ abstract trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  noSpecExec
     //   |          |          |          |         |           |  |  |  |  |  blockBackward
     //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
-    //   |          |          |          |         |           |  |  |  |  |  |  |  uopDivType
+    //   |          |          |          |         |           |  |  |  |  |  |  |  uopSplitType
     //   |          |          |          |         |           |  |  |  |  |  |  |  |             selImm
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopDivType.X, SelImm.INVALID_INSTR)
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR)
   } // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
@@ -85,7 +85,7 @@ abstract class XSDecodeBase {
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: BitPat, fuOp: BitPat, selImm: BitPat,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -96,14 +96,14 @@ case class XSDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, fu, fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopDivType, selImm)
+    List (src1, src2, src3, fu, fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopSplitType, selImm)
   }
 }
 
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: BitPat, fuOp: BitPat, selImm: BitPat = SelImm.X,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -114,7 +114,7 @@ case class FDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopDivType,  xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType,  xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
   }
 }
 
@@ -196,7 +196,7 @@ object XDecode extends DecodeConstants {
 
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopDivType = UopDivType.SCA_SIM, xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopSplitType = UopSplitType.SCA_SIM, xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bge   , SelImm.IMM_SB          ),
@@ -750,7 +750,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.cf_ctrl := cf_ctrl
 
   io.deq.isVset := FuType.isIntExu(cs.fuType) && ALUOpType.isVset(cs.fuOpType)
-  io.deq.isComplex := UopDivType.needSplit(cs.uopDivType)
+  io.deq.isComplex := UopSplitType.needSplit(cs.uopSplitType)
 
   //-------------------------------------------------------------
   // Debug Info
