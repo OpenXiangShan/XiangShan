@@ -134,6 +134,7 @@ class IPFWritePtrQueue(implicit p: Parameters) extends IPrefetchModule with HasC
 class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 {
   val io = IO(new Bundle{
+    val hartId = Input(UInt(8.W))
     val read  = new IPFBufferRead
     val filter_read = Vec(prefetchPipeNum, new IPFBufferFilterRead)
     val write = Flipped(ValidIO(new IPFBufferWrite))
@@ -416,7 +417,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := io.hartId
     difftest.io.cacheid := 6.U
     difftest.io.valid := io.move.meta_write.fire
     difftest.io.addr := s3_move_meta.paddr

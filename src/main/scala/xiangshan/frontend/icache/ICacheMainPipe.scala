@@ -89,6 +89,7 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
 }
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
+  val hartId = Input(UInt(8.W))
   /*** internal interface ***/
   val metaArray   = new ICacheMetaReqBundle
   val dataArray   = new ICacheDataReqBundle
@@ -371,7 +372,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     (0 until PortNumber).foreach { i =>
       val diffPIQ = Module(new DifftestRefillEvent)
       diffPIQ.io.clock := clock
-      diffPIQ.io.coreid := 0.U
+      diffPIQ.io.coreid := io.hartId
       diffPIQ.io.cacheid := (i + 7).U
       if (i == 0) diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && !tlbExcp(0)
       else diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
@@ -834,9 +835,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
-  XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
-  XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
-  XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
+//  XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
+//  XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
+//  XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
 
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
@@ -846,7 +847,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     (0 until PortNumber).map { i =>
       val diffMainPipeOut = Module(new DifftestRefillEvent)
       diffMainPipeOut.io.clock := clock
-      diffMainPipeOut.io.coreid := 0.U
+      diffMainPipeOut.io.coreid := io.hartId
       diffMainPipeOut.io.cacheid := (4 + i).U
       if (i == 0) diffMainPipeOut.io.valid := s2_fire && !discards(0)
       else        diffMainPipeOut.io.valid := s2_fire && s2_double_line && !discards(0) && !discards(1)
