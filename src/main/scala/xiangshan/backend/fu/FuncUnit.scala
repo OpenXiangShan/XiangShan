@@ -47,7 +47,7 @@ class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val preDecode    = if (cfg.hasPredecode)Some(new PreDecodeInfo)            else None
 }
 
-class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends Bundle {
+class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
@@ -56,7 +56,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends Bundle {
   val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
 }
 
-abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends Module {
+abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
   val io = IO(new FuncUnitIO(cfg))
 
   // should only be used in non-piped fu

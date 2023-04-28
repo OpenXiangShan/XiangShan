@@ -79,12 +79,15 @@ object Bundles {
     val vpu           = new VPUCtrlSignals
     val isMove        = Bool()
     val uopIdx        = UInt(5.W)
-    //    val vconfig       = UInt(16.W)
+    val vtype         = new VType
+    val uopDivType    = UopDivType()
     val isVset        = Bool()
+    val firstUop      = Bool()
+    val lastUop       = Bool()
     val commitType    = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      isXSTrap, waitForward, blockBackward, flushPipe, selImm)
+      isXSTrap, waitForward, blockBackward, flushPipe, uopDivType, selImm)
 
     def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodedInst = {
       val decoder: Seq[UInt] = ListLookup(
@@ -143,8 +146,10 @@ object Bundles {
     val vpu             = new VPUCtrlSignals
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
-    //    val vconfig         = UInt(16.W)
+    val vtype           = new VType
     val isVset          = Bool()
+    val firstUop = Bool()
+    val lastUop = Bool()
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numPSrc, SrcState())
@@ -274,7 +279,7 @@ object Bundles {
 
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
-    def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readFp)
+    def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(x => x.readFp || x.readVec)
   }
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {

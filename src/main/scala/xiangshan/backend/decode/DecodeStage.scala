@@ -25,7 +25,9 @@ import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
 
-class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class DecodeStage(implicit p: Parameters) extends XSModule
+  with HasPerfEvents
+  with VectorConstants {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
@@ -38,19 +40,57 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+    // vtype update
+    val isRedirect = Input(Bool())
+    val commitVType = Flipped(Valid(new VType))
+    val walkVType = Flipped(Valid(new VType))
   })
 
-  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-
   private val v0Idx = 0
-  private val vconfigIdx = 32
+  private val vconfigIdx = VECTOR_VCONFIG
 
+  val decoderComp = Module(new DecodeUnitComp)
+  val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
+  val vtypeGen = Module(new VTypeGen)
+  val debug_globalCounter = RegInit(0.U(XLEN.W))
+
+  val isComplex = Wire(Vec(DecodeWidth - 1, Bool()))
+  val uopComplex = Wire(Vec(DecodeWidth, new DecodedInst))
+  val isFirstVset = Wire(Bool())
+  val complexNum = Wire(UInt(3.W))
+
+  val uopSimple = Wire(Vec(DecodeWidth - 1, new DecodedInst))
+
+  //Comp 1
+  decoderComp.io.enq.staticInst := io.in(0).bits
+  decoderComp.io.csrCtrl := io.csrCtrl
+  decoderComp.io.vtype := vtypeGen.io.vtype
+  decoderComp.io.isComplex := isComplex
+  decoderComp.io.validFromIBuf.zip(io.in).map { case (dst, src) => dst := src.valid }
+  decoderComp.io.readyFromRename.zip(io.out).map { case (dst, src) => dst := src.ready }
+  uopComplex := decoderComp.io.deq.decodedInsts
+  io.out.zip(decoderComp.io.deq.validToRename).map { case (dst, src) => dst.valid := src }
+  io.in.zip(decoderComp.io.deq.readyToIBuf).map { case (dst, src) => dst.ready := src }
+  isFirstVset := decoderComp.io.deq.isVset
+  complexNum := decoderComp.io.deq.complexNum
+
+  //Simple 5
+  decoders.zip(io.in.drop(1)).map { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
+  decoders.map { case dst => dst.io.csrCtrl := io.csrCtrl }
+  decoders.map { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
+  isComplex.zip(decoders.map(_.io.deq.isComplex)).map { case (dst, src) => dst := src }
+  uopSimple.zip(decoders.map(_.io.deq.decodedInst)).map { case (dst, src) => dst := src }
+
+  vtypeGen.io.firstInstr.valid :=  io.in(0).valid
+  vtypeGen.io.firstInstr.bits.instr := io.in(0).bits.instr
+  vtypeGen.io.firstInstr.bits.isVset := decoderComp.io.deq.isVset
+  vtypeGen.io.isRedirect := io.isRedirect
+  vtypeGen.io.commitVType := io.commitVType
+  vtypeGen.io.walkVType := io.walkVType
+
+  io.out.zip(0 until RenameWidth).map { case (dst, i) => dst.bits := Mux(complexNum > i.U, uopComplex(i), uopSimple(i.U - complexNum)) }
 
   for (i <- 0 until DecodeWidth) {
-    decoders(i).io.enq.ctrlFlow <> io.in(i).bits
-
-    // csr control
-    decoders(i).io.csrCtrl := io.csrCtrl
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.lsrc(0)
@@ -67,20 +107,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // Vec instructions
     // TODO: vec uop dividers need change this
-    io.vecRat(i)(0).addr := decoders(i).io.deq.decodedInsts.lsrc(0) // vs1
-    io.vecRat(i)(1).addr := decoders(i).io.deq.decodedInsts.lsrc(1) // vs2
-    io.vecRat(i)(2).addr := decoders(i).io.deq.decodedInsts.ldest   // old_vd
-    io.vecRat(i)(3).addr := v0Idx.U                                 // v0
-    io.vecRat(i)(4).addr := vconfigIdx.U                            // vtype
+    io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
+    io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
+    io.vecRat(i)(2).addr := io.out(i).bits.ldest   // old_vd0
+    io.vecRat(i)(3).addr := v0Idx.U                // v0
+    io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
-  }
-
-  io.out.zip(decoders.map(_.io.deq)).foreach { case (out, decodeOut) =>
-    out.bits := decodeOut.decodedInsts
-  }
-  io.out.zip(io.in).foreach { case (out, in) =>
-    out.valid := in.valid
-    in.ready := out.ready
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR

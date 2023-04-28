@@ -17,7 +17,7 @@ object FuType {
   val div = OHInt(6)
   val fence = OHInt(7)
   val bku = OHInt(8)
-  val vset = OHInt(9)
+  val vsetiwi = OHInt(9)
   val fmac = OHInt(10)
   val fmisc = OHInt(11)
   val fDivSqrt = OHInt(12)
@@ -25,19 +25,25 @@ object FuType {
   val stu = OHInt(14)
   val mou = OHInt(15)
   val vipu = OHInt(16)
-  val vfpu = OHInt(17)
-  val vldu = OHInt(18)
-  val vstu = OHInt(19)
+  val vialuF = OHInt(17)
+  val vfpu = OHInt(18)
+  val vldu = OHInt(19)
+  val vstu = OHInt(20)
+  val vppu = OHInt(21)
+  val vsetiwf = OHInt(22)
+  val vsetfwf = OHInt(23)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 20
+  def num = 24
 
   def width = num
 
   def apply() = UInt(num.W)
 
-  def isInt(fuType: UInt): Bool = fuType(9, 0).orR // from jmp to vset
+  def isInt(fuType: UInt): Bool = fuType(9, 0).orR || fuType(22)// from jmp to vset
+
+  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23)
 
   def isJump(fuType: UInt): Bool = fuType(0)
 

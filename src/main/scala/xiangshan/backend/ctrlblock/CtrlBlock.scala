@@ -30,6 +30,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
+import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
@@ -166,7 +167,7 @@ class CtrlBlockImp(
   for (i <- 0 until CommitWidth) {
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).uopIdx.andR && !s0_robFlushRedirect.valid
+    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).lastUop && (!s0_robFlushRedirect.valid || s0_robFlushRedirect.valid && rob.io.commits.info(i).isVset)
     io.frontend.toFtq.rob_commits(i).valid := RegNext(s1_isCommit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
   }
@@ -226,6 +227,23 @@ class CtrlBlockImp(
     XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
     XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
   }
+
+  // vtype commit
+  val commitIsVsetSeq = rob.io.commits.commitValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset && info.lastUop }
+  val pdestSeq = rob.io.commits.info.map(info => info.pdest)
+  io.toDataPath.vtypeAddr := PriorityMux(commitIsVsetSeq.reverse, pdestSeq.reverse)
+  decode.io.commitVType.bits := io.fromDataPath.vtype
+  decode.io.commitVType.valid := RegNext(rob.io.commits.isCommit && Cat(commitIsVsetSeq).orR)
+
+  io.toExuBlock.vsetCommit := decode.io.commitVType.valid
+
+  // vtype walk
+  val walkIsVsetSeq = rob.io.commits.walkValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset && info.lastUop }
+  val vtypeSeq = rob.io.commits.info.map(info => info.vtype)
+  decode.io.walkVType.bits := PriorityMux(walkIsVsetSeq.reverse, vtypeSeq.reverse)
+  decode.io.walkVType.valid := rob.io.commits.isWalk && walkIsVsetSeq.reduce(_ || _)
+
+  decode.io.isRedirect := s1_robFlushRedirect.valid
 
   decode.io.in.zip(io.frontend.cfVec).foreach { case (decodeIn, frontendCf) =>
     decodeIn.valid := frontendCf.valid
@@ -455,10 +473,15 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val targetVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   }
+  val fromDataPath = new Bundle{
+    val vtype = Input(new VType)
+  }
   val toDataPath = new Bundle {
+    val vtypeAddr = Output(UInt(PhyRegIdxWidth.W))
     val flush = ValidIO(new Redirect)
   }
   val toExuBlock = new Bundle {
+    val vsetCommit = Output(Bool())
     val flush = ValidIO(new Redirect)
   }
   val fromWB = new Bundle {

@@ -26,7 +26,7 @@ import utility._
 
 class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
 
-  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 64).U(PhyRegIdxWidth.W) )))
+  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + FpLogicRegs + VecLogicRegs).U(PhyRegIdxWidth.W) )))
   val headPtr  = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
   val headPtrOHShift = CircularShift(headPtrOH)
@@ -76,7 +76,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
   val doCommit = io.commit.isCommit
-  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && info.fpWen }
+  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && (info.fpWen || info.vecWen) }
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew   = archHeadPtr + numArchAllocate
   val archHeadPtrOHNew = archHeadPtrOHVec(numArchAllocate)

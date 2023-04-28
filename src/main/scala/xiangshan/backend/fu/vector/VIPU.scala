@@ -27,7 +27,7 @@ import xiangshan.backend.fu.FuConfig
 import yunsuan.vector.VectorIntAdder
 import yunsuan.{VectorElementFormat, VipuType}
 
-class VIPU(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg) with HasXSParameter {
+class VIPU(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasXSParameter {
   XSError(io.in.valid && io.in.bits.fuOpType === VipuType.dummy, "VIPU OpType not supported")
 
   val AdderWidth = XLEN

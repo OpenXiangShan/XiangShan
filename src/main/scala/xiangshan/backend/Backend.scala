@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.PipelineConnect
+import utility.{PipelineConnect, ZeroExt}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.CtrlBlock
@@ -47,7 +47,8 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   lazy val module = new BackendImp(this)
 }
 
-class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
+class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper)
+  with HasXSParameter{
   implicit private val params = wrapper.params
   val io = IO(new BackendIO()(p, wrapper.params))
 
@@ -106,7 +107,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
 
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
-
+  dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
+  val vconfig = dataPath.io.vconfigReadPort.data
+  ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
       PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
@@ -147,6 +150,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.isIllegal := false.B // Todo: remove it
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
+  csrio.vpu.set_vstart.valid := ctrlBlock.io.toExuBlock.vsetCommit
+  csrio.vpu.set_vstart.bits := 0.U
+  csrio.vpu.set_vtype.valid := ctrlBlock.io.toExuBlock.vsetCommit
+  csrio.vpu.set_vtype.bits := ZeroExt(vconfig(7, 0), XLEN)
+  csrio.vpu.set_vl.valid := ctrlBlock.io.toExuBlock.vsetCommit
+  csrio.vpu.set_vl.bits := ZeroExt(vconfig(15, 8), XLEN)
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionVAddr
   csrio.externalInterrupt := io.fromTop.externalInterrupt

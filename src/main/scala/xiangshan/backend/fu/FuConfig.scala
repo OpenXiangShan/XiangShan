@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VSetFVConfig, VSetIVConfig, VSetIVL}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -220,16 +220,45 @@ object FuConfig {
     latency = CertainLatency(1),
   )
 
-  val VsetCfg: FuConfig = FuConfig (
-    name = "vset",
-    fuType = FuType.vset,
-    fuGen = null, // Todo
+  val VSetFVConfigCfg: FuConfig = FuConfig(
+    name = "vsetfvconfig",
+    fuType = FuType.vsetiwf,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetFVConfig(cfg)(p).suggestName("VSetFVConfig")),
+    srcData = Seq(
+      Seq(FpData(), FpData()),
+    ),
+    writeIntRf = false,
+    writeFpRf = false,
+    writeVecRf = true,
+    latency = CertainLatency(0),
+    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+  )
+
+  val VSetIVConfigCfg: FuConfig = FuConfig(
+    name = "vsetivconfig",
+    fuType = FuType.vsetiwf,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetIVConfig(cfg)(p).suggestName("VSetIVConfig")),
+    srcData = Seq(
+      Seq(IntData(), IntData()),
+    ),
+    writeIntRf = false,
+    writeFpRf = false,
+    writeVecRf = true,
+    latency = CertainLatency(0),
+    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+  )
+
+  val VSetIVLCfg: FuConfig = FuConfig(
+    name = "vsetivl",
+    fuType = FuType.vsetiwi,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetIVL(cfg)(p).suggestName("VSetIVL")),
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
     writeIntRf = true,
     writeFpRf = false,
-    latency = CertainLatency(0)
+    latency = CertainLatency(0),
+    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
 
   val FmacCfg: FuConfig = FuConfig (
