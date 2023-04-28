@@ -162,12 +162,12 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+  val uopDivType = UopDivType()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UInt(5.W)
-  val vconfig = UInt(16.W)
   val isMove = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
@@ -175,7 +175,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 
   private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, uopDivType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder: Seq[UInt] = ListLookup(
@@ -325,8 +325,10 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val uopIdx = UInt(5.W)
-//  val vconfig = UInt(16.W)
+  val vtype = new VType
+  val isVset = Bool()
+  val firstUop = Bool()
+  val lastUop = Bool()
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
@@ -608,4 +610,16 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
+}
+
+class VType(implicit p: Parameters) extends XSBundle {
+  val vma   = Bool()
+  val vta   = Bool()
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class VConfig(implicit p: Parameters) extends XSBundle {
+  val vl    = UInt(8.W)
+  val vtype = new VType
 }

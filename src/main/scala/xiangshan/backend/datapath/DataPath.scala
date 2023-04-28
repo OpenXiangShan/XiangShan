@@ -83,6 +83,8 @@ class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule
 class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
   extends LazyModuleImp(wrapper) with HasXSParameter {
 
+  private val VCONFIG_PORT = params.vconfigPort
+
   val io = IO(new DataPathIO())
 
   private val (fromIntIQ, toIntIQ, toIntExu) = (io.fromIntIQ, io.toIntIQ, io.toIntExu)
@@ -228,6 +230,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   vfRfWen.foreach(_.zip(io.fromVfWb.map(_.wen)).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
 
   vfRFReadArbiter.io.out.map(_.bits.addr).zip(vfRfRaddr).foreach{ case(source, sink) => sink := source }
+  vfRfRaddr(VCONFIG_PORT) := io.vconfigReadPort.addr
+  io.vconfigReadPort.data := vfRfRdata(VCONFIG_PORT)
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat
@@ -445,6 +449,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val hartId = Input(UInt(8.W))
 
   val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
+
+  val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))

@@ -59,7 +59,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
   val intRefCounter = Module(new RefCounter(NRPhyRegs))
-  val fpFreeList = Module(new StdFreeList(NRPhyRegs - 64))
+  val fpFreeList = Module(new StdFreeList(NRPhyRegs - FpLogicRegs - VecLogicRegs))
 
   intRefCounter.io.commit        <> io.robCommits
   intRefCounter.io.redirect      := io.redirect.valid
@@ -223,11 +223,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     when (io.out(i).bits.fuType === FuType.fence.U) {
       io.out(i).bits.imm := Cat(io.in(i).bits.lsrc(1), io.in(i).bits.lsrc(0))
     }
-    // dirty code for vsetvl(11)/vsetvli(15). The lsrc0 is passed by imm.
-    val isVsetvl_ = FuType.isInt(io.in(i).bits.fuType) && (ALUOpType.isVsetvli(io.in(i).bits.fuOpType) || ALUOpType.isVsetvl(io.in(i).bits.fuOpType))
-    when (isVsetvl_){
-      io.out(i).bits.imm := Cat(io.in(i).bits.lsrc(0).orR.asUInt, io.in(i).bits.imm(14,0))                           // lsrc(0) Not Zero
-    }
+
     // dirty code for SoftPrefetch (prefetch.r/prefetch.w)
 //    when (io.in(i).bits.isSoftPrefetch) {
 //      io.out(i).bits.fuType := FuType.ldu.U
