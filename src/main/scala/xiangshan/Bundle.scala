@@ -321,8 +321,10 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val uopIdx = UInt(5.W)
-//  val vconfig = UInt(16.W)
+  val vtype = new VType
+  val isVset = Bool()
+  val firstUop = Bool()
+  val lastUop = Bool()
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
@@ -596,4 +598,16 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
+}
+
+class VType(implicit p: Parameters) extends XSBundle {
+  val vma   = Bool()
+  val vta   = Bool()
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class VConfig(implicit p: Parameters) extends XSBundle {
+  val vl    = UInt(8.W)
+  val vtype = new VType
 }

@@ -129,8 +129,12 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
+  MaxUopSize: Int = 37,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
+  IntLogicRegs: Int = 33,
+  FpLogicRegs: Int = 33,
+  VecLogicRegs: Int = 40,
   NRPhyRegs: Int = 192,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,
@@ -268,11 +272,11 @@ case class XSCoreParameters
         ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(4, 1)), Seq(IntRD(5, 1)))),
-        ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(7, 1)))),
+        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(2, 1)), Seq(IntRD(3, 1)))),
+        ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(4, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(I2fCfg), Seq(VecWB(port = 6, Int.MaxValue)), Seq(Seq(IntRD(0, 0)))),
+        ExeUnitParams(Seq(I2fCfg, VSetIVLCfg, VSetIVConfigCfg), Seq(VecWB(port = 6, Int.MaxValue), IntWB(port = 7, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
     ),
       numPregs = intPreg.numEntries,
@@ -294,7 +298,7 @@ case class XSCoreParameters
         ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetFVConfigCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
     ),
       numPregs = vfPreg.numEntries,
@@ -451,8 +455,12 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val MaxUopSize = coreParams.MaxUopSize
   val FtqSize = coreParams.FtqSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
+  val IntLogicRegs = coreParams.IntLogicRegs
+  val FpLogicRegs = coreParams.FpLogicRegs
+  val VecLogicRegs = coreParams.VecLogicRegs
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val IntPhyRegs = coreParams.IntPhyRegs

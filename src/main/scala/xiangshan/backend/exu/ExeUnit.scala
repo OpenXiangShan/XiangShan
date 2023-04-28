@@ -33,6 +33,7 @@ class ExeUnitImp(
   val io = IO(new ExeUnitIO(exuParams))
 
   val funcUnits = fuCfgs.map(cfg => {
+    assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
     val module = cfg.fuGen(p, cfg)
     module
   })

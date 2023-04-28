@@ -158,7 +158,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
-class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
+class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
   with PMAMethod

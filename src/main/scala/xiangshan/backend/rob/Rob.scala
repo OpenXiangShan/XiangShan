@@ -25,10 +25,10 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.FuType
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 
 class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
@@ -308,7 +308,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
-    val isVsetFlushPipe = Output(Bool())
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
@@ -486,7 +485,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val firstVInstrRobIdx    = RegInit(0.U.asTypeOf(new RobPtr))
 
   val enq0            = io.enq.req(0)
-  val enq0IsVset      = FuType.isInt(enq0.bits.fuType) && ALUOpType.isVset(enq0.bits.fuOpType) && enq0.bits.uopIdx.andR && canEnqueue(0)
+  val enq0IsVset      = enq0.bits.isVset && enq0.bits.lastUop && canEnqueue(0)
   val enq0IsVsetFlush = enq0IsVset && enq0.bits.flushPipe
   val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVpu(req.bits.fuType) && fire}
   // for vs_idle
@@ -574,7 +573,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val isVsetFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe && exceptionDataRead.bits.isVset
   val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
-  io.isVsetFlushPipe := RegNext(isVsetFlushPipe)
+
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
@@ -751,7 +750,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   walkPtrVec := walkPtrVec_next
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val isLastUopVec = io.commits.info.map(_.uopIdx.andR)
+  val isLastUopVec = io.commits.info.map(_.lastUop)
   val commitCnt = PopCount(io.commits.commitValid.zip(isLastUopVec).map{case(isCommitValid, isLastUop) => isCommitValid && isLastUop})
 
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
@@ -911,7 +910,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.ftqOffset := req.ftqOffset
     wdata.isMove := req.eliminatedMove
     wdata.pc := req.pc
-    wdata.uopIdx := req.uopIdx
+    wdata.vtype := req.vtype
+    wdata.isVset := req.isVset
+    wdata.firstUop := req.firstUop
+    wdata.lastUop := req.lastUop
 //    wdata.vconfig := req.vconfig
   }
   dispatchData.io.raddr := commitReadAddr_next
@@ -923,7 +925,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.flushPipe
-    exceptionGen.io.enq(i).bits.isVset := FuType.isInt(io.enq.req(i).bits.fuType) && ALUOpType.isVset(io.enq.req(i).bits.fuOpType)
+    exceptionGen.io.enq(i).bits.isVset := io.enq.req(i).bits.isVset
     exceptionGen.io.enq(i).bits.replayInst := false.B
     XSError(canEnqueue(i) && io.enq.req(i).bits.replayInst, "enq should not set replayInst")
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.singleStep
@@ -1104,7 +1106,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
 
-      difftest.io.isVsetFirst := RegNext(RegNext(RegNext(io.commits.commitValid(i) && !io.commits.info(i).uopIdx.orR)))
+      difftest.io.isVsetFirst := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).isVset && io.commits.info(i).firstUop && !io.commits.info(i).lastUop)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
