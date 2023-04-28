@@ -273,11 +273,10 @@ class ITTageTable
   us.io.waddr := update_idx
   us.io.wdata := io.update.u
 
-  val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows), tagWidth=tagLen))
+  val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
 
   wrbypass.io.wen := io.update.valid
   wrbypass.io.write_idx := update_idx
-  wrbypass.io.write_tag.map(_ := update_tag)
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
