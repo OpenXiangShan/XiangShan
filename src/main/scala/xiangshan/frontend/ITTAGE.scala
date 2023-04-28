@@ -273,11 +273,10 @@ class ITTageTable
   us.io.waddr := update_idx
   us.io.wdata := io.update.u
 
-  val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows), tagWidth=tagLen))
+  val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
 
   wrbypass.io.wen := io.update.valid
   wrbypass.io.write_idx := update_idx
-  wrbypass.io.write_tag.map(_ := update_tag)
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
@@ -420,7 +419,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val update = io.update.bits
   val updateValid =
     update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
-    update.jmp_taken
+    update.jmp_taken && update.cfi_idx.valid && update.cfi_idx.bits === update.ftb_entry.tailSlot.offset
   val updateFhist = update.spec_info.folded_hist
 
   // meta is splited by composer

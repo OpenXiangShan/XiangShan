@@ -159,6 +159,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** SRAM request */
   //0 -> metaread, 1,2,3 -> data, 3 -> code 4 -> itlb
+  // TODO: it seems like 0,1,2,3 -> dataArray(data); 3 -> dataArray(code); 0 -> metaArray; 4 -> itlb
   val ftq_req_to_data_doubleline  = s0_double_line.init
   val ftq_req_to_data_vset_idx    = s0_req_vsetIdx.init
   val ftq_req_to_data_valid       = fromFtq.bits.readValid.init
@@ -274,14 +275,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
-  val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
+//  val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
+  val s1_meta_valids             = ResultHoldBypass(data = metaResp.entryValid, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
 
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
-  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
+  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_valids(k)(w) /*s1_meta_cohs(k)(w).isValid()*/})))
   val s1_tag_match         = VecInit(s1_tag_match_vec.map(vector => ParallelOR(vector)))
 
   val s1_port_hit          = VecInit(Seq(s1_tag_match(0) && s1_valid  && !tlbExcp(0),  s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcp(1) ))
@@ -292,10 +294,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
   val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(s0_fire))
 
-  val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
 
-  when(s1_valid){
-    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
+  when(s1_fire){
+    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line),
+      "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
+      PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
+      PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
   }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
@@ -349,7 +353,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_port_hit     = RegEnable(s1_port_hit, s1_fire)
   val s2_bank_miss    = RegEnable(s1_bank_miss, s1_fire)
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
-  val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
+//  val s2_victim_coh   = RegEnable(s1_victim_coh, s1_fire)
   val s2_tag_match_vec = RegEnable(s1_tag_match_vec, s1_fire)
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
@@ -610,7 +614,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMSHR(i).bits.paddr    := s2_req_paddr(i)
     toMSHR(i).bits.vaddr    := s2_req_vaddr(i)
     toMSHR(i).bits.waymask  := s2_waymask(i)
-    toMSHR(i).bits.coh      := s2_victim_coh(i)
 
 
     when(toMSHR(i).fire() && missStateQueue(i) === m_invalid){

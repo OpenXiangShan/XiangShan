@@ -135,10 +135,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p1_ptag = get_phy_tag(tlb_resp_paddr)
 
   val p1_meta_ptags       = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.tag)),valid = RegNext(p0_fire))
-  val p1_meta_cohs        = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.coh)),valid = RegNext(p0_fire))
-
+//  val p1_meta_cohs        = ResultHoldBypass(data = VecInit(fromIMeta.map(way => way.coh)),valid = RegNext(p0_fire))
+val s1_meta_valids             = ResultHoldBypass(data = io.fromIMeta.entryValid(0), valid = RegNext(p0_fire))
   val p1_tag_eq_vec       =  VecInit(p1_meta_ptags.map(_  ===  p1_ptag ))
-  val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_cohs(w).isValid()})
+  val p1_tag_match_vec    =  VecInit(p1_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_valids(w) /*p1_meta_cohs(w).isValid()*/})
   val p1_tag_match        =  ParallelOR(p1_tag_match_vec)
   val (p1_hit, p1_miss)   =  (p1_valid && p1_tag_match && !p1_has_except, p1_valid && !p1_tag_match && !p1_has_except)
 
