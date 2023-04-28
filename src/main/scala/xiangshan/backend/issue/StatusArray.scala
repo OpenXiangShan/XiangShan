@@ -144,8 +144,6 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
         }.elsewhen (RSFeedbackType.isBlocked(deqRespVec(i).bits.respType)) {
           statusNext.issued := false.B
         }
-      }.elsewhen(deqSelVec(i)) {
-        statusNext.issued := true.B
       }
     }
   }
