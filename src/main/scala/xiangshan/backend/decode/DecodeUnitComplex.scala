@@ -99,6 +99,11 @@ class DecodeUnitComplex(maxNumOfUop : Int)(implicit p : Parameters) extends XSMo
                                   Cat(numOfUopVrgather, 0.U(1.W)),
                                   numOfUopVrgather
                                 )
+  val numOfUopVcompress =  MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(4.W), Array(
+    "b001".U -> 4.U,
+    "b010".U -> 13.U,
+    "b011".U -> 43.U
+  ))
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(maxNumOfUop+1).W), Array(
     UopSplitType.VEC_0XV         -> 2.U,
@@ -1012,6 +1017,43 @@ class DecodeUnitComplex(maxNumOfUop : Int)(implicit p : Parameters) extends XSMo
 
         is("b011".U) {
             genCsBundle_VEC_RGATHEREI16(8)
+        }
+      }
+    }
+
+    is(UopSplitType.VEC_COMPRESS) {
+      def genCsBundle_VEC_COMPRESS(len:Int): Unit ={
+        for (i <- 0 until len){
+          val jlen = if (i == len-1) i+1 else i+2
+          for (j <- 0 until jlen) {
+            val vd_old = if(i==j) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j + 1).U
+            val vd = if(i==len-1) (dest + j.U) else{
+              if (j == i+1) VECTOR_TMP_REG_LMUL.U else (VECTOR_TMP_REG_LMUL + j + 1).U
+            }
+            val src23Type = if (j == i+1) DontCare else SrcType.vp
+            csBundle(i*(i+3)/2 + j).ctrl.srcType(0) := SrcType.vp
+            csBundle(i*(i+3)/2 + j).ctrl.srcType(1) := src23Type
+            csBundle(i*(i+3)/2 + j).ctrl.srcType(2) := src23Type
+            csBundle(i*(i+3)/2 + j).ctrl.lsrc(0) := src1
+            csBundle(i*(i+3)/2 + j).ctrl.lsrc(1) := src2 + i.U
+            csBundle(i*(i+3)/2 + j).ctrl.lsrc(2) := vd_old
+            csBundle(i*(i+3)/2 + j).ctrl.lsrc(3) := VECTOR_TMP_REG_LMUL.U
+            csBundle(i*(i+3)/2 + j).ctrl.ldest := vd
+            csBundle(i*(i+3)/2 + j).ctrl.uopIdx := (i*(i+3)/2 + j).U
+          }
+        }
+      }
+      switch(simple.io.vconfig.vtype.vlmul) {
+        is("b001".U ){
+          genCsBundle_VEC_COMPRESS(2)
+        }
+
+        is("b010".U ){
+          genCsBundle_VEC_COMPRESS(4)
+        }
+
+        is("b011".U ){
+          genCsBundle_VEC_COMPRESS(8)
         }
       }
     }

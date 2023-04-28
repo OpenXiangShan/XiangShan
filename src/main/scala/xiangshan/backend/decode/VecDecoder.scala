@@ -277,7 +277,7 @@ object VecDecoder extends DecodeConstants {
     VAADDU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vaaddu_vv, F, T, F, UopSplitType.VEC_VVV),
     VASUB_VV     -> OPMVV(T, FuType.vialuF, VialuFixType.vasub_vv, F, T, F, UopSplitType.VEC_VVV),
     VASUBU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F, UopSplitType.VEC_VVV),
-    VCOMPRESS_VM -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VCOMPRESS_VM -> OPMVV(T, FuType.vppu, VpermType.vcompress, F, T, F, UopSplitType.VEC_COMPRESS),
     VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X),
     VDIV_VV      -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VDIVU_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
