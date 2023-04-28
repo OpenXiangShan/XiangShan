@@ -25,7 +25,7 @@ import utils._
 import utility._
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
 import yunsuan.{VectorElementFormat, VipuType}
-import xiangshan.{SelImm, SrcType, UopDivType, XSCoreParamsKey, XSModule,FuType}
+import xiangshan.{SelImm, SrcType, UopSplitType, XSCoreParamsKey, XSModule,FuType}
 
 import scala.collection.Seq
 
