@@ -115,7 +115,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val robCommits = Input(new RobCommitIO)
   })
 
-  val decoderComp = Module(new DecodeUnitComp(MaxUopSize))
+  val decoderComplex = Module(new DecodeUnitComplex(MaxUopSize))
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
   val debug_globalCounter = RegInit(0.U(XLEN.W))
   val vconfigGen = Module(new VConfigGen)
@@ -128,17 +128,17 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val cfSimple = Wire(Vec(DecodeWidth - 1, new CfCtrl))
 
   //Comp 1
-  decoderComp.io.enq.ctrl_flow := io.in(0).bits
-  decoderComp.io.csrCtrl := io.csrCtrl
-  decoderComp.io.vconfig := vconfigGen.io.vconfigPre
-  decoderComp.io.isComplex := isComplex
-  decoderComp.io.validFromIBuf.zip(io.in).map{ case (dst, src) => dst := src.valid}
-  decoderComp.io.readyFromRename.zip(io.out).map{ case (dst, src) => dst := src.ready}
-  cfComplex := decoderComp.io.deq.cf_ctrl
-  io.out.zip(decoderComp.io.deq.validToRename).map{ case (dst, src) => dst.valid := src}
-  io.in.zip(decoderComp.io.deq.readyToIBuf).map{ case (dst, src) => dst.ready := src}
-  isFirstVset := decoderComp.io.deq.isVset
-  complexNum := decoderComp.io.deq.complexNum
+  decoderComplex.io.enq.ctrl_flow := io.in(0).bits
+  decoderComplex.io.csrCtrl := io.csrCtrl
+  decoderComplex.io.vconfig := vconfigGen.io.vconfigPre
+  decoderComplex.io.isComplex := isComplex
+  decoderComplex.io.validFromIBuf.zip(io.in).map{ case (dst, src) => dst := src.valid}
+  decoderComplex.io.readyFromRename.zip(io.out).map{ case (dst, src) => dst := src.ready}
+  cfComplex := decoderComplex.io.deq.cf_ctrl
+  io.out.zip(decoderComplex.io.deq.validToRename).map{ case (dst, src) => dst.valid := src}
+  io.in.zip(decoderComplex.io.deq.readyToIBuf).map{ case (dst, src) => dst.ready := src}
+  isFirstVset := decoderComplex.io.deq.isVset
+  complexNum := decoderComplex.io.deq.complexNum
 
   //Simple 5
   decoders.zip(io.in.drop(1)).map { case (dst, src) => dst.io.enq.ctrl_flow := src.bits }
