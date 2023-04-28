@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
-import huancun.DirtyKey
+import coupledL2.DirtyKey
 import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
@@ -210,7 +210,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // --------------------------------------------------------------------------------
   // s_invalid: receive requests
   // new req entering
-  when (io.req.valid && io.primary_valid && io.primary_ready) {
+  val alloc = io.req.valid && io.primary_valid && io.primary_ready
+  when (alloc) {
     assert (remain === 0.U)
     req := io.req.bits
     s_data_override := false.B
@@ -313,7 +314,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     data = beat_data(beat)
   )._2
 
-  voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
+  // voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
   when(busy) {
     assert(!req.dirty || req.hasData)
   }
@@ -517,7 +518,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     data := mergeData(data, io.release_update.bits.data_delayed, io.release_update.bits.mask_delayed)
   }
 
-  when (!s_data_override && req.hasData) {
+  when (!s_data_override && (req.hasData || RegNext(alloc))) {
     data := io.req_data.data
   }
 

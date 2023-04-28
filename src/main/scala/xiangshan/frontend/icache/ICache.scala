@@ -22,7 +22,7 @@ import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
+import coupledL2.{AliasField, DirtyField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
@@ -51,10 +51,9 @@ case class ICacheParameters(
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField(),
-    PreferCacheField()
+    PrefetchField()
   ) ++ aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
+  val echoFields: Seq[BundleFieldBase] = Nil
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
@@ -468,9 +467,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries),
-      supportsProbe = TransferSizes(blockBytes),
-      supportsHint = TransferSizes(blockBytes)
+      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nReleaseEntries)
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields

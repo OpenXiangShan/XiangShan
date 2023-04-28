@@ -23,7 +23,6 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, T
 import xiangshan._
 import utils._
 import utility._
-import huancun.{DirtyField, DirtyKey}
 
 class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(PAddrBits.W)
@@ -105,8 +104,6 @@ class ReleaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
     shrinkPermissions = req.param,
     data = beat_data(beat)
   )._2
-
-  voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
 
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req )
   io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
