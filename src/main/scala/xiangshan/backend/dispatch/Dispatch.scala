@@ -293,16 +293,26 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   ExcitingUtils.addSink(l2Miss, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(l3Miss, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
 
-  val ldReason = MuxCase(TopDownCounters.LoadMemStall.id.U, Seq(
-    notIssue   -> TopDownCounters.MemNotReadyStall.id.U,
-    tlbReplay  -> TopDownCounters.LoadTLBStall.id.U,
-    tlbMiss    -> TopDownCounters.LoadTLBStall.id.U,
-    vioReplay  -> TopDownCounters.LoadVioReplayStall.id.U,
-    mshrReplay -> TopDownCounters.LoadMSHRReplayStall.id.U,
-    !l1Miss    -> TopDownCounters.LoadL1Stall.id.U,
-    !l2Miss    -> TopDownCounters.LoadL2Stall.id.U,
-    !l3Miss    -> TopDownCounters.LoadL3Stall.id.U
-  ))
+  // val ldReason = MuxCase(TopDownCounters.LoadMemStall.id.U, Seq(
+  //   notIssue   -> TopDownCounters.MemNotReadyStall.id.U,
+  //   tlbReplay  -> TopDownCounters.LoadTLBStall.id.U,
+  //   tlbMiss    -> TopDownCounters.LoadTLBStall.id.U,
+  //   vioReplay  -> TopDownCounters.LoadVioReplayStall.id.U,
+  //   mshrReplay -> TopDownCounters.LoadMSHRReplayStall.id.U,
+  //   !l1Miss    -> TopDownCounters.LoadL1Stall.id.U,
+  //   !l2Miss    -> TopDownCounters.LoadL2Stall.id.U,
+  //   !l3Miss    -> TopDownCounters.LoadL3Stall.id.U
+  // ))
+
+  val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
+  Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
+  Mux(l1Miss, TopDownCounters.LoadL2Stall.id.U,
+  Mux(notIssue, TopDownCounters.MemNotReadyStall.id.U,
+  Mux(tlbMiss, TopDownCounters.LoadTLBStall.id.U,
+  Mux(tlbReplay, TopDownCounters.LoadTLBStall.id.U,
+  Mux(mshrReplay, TopDownCounters.LoadMSHRReplayStall.id.U,
+  Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
+  TopDownCounters.LoadL1Stall.id.U))))))))
 
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
   val realFired = io.recv.zip(io.fromRename.map(_.valid)).map(x => x._1 && x._2)
