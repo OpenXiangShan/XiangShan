@@ -398,6 +398,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new MicroOp)
     val debugEnqLsq = Input(new LsqEnqIO)
+    val debugHeadLsIssue = Input(Bool())
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -437,6 +438,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
   val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(false.B))
+  val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -452,6 +454,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val isEmpty = enqPtr === deqPtr
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
+
+  val debug_lsIssue = WireDefault(debug_lsIssued)
+  debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
   /**
     * states of Rob
@@ -531,6 +536,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.tlbRespTime := timer
       debug_lsInfo(enqIndex) := DebugLsInfo.init
       debug_lqIdxValid(enqIndex) := false.B
+      debug_lsIssued(enqIndex) := false.B
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -570,6 +576,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(req.bits.robIdx.value).lqIdx := req.bits.lqIdx
       debug_lqIdxValid(req.bits.robIdx.value) := true.B
     }
+  }
+
+  // lsIssue
+  when(io.debugHeadLsIssue) {
+    debug_lsIssued(deqPtr.value) := true.B
   }
 
   /**
@@ -1118,9 +1129,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val sourceLqIdx = Wire(Valid(new LqPtr))
   sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
   sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
+  val sourceHeadLsIssue = WireDefault(debug_lsIssue(deqPtr.value))
   ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
   // dummy sink
   ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
 

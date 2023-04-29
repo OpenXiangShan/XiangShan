@@ -30,6 +30,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 import chisel3.ExcitingUtils
 
@@ -270,9 +271,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     // perf
-    val sqFull = Input(Bool())
-    val lqFull = Input(Bool())
-
+    val robDeqPtr = Input(new RobPtr)
+    val robHeadLsIssue = Output(Bool())
   }
 
   val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
@@ -524,6 +524,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       fpReadPort += numFpRfPorts
     }
   }
+
+  val lsRsDeqPorts = outer.reservationStations.filter(_.params.lsqFeedback).map(_.module.io.deq).flatten
+  io.extra.robHeadLsIssue := lsRsDeqPorts.map(deq => deq.fire && deq.bits.uop.robIdx === io.extra.robDeqPtr).reduceOption(_ || _).getOrElse(false.B)
 
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
