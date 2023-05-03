@@ -164,15 +164,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_pred_way_en = Wire(Vec(PortNumber, UInt(nWays.W)))
 
   for(i <- 0 until PortNumber){
-    io.iwpu.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
-    io.iwpu.req(i).bits.vaddr := s0_final_vaddr(i)
     if(iwpuParam.enWPU){
+      io.iwpu.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
+      io.iwpu.req(i).bits.vaddr := s0_final_vaddr(i)
       when(io.iwpu.resp(i).valid) {
         s0_pred_way_en(i) := io.iwpu.resp(i).bits.s0_pred_way_en
       }.otherwise {
         s0_pred_way_en(i) := 0.U(nWays.W)
       }
     }else{
+      io.iwpu.req(i).valid := false.B
+      io.iwpu.req(i).bits := DontCare
       s0_pred_way_en(i) := ~0.U(nWays.W)
     }
   }
@@ -321,9 +323,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   for (i <- 0 until PortNumber) {
     io.iwpu.lookup_upd(i).valid := s1_valid
     io.iwpu.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
-    // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
     io.iwpu.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
+    io.iwpu.lookup_upd(i).bits.s1_pred_way_en := s1_pred_way_en(i)
   }
+
+  // replay read when wpu is enable
+  replay_read_valid := s1_wpu_pred_fail_and_real_hit && (!missSwitchBit || missSwitchBit && s2_fire)
+  s1_resend_can_go := !replay_read_valid || reToData.ready && reToMeta.ready
 
   val s1_datas = Wire(Vec(PortNumber, UInt(blockBits.W)))
   val s1_data_errorBits = Wire(Vec(PortNumber, UInt(dataCodeEntryBits.W)))
@@ -331,9 +337,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // pred result
     s1_datas := VecInit(s1_data_cacheline.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
     s1_data_errorBits := VecInit(s1_data_errorline.zipWithIndex.map { case (bank, i) => Mux1H(s1_pred_way_en(i), bank) })
-    s1_wpu_pred_fail_and_real_hit_vec := VecInit((0 until PortNumber).map { i =>
-      tlbRespValid(i) && s1_pred_way_en(i) =/= s1_tag_match_vec(i).asUInt && s1_port_hit(i)
-    })
+    s1_wpu_pred_fail_and_real_hit_vec := VecInit(Seq(
+      tlbRespValid(0) && s1_pred_way_en(0) =/= s1_tag_match_vec(0).asUInt && s1_port_hit(0),
+      tlbRespValid(1) && s1_pred_way_en(1) =/= s1_tag_match_vec(1).asUInt && s1_port_hit(1) && s1_double_line
+    ))
     s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail_and_real_hit_vec.asUInt.orR
 
     reToData.valid := replay_read_valid
@@ -355,10 +362,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     reToMeta.valid := false.B
     reToMeta.bits := DontCare
   }
-
-  // replay read when wpu is enable
-  s1_resend_can_go := !s1_wpu_pred_fail_and_real_hit || reToData.ready && reToMeta.ready
-  replay_read_valid := s1_valid && s1_wpu_pred_fail_and_real_hit && (!missSwitchBit || missSwitchBit && s2_fire)
+  XSPerfAccumulate("wpu_pred_total", PopCount(io.iwpu.req.map(_.valid)))
+  XSPerfAccumulate("count_first_send", PopCount(Seq(s1_valid, s1_valid && s1_double_line)))
+  XSPerfAccumulate("count_second_send", replay_read_valid)
+  XSPerfAccumulate("resend_block", !s1_resend_can_go)
 
   /** choose victim cacheline */
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))

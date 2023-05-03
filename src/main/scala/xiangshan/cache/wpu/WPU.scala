@@ -45,6 +45,10 @@ class BaseWpuUpdateBundle(nWays: Int)(implicit p: Parameters) extends BaseWPUBun
   val way_en = UInt(nWays.W)
 }
 
+class LookupWpuUpdateBundle(nWays: Int)(implicit p: Parameters) extends BaseWpuUpdateBundle(nWays){
+  val pred_way_en = UInt(nWays.W)
+}
+
 class BaseWpuPredictIO(nWays: Int)(implicit p: Parameters) extends BaseWPUBundle{
   val en = Input(Bool())
   val vaddr = Input(UInt(VAddrBits.W))
@@ -53,7 +57,7 @@ class BaseWpuPredictIO(nWays: Int)(implicit p: Parameters) extends BaseWPUBundle
 
 class WPUBaseIO(portNum: Int, nWays: Int)(implicit p:Parameters) extends BaseWPUBundle {
   val predVec = Vec(portNum, new BaseWpuPredictIO(nWays))
-  val updLookup = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
+  val updLookup = Input(Vec(portNum, new LookupWpuUpdateBundle(nWays)))
   val updReplaycarry = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
   val updTagwrite = Input(Vec(portNum, new BaseWpuUpdateBundle(nWays)))
 }
@@ -177,8 +181,7 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
 
   for(i <- 0 until nPorts){
     predict(io.predVec(i))
-    // FIXME: There should be no known timing
-    val s1_pred_way_en = RegNext(io.predVec(i).way_en)
+    val s1_pred_way_en = io.updLookup(i).pred_way_en
     val s1_vtag_look_miss = !s1_pred_way_en.orR
 
     // look up: vtag miss but tag hit

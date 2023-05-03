@@ -100,15 +100,17 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   r0_fire  := r0_valid && r0_ready
 
   val p0_pred_way_en = Wire(UInt(nWays.W))
-  io.iwpu.req(0).valid := r0_valid && r0_req.isProbe
-  io.iwpu.req(0).bits.vaddr := r0_req.vaddr
   if (iwpuParam.enWPU) {
+    io.iwpu.req(0).valid := r0_valid && r0_req.isProbe
+    io.iwpu.req(0).bits.vaddr := r0_req.vaddr
     when(io.iwpu.resp(0).valid) {
       p0_pred_way_en := io.iwpu.resp(0).bits.s0_pred_way_en
     }.otherwise {
       p0_pred_way_en := 0.U(nWays.W)
     }
   } else {
+    io.iwpu.req(0).valid := false.B
+    io.iwpu.req(0).bits := DontCare
     p0_pred_way_en := ~0.U(nWays.W)
   }
 
@@ -137,10 +139,12 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     ******************************************************************************
     * ReplacePipe Stage 1
     ******************************************************************************
-    */  
-  
+    */
+
+  val r1_resend_can_go = Wire(Bool())
+  val replay_read_valid = Wire(Bool())
   val r1_valid = generatePipeControl(lastFire = r0_fire, thisFire = r1_fire, thisFlush = false.B, lastFlush = false.B)
-  r1_ready := reToMeta.ready && reToData.ready && r2_ready  || !r1_valid
+  r1_ready := r1_resend_can_go && r2_ready  || !r1_valid
   r1_fire  := r1_valid && r1_ready
 
 
@@ -156,7 +160,9 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_datas_line = ResultHoldBypass(data = dataResp, valid = RegNext(r0_fire))
   val r1_data_errorBits_line = ResultHoldBypass(data = codeResp, valid = RegNext(r0_fire))
-
+  val r1_datas = Wire(UInt(blockBits.W))
+  val r1_data_errorBits = Wire(UInt(dataCodeEntryBits.W))
+  val p1_pred_fail_and_real_hit = Wire(Bool())
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
@@ -164,26 +170,26 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
 
   /** wpu */
-  io.iwpu.lookup_upd(0).valid := r1_valid
+  io.iwpu.lookup_upd(0).valid := r1_valid && r1_req.isProbe
   io.iwpu.lookup_upd(0).bits.vaddr := r1_req.vaddr
-  // FIXME lyq: check whether the conversion of match_vec to real_way_en is right
+  io.iwpu.lookup_upd(0).bits.s1_pred_way_en := p1_pred_way_en
   io.iwpu.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
 
-  val r1_datas = Wire(UInt(blockBits.W))
-  val r1_data_errorBits = Wire(UInt(dataCodeEntryBits.W))
-  val p1_pred_fail_and_real_hit = Wire(Bool())
+  replay_read_valid := r1_valid && p1_pred_fail_and_real_hit
+  r1_resend_can_go := !replay_read_valid || reToData.ready && reToMeta.ready
+
   if(iwpuParam.enWPU){
     val r1_way_en = Mux(r1_req.isProbe, p1_pred_way_en, r1_way_mask)
     r1_datas := Mux1H(r1_way_en, r1_datas_line)
     r1_data_errorBits := Mux1H(r1_way_en, r1_data_errorBits_line)
 
     p1_pred_fail_and_real_hit := r1_valid && r1_req.isProbe && p1_pred_way_en =/= probe_hit_vec.asUInt && probe_hit_vec.asUInt.orR
-    reToData.valid := r1_valid && p1_pred_fail_and_real_hit
+    reToData.valid := replay_read_valid
     reToData.bits := r1_toDataBits
     for (i <- 0 until partWayNum) {
       reToData.bits(i).way_en := VecInit(Seq(probe_hit_vec.asUInt, 0.U(nWays.W)))
     }
-    reToMeta.valid := r1_valid && p1_pred_fail_and_real_hit
+    reToMeta.valid := replay_read_valid
     reToMeta.bits := r1_toMetaBits
   }else{
     val r1_way_en = Mux(r1_req.isProbe, probe_hit_vec.asUInt, r1_way_mask)
@@ -196,6 +202,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     reToMeta.valid := false.B
     reToMeta.bits := DontCare
   }
+  XSPerfAccumulate("wpu_pred_total", io.iwpu.req(0).valid)
+  XSPerfAccumulate("count_first_send", r1_valid && r1_req.isProbe)
+  XSPerfAccumulate("count_second_send", replay_read_valid)
+  XSPerfAccumulate("resend_block", !r1_resend_can_go)
 
   /*** for Release way select ***/
   val release_waymask  = r1_req.waymask
