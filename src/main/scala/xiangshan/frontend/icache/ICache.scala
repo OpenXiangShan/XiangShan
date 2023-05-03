@@ -475,6 +475,19 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
   }
 
+  val data_read_oh = WireInit(VecInit(Seq.fill(partWayNum * 2)(0.U(2.W))))
+  for(i <- 0 until partWayNum){
+    data_read_oh(i) := 0.U(2.W)
+    data_read_oh(partWayNum + i) := 0.U(2.W)
+    when(dataArrays(i).io.read.req(0).valid) {
+      data_read_oh(i) := PopCount(Cat(dataArrays(i).io.read.req(0).bits.rmask).asUInt)
+    }
+    when(dataArrays(i).io.read.req(1).valid) {
+      data_read_oh(partWayNum + i) := PopCount(Cat(dataArrays(i).io.read.req(1).bits.rmask).asUInt)
+    }
+  }
+  XSPerfAccumulate("data_read_counter", data_read_oh.reduce(_ + _))
+
 }
 
 
@@ -812,7 +825,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
       if (bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx && io.write.bits.wmask(way)
       else sramBank.io.w.req.valid := io.write.valid && io.write.bits.wbankidx && io.write.bits.wmask(way)
       sramBank.io.w.req.bits.apply(data = io.write.bits.wdata, setIdx = io.write.bits.widx, waymask = io.write.bits.wmask(way))
-
+      XSPerfAccumulate("part_data_read_counter", sramBank.io.r.req.valid)
       sramBank
     }
   }
