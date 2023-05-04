@@ -40,6 +40,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
+  val wbBusyRead = Input(params.genFuBusyTableReadBundle)
   val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
@@ -55,7 +56,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
-  val latencyCertains: Seq[Boolean] = deqFuCfgs.map(x => x.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _))
   val fuLatencyMaps :  Seq[Option[Seq[(Int, Int)]]]  = params.exuBlockParams.map(x => x.fuLatencyMap)
   val latencyValMaxs: Seq[Option[Int]] = params.exuBlockParams.map(x => x.latencyValMax)
   val allDeqFuCfgs: Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
@@ -149,6 +149,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       deqResp.bits.success := io.deqResp(i).bits.success
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
+      deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
+      deqResp.bits.fuType := io.deqResp(i).bits.fuType
     }
     statusArrayIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp.valid := io.og0Resp(i).valid
@@ -156,6 +158,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       og0Resp.bits.success := io.og0Resp(i).bits.success
       og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
       og0Resp.bits.respType := io.og0Resp(i).bits.respType
+      og0Resp.bits.rfWen := io.og0Resp(i).bits.rfWen
+      og0Resp.bits.fuType := io.og0Resp(i).bits.fuType
     }
     statusArrayIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp.valid := io.og1Resp(i).valid
@@ -163,6 +167,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       og1Resp.bits.success := io.og1Resp(i).bits.success
       og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
       og1Resp.bits.respType := io.og1Resp(i).bits.respType
+      og1Resp.bits.rfWen := io.og1Resp(i).bits.rfWen
+      og1Resp.bits.fuType := io.og1Resp(i).bits.fuType
     }
   }
 
@@ -293,13 +299,24 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         }
         isLatencyNumVec
       }
+      val isWBReadLatencyNumVec2 = io.wbBusyRead(i).asBools().reverse.zipWithIndex.map { case (en, idx) =>
+        val isLatencyNumVec = WireInit(0.U(params.numEntries.W))
+        when(en) {
+          isLatencyNumVec := VecInit(fuTypeRegVec.map { case futype =>
+            val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == idx).map(_._1)
+            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt().orR()
+            isLatencyNum
+          }).asUInt()
+        }
+        isLatencyNumVec
+      }
       if ( latencyValMaxs(i).get > 1 ){
-        fuBusyTableMask(i) := isReadLatencyNumVec2.reduce(_ | _)
+        fuBusyTableMask(i) := isReadLatencyNumVec2.reduce(_ | _) | isWBReadLatencyNumVec2.reduce(_ | _)
       }else{
-        fuBusyTableMask(i) := isReadLatencyNumVec2.head
+        fuBusyTableMask(i) := isReadLatencyNumVec2.head | isWBReadLatencyNumVec2.head
       }
     } else {
-      fuBusyTableMask(i) := 0.U(params.numEntries.W) // TODO:
+      fuBusyTableMask(i) := 0.U(params.numEntries.W)
     }
   }
 
@@ -485,6 +502,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       deqResp.bits.success := io.deqResp(i).bits.success
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
+      deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
+      deqResp.bits.fuType := io.deqResp(i).bits.fuType
     }
 
     statusArray.io.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
@@ -493,6 +512,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       og0Resp.bits.success := io.og0Resp(i).bits.success
       og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
       og0Resp.bits.respType := io.og0Resp(i).bits.respType
+      og0Resp.bits.rfWen := io.og0Resp(i).bits.rfWen
+      og0Resp.bits.fuType := io.og0Resp(i).bits.fuType
     }
     statusArray.io.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp.valid := io.og1Resp(i).valid
@@ -500,6 +521,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       og1Resp.bits.success := io.og1Resp(i).bits.success
       og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
       og1Resp.bits.respType := io.og1Resp(i).bits.respType
+      og1Resp.bits.rfWen := io.og1Resp(i).bits.rfWen
+      og1Resp.bits.fuType := io.og1Resp(i).bits.fuType
     }
 
     statusArray.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
@@ -508,6 +531,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       slowResp.bits.success          := memIO.feedbackIO(i).feedbackSlow.bits.hit
       slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, 0.U, RSFeedbackType.feedbackInvalid)
       slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
+      slowResp.bits.rfWen := DontCare
+      slowResp.bits.fuType := DontCare
     }
 
     statusArray.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
@@ -516,6 +541,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       fastResp.bits.success          := false.B
       fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
       fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
+      fastResp.bits.rfWen := DontCare
+      fastResp.bits.fuType := DontCare
     }
 
     statusArray.io.fromMem.get.memWaitUpdateReq := memIO.checkWait.memWaitUpdateReq

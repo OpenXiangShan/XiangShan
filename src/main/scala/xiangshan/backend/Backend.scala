@@ -6,13 +6,13 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.{PipelineConnect, ZeroExt}
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, FuBusyTableWriteBundle}
 import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataPath, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO}
-import xiangshan.backend.issue.Scheduler
+import xiangshan.backend.issue.{Scheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -60,6 +60,111 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
   private val wbDataPath = Module(new WbDataPath(params))
+
+  private val (intRespWrite, vfRespWrite, memRespWrite) = (intScheduler.io.wbFuBusyTable.fuBusyTableWrite,
+    vfScheduler.io.wbFuBusyTable.fuBusyTableWrite,
+    memScheduler.io.wbFuBusyTable.fuBusyTableWrite)
+  private val (intRespRead, vfRespRead, memRespRead) = (intScheduler.io.wbFuBusyTable.fuBusyTableRead,
+    vfScheduler.io.wbFuBusyTable.fuBusyTableRead,
+    memScheduler.io.wbFuBusyTable.fuBusyTableRead)
+  private val allRespWrite = (intRespWrite ++ vfRespWrite ++ memRespWrite).flatten
+  private val allRespRead = (intRespRead ++ vfRespRead ++ memRespRead).flatten
+  wbDataPath.io.fromIntExu.flatten.filter(x => x.bits.params.writeIntRf)
+  private val allExuParams = params.allExuParams
+  private val respWriteWithParams = allRespWrite.zip(allExuParams)
+
+  private val intWBFuGroup = params.getIntWBExeGroup.map{case(groupId, exeUnit) => (groupId, exeUnit.flatMap(_.fuConfigs))}
+  private val intLatencyCertains = intWBFuGroup.map{case (k,v) => (k, v.map(_.latency.latencyVal.nonEmpty).reduce(_ && _))}
+  private val intWBFuLatencyMap = intLatencyCertains.map{case (k, latencyCertain) =>
+    if (latencyCertain) Some(intWBFuGroup(k).map(y => (y.fuType, y.latency.latencyVal.get)))
+    else None
+  }.toSeq
+  private val intWBFuLatencyValMax = intWBFuLatencyMap.map(latencyMap=> latencyMap.map(x => x.map(_._2).max))
+
+  private val vfWBFuGroup = params.getVfWBExeGroup.map{case(groupId, exeUnit) => (groupId, exeUnit.flatMap(_.fuConfigs))}
+  private val vfLatencyCertains = vfWBFuGroup.map{case (k,v) => (k, v.map(_.latency.latencyVal.nonEmpty).reduce(_ && _))}
+  val vfWBFuLatencyMap = vfLatencyCertains.map { case (k, latencyCertain) =>
+    if (latencyCertain) Some(vfWBFuGroup(k).map(y => (y.fuType, y.latency.latencyVal.get)))
+    else None
+  }.toSeq
+  private val vfWBFuLatencyValMax = vfWBFuLatencyMap.map(latencyMap => latencyMap.map(x => x.map(_._2).max))
+
+  private val intWBFuBusyTable = intWBFuLatencyValMax.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
+  private val vfWBFuBusyTable = vfWBFuLatencyValMax.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
+
+  // intWBFuBusyTable write
+  for (i <- 0 until intWBFuGroup.size) {
+    if (intWBFuBusyTable(i).nonEmpty){
+      val deqIsLatencyNumMask = respWriteWithParams.zipWithIndex.map{ case((r, p), idx) =>
+        val resps = p.schdType match {
+          case IntScheduler() => Seq(r.deqResp, r.og0Resp, r.og1Resp)
+          case MemScheduler() => Seq(r.deqResp, r.og1Resp)
+          case VfScheduler() => Seq(r.deqResp, r.og1Resp)
+          case _ => null
+        }
+        val matchI = (p.wbPortConfigs.collectFirst{ case x: IntWB => x }.getOrElse(-1)) == i
+        if(matchI){
+          Mux(resps(0).valid && resps(0).bits.respType === RSFeedbackType.issueSuccess,
+            Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+            val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num+1).map(_.fuType)
+            val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(0).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
+            isLatencyNum
+            }),
+            0.U)
+        } else 0.U
+      }.reduce(_|_)
+      val og0IsLatencyNumMask = WireInit(-1.S.asTypeOf(deqIsLatencyNumMask))
+      og0IsLatencyNumMask := respWriteWithParams.zipWithIndex.map { case ((r, p), idx) =>
+        val resps = p.schdType match {
+          case IntScheduler() => Seq(r.deqResp, r.og0Resp, r.og1Resp)
+          case MemScheduler() => Seq(r.deqResp, r.og1Resp)
+          case VfScheduler() => Seq(r.deqResp, r.og1Resp)
+          case _ => null
+        }
+        val matchI = (p.wbPortConfigs.collectFirst { case x: IntWB => x }.getOrElse(-1)) == i
+        if (matchI) {
+          Mux(resps(1).valid && resps(1).bits.respType === RSFeedbackType.issueSuccess,
+            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+              val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num + 1).map(_.fuType)
+              val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(1).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
+              isLatencyNum
+            }), 0.U(1.W))),
+            -1.S.asTypeOf(deqIsLatencyNumMask)).asTypeOf(deqIsLatencyNumMask)
+        } else -1.S.asTypeOf(deqIsLatencyNumMask)
+      }.reduce(_|_)
+      val og1IsLatencyNumMask = WireInit(-1.S.asTypeOf(deqIsLatencyNumMask))
+      og1IsLatencyNumMask := respWriteWithParams.zipWithIndex.map { case ((r, p), idx) =>
+        val resps = p.schdType match {
+          case IntScheduler() => Seq(r.deqResp, r.og0Resp, r.og1Resp)
+          case MemScheduler() => Seq(r.deqResp, r.og1Resp)
+          case VfScheduler() => Seq(r.deqResp, r.og1Resp)
+          case _ => null
+        }
+        val matchI = (p.wbPortConfigs.collectFirst { case x: IntWB => x }.getOrElse(-1)) == i
+        if (matchI && resps.length==3) {
+          Mux(resps(2).valid && resps(2).bits.respType === RSFeedbackType.issueSuccess,
+            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+              val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num + 1).map(_.fuType)
+              val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(2).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
+              isLatencyNum
+            }), 0.U(1.W))),
+            -1.S.asTypeOf(deqIsLatencyNumMask)).asTypeOf(deqIsLatencyNumMask)
+        } else -1.S.asTypeOf(deqIsLatencyNumMask)
+      }.reduce(_ | _)
+      intWBFuBusyTable(i).get := ((intWBFuBusyTable(i).get << 1.U).asUInt() | deqIsLatencyNumMask) & og0IsLatencyNumMask.asUInt() & og1IsLatencyNumMask.asUInt()
+    }
+  }
+  // intWBFuBusyTable read
+  for(i <- 0 until allRespRead.size){
+    allRespRead(i) := intWBFuBusyTable.zipWithIndex.map{ case (ele, idx) =>
+      val matchI = (allExuParams(i).wbPortConfigs.collectFirst { case x: IntWB => x }.getOrElse(-1)) == idx
+      if(ele.nonEmpty && matchI){
+        ele.get.asTypeOf(allRespRead(i))
+      }else{
+        0.U.asTypeOf(allRespRead(i))
+      }
+    }.reduce(_|_)
+  }
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend

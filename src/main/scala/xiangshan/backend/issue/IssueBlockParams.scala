@@ -3,7 +3,7 @@ package xiangshan.backend.issue
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle, FuBusyTableWriteBundle}
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -177,6 +177,16 @@ case class IssueBlockParams(
   def genOGRespBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))
+  }
+
+  def genFuBusyTableWriteBundle(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map(_ => new FuBusyTableWriteBundle))
+  }
+
+  def genFuBusyTableReadBundle(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map(x => UInt(x.latencyValMax.getOrElse(0).W)))
   }
 
   def getIQName = {
