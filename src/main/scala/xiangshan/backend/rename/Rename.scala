@@ -282,11 +282,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val hasCFI = VecInit(io.in.map(in => (!in.bits.cf.pd.notCFI || FuType.isJumpExu(in.bits.ctrl.fuType)) && in.fire)).asUInt.orR
-  val snapshotCtr = RegInit(CommitWidth.U)
+  val snapshotCtr = RegInit((4 * CommitWidth).U)
   val allowSnpt = !snapshotCtr.orR
   io.out.head.bits.snapshot := hasCFI && allowSnpt
   when(io.out.head.fire && io.out.head.bits.snapshot) {
-    snapshotCtr := CommitWidth.U - PopCount(io.out.map(_.fire))
+    snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
   }.elsewhen(io.out.head.fire) {
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
   }
