@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.SRAMTemplate
+import utils.XSPerfAccumulate
 import xiangshan.cache.CacheInstrucion._
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
@@ -89,6 +90,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
+  XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
 
   val ecc_ren = io.ecc_read.fire()
   ecc_array.io.r.req.valid := ecc_ren
@@ -119,6 +121,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
     encTag(encTagBits - 1, tagBits)
   }
 
+  val tag_read_oh = WireInit(VecInit(Seq.fill(readPorts)(0.U(XLEN.W))))
   for (i <- 0 until readPorts) {
     // normal read / write
     array(i).io.write.valid := io.write.valid
@@ -137,7 +140,9 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
 //    array(i).io.ecc_write.valid := false.B
 //    array(i).io.ecc_write.bits := DontCare
     io.read(i).ready := array(i).io.read.ready && array(i).io.ecc_read.ready
+    tag_read_oh(i) := PopCount(array(i).io.read.fire)
   }
+  XSPerfAccumulate("tag_read_counter", tag_read_oh.reduce(_ + _))
   io.write.ready := true.B
 
   require(nWays <= 32)

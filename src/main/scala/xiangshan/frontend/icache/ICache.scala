@@ -192,7 +192,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
 
   val write_meta_bits = Wire(UInt(metaEntryBits.W))
-
+  val tag_read_oh = WireInit(VecInit(Seq.fill(2)(0.U(XLEN.W))))
   val tagArrays = (0 until 2) map { bank =>
     val tagArray = Module(new SRAMTemplate(
       UInt(metaEntryBits.W),
@@ -216,9 +216,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tagArray.io.w.req.valid := write_bank_1
       tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
-
+    tag_read_oh(bank) := PopCount(tagArray.io.r.req.valid) // PopCount(Fill(nWays, tagArray.io.r.req.valid))
     tagArray
   }
+  XSPerfAccumulate("tag_read_counter", tag_read_oh.reduce(_ + _))
 
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
@@ -475,7 +476,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     io.cacheOp.resp.bits.read_data_vec(wordIndex) := dataresp(io.cacheOp.req.bits.wayNum(4, 0))(64*(wordIndex+1)-1, 64*wordIndex)
   }
 
-  val data_read_oh = WireInit(VecInit(Seq.fill(partWayNum * 2)(0.U(2.W))))
+  val data_read_oh = WireInit(VecInit(Seq.fill(partWayNum * 2)(0.U(XLEN.W))))
   for(i <- 0 until partWayNum){
     data_read_oh(i) := 0.U(2.W)
     data_read_oh(partWayNum + i) := 0.U(2.W)

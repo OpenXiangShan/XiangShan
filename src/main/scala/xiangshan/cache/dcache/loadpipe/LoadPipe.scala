@@ -115,10 +115,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // meta_read.tag := DontCare
 
   tag_read.idx := get_idx(io.lsu.req.bits.addr)
+  // FIXME lyq: tag read will act on every way, it need to be changed in this experiment
   // tag_read.way_en := wpu.io.resp.bits.s0_pred_way_en
   tag_read.way_en := ~0.U(nWays.W)
-  // FIXME lyq: tag read will act on every way, it need to be changed in this experiment
-  XSPerfAccumulate("tag_read_counter", PopCount(Cat(Seq.fill(nWays)(io.tag_read.valid)) & tag_read.way_en))
 
   // --------------------------------------------------------------------------------
   // stage 1

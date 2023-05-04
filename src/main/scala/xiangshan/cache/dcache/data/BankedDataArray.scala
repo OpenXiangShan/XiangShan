@@ -746,7 +746,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     read_bank_error_delayed(bank_index) := bank_result(bank_index).error_delayed
   }
 
-  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(8.W))))
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(XLEN.W))))
   for (bank_index <- 0 until DCacheBanks) {
     data_read_oh(bank_index) := PopCount(Fill(DCacheWays, data_banks(bank_index).io.r.en.asUInt))
   }
