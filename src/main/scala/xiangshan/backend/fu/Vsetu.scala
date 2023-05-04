@@ -19,46 +19,91 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{ParallelMux, ZeroExt}
+import utility.ZeroExt
 import xiangshan._
-class VsetModule(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val src0  = Input(UInt(XLEN.W))
-    val src1  = Input(UInt(XLEN.W))
-    val func  = Input(FuOpType())
-    val oldVConfig = Input(UInt(16.W))
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl}
 
-    val vconfig = Output(UInt(XLEN.W))
-    val vl      = Output(UInt(XLEN.W))
+class VsetModuleIO(implicit p: Parameters) extends XSBundle {
+  private val vlWidth = p(XSCoreParamsKey).vlWidth
+
+  val in = Input(new Bundle {
+    val avl   : UInt = Vl()
+    val vtype : VType = VType()
+    val func  : UInt = FuOpType()
+    val oldVl : UInt = Vl() // Todo: check if it can be optimized
   })
 
-  private val vtypeWidth = 8
-  private val vlWidth = 8
+  val out = Output(new Bundle {
+    val vconfig: VConfig = VConfig()
+  })
 
-  private val setOldVLFlag = VSETOpType.oldvlFlag(io.func)
-  private val setVLMAXFlag = VSETOpType.vlmaxFlag(io.func)
-  private val isVsetivli = VSETOpType.isVsetivli(io.func)
+  // test bundle for internal state
+  val testOut = Output(new Bundle {
+    val log2Vlmax : UInt = UInt(3.W)
+    val vlmax     : UInt = UInt(vlWidth.W)
+  })
+}
 
-  private val vtype = io.src1(7, 0)
-  private val vlmul = vtype(2, 0)
-  private val vsew = vtype(5, 3)
+class VsetModule(implicit p: Parameters) extends XSModule {
+  val io = IO(new VsetModuleIO)
 
-  private val avlImm = ZeroExt(io.src1(14, 10), XLEN)
-  private val avl = Mux(VSETOpType.isVsetivli(io.func), avlImm, io.src0)
-  private val oldVL = io.oldVConfig(vtypeWidth + vlWidth - 1, vtypeWidth)
+  private val avl   = io.in.avl
+  private val oldVL = io.in.oldVl
+  private val func  = io.in.func
+  private val vtype = io.in.vtype
+
+  private val outVConfig = io.out.vconfig
+
+  private val vlWidth = p(XSCoreParamsKey).vlWidth
+
+  private val isKeepVl   = VSETOpType.isKeepVl(func)
+  private val isSetVlmax = VSETOpType.isSetVlmax(func)
+  private val isVsetivli = VSETOpType.isVsetivli(func)
+
+  private val vlmul: UInt = vtype.vlmul
+  private val vsew : UInt = vtype.vsew
+
 
   private val vl = WireInit(0.U(XLEN.W))
 
+  // VLMAX = VLEN * LMUL / SEW
+  //       = VLEN << (Cat(~vlmul(2), vlmul(1,0)) >> (vsew + 1.U)
+  //       = VLEN >> shamt
+  // shamt = (vsew + 1.U) - (Cat(~vlmul(2), vlmul(1,0))
+
   // vlen =  128
-  private val vlmaxVec = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
-  private val shamt = vlmul + (~vsew).asUInt + 1.U
-  private val vlmax = ParallelMux((0 to 7).map(_.U === shamt), vlmaxVec)
+  private val log2Vlen = log2Up(VLEN)
+  println(s"[VsetModule] log2Vlen: $log2Vlen")
+  println(s"[VsetModule] vlWidth: $vlWidth")
+  // mf8-->b001, m1-->b100, m8-->b111
+  private val ilmul = Cat(!vlmul(2), vlmul(1, 0))
+
+  // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
+  // vlmul = b011, ilmul - 4 = b111 - 4 = 3, vsew = 0, vsew + 3 = 3, 7 + (7 - 4) - (0 + 3) = 7
+  // vlen = 128, lmul = 2, sew = 16
+  // vlmul = b001, ilmul - 4 = b101 - 4 = 3, vsew = 1, 7 + (5 - 4) - (1 + 3) = 4
+  private val log2Vlmax: UInt = log2Vlen.U(3.W) + (ilmul - "b100".U) - (vsew + "b011".U)
+  private val vlmax = (1.U(vlWidth.W) << (log2Vlmax - 1.U)).asUInt
+
+//  private val vlmaxVec: Seq[UInt] = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
+//  private val shamt = vlmul + (~vsew).asUInt + 1.U
+//  private val vlmax = ParallelMux((0 to 7).map(_.U === shamt), vlmaxVec)
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
 
-  vl := Mux(isVsetivli, normalVL,
-    Mux(setOldVLFlag, ZeroExt(oldVL, XLEN),
-      Mux(setVLMAXFlag, vlmax, normalVL)))
-  io.vl := vl
-  io.vconfig := ZeroExt(Cat(vl(7, 0), vtype), XLEN)
+  vl := MuxCase(normalVL, Seq(
+    isVsetivli -> normalVL,
+    isKeepVl   -> ZeroExt(oldVL, XLEN),
+    isSetVlmax -> vlmax,
+  ))
+
+  outVConfig.vl := vl
+  outVConfig.vtype.illegal := false.B // Todo
+  outVConfig.vtype.vta := vtype.vta
+  outVConfig.vtype.vma := vtype.vma
+  outVConfig.vtype.vlmul := vtype.vlmul
+  outVConfig.vtype.vsew := vtype.vsew
+
+  io.testOut.vlmax := vlmax
+  io.testOut.log2Vlmax := log2Vlmax
 }

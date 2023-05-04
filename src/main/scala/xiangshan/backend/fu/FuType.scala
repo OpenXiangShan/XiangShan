@@ -17,7 +17,7 @@ object FuType {
   val div = OHInt(6)
   val fence = OHInt(7)
   val bku = OHInt(8)
-  val vsetiwi = OHInt(9)
+  val vsetiwi = OHInt(9) // vset read rs write rd
   val fmac = OHInt(10)
   val fmisc = OHInt(11)
   val fDivSqrt = OHInt(12)
@@ -30,8 +30,8 @@ object FuType {
   val vldu = OHInt(19)
   val vstu = OHInt(20)
   val vppu = OHInt(21)
-  val vsetiwf = OHInt(22)
-  val vsetfwf = OHInt(23)
+  val vsetiwf = OHInt(22) // vset read rs write vconfig
+  val vsetfwf = OHInt(23) // vset read old vl write vconfig
 
   def X = BitPat.N(num) // Todo: Don't Care
 

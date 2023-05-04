@@ -277,26 +277,56 @@ package object xiangshan {
   }
 
   object VSETOpType {
-    // o: set vl to old vl
-    // m: set vl to vlmax
-    def uvset_xi = "b0000_0000".U
-    def uvset_xi_o = "b0000_1000".U
-    def uvset_xi_m = "b0001_0000".U
-    def uvsetvl_xi = "b0000_0100".U
-    def uvsetvl_xi_o = "b0000_1100".U
-    def uvset_xx = "b0000_0001".U
-    def uvset_xx_o = "b0000_1001".U
-    def uvset_xx_m = "b0001_0001".U
-    def uvsetvl_xx = "b0000_0101".U
-    def uvsetvl_xx_o = "b0000_1101".U
-    def uvset_ii = "b0000_0010".U
-    def uvsetvl_ii = "b0000_0110".U
+    // vsetvli's uop
+    //   rs1!=x0, normal
+    //     uop0: r(rs1), w(vconfig)     | x[rs1],vtypei  -> vconfig
+    //     uop1: r(rs1), w(rd)          | x[rs1],vtypei  -> x[rd]
+    def uvsetvcfg_xi        = "b1010_0000".U
+    def uvsetrd_xi          = "b1000_0000".U
+    //   rs1==x0, rd!=x0, set vl to vlmax, set rd to vlmax, set vtype
+    //     uop0: w(vconfig)             | vlmax, vtypei  -> vconfig
+    //     uop1: w(rd)                  | vlmax, vtypei  -> x[rd]
+    def uvsetvcfg_vlmax_i   = "b1010_0001".U
+    def uvsetrd_vlmax_i     = "b1000_0001".U
+    //   rs1==x0, rd==x0, keep vl, set vtype
+    //     uop0: r(vconfig), w(vconfig) | ld_vconfig.vl, vtypei -> vconfig
+    def uvsetvcfg_keep_v    = "b1010_0010".U
 
-    def isVsetvl(func: UInt) = func(0)
-    def isVsetvli(func: UInt) = !func(1, 0).orR
-    def isVsetivli(func: UInt) = func(1)
-    def oldvlFlag(func: UInt) = func(3)
-    def vlmaxFlag(func: UInt) = func(4)
+    // vsetvl's uop
+    //   rs1!=x0, normal
+    //     uop0: r(rs1,rs2), w(vconfig) | x[rs1],x[rs2]  -> vconfig
+    //     uop1: r(rs1,rs2), w(rd)      | x[rs1],x[rs2]  -> x[rd]
+    def uvsetvcfg_xx        = "b0110_0000".U
+    def uvsetrd_xx          = "b0100_0000".U
+    //   rs1==x0, rd!=x0, set vl to vlmax, set rd to vlmax, set vtype
+    //     uop0: r(rs2), w(vconfig)     | vlmax, vtypei  -> vconfig
+    //     uop1: r(rs2), w(rd)          | vlmax, vtypei  -> x[rd]
+    def uvsetvcfg_vlmax_x   = "b0110_0001".U
+    def uvsetrd_vlmax_x     = "b0100_0001".U
+    //   rs1==x0, rd==x0, keep vl, set vtype
+    //     uop0: r(rs2), w(vtmp)             | x[rs2]               -> vtmp
+    //     uop0: r(vconfig,vtmp), w(vconfig) | old_vconfig.vl, vtmp -> vconfig
+    def uvmv_v_x            = "b0110_0010".U
+    def uvsetvcfg_vv        = "b0111_0010".U
+
+    // vsetivli's uop
+    //     uop0: w(vconfig)             | vli, vtypei    -> vconfig
+    //     uop1: w(rd)                  | vli, vtypei    -> x[rd]
+    def uvsetvcfg_ii        = "b0010_0000".U
+    def uvsetrd_ii          = "b0000_0000".U
+
+    def isVsetvl  (func: UInt)  = func(6)
+    def isVsetvli (func: UInt)  = func(7)
+    def isVsetivli(func: UInt)  = func(7, 6) === 0.U
+    def isNormal  (func: UInt)  = func(1, 0) === 0.U
+    def isSetVlmax(func: UInt)  = func(0)
+    def isKeepVl  (func: UInt)  = func(1)
+    // RG: region
+    def writeIntRG(func: UInt)  = !func(5)
+    def writeVecRG(func: UInt)  = func(5)
+    def readIntRG (func: UInt)  = !func(4)
+    def readVecRG (func: UInt)  = func(4)
+    // Todo: @fdy fix it
     def convert2uvsetvl(func: UInt) = Cat(func(7, 3), "b1".U, func(1, 0))
     def convert2oldvl(func: UInt) = Cat(func(7, 4), "b1".U, func(2, 0))
     def convert2vlmax(func: UInt) = Cat(func(7, 5), "b1".U, func(3, 0))
