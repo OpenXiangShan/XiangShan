@@ -12,7 +12,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Category, Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
+import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle, IssueQueueDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
@@ -318,6 +318,18 @@ object Bundles {
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
     val og0resp = Valid(new StatusArrayDeqRespBundle)
     val og1resp = Valid(new StatusArrayDeqRespBundle)
+  }
+
+  class fuBusyRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
+    val respType = RSFeedbackType() // update credit if needs replay
+    val rfWen = Bool() // TODO: use params to identify IntWB/VfWB
+    val fuType = FuType()
+  }
+
+  class FuBusyTableWriteBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+    val deqResp = Valid(new fuBusyRespBundle)
+    val og0Resp = Valid(new fuBusyRespBundle)
+    val og1Resp = Valid(new fuBusyRespBundle)
   }
 
   // DataPath --[ExuInput]--> Exu

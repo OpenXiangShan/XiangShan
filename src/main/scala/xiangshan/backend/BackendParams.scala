@@ -103,6 +103,9 @@ case class BackendParams(
     val vfWbCfgs = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVec || x.writeFp))
     datapath.WbArbiterParams(vfWbCfgs, vfPregParams)
   }
+
+  def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
+  def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 }
 
 
