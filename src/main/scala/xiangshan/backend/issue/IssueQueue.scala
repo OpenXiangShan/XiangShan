@@ -276,7 +276,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         // & ~
       }
 
-      fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLatencyNumVec) // & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
+      fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLatencyNumVec) & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
     }
   }
   // fuBusyTable read
