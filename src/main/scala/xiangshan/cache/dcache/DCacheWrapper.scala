@@ -856,18 +856,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
   })
 
-  /** dwpu */
-  val dwpu = Module(new DCacheWpuWrapper(LoadPipelineWidth))
-  for(i <- 0 until LoadPipelineWidth){
-    dwpu.io.req(i) <> ldu(i).io.dwpu.req(0)
-    dwpu.io.resp(i) <> ldu(i).io.dwpu.resp(0)
-    dwpu.io.lookup_upd(i) <> ldu(i).io.dwpu.lookup_upd(0)
-    dwpu.io.cfpred(i) <> ldu(i).io.dwpu.cfpred(0)
-  }
-  dwpu.io.tagwrite_upd.valid := tagArray.io.write.valid
-  dwpu.io.tagwrite_upd.bits.vaddr := tagArray.io.write.bits.vaddr
-  dwpu.io.tagwrite_upd.bits.s1_real_way_en := tagArray.io.write.bits.way_en
-
   //----------------------------------------
   // load pipe
   // the s1 kill signal
