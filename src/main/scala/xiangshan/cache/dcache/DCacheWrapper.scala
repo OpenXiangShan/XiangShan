@@ -335,6 +335,25 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val wline = Bool()
 }
 
+class DCacheWordReqWithVaddrAndPc(implicit p: Parameters) extends DCacheWordReqWithVaddr {
+  val pc = UInt(VAddrBits.W)
+
+  def toDCacheWordReqWithVaddr() = {
+    val res = Wire(new DCacheWordReqWithVaddr)
+    res.vaddr := vaddr
+    res.wline := wline
+    res.cmd := cmd
+    res.addr := addr
+    res.data := data
+    res.mask := mask
+    res.id := id
+    res.instrtype := instrtype
+    res.replayCarry := replayCarry
+    
+    res
+  }
+}
+
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   // read in s2

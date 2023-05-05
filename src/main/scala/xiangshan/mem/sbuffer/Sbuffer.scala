@@ -180,14 +180,15 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
-    val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
-    val sb_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
+    val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPc)))  //Todo: store logic only support Width == 2 now
+    val sb_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq)) // to L1
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val lq_deq  = Flipped(Valid(new DCacheWordReqWithVaddr))
+    val l2_store_prefetch = Decoupled(new StorePrefetchReq) // to L2
   })
 
   val dataModule = Module(new SbufferData)
@@ -203,8 +204,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
-  // val spb = Module(new StorePrefetchBursts())
-  val lpb = Module(new LoadPrefetchBursts())
+
+  val l2_prefetcher = Module(new StorePfWrapper())
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -362,13 +363,15 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
-  // for(i <- 0 until EnsbufferWidth) {
-  //   spb.io.sbuffer_enq(i).valid := io.in(i).fire
-  //   spb.io.sbuffer_enq(i).bits := DontCare
-  //   spb.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-  // }
-
-  lpb.io.lq_deq <> io.lq_deq
+  // train
+  for(i <- 0 until EnsbufferWidth) {
+    l2_prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
+    l2_prefetcher.io.sbuffer_enq(i).bits := DontCare
+    l2_prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
+    l2_prefetcher.io.sbuffer_enq(i).bits.addr := io.in(i).bits.addr
+    l2_prefetcher.io.sbuffer_enq(i).bits.pc := io.in(i).bits.pc
+  }
+  io.l2_store_prefetch <> l2_prefetcher.io.prefetch_req
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,
@@ -481,15 +484,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // }
 
   for(i <- 0 until EnsbufferWidth) {
-    io.sb_prefetch(i).valid := io.in(i).fire || lpb.io.prefetch_req(i).valid
-    io.sb_prefetch(i).bits.vaddr := Mux(lpb.io.prefetch_req(i).valid, lpb.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
-    io.sb_prefetch(i).bits.paddr := Mux(lpb.io.prefetch_req(i).valid, lpb.io.prefetch_req(i).bits.paddr, io.in(i).bits.addr)
-    
-    lpb.io.prefetch_req(i).ready := io.sb_prefetch(i).ready
-    // spb.io.prefetch_req(i).ready := false.B
+    io.sb_prefetch(i).valid := io.in(i).fire
+    io.sb_prefetch(i).bits.vaddr := io.in(i).bits.vaddr
+    io.sb_prefetch(i).bits.paddr := io.in(i).bits.addr
 
-    XSPerfAccumulate(s"sbuffer_lpb${i}_prefetch", io.sb_prefetch(i).fire && lpb.io.prefetch_req(i).valid)
-    XSPerfAccumulate(s"sbuffer_commit${i}_prefetch", io.sb_prefetch(i).fire && !lpb.io.prefetch_req(i).valid)
+    XSPerfAccumulate(s"store_prefetch_at_commit${i}", io.sb_prefetch(i).fire)
   }
 
   // ---------------------- Send Dcache Req ---------------------

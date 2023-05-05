@@ -72,7 +72,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
     val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPc))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val uncacheOutstanding = Input(Bool())

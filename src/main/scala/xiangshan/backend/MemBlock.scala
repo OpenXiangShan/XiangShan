@@ -152,13 +152,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms.io_stride_en := RegNextN(io.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
       sms
   }
-  prefetcherOpt.foreach(pf => {
-    val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)
-    outer.pf_sender_opt.get.out.head._1.addr_valid := pf_to_l2.valid
-    outer.pf_sender_opt.get.out.head._1.addr := pf_to_l2.bits
-    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
-    pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
-  })
+  // load prefetch to l1 Dcache
   prefetcherOpt match {
     case Some(pf) => l1_pf_req <> pf.io.l1_req
     case None =>
@@ -234,6 +228,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.hartId := io.hartId
   sbuffer.io.hartId := io.hartId
   atomicsUnit.io.hartId := io.hartId
+
+  // load and store prefetch to l2 cache
+  prefetcherOpt.foreach(load_pf => {
+    val store_pf = sbuffer.io.l2_store_prefetch
+    val load_pf_to_l2 = ValidIODelay(load_pf.io.pf_addr, 2)
+    outer.pf_sender_opt.get.out.head._1.addr_valid := load_pf_to_l2.valid || store_pf.valid
+    outer.pf_sender_opt.get.out.head._1.addr := Mux(load_pf_to_l2.valid, load_pf_to_l2.bits, store_pf.bits.paddr)
+    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
+    store_pf.ready := !load_pf_to_l2.valid
+    load_pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+
+    XSPerfAccumulate("store_prefetch_fire_l2", store_pf.fire)
+    XSPerfAccumulate("load_prefetch_fire_l2", load_pf_to_l2.valid)
+    XSPerfAccumulate("prefetch_fire_l2", outer.pf_sender_opt.get.out.head._1.addr_valid)
+  })
 
   // dtlb
   val sfence = RegNext(RegNext(io.sfence))

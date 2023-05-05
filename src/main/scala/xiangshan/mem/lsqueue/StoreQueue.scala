@@ -57,6 +57,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val mask   = UInt((DataBits/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
+  val pc     = UInt(VAddrBits.W)
 }
 
 // Store Queue
@@ -70,7 +71,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPc)) // write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -574,6 +575,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataBuffer.io.enq(i).bits.mask  := dataModule.io.rdata(i).mask
     dataBuffer.io.enq(i).bits.wline := paddrModule.io.rlineflag(i)
     dataBuffer.io.enq(i).bits.sqPtr := rdataPtrExt(i)
+    dataBuffer.io.enq(i).bits.pc    := uop(ptr).cf.pc
   }
 
   // Send data stored in sbufferReqBitsReg to sbuffer
@@ -588,6 +590,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
+    io.sbuffer(i).bits.pc    := dataBuffer.io.deq(i).bits.pc
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
     io.sbuffer(i).bits.replayCarry := DontCare
