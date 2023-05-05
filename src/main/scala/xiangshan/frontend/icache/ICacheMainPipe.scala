@@ -835,10 +835,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
-//  XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
-//  XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
-//  XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
-
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
       val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio

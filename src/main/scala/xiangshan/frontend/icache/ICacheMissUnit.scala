@@ -198,7 +198,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
       startHighPriority = true)
   )
   XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire())
-  XSError(blockCounter(io.req.fire, io.resp.fire, 5000), "missEntry"+ io.id +"_block_5000_cycle,may_has_error\n")
 }
 
 

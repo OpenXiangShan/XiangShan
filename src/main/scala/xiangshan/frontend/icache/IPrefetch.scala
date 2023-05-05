@@ -764,7 +764,4 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     toAddress       = Cat(req.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
 
-
-
-  XSError(blockCounter(io.req.fire, io.piq_write_ipbuffer.fire, 10000), "PIQEntry"+ io.id +"_block_10000_cycle,may_has_error\n")
 }
