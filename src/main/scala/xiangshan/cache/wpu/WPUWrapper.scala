@@ -221,9 +221,9 @@ class ICacheWpuWrapper (nPorts: Int) (implicit p:Parameters) extends WPUModule w
     // replace / tag write
     wpu.io.updTagwrite := DontCare
   }
-  // wpu.io.updTagwrite.head.en := io.tagwrite_upd.valid
-  // wpu.io.updTagwrite.head.vaddr := io.tagwrite_upd.bits.vaddr
-  // wpu.io.updTagwrite.head.way_en := io.tagwrite_upd.bits.s1_real_way_en
+  wpu.io.updTagwrite.head.en := io.tagwrite_upd.valid
+  wpu.io.updTagwrite.head.vaddr := io.tagwrite_upd.bits.vaddr
+  wpu.io.updTagwrite.head.way_en := io.tagwrite_upd.bits.s1_real_way_en
 
   XSPerfAccumulate("wpu_pred_total", PopCount((0 until nPorts).map{i => RegNext(io.req(i).valid) && io.lookup_upd(i).valid}))
   XSPerfAccumulate("wpu_pred_succ",  PopCount((0 until nPorts).map{i => RegNext(io.req(i).valid) && io.lookup_upd(i).valid && !s1_pred_fail(i)}))
