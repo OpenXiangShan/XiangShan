@@ -29,13 +29,12 @@ import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.wpu.ReplayCarry
 
-class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle with HasDCacheParameters{
+class LoadToLsqFastIO(implicit p: Parameters) extends XSBundle {
   val valid = Output(Bool())
   val ld_ld_check_ok = Output(Bool())
   val st_ld_check_ok = Output(Bool())
   val cache_bank_no_conflict = Output(Bool())
   val ld_idx = Output(UInt(log2Ceil(LoadQueueSize).W))
-  val replayCarry = Output(new ReplayCarry(nWays))
   val debug = Output(new PerfDebugInfo)
 
   def needreplay: Bool = {
@@ -379,7 +378,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasDCacheParameters {
+class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val s1_kill = Input(Bool())
@@ -389,7 +388,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val dcacheBankConflict = Input(Bool())
-    val replayCarry = Input(new ReplayCarry(nWays))
     val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
@@ -498,7 +496,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.replayFast.st_ld_check_ok := !needReExecute || s1_is_sw_prefetch
   io.replayFast.cache_bank_no_conflict := !s1_bank_conflict || s1_is_sw_prefetch
   io.replayFast.ld_idx := io.in.bits.uop.lqIdx.value
-  io.replayFast.replayCarry := io.replayCarry
   io.replayFast.debug := io.in.bits.uop.debugInfo
 
   // if replay is detected in load_s1,
@@ -928,7 +925,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s1.io.lsq <> io.lsq.forward
   load_s1.io.loadViolationQueryReq <> io.lsq.loadViolationQuery.req
   load_s1.io.dcacheBankConflict <> io.dcache.s1_bank_conflict
-  load_s1.io.replayCarry := io.dcache.s1_replayCarry
   load_s1.io.csrCtrl <> io.csrCtrl
   load_s1.io.reExecuteQuery := io.reExecuteQuery
   // provide paddr and vaddr for lq

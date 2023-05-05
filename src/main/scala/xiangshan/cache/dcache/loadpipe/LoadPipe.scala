@@ -167,7 +167,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dwpu.io.tagwrite_upd.bits.s1_real_way_en := io.vtag_update.bits.way_en
 
   val s1_wpu_pred_fail = s1_valid && s1_tag_match_way_dup_dc =/= s1_wpu_pred_way_en
-  val s1_wpu_pred_fail_and_real_hit = s1_wpu_pred_fail && s1_tag_match_way_dup_dc.orR
   val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
   if(dwpuParam.enCfPred || !env.FPGAPlatform){
     dwpu.io.cfpred(0).s0_pc := io.lsu.s0_pc
@@ -381,10 +380,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
-  io.lsu.s1_bank_conflict := io.bank_conflict_fast || s1_wpu_pred_fail_and_real_hit
-  io.lsu.s1_replayCarry.valid := io.bank_conflict_fast || s1_wpu_pred_fail_and_real_hit
-  io.lsu.s1_replayCarry.real_way_en := s1_tag_match_way_dup_dc
-
+  io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------

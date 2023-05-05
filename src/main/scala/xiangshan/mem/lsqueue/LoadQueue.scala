@@ -527,7 +527,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       ld_ld_check_ok(idx) := io.replayFast(i).ld_ld_check_ok
       st_ld_check_ok(idx) := io.replayFast(i).st_ld_check_ok
       cache_bank_no_conflict(idx) := io.replayFast(i).cache_bank_no_conflict
-      replayCarryReg(idx) := io.replayFast(i).replayCarry
+
       // update tlbReqFirstTime
       uop(idx).debugInfo := io.replayFast(i).debug
 
