@@ -186,8 +186,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // specific cycles to block
   val block_cycles_tlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   block_cycles_tlb := io.tlbReplayDelayCycleCtrl
-  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 0.U(ReSelectLen.W), 31.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val block_cycles_cache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
   val block_cycles_others = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+
+  XSPerfAccumulate("block_in_last", PopCount((0 until LoadQueueSize).map(i => block_ptr_cache(i) === 3.U)))
 
   val sel_blocked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B)))
 
@@ -230,6 +232,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
+  val debug_vaddr = RegInit(VecInit(List.fill(LoadQueueSize)(0.U(VAddrBits.W))))
 
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
@@ -388,7 +391,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.loadOut(i).bits.isLoadReplay := true.B
     io.loadOut(i).bits.replayCarry := replayCarryReg(replayIdx)
     io.loadOut(i).bits.mshrid := miss_mshr_id(replayIdx)
-    io.loadOut(i).bits.forward_tlDchannel := true_cache_miss_replay(replayIdx)
+    io.loadOut(i).bits.forward_tlDchannel := !cache_hited(replayIdx)
 
     when(io.loadOut(i).fire) {
       replayRemFire(i) := true.B
@@ -522,6 +525,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       vaddrModule.io.wen(i) := true.B
       vaddrModule.io.waddr(i) := io.loadVaddrIn(i).bits.lqIdx.value
       vaddrModule.io.wdata(i) := io.loadVaddrIn(i).bits.vaddr
+      debug_vaddr(io.loadVaddrIn(i).bits.lqIdx.value) := io.loadVaddrIn(i).bits.vaddr
     }
 
     /**
@@ -569,14 +573,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         // update credit and ptr
         val data_in_last_beat = io.replaySlow(i).data_in_last_beat
         creditUpdate(idx) := Mux( !io.replaySlow(i).tlb_hited, block_cycles_tlb(block_ptr_tlb(idx)), 
-                              Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat,
-                               Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)), 0.U)))
+                              Mux(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok, block_cycles_others(block_ptr_others(idx)),
+                               Mux(!io.replaySlow(i).cache_hited, block_cycles_cache(block_ptr_cache(idx)) + data_in_last_beat, 0.U)))
         when(!io.replaySlow(i).tlb_hited) {
           block_ptr_tlb(idx) := Mux(block_ptr_tlb(idx) === 3.U(2.W), block_ptr_tlb(idx), block_ptr_tlb(idx) + 1.U(2.W))
-        }.elsewhen(!io.replaySlow(i).cache_hited) {
-          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }.elsewhen(!io.replaySlow(i).cache_no_replay || !io.replaySlow(i).st_ld_check_ok) {
           block_ptr_others(idx) := Mux(block_ptr_others(idx) === 3.U(2.W), block_ptr_others(idx), block_ptr_others(idx) + 1.U(2.W))
+        }.elsewhen(!io.replaySlow(i).cache_hited) {
+          block_ptr_cache(idx) := Mux(block_ptr_cache(idx) === 3.U(2.W), block_ptr_cache(idx), block_ptr_cache(idx) + 1.U(2.W))
         }
       }
 
@@ -591,9 +595,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       }
 
       // special case: cache miss
-      miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
-      block_by_cache_miss(idx) := io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok && // this load tlb hit and no cache replay
-                                  !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data && // cache miss
+      val true_cache_miss = io.replaySlow(i).tlb_hited && io.replaySlow(i).cache_no_replay && io.replaySlow(i).st_ld_check_ok &&
+                            !io.replaySlow(i).cache_hited && !io.replaySlow(i).can_forward_full_data
+      when(true_cache_miss) {
+        miss_mshr_id(idx) := io.replaySlow(i).miss_mshr_id
+      }
+      block_by_cache_miss(idx) := true_cache_miss && // cache miss
                                   !(io.refill.valid && io.refill.bits.id === io.replaySlow(i).miss_mshr_id) && // no refill in this cycle
                                   creditUpdate(idx) =/= 0.U // credit is not zero
     }
@@ -814,6 +821,8 @@ def detectRollback(i: Int) = {
   io.rollback.bits.cfiUpdate := DontCare
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
+  io.rollback.bits.debugIsCtrl := DontCare
+  io.rollback.bits.debugIsMemVio := DontCare
   // io.rollback.bits.pc := DontCare
 
   io.rollback.valid := rollbackLqVReg.reduce(_|_) &&
@@ -950,6 +959,7 @@ def detectRollback(i: Int) = {
 
   dataModule.io.uncache.raddr := deqPtrExtNext.value
 
+  io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
   io.uncache.req.bits.data := DontCare
@@ -1094,17 +1104,48 @@ def detectRollback(i: Int) = {
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
-  if (env.EnableTopDown) {
-    val stall_loads_bound = WireDefault(0.B)
-    ExcitingUtils.addSink(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
-    val have_miss_entry = (allocated zip miss).map(x => x._1 && x._2).reduce(_ || _)
-    val l1d_loads_bound = stall_loads_bound && !have_miss_entry
-    ExcitingUtils.addSource(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
-    XSPerfAccumulate("l1d_loads_bound", l1d_loads_bound)
-    val stall_l1d_load_miss = stall_loads_bound && have_miss_entry
-    ExcitingUtils.addSource(stall_l1d_load_miss, "stall_l1d_load_miss", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(WireInit(0.U), "stall_l1d_load_miss", ExcitingUtils.Perf)
+  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
+
+  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  val uop_wrapper = Wire(Vec(LoadQueueSize, new XSBundleWithMicroOp))
+  (uop_wrapper.zipWithIndex).foreach {
+    case (u, i) => {
+      u.uop := uop(i)
+    }
   }
+  val lq_match_vec = (debug_vaddr.zip(allocated)).map{case(va, alloc) => alloc && (va === sourceVaddr.bits)}
+  val rob_head_lq_match = ParallelOperation(lq_match_vec.zip(uop_wrapper), (a: Tuple2[Bool, XSBundleWithMicroOp], b: Tuple2[Bool, XSBundleWithMicroOp]) => {
+    val (a_v, a_uop) = (a._1, a._2)
+    val (b_v, b_uop) = (b._1, b._2)
+
+    val res = Mux(a_v && b_v, Mux(isAfter(a_uop.uop.robIdx, b_uop.uop.robIdx), b_uop, a_uop), 
+                  Mux(a_v, a_uop, 
+                      Mux(b_v, b_uop, 
+                                a_uop)))
+    (a_v || b_v, res)
+  })
+
+  val lq_match_bits = rob_head_lq_match._2.uop
+  val lq_match = rob_head_lq_match._1 && sourceVaddr.valid
+  val lq_match_idx = lq_match_bits.lqIdx.value
+
+  val rob_head_tlb_miss        = lq_match && !tlb_hited(lq_match_idx)
+  val rob_head_vio_replay      = lq_match && !st_ld_check_ok(lq_match_idx)
+  val rob_head_mshrfull_replay = lq_match && !cache_no_replay(lq_match_idx)
+  val rob_head_confilct_replay = lq_match && !cache_bank_no_conflict(lq_match_idx)
+  val rob_head_other_replay    = lq_match && (!ld_ld_check_ok(lq_match_idx) || !forward_data_valid(lq_match_idx))
+    
+  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  val rob_head_miss_in_dtlb = WireInit(false.B)
+  ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
 
   val perfValidCount = RegNext(validCount)
 

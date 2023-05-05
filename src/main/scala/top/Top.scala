@@ -28,7 +28,7 @@ import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
+import freechips.rocketchip.util.{HasRocketChipStageUtils, UIntToOH1}
 import huancun.{HCCacheParamsKey, HuanCun}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -69,7 +69,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param.copy(enableTopDown = debugOpts.EnableTopDown)
+      case HCCacheParamsKey => l3param.copy(hartIds = tiles.map(_.HartId))
     })))
   )
 
@@ -101,13 +101,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
     case None =>
+      val dummyMatch = WireDefault(false.B)
+      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf))
   }
 
   lazy val module = new LazyRawModuleImp(this) {
-    ElaborationArtefacts.add("dts", dts)
-    ElaborationArtefacts.add("graphml", graphML)
-    ElaborationArtefacts.add("json", json)
-    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+    FileRegisters.add("dts", dts)
+    FileRegisters.add("graphml", graphML)
+    FileRegisters.add("json", json)
+    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = IO(Flipped(misc.dma.cloneType))
     val peripheral = IO(misc.peripheral.cloneType)
@@ -202,11 +204,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
+    // tools: init to close dpi-c when in fpga
+    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+    Constantin.init(envInFPGA)
+    ChiselDB.init(envInFPGA)
+
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firrtlComplier)
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
+    Generator.execute(firrtlOpts, soc.module, firrtlComplier, firtoolOpts)
+    FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
   }
 }

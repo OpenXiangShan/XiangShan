@@ -47,10 +47,11 @@ object ArgParser {
     val c = Class.forName(prefix + confString).getConstructor(Integer.TYPE)
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
-  def parse(args: Array[String]): (Parameters, Array[String], FirrtlCompiler) = {
+  def parse(args: Array[String]): (Parameters, Array[String], FirrtlCompiler, Array[String]) = {
     val default = new DefaultConfig(1)
     var firrtlOpts = Array[String]()
     var firrtlCompiler: FirrtlCompiler = SFC
+    var firtoolOpts = Array[String]()
     @tailrec
     def nextOption(config: Parameters, list: List[String]): Parameters = {
       list match {
@@ -87,12 +88,11 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
-        case "--enable-topdown" :: tail =>
-          nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableTopDown = true)
-          }), tail)
         case "--mfc" :: tail =>
           firrtlCompiler = MFC
+          nextOption(config, tail)
+        case "--firtool-opt" :: option :: tail =>
+          firtoolOpts :+= option
           nextOption(config, tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
@@ -101,6 +101,6 @@ object ArgParser {
       }
     }
     var config = nextOption(default, args.toList)
-    (config, firrtlOpts, firrtlCompiler)
+    (config, firrtlOpts, firrtlCompiler, firtoolOpts)
   }
 }

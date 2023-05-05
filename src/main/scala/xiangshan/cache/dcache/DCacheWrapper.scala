@@ -27,8 +27,8 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import utility.{FastArbiter}
+import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField, ReqSourceField}
+import utility.FastArbiter
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry
 
@@ -43,6 +43,7 @@ case class DCacheParameters
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
+  updateReplaceOn2ndmiss: Boolean = true,
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
@@ -59,7 +60,8 @@ case class DCacheParameters
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
-    PreferCacheField()
+    PreferCacheField(),
+    ReqSourceField()
   ) ++ aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
 
@@ -130,6 +132,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheSets = cacheParams.nSets
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8 // hardcoded
+  val DCacheDupNum = 16
   val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
@@ -307,7 +310,10 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
+  val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry
+
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -349,6 +355,8 @@ class DCacheWordReqWithVaddrAndPc(implicit p: Parameters) extends DCacheWordReqW
     res.id := id
     res.instrtype := instrtype
     res.replayCarry := replayCarry
+    res.isFirstIssue := isFirstIssue
+    res.debug_robIdx := debug_robIdx
     
     res
   }
@@ -361,7 +369,6 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // select in s3
   val data_delayed = UInt(DataBits.W)
   val id     = UInt(reqIdWidth.W)
-
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache miss, and failed to enter the missqueue, replay from RS is needed
@@ -371,6 +378,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val tag_error = Bool() // tag error
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
@@ -449,6 +457,7 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
+  val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry
 
   def dump() = {
@@ -469,6 +478,7 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val replayCarry = new ReplayCarry
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
+  val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
       data, id, miss, replay, tag_error, error) 
@@ -514,7 +524,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_disable_fast_wakeup = Input(Bool())
   val s1_bank_conflict = Input(Bool())
   // cycle 2: hit signal
-  val s2_hit = Input(Bool()) // hit signal for lsu, 
+  val s2_hit = Input(Bool()) // hit signal for lsu,
+  val s2_first_hit = Input(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
@@ -880,6 +891,35 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
+  /** LoadMissDB: record load miss state */
+  val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable" + p(XSCoreParamsKey).HartId.toString))
+  val isFirstHitWrite = WireInit(Constantin.createRecord("isFirstHitWrite" + p(XSCoreParamsKey).HartId.toString))
+  val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
+  val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
+  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
+  for( i <- 0 until LoadPipelineWidth){
+    val loadMissEntry = Wire(new LoadMissEntry)
+    val loadMissWriteEn =
+      (!ldu(i).io.lsu.resp.bits.replay && ldu(i).io.miss_req.fire) ||
+      (ldu(i).io.lsu.s2_first_hit && ldu(i).io.lsu.resp.valid && isFirstHitWrite.orR)
+    loadMissEntry.timeCnt := GTimer()
+    loadMissEntry.robIdx := ldu(i).io.lsu.resp.bits.debug_robIdx
+    loadMissEntry.paddr := ldu(i).io.miss_req.bits.addr
+    loadMissEntry.vaddr := ldu(i).io.miss_req.bits.vaddr
+    loadMissEntry.missState := OHToUInt(Cat(Seq(
+      ldu(i).io.miss_req.fire & ldu(i).io.miss_resp.merged,
+      ldu(i).io.miss_req.fire & !ldu(i).io.miss_resp.merged,
+      ldu(i).io.lsu.s2_first_hit && ldu(i).io.lsu.resp.valid
+    )))
+    loadMissTable.log(
+      data = loadMissEntry,
+      en = isWriteLoadMissTable.orR && loadMissWriteEn,
+      site = siteName,
+      clock = clock,
+      reset = reset
+    )
+  }
+
   //----------------------------------------
   // Sta pipe
   for (w <- 0 until StorePipelineWidth) {
@@ -912,7 +952,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (w <- 0 until LoadPipelineWidth)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
   for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
 
-  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp.id := missQueue.io.resp.id }
+  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
+  mainPipe.io.miss_resp := missQueue.io.resp
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr

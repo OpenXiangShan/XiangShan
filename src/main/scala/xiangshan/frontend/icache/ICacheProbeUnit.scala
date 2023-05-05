@@ -129,7 +129,7 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
   }
 
   io.pipe_req <> pipe_req_arb.io.out
-
+  XSPerfAccumulate("ProbeL1ICache", io.mem_probe.fire)
 }
 
 //class ICacheProbe(implicit p: Parameters) extends ICacheModule{

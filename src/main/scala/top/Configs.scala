@@ -148,6 +148,18 @@ class MinimalConfig(n: Int = 1) extends Config(
           outsideRecvFlush = true,
           outReplace = false
         ),
+        pftlbParameters = TLBParameters(
+          name = "pftlb",
+          normalNSets = 16, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 4,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
         btlbParameters = TLBParameters(
           name = "btlb",
           normalNSets = 1,
@@ -245,7 +257,7 @@ class WithNKBL2
           blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
+        reqField = Seq(PreferCacheField(), ReqSourceField()),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
         enablePerf = true,

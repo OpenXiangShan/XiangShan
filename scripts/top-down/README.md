@@ -1,5 +1,6 @@
 # top-down 分析工具
 
+最新的 top-down 分析工具已经与 env-scripts 集成。在使用 `xs_autorun.py` 完成 checkpoint 的运行后，使用 `--report-top-down` 参数即可！
 本仓库集成了 top-down 分析所需要的工具。
 
 ## 运行仿真
