@@ -20,11 +20,13 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util.log2Up
 import utils._
 import yunsuan.VpermType
-import xiangshan.{XSCoreParamsKey, FuType, SrcType}
+import xiangshan.{FuType, SrcType, XSCoreParamsKey}
 import yunsuan.vector.perm.Permutation
 import yunsuan.vector.{FToSModule, Vfslide1upModule}
+import chisel3.dontTouch
 
 class VPPUWrapper(implicit p: Parameters)  extends VPUDataModule {
 
@@ -44,7 +46,7 @@ class VPPUWrapper(implicit p: Parameters)  extends VPUDataModule {
   f2s.io.in.vta := in.uop.ctrl.vconfig.vtype.vta
   f2s.io.in.vma := in.uop.ctrl.vconfig.vtype.vma
   f2s.io.in.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
-  f2s.io.in.v0 := in.src(3)
+  f2s.io.in.v0 := mask
 
   vfslide1up.io.in.valid := io.in.valid
   vfslide1up.io.in.src0 := vs1
@@ -55,7 +57,7 @@ class VPPUWrapper(implicit p: Parameters)  extends VPUDataModule {
   vfslide1up.io.in.vta := in.uop.ctrl.vconfig.vtype.vta
   vfslide1up.io.in.vma := in.uop.ctrl.vconfig.vtype.vma
   vfslide1up.io.in.vlmul := in.uop.ctrl.vconfig.vtype.vlmul
-  vfslide1up.io.in.v0 := in.src(3)
+  vfslide1up.io.in.v0 := mask
 
   io.out.bits.data := RegNext(Mux(in.uop.ctrl.fuOpType === VpermType.vfmv_s_f, f2s.io.out.vd,
                       Mux(in.uop.ctrl.fuOpType === VpermType.vfslide1up, vfslide1up.io.out.vd, 0.U)))
@@ -66,7 +68,7 @@ class VPPUWrapper(implicit p: Parameters)  extends VPUDataModule {
 class VPermWrapper(implicit p: Parameters)  extends VPUDataModule {
 
   needReverse := false.B
-  needClearMask := false.B
+  needClearMask := (VpermType.vcompress === in.uop.ctrl.fuOpType) && (in.uop.ctrl.uopIdx(log2Up(MaxUopSize)-1,1) === 0.U)
 
   // connect VPerm
   val VPerm = Module(new Permutation)
@@ -96,7 +98,7 @@ class VPermWrapper(implicit p: Parameters)  extends VPUDataModule {
   VPerm.io.in.bits.vs1 := vs1
   VPerm.io.in.bits.vs2 := vs2
   VPerm.io.in.bits.old_vd := in.src(2)
-  VPerm.io.in.bits.mask := in.src(3)
+  VPerm.io.in.bits.mask := mask
   VPerm.io.in.valid := io.in.valid
 
   // connect io

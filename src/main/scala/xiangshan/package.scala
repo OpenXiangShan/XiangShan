@@ -79,6 +79,7 @@ package object xiangshan {
     def mou          = "b01111".U // for amo, lr, sc, fence
 
     def vipu         = "b10000".U
+    def vimac        = "b10010".U // for VIMacU
     def vialuF       = "b10001".U // for VIALU Fixed-Point instructions
     def vfpu         = "b11000".U
     def vldu         = "b11100".U
@@ -590,6 +591,7 @@ package object xiangshan {
     def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
     def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
+    def VEC_COMPRESS     = "b110000".U // vcompress.vm
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U
@@ -668,6 +670,7 @@ package object xiangshan {
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
   def vipuGen(p: Parameters) = new VIPU()(p)
+  def vimacGen(p: Parameters) = new VIMacU()(p)
   def vialuFGen(p: Parameters) = new VIAluFix()(p)
   def vppuGen(p: Parameters) = new VPerm()(p)
   def vfpuGen(p: Parameters) = new VFPU()(p)
@@ -879,6 +882,17 @@ package object xiangshan {
     fastImplemented = true, //TODO: check
   )
 
+  val vimacCfg = FuConfig(
+    name = "vimac",
+    fuGen = vimacGen,
+    fuSel = (uop: MicroOp) => FuType.vimac === uop.ctrl.fuType,
+    fuType = FuType.vimac,
+    numIntSrc = 0, numFpSrc = 0, writeIntRf = false, writeFpRf = false, writeFflags = false, writeVxsat = true,
+    numVecSrc = 4, writeVecRf = true,
+    fastUopOut = false, // TODO: check
+    fastImplemented = true, //TODO: check
+  )
+
   val vialuFCfg = FuConfig(
     name = "vialuF",
     fuGen = vialuFGen,
@@ -917,7 +931,7 @@ package object xiangshan {
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vppuCfg, vfpuCfg, vialuFCfg), Int.MaxValue, 0)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg, vipuCfg, vimacCfg, vppuCfg, vfpuCfg, vialuFCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
     "Fp",
