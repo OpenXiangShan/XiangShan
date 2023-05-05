@@ -540,7 +540,6 @@ if(cacheParams.hasPrefetch){
   println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
 }
   println("  WPUEnable: " + iwpuParam.enWPU)
-  println("  WPUEnableCfPred: " + iwpuParam.enCfPred)
   println("  WPUAlgorithm: " + iwpuParam.algoName)
 
   val (bus, edge) = outer.clientNode.out.head
@@ -583,6 +582,15 @@ if(cacheParams.hasPrefetch){
   mainPipe.io.reDataArray.fromIData   <> dataArray.io.readResp
   mainPipe.io.dataArray.fromIData     <> dataArray.io.readResp
 
+  // iwpu tagwrite update
+  mainPipe.io.tagwriteUpd.valid := metaArray.io.write.valid
+  mainPipe.io.tagwriteUpd.bits.vaddr := metaArray.io.write.bits.vaddr
+  mainPipe.io.tagwriteUpd.bits.s1_real_way_en := metaArray.io.write.bits.waymask
+  replacePipe.io.tagwriteUpd.valid := metaArray.io.write.valid
+  replacePipe.io.tagwriteUpd.bits.vaddr := metaArray.io.write.bits.vaddr
+  replacePipe.io.tagwriteUpd.bits.s1_real_way_en := metaArray.io.write.bits.waymask
+
+/*
   /** wpu: unified predict */
   val iwpu = Module(new ICacheWpuWrapper(PortNumber + 1))
   for(i <- 0 until PortNumber){
@@ -595,9 +603,10 @@ if(cacheParams.hasPrefetch){
   replacePipe.io.iwpu.resp.head <> iwpu.io.resp(PortNumber)
   // tag write update
   iwpu.io.tagwrite_upd <> DontCare
-  iwpu.io.tagwrite_upd.head.valid := metaArray.io.write.valid
-  iwpu.io.tagwrite_upd.head.bits.vaddr := metaArray.io.write.bits.vaddr
-  iwpu.io.tagwrite_upd.head.bits.s1_real_way_en := metaArray.io.write.bits.waymask
+  iwpu.io.tagwrite_upd.valid := metaArray.io.write.valid
+  iwpu.io.tagwrite_upd.bits.vaddr := metaArray.io.write.bits.vaddr
+  iwpu.io.tagwrite_upd.bits.s1_real_way_en := metaArray.io.write.bits.waymask
+*/
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo

@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions
 import utils._
 import xiangshan._
-import xiangshan.cache.wpu.IwpuBaseIO
+import xiangshan.cache.wpu._
 
 class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -44,7 +44,8 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val io = IO(new Bundle{
     val pipe_req = Flipped(DecoupledIO(new ReplacePipeReq))
-    val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = 1))
+    // val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = 1))
+    val tagwriteUpd = Flipped(ValidIO(new WPUUpdate(nWays)))
     val meta_read = DecoupledIO(new ICacheReadBundle)
     val data_read = DecoupledIO(Vec(partWayNum, new ICacheReadBundle))
     val meta_response = Input(new ICacheMetaRespBundle)
@@ -100,17 +101,19 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   r0_fire  := r0_valid && r0_ready
 
   val p0_pred_way_en = Wire(UInt(nWays.W))
+  val iwpu = Module(new ICacheWpuWrapper(1))
+  iwpu.io.tagwrite_upd <> io.tagwriteUpd
   if (iwpuParam.enWPU) {
-    io.iwpu.req(0).valid := r0_valid && r0_req.isProbe
-    io.iwpu.req(0).bits.vaddr := r0_req.vaddr
-    when(io.iwpu.resp(0).valid) {
-      p0_pred_way_en := io.iwpu.resp(0).bits.s0_pred_way_en
+    iwpu.io.req(0).valid := r0_valid && r0_req.isProbe
+    iwpu.io.req(0).bits.vaddr := r0_req.vaddr
+    when(iwpu.io.resp(0).valid) {
+      p0_pred_way_en := iwpu.io.resp(0).bits.s0_pred_way_en
     }.otherwise {
       p0_pred_way_en := 0.U(nWays.W)
     }
   } else {
-    io.iwpu.req(0).valid := false.B
-    io.iwpu.req(0).bits := DontCare
+    iwpu.io.req(0).valid := false.B
+    iwpu.io.req(0).bits := DontCare
     p0_pred_way_en := ~0.U(nWays.W)
   }
 
@@ -170,10 +173,10 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val probe_hit_coh   = Mux1H(probe_hit_vec, r1_meta_cohs)
 
   /** wpu */
-  io.iwpu.lookup_upd(0).valid := r1_valid && r1_req.isProbe
-  io.iwpu.lookup_upd(0).bits.vaddr := r1_req.vaddr
-  io.iwpu.lookup_upd(0).bits.s1_pred_way_en := p1_pred_way_en
-  io.iwpu.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
+  iwpu.io.lookup_upd(0).valid := r1_valid && r1_req.isProbe
+  iwpu.io.lookup_upd(0).bits.vaddr := r1_req.vaddr
+  iwpu.io.lookup_upd(0).bits.s1_pred_way_en := p1_pred_way_en
+  iwpu.io.lookup_upd(0).bits.s1_real_way_en := probe_hit_vec.asUInt
 
   replay_read_valid := r1_valid && p1_pred_fail_and_real_hit
   r1_resend_can_go := !replay_read_valid || reToData.ready && reToMeta.ready
@@ -202,7 +205,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     reToMeta.valid := false.B
     reToMeta.bits := DontCare
   }
-  XSPerfAccumulate("wpu_pred_total", io.iwpu.req(0).valid)
+  XSPerfAccumulate("wpu_pred_total", RegNext(iwpu.io.req(0).valid) && iwpu.io.lookup_upd(0).valid)
   XSPerfAccumulate("count_first_send", r1_valid && r1_req.isProbe)
   XSPerfAccumulate("count_second_send", replay_read_valid)
   XSPerfAccumulate("resend_block", !r1_resend_can_go)

@@ -3,6 +3,7 @@ package xiangshan.cache.wpu
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
+import utils.XSPerfAccumulate
 import xiangshan.cache.{HasL1CacheParameters, L1CacheParameters}
 import xiangshan.{XSBundle, XSModule}
 
@@ -144,8 +145,23 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
   val valid_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nWays)(false.B)))))
 
   def get_hash_utag(addr: UInt): UInt = {
+    val utagQuotient = vtagBits / utagBits
+    val utagRemainder = vtagBits % utagBits
     val vtag = get_vir_tag(addr)
-    vtag(utagBits * 2 - 1, utagBits) ^ vtag(utagBits - 1, 0)
+
+    /* old */
+    // vtag(utagBits * 2 - 1, utagBits) ^ vtag(utagBits - 1, 0)
+    
+    /* new */
+    val tmp = vtag(utagQuotient * utagBits - 1, 0).asTypeOf(Vec(utagQuotient, UInt(utagBits.W)))
+    val res1 = tmp.reduce(_ ^ _)
+    val res2 = Wire(UInt(utagRemainder.W))
+    if(utagRemainder!=0){
+      res2 := res1(utagRemainder - 1, 0) ^ vtag(vtagBits - 1, utagBits * utagQuotient)
+      Cat(res1(utagBits - 1, utagRemainder), res2)
+    }else{
+      res1
+    }
   }
 
   def write_utag(upd: BaseWpuUpdateBundle): Unit = {
@@ -158,10 +174,10 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
     }
   }
 
-  def unvalid_utag(upd: BaseWpuUpdateBundle): Unit = {
+  def unvalid_utag(upd: LookupWpuUpdateBundle): Unit = {
     when(upd.en){
       val upd_setIdx = get_wpu_idx(upd.vaddr)
-      val upd_way = OHToUInt(upd.way_en)
+      val upd_way = OHToUInt(upd.pred_way_en)
       valid_regs(upd_setIdx)(upd_way) := false.B
     }
   }
@@ -179,18 +195,24 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
     pred.way_en := UIntToOH(OHToUInt(pred_way_en))
   }
 
+  val hash_conflict = Wire(Vec(nPorts, Bool()))
   for(i <- 0 until nPorts){
     predict(io.predVec(i))
-    val s1_pred_way_en = io.updLookup(i).pred_way_en
-    val s1_vtag_look_miss = !s1_pred_way_en.orR
+    val real_way_en = io.updLookup(i).way_en
+    val pred_way_en = io.updLookup(i).pred_way_en
+    val pred_miss = io.updLookup(i).en && !pred_way_en.orR
+    val real_miss = io.updLookup(i).en && !real_way_en.orR
+    val way_match = io.updLookup(i).en && pred_way_en === real_way_en
 
-    // look up: vtag miss but tag hit
-    when(s1_vtag_look_miss && io.updLookup(i).way_en.orR) {
+    hash_conflict(i) := !pred_miss && !way_match
+      // look up: vtag miss but tag hit
+    when(pred_miss && !real_miss) {
       write_utag(io.updLookup(i))
     }
-    // look up: vtag hit but other tag hit
-    when(!s1_vtag_look_miss && io.updLookup(i).way_en.orR && s1_pred_way_en =/= io.updLookup(i).way_en) {
+    // look up: vtag hit but other tag hit ==> unvalid pred way; write real way
+    when(!pred_miss && !real_miss && !way_match) {
       unvalid_utag(io.updLookup(i))
+      write_utag(io.updLookup(i))
     }
     // replay carry
     write_utag(io.updReplaycarry(i))
@@ -198,4 +220,5 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
     write_utag(io.updTagwrite(i))
   }
 
+  XSPerfAccumulate("utag_hash_conflict", PopCount(hash_conflict))
 }
