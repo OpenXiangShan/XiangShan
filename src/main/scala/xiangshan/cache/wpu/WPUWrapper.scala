@@ -159,9 +159,9 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
     io.resp(i).bits.s0_pred_way_en := s0_pred_way_en(i)
     assert(PopCount(io.resp(i).bits.s0_pred_way_en) <= 1.U, "tag should not match with more than 1 way")
   }
-  wpu.io.updTagwrite(0).en := io.tagwrite_upd.valid
-  wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd.bits.vaddr
-  wpu.io.updTagwrite(0).way_en := io.tagwrite_upd.bits.s1_real_way_en
+  // wpu.io.updTagwrite(0).en := io.tagwrite_upd.valid
+  // wpu.io.updTagwrite(0).vaddr := io.tagwrite_upd.bits.vaddr
+  // wpu.io.updTagwrite(0).way_en := io.tagwrite_upd.bits.s1_real_way_en
 
   // PerfLog
   // pred situation
