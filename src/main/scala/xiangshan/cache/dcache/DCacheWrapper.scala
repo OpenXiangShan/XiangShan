@@ -798,6 +798,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // data array
+  mainPipe.io.data_read.zip(ldu).map(x => x._1 := x._2.io.lsu.req.valid)
 
   val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
   dataWriteArb.io.in(0) <> refillPipe.io.data_write
@@ -815,7 +816,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bankedDataArray.io.write_dup(bank) <> dataWriteArb_dup.io.out
   }
 
-  bankedDataArray.io.readline <> mainPipe.io.data_read
+  bankedDataArray.io.readline <> mainPipe.io.data_readline
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
   mainPipe.io.data_resp := bankedDataArray.io.readline_resp
