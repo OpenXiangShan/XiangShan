@@ -81,6 +81,7 @@ abstract class BaseWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Paramete
 }
 
 class MruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
+  println("  WpuType: MruWPU")
   val predict_regs = RegInit(VecInit(Seq.fill(setSize)(0.U(wayBits.W))))
 
   def write(upd: BaseWpuUpdateBundle): Unit = {
@@ -109,6 +110,7 @@ class MruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extend
 }
 
 class MmruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
+  println("  WpuType: MmruWPU")
   val predict_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nTagIdx)(0.U(auxWayBits.W))))))
 
   def write(upd: BaseWpuUpdateBundle): Unit = {
@@ -141,6 +143,7 @@ class MmruWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
 }
 
 class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends BaseWPU(wpuParam, nPorts){
+  println("  WpuType: UtagWPU")
   val utag_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nWays)(0.U(utagBits.W))))))
   val valid_regs = RegInit(VecInit(Seq.fill(setSize)(VecInit(Seq.fill(nWays)(false.B)))))
 

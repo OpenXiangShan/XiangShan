@@ -330,6 +330,36 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.iwpu.lookup_upd(i).bits.s1_pred_way_en := s1_pred_way_en(i)
   }
 
+  class WayEntry(nWays: Int) extends Bundle {
+    val pred_way = UInt(64.W)
+    val real_way = UInt(64.W)
+    val pred_way_en = UInt(nWays.W)
+    val real_way_en = UInt(nWays.W)
+    val real_miss = Bool()
+  }
+
+  val tableName = "IwpuWay" + p(XSCoreParamsKey).HartId.toString
+  val siteName = "MainPipeIwpu"
+  val table = ChiselDB.createTable(tableName, new WayEntry(nWays))
+  val table_entry = Wire(new WayEntry(nWays))
+  for (i <- 0 until PortNumber) {
+    val real_way_en = io.iwpu.lookup_upd(i).bits.s1_real_way_en
+    val pred_way_en = io.iwpu.lookup_upd(i).bits.s1_pred_way_en
+    table_entry.real_way := OHToUInt(real_way_en)
+    table_entry.real_way_en := real_way_en
+    table_entry.real_miss := !real_way_en.orR
+    table_entry.pred_way := OHToUInt(pred_way_en)
+    table_entry.pred_way_en := pred_way_en
+    table.log(
+      data = table_entry,
+      en = RegNext(io.iwpu.req(i).valid) && io.iwpu.lookup_upd(i).valid,
+      site = siteName + i.toString,
+      clock = clock,
+      reset = reset
+    )
+  }
+
+
   // replay read when wpu is enable
   replay_read_valid := s1_wpu_pred_fail_and_real_hit && (!missSwitchBit || missSwitchBit && s2_fire)
   s1_resend_can_go := !replay_read_valid || reToData.ready && reToMeta.ready
