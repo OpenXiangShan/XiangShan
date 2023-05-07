@@ -174,7 +174,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           l3nWays = 8,
           spSize = 2,
         ),
-        L2CacheParamsOpt = None, // remove L2 Cache
+        L2CacheParamsOpt = Some(L2Param(
+          name = "L2",
+          ways = 8,
+          sets = 128,
+          echoField = Seq(huancun.DirtyField()),
+          prefetch = None
+        )),
+        L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
     )
@@ -184,14 +191,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
           sets = 1024,
           inclusive = false,
-          clientCaches = tiles.map{ p =>
-            CacheParameters(
-              "dcache",
-              sets = 2 * p.dcacheParametersOpt.get.nSets,
-              ways = p.dcacheParametersOpt.get.nWays + 2,
-              blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets),
-              aliasBitsOpt = None
-            )
+          clientCaches = tiles.map{ core =>
+            val clientDirBytes = tiles.map{ t =>
+              t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+            }.sum
+            val l2params = core.L2CacheParamsOpt.get.toCacheParams
+            l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
           },
           simulation = !site(DebugOptionsKey).FPGAPlatform
         )),
