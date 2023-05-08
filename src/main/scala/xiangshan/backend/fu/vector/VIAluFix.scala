@@ -32,6 +32,7 @@ class VIAluFixWrapper(implicit p: Parameters)  extends VPUDataModule {
 
   needReverse := VialuFixType.needReverse(ctrl.fuOpType)
   needClearMask := VialuFixType.needClearMask(ctrl.fuOpType)
+  src1NeedSew := !VialuFixType.notNeedSew(ctrl.fuOpType)
 
   // connect VIAlu
   val vIntFixpAlu = Module(new VIntFixpAlu)
