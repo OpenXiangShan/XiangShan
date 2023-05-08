@@ -672,7 +672,6 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
   val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
   val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
-  val sta_missQueue = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -682,6 +681,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
+  val sta_prefetch = DecoupledIO(new StorePrefetchReq)
 }
 
 
@@ -928,7 +928,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   staMissQueue.io.mshr_release_info <> missQueue.io.entry_release_info
-  staMissQueue.io.deq <> io.lsu.sta_missQueue
+  staMissQueue.io.deq <> io.sta_prefetch
 
   //----------------------------------------
   // atomics
@@ -942,7 +942,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // miss queue
   // load pipe * 2 + main pipe * 1 + store pipe * 2
-  val MissReqPortCount = LoadPipelineWidth + 1 + StorePipelineWidth
+  val MissReqPortCount = LoadPipelineWidth + 1
   val MainPipeMissReqPort = 0
 
   // Request
@@ -950,7 +950,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
-  for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp

@@ -33,10 +33,6 @@ import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, 
 class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
-    // prefetch req issued by store buffer
-    val sb_prefetch = Flipped(DecoupledIO(new StorePrefetchReq))
-    // prefetch req replayed by sta missQueue
-    val sta_missQueue = Flipped(DecoupledIO(new StorePrefetchReq))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
@@ -55,56 +51,45 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
 
   val use_flow_fromRS = io.in.valid
-  val use_flow_fromPrefetch = !use_flow_fromRS && (io.sta_missQueue.valid || io.sb_prefetch.valid)
-  val use_flow_fromStoreBuffer = !use_flow_fromRS && io.sb_prefetch.valid
-  val use_flow_fromStaMissQueue = !use_flow_fromRS && io.sta_missQueue.valid && !io.sb_prefetch.valid
-
-  val prefetch_vaddr = Mux(use_flow_fromStoreBuffer, io.sb_prefetch.bits.vaddr, io.sta_missQueue.bits.vaddr)
-  val fake_prefetch_exinput = WireInit(0.U.asTypeOf(new ExuInput))
-  val fake_prefetch_exinput_uop = fake_prefetch_exinput.uop
 
   // request to tlb
-  io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
-  io.dtlbReq.valid := use_flow_fromRS || use_flow_fromPrefetch
+  io.dtlbReq.bits.vaddr := saddr
+  io.dtlbReq.valid := use_flow_fromRS
   io.dtlbReq.bits.cmd := TlbCmd.write
-  io.dtlbReq.bits.size := Mux(use_flow_fromRS, LSUOpType.size(io.in.bits.uop.ctrl.fuOpType), 3.U)
+  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := false.B
   io.dtlbReq.bits.memidx.is_st := true.B
-  io.dtlbReq.bits.memidx.idx := Mux(use_flow_fromRS, io.in.bits.uop.sqIdx.value, DontCare)
-  io.dtlbReq.bits.debug.robIdx := Mux(use_flow_fromRS, io.in.bits.uop.robIdx, DontCare)
+  io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
+  io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.no_translate := false.B
-  io.dtlbReq.bits.debug.pc := Mux(use_flow_fromRS, io.in.bits.uop.cf.pc, DontCare)
-  io.dtlbReq.bits.debug.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
-
-  // ready for prefetch sources
-  io.sb_prefetch.ready   := io.out.ready && io.dcache.ready && !io.in.valid
-  io.sta_missQueue.ready := io.out.ready && io.dcache.ready && !io.in.valid && !io.sb_prefetch.valid
+  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   // not real dcache write
-  // just triger a write intent to dcache by prefetch req
-  io.dcache.valid           := use_flow_fromPrefetch
+  // just triger a write intent to dcache
+  io.dcache.valid           := use_flow_fromRS
   io.dcache.bits.cmd        := MemoryOpConstants.M_PFW
-  io.dcache.bits.vaddr      := prefetch_vaddr
+  io.dcache.bits.vaddr      := saddr
   io.dcache.bits.mask       := DontCare
   io.dcache.bits.instrtype  := DCACHE_PREFETCH_SOURCE.U
 
   io.out.bits := DontCare
-  io.out.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
+  io.out.bits.vaddr := saddr
 
   // Now data use its own io
   // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_prefetch_exinput_uop)
+  io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
-  io.out.bits.rsIdx := Mux(use_flow_fromRS, io.rsIdx, DontCare)
-  io.out.bits.mask := Mux(use_flow_fromRS, genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0)), 3.U)
-  io.out.bits.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
-  io.out.bits.wlineflag := Mux(use_flow_fromRS, io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero, false.B)
-  io.out.bits.isHWPrefetch := use_flow_fromPrefetch
-  io.out.valid := Mux(use_flow_fromRS, true.B, use_flow_fromPrefetch && io.dcache.fire)
+  io.out.bits.rsIdx := io.rsIdx
+  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
+  io.out.bits.isHWPrefetch := !use_flow_fromRS
+  io.out.valid := use_flow_fromRS
   io.in.ready := io.out.ready
-  when(io.in.valid && io.isFirstIssue) {
+  when(io.in.fire && io.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
 
@@ -116,7 +101,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
     "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
 
-  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := Mux(use_flow_fromRS, !addrAligned, false.B)
+  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -266,8 +251,6 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
-    val sb_prefetch = Flipped(DecoupledIO(new StorePrefetchReq))
-    val sta_missQueue = Flipped(DecoupledIO(new StorePrefetchReq))
     val redirect = Flipped(ValidIO(new Redirect))
     val dcache = new DCacheStoreIO
     val feedbackSlow = ValidIO(new RSFeedback)
@@ -293,8 +276,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.dcache <> io.dcache.req
-  store_s0.io.sta_missQueue <> io.sta_missQueue
-  store_s0.io.sb_prefetch <> io.sb_prefetch
   io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue

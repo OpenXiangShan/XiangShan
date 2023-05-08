@@ -230,15 +230,23 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // load and store prefetch to l2 cache
   prefetcherOpt.foreach(load_pf => {
-    val store_pf = sbuffer.io.l2_store_prefetch
+    val store_sta_pf = dcache.io.sta_prefetch
+    val store_stride_pf = sbuffer.io.l2_store_prefetch
+    val store_pf_paddr = Mux(store_stride_pf.valid, store_stride_pf.bits.paddr, store_sta_pf.bits.paddr)
     val load_pf_to_l2 = ValidIODelay(load_pf.io.pf_addr, 2)
-    outer.pf_sender_opt.get.out.head._1.addr_valid := load_pf_to_l2.valid || store_pf.valid
-    outer.pf_sender_opt.get.out.head._1.addr := Mux(load_pf_to_l2.valid, load_pf_to_l2.bits, store_pf.bits.paddr)
+
+    outer.pf_sender_opt.get.out.head._1.addr_valid := load_pf_to_l2.valid || store_sta_pf.valid || store_stride_pf.valid
+    outer.pf_sender_opt.get.out.head._1.addr := Mux(load_pf_to_l2.valid, load_pf_to_l2.bits, store_pf_paddr)
     outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
-    store_pf.ready := !load_pf_to_l2.valid
+
+    store_stride_pf.ready := !load_pf_to_l2.valid
+    store_sta_pf.ready := !load_pf_to_l2.valid && !store_stride_pf.valid
+
     load_pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
 
-    XSPerfAccumulate("store_prefetch_fire_l2", store_pf.fire)
+    XSPerfAccumulate("store_prefetch_fire_l2", store_sta_pf.fire || store_stride_pf.fire)
+    XSPerfAccumulate("store_sta_pf_fire_l2", store_sta_pf.fire)
+    XSPerfAccumulate("store_stride_pf_fire_l2", store_stride_pf.fire)
     XSPerfAccumulate("load_prefetch_fire_l2", load_pf_to_l2.valid)
     XSPerfAccumulate("prefetch_fire_l2", outer.pf_sender_opt.get.out.head._1.addr_valid)
   })
@@ -477,10 +485,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt)(i)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
-
-    // use two pipeline
-    stu.io.sta_missQueue <> dcache.io.lsu.sta_missQueue(i)
-    stu.io.sb_prefetch <> sbuffer.io.sb_prefetch(i)
 
     // store unit does not need fast feedback
     io.rsfeedback(i).feedbackFast := DontCare

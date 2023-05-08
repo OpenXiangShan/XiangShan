@@ -27,16 +27,17 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
     val vaddr = UInt(VAddrBits.W)
 }
 
-class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule with HasPerfEvents{
+class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule{
     val io = IO(new DCacheBundle {
         // enq0: odd
         // enq1: even
         val enq = Vec(StorePipelineWidth, Flipped(DecoupledIO(new StorePrefetchReq)))
         val mshr_release_info = Flipped(Valid(new MissEntryReleaseInfo))
-        val deq = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
+        // prefetch to L2 cache
+        val deq = DecoupledIO(new StorePrefetchReq)
     })
     require(StorePipelineWidth == 2)
-    val QueueSize = 32
+    val QueueSize = 6
     val valids = RegInit(VecInit(List.tabulate(QueueSize){_ => false.B}))
     val datas = RegInit(VecInit(List.tabulate(QueueSize){_ => 0.U.asTypeOf(new StorePrefetchReq)}))
     val cancel_mask = Wire(Vec(QueueSize, Bool()))
@@ -68,7 +69,12 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule with H
         val enq_req = io.enq(i)
         val enq_cancel = io.mshr_release_info.valid && same_cache_line_addr(io.mshr_release_info.bits.paddr, enq_req.bits.paddr)
         val enq_filter = filter_by_cache_line_addr(valids, datas, enq_req.bits.paddr)
-        enq_req.ready := !full && !enq_cancel && !enq_filter
+        when(i.U === 0.U) {
+            enq_req.ready := !full && !enq_cancel && !enq_filter
+        }.otherwise {
+            val req1_same_as_req0 = same_cache_line_addr(io.enq(0).bits.paddr, io.enq(1).bits.paddr) && io.enq(0).valid
+            enq_req.ready := !full && !enq_cancel && !enq_filter && !req1_same_as_req0
+        }
 
         when(enq_req.fire) {
             valids(enq_idx) := true.B
@@ -76,20 +82,15 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule with H
         }
     }
 
-    // deq
-    for (i <- 0 until StorePipelineWidth) {
-        val odd = i == 0
-        val deq_mask = get_deq_mask(odd).asUInt
-        val deq_valids = ((valids.asUInt & deq_mask) & ~cancel_mask.asUInt)
-        val deq_idx = PriorityEncoder(deq_valids)
+    val deq_valids = (valids.asUInt & ~cancel_mask.asUInt)
+    val deq_idx = PriorityEncoder(deq_valids)
 
-        val deq_req = io.deq(i)
-        deq_req.valid := deq_valids.orR
-        deq_req.bits := datas(deq_idx)
+    val deq_req = io.deq
+    deq_req.valid := deq_valids.orR
+    deq_req.bits := datas(deq_idx)
 
-        when(deq_req.fire) {
-            valids(deq_idx) := false.B
-        }
+    when(deq_req.fire) {
+        valids(deq_idx) := false.B
     }
 
     // cancel
@@ -103,20 +104,18 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule with H
         }
     }}
 
-    (0 until StorePipelineWidth).map{case i => XSPerfAccumulate(s"deq${i}_fire", io.deq(i).fire)}
     (0 until StorePipelineWidth).map{case i => XSPerfAccumulate(s"enq${i}_fire", io.enq(i).fire)}
-    XSPerfAccumulate("mshr_release", io.mshr_release_info.valid)
+    XSPerfAccumulate("deq_fire", io.deq.fire)
+    XSPerfAccumulate("mshr_release_cancel", PopCount(VecInit(cancel_vec)))
+
+    XSPerfAccumulate("has_req", (VecInit((0 until StorePipelineWidth).map(i => io.enq(i).valid))).asUInt.orR)
+    XSPerfAccumulate("muti_req", (VecInit((0 until StorePipelineWidth).map(i => io.enq(i).valid))).asUInt.andR)
+    XSPerfAccumulate("has_enq", (VecInit((0 until StorePipelineWidth).map(i => io.enq(i).fire))).asUInt.orR)
+    XSPerfAccumulate("muti_enq", (VecInit((0 until StorePipelineWidth).map(i => io.enq(i).fire))).asUInt.andR)
+    XSPerfAccumulate("same_cache_line", same_cache_line_addr(io.enq(0).bits.paddr, io.enq(1).bits.paddr) && io.enq(0).valid && io.enq(1).valid)
 
     val perfValidCount = RegNext(PopCount(valids))
 
     QueuePerf(QueueSize, perfValidCount, perfValidCount === QueueSize.U)
-    val perfEvents = Seq(
-        ("queue_1_4_valid", (perfValidCount < (QueueSize.U/4.U))),
-        ("queue_2_4_valid", (perfValidCount > (QueueSize.U/4.U)) & (perfValidCount <= (QueueSize.U/2.U))),
-        ("queue_3_4_valid", (perfValidCount > (QueueSize.U/2.U)) & (perfValidCount <= (QueueSize.U*3.U/4.U))),
-        ("queue_4_4_valid", (perfValidCount > (QueueSize.U*3.U/4.U)))
-    )
-    generatePerfEvent()
-
 }
 

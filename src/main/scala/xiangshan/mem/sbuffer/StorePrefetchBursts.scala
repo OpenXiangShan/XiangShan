@@ -577,3 +577,29 @@ class StorePfWrapper()(implicit p: Parameters) extends DCacheModule with HasStor
   // if no stride prefetch, and prefetch channel is free, give ready to spb to help it deq
   spb.io.prefetch_req.ready := !storeStridePF.io.s2_gen_req.valid && io.prefetch_req.ready
 }
+
+class EastLakeLikeStorePfWrapper()(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
+  val io = IO(new DCacheBundle {
+    val sbuffer_enq  = Vec(EnsbufferWidth, Flipped(Valid(new DCacheWordReqWithVaddrAndPc)))
+    val prefetch_req = DecoupledIO(new StorePrefetchReq)
+  })
+
+  val serializer_of_stride = Module(new Serializer())
+  val storeStridePF = Module(new StoreStridePF())
+
+  // give mutiple reqs to serializer, serializer will give out one req per cycle
+  serializer_of_stride.io.sbuffer_enq <> io.sbuffer_enq
+
+  // train stride
+  storeStridePF.io.stride_en := ENABLE_STRIDE.B
+  storeStridePF.io.s0_lookup.valid := serializer_of_stride.io.prefetch_train.valid
+  storeStridePF.io.s0_lookup.bits.pc := pc_hash(serializer_of_stride.io.prefetch_train.bits.pc)
+  storeStridePF.io.s0_lookup.bits.vaddr := serializer_of_stride.io.prefetch_train.bits.vaddr
+  storeStridePF.io.s0_lookup.bits.paddr := serializer_of_stride.io.prefetch_train.bits.addr
+  // stride may reject some specific train req, so connect the ready signal
+  serializer_of_stride.io.prefetch_train.ready := storeStridePF.io.s0_lookup.ready
+
+  // fire a prefetch req: stride has higher priority than spb
+  io.prefetch_req.valid := storeStridePF.io.s2_gen_req.valid
+  io.prefetch_req.bits := storeStridePF.io.s2_gen_req.bits
+}
