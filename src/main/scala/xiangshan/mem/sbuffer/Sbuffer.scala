@@ -280,6 +280,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // * remove dcache write block (if there is)
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
+  val validMask  = VecInit(stateVec.map(s => s.isValid()))
   val drainIdx = PriorityEncoder(activeMask)
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
@@ -461,11 +462,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val sq_empty = !Cat(io.in.map(_.valid)).orR()
   val empty = sbuffer_empty && sq_empty
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  val validCount = PopCount(activeMask)
-  val do_eviction = RegNext(validCount >= threshold || validCount === (StoreBufferSize-1).U, init = false.B)
+  val ActiveCount = PopCount(activeMask)
+  val ValidCount = PopCount(validMask)
+  val do_eviction = RegNext(ActiveCount >= threshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
-  XSDebug(p"validCount[$validCount]\n")
+  XSDebug(p"ActiveCount[$ActiveCount]\n")
 
   io.flush.empty := RegNext(empty && io.sqempty)
   // lru.io.flush := sbuffer_state === x_drain_all && empty
