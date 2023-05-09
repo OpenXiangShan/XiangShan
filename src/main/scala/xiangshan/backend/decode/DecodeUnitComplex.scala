@@ -27,7 +27,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import freechips.rocketchip.rocket.Instructions._
-import yunsuan.VialuFixType
+import yunsuan.{VialuFixType, VpermType}
 import scala.collection.Seq
 
 trait VectorConstants {
@@ -80,7 +80,9 @@ class DecodeUnitComplex(maxNumOfUop : Int)(implicit p : Parameters) extends XSMo
   val typeOfSplit = cf_ctrl_simple.ctrl.uopSplitType
 
   //LMUL
-  val lmul = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(4.W), Array(
+  val isVmvnr = cf_ctrl_simple.ctrl.fuType === FuType.vppu && VpermType.isVmvnr(cf_ctrl_simple.ctrl.fuOpType)
+  val lmulVmvnr = Mux(isVmvnr, VpermType.getLmulVmvnr(cf_ctrl_simple.ctrl.fuOpType), simple.io.vconfig.vtype.vlmul)
+  val lmul = MuxLookup(lmulVmvnr, 1.U(4.W), Array(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
