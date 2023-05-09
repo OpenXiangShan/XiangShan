@@ -27,7 +27,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
-import xiangshan.backend.decode.isa.bitfield.{InstVType, RiscvVecInst}
+import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.VType
 
 /**
@@ -579,7 +579,7 @@ case class Imm_VSETIVLI() extends Imm(13){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
-    val rvInst: RiscvVecInst = instr.asTypeOf(new RiscvVecInst)
+    val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
     val uimm5 = rvInst.UIMM_VSETIVLI
     val vtype8 = rvInst.ZIMM_VTYPE
     Cat(uimm5, vtype8)
