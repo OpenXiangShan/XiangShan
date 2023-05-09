@@ -19,16 +19,16 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   protected val vsetModule = Module(new VsetModule)
 
-  protected val flushed = io.in.bits.robIdx.needFlush(io.flush)
+  protected val flushed = io.in.bits.ctrl.robIdx.needFlush(io.flush)
 
-  protected val avlImm = Imm_VSETIVLI().getAvl(in.src(1))
-  protected val avl = Mux(VSETOpType.isVsetivli(in.fuOpType), avlImm, in.src(0))
+  protected val avlImm = Imm_VSETIVLI().getAvl(in.data.src(1))
+  protected val avl = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), avlImm, in.data.src(0))
 
-  protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.src(1))
+  protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.data.src(1))
   protected val vtypeImm: VType = VType.fromInstVType(instVType)
-  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.fuOpType), VType.fromVtypeStruct(in.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
+  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
-  vsetModule.io.in.func := in.fuOpType
+  vsetModule.io.in.func := in.ctrl.fuOpType
 
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -51,7 +51,7 @@ class VSetRiWi(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := avl
   vsetModule.io.in.vtype := vtype
 
-  out.data := vsetModule.io.out.vconfig.vl
+  out.res.data := vsetModule.io.out.vconfig.vl
 
   connectNonPipedCtrlSingal
 
@@ -74,7 +74,7 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := avl
   vsetModule.io.in.vtype := vtype
 
-  out.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
+  out.res.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
 
   connectNonPipedCtrlSingal
 
@@ -94,13 +94,13 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := 0.U
   vsetModule.io.in.vtype := vtype
 
-  val oldVL = in.src(0).asTypeOf(VConfig()).vl
+  val oldVL = in.data.src(0).asTypeOf(VConfig()).vl
   val res = WireInit(0.U.asTypeOf(VConfig()))
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
-              Mux(VSETOpType.isKeepVl(in.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
+              Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype
 
-  out.data := ZeroExt(res.asUInt, XLEN)
+  out.res.data := ZeroExt(res.asUInt, XLEN)
 
   connectNonPipedCtrlSingal
 

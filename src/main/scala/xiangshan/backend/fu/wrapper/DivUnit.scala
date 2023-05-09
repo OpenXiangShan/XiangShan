@@ -12,7 +12,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val xlen = cfg.dataBits
 
-  val func = io.in.bits.fuOpType
+  val func = io.in.bits.ctrl.fuOpType
   val ctrl = Wire(new MulDivCtrl)
   ctrl.isW := DIVOpType.isW(func)
   ctrl.isHi := DIVOpType.isH(func)
@@ -27,17 +27,17 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
     x
   )
 
-  val robIdxReg = RegEnable(io.in.bits.robIdx, io.in.fire)
+  val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
   val ctrlReg = RegEnable(ctrl, io.in.fire)
 
   val divDataModule = Module(new SRT16DividerDataModule(cfg.dataBits))
 
-  val kill_w = io.in.bits.robIdx.needFlush(io.flush)
+  val kill_w = io.in.bits.ctrl.robIdx.needFlush(io.flush)
   val kill_r = !divDataModule.io.in_ready && robIdxReg.needFlush(io.flush)
 
   divDataModule.io.valid := io.in.valid
-  divDataModule.io.src(0) := divInputCvtFunc(io.in.bits.src(0))
-  divDataModule.io.src(1) := divInputCvtFunc(io.in.bits.src(1))
+  divDataModule.io.src(0) := divInputCvtFunc(io.in.bits.data.src(0))
+  divDataModule.io.src(1) := divInputCvtFunc(io.in.bits.data.src(1))
   divDataModule.io.sign := ctrl.sign
   divDataModule.io.kill_w := kill_w
   divDataModule.io.kill_r := kill_r
@@ -49,6 +49,6 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   io.in.ready := divDataModule.io.in_ready
   io.out.valid := divDataModule.io.out_valid
-  io.out.bits.data := divDataModule.io.out_data
+  io.out.bits.res.data := divDataModule.io.out_data
   connectNonPipedCtrlSingal
 }

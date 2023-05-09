@@ -91,14 +91,14 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
 
-  val robIdxReg = RegEnable(io.in.bits.robIdx, io.in.fire)
+  val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
   val kill_r = !io.in.ready && robIdxReg.needFlush(io.flush)
 
   override val dataModule = Module(new FDivSqrtDataModule)
   connectDataModule
   dataModule.in_valid := io.in.valid
   dataModule.out_ready := io.out.ready
-  dataModule.kill_w := io.in.bits.robIdx.needFlush(io.flush)
+  dataModule.kill_w := io.in.bits.ctrl.robIdx.needFlush(io.flush)
   dataModule.kill_r := kill_r
   io.in.ready := dataModule.in_ready
   io.out.valid := dataModule.out_valid

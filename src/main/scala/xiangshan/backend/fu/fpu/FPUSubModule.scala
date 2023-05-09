@@ -51,12 +51,12 @@ abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncU
   val dataModule: FPUDataModule
   def connectDataModule = {
     for (i <- 0 until dataModule.io.in.src.length) {
-      dataModule.io.in.src(i) := (if (i < io.in.bits.src.length) io.in.bits.src(i) else 0.U)
+      dataModule.io.in.src(i) := (if (i < io.in.bits.data.src.length) io.in.bits.data.src(i) else 0.U)
     }
-    io.in.bits.fpu.foreach(_ <> dataModule.io.in.fpCtrl)
+    io.in.bits.ctrl.fpu.foreach(_ <> dataModule.io.in.fpCtrl)
     dataModule.io.in.rm <> io.frm.get
-    io.out.bits.data := dataModule.io.out.data
-    io.out.bits.fflags.get := dataModule.io.out.fflags
+    io.out.bits.res.data := dataModule.io.out.data
+    io.out.bits.res.fflags.get := dataModule.io.out.fflags
   }
   def invert_sign(x: UInt, len: Int) = {
     Cat(

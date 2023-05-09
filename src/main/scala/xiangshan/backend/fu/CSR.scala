@@ -180,9 +180,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val (valid, src1, src2, func) = (
     io.in.valid,
-    io.in.bits.src(0),
-    io.in.bits.imm,
-    io.in.bits.fuOpType
+    io.in.bits.data.src(0),
+    io.in.bits.data.imm,
+    io.in.bits.ctrl.fuOpType
   )
 
   // CSR define
@@ -902,8 +902,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
-  io.out.bits.data := rdata
-  io.out.bits.flushPipe.get := flushPipe
+  io.out.bits.res.data := rdata
+  io.out.bits.ctrl.flushPipe.get := flushPipe
   connectNonPipedCtrlSingal
 
   // send distribute csr a w signal
@@ -989,8 +989,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val isDret   = addr === privDret   && func === CSROpType.jmp
   val isWFI    = func === CSROpType.wfi
 
-  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.pc.get, addr, rdata, wdata, func)
-  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
+  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.data.pc.get, addr, rdata, wdata, func)
+  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.data.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
 
   // Illegal priviledged operation list
   val illegalMret = valid && isMret && priviledgeMode < ModeM
@@ -1088,7 +1088,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // * unimplemented csr is being read/written
   // * csr access is illegal
   csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
-  io.out.bits.exceptionVec.get := csrExceptionVec
+  io.out.bits.ctrl.exceptionVec.get := csrExceptionVec
 
   XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
 
@@ -1279,7 +1279,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.pc.get)
+  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
 
   // Distributed CSR update req
   //

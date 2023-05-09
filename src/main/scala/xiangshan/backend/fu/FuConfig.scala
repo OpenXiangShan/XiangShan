@@ -96,6 +96,11 @@ case class FuConfig (
     Set(fmac, fDivSqrt, fmisc, i2f).contains(fuType)
   }
 
+  def needVecCtrl: Boolean = {
+    import FuType._
+    Set(vipu, vialuF, vfpu, vppu).contains(fuType)
+  }
+
   def isMul: Boolean = fuType == FuType.mul
 
   def isDiv: Boolean = fuType == FuType.div
@@ -390,6 +395,17 @@ object FuConfig {
     writeIntRf = false,
     writeFpRf = false,
     latency = UncertainLatency()
+  )
+
+  val Vialu = FuConfig (
+    name = "vialu",
+    fuType = FuType.vialuF,
+    fuGen = null,
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    writeVecRf = true,
+    latency = CertainLatency(1),
   )
 
   val VipuCfg: FuConfig = FuConfig (

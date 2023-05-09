@@ -28,22 +28,22 @@ import yunsuan.vector.VectorIntAdder
 import yunsuan.{VectorElementFormat, VipuType}
 
 class VIPU(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasXSParameter {
-  XSError(io.in.valid && io.in.bits.fuOpType === VipuType.dummy, "VIPU OpType not supported")
+  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
 
   val AdderWidth = XLEN
   val NumAdder = VLEN / XLEN
   val adder = Seq.fill(NumAdder)(Module(new VectorIntAdder()))
   for(i <- 0 until NumAdder) {
-    adder(i).io.in_0 := io.in.bits.src(0)(AdderWidth*(i+1)-1, AdderWidth*i)
-    adder(i).io.in_1 := io.in.bits.src(1)(AdderWidth*(i+1)-1, AdderWidth*i)
+    adder(i).io.in_0 := io.in.bits.data.src(0)(AdderWidth*(i+1)-1, AdderWidth*i)
+    adder(i).io.in_1 := io.in.bits.data.src(1)(AdderWidth*(i+1)-1, AdderWidth*i)
     adder(i).io.int_format := VectorElementFormat.d // TODO
-    adder(i).io.op_code := io.in.bits.fuOpType
+    adder(i).io.op_code := io.in.bits.ctrl.fuOpType
     adder(i).io.carry_or_borrow_in := DontCare
   }
   val adder_result = VecInit(adder.map(_.io.out)).asUInt
 
-  io.out.bits.data := adder_result
-  io.out.bits.robIdx := io.in.bits.robIdx
+  io.out.bits.res.data := adder_result
+  io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 }

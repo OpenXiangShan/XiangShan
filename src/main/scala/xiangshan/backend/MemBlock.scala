@@ -38,8 +38,8 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits := 0.U.asTypeOf(io.out.bits)
-  io.out.bits.data := io.in.bits.src(0)
-  io.out.bits.robIdx := io.in.bits.robIdx
+  io.out.bits.res.data := io.in.bits.data.src(0)
+  io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
 }
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
