@@ -324,8 +324,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val fuType = io.robHead.ctrl.fuType
     val notRdy = io.robHeadNotReady
     update := MuxCase(OtherCoreStall.id.U, Seq(
+      // fire
       (fire                                       ) -> NoStall.id.U          ,
+      // dispatch not stall / core stall from rename
       (in =/= OtherCoreStall.id.U                 ) -> in                    ,
+      // dispatch queue stall
+      (!io.toIntDq.canAccept                      ) -> IntDqStall.id.U       ,
+      (!io.toFpDq.canAccept                       ) -> FpDqStall.id.U        ,
+      (!io.toLsDq.canAccept                       ) -> LsDqStall.id.U        ,
+      // rob stall
       (fuType === mou                    && notRdy) -> AtomicStall.id.U      ,
       (!io.sqCanAccept || fuType === stu && notRdy) -> StoreStall.id.U       ,
       (fuType === ldu                    && notRdy) -> ldReason              ,

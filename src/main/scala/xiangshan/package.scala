@@ -830,6 +830,13 @@ package object xiangshan {
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
     val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    // freelist full
+    val IntFlStall = Value("IntFlStall")
+    val FpFlStall = Value("FpFlStall")
+    // dispatch queue full
+    val IntDqStall = Value("IntDqStall")
+    val FpDqStall = Value("FpDqStall")
+    val LsDqStall = Value("LsDqStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")

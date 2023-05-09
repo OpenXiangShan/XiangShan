@@ -367,16 +367,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("control_recovery_stall", ctrlRecStall)
   XSPerfAccumulate("mem_violation_recovery_stall", mvioRecStall)
   XSPerfAccumulate("other_recovery_stall", otherRecStall)
+  // freelist stall
+  val notRecStall = !io.out.head.valid && !recStall
+  val intFlStall = notRecStall && hasValid && !intFreeList.io.canAllocate
+  val fpFlStall = notRecStall && hasValid && !fpFreeList.io.canAllocate
   // other stall
-  val otherStall = !io.out.head.valid && !recStall
+  val otherStall = notRecStall && !intFlStall && !fpFlStall
 
   io.stallReason.in.backReason.valid := io.stallReason.out.backReason.valid || !io.in.head.ready
-  io.stallReason.in.backReason.bits := Mux(io.stallReason.out.backReason.valid, io.stallReason.out.backReason.bits, Mux1H(Seq(
-    ctrlRecStall  -> TopDownCounters.ControlRecoveryStall.id.U,
-    mvioRecStall  -> TopDownCounters.MemVioRecoveryStall.id.U,
-    otherRecStall -> TopDownCounters.OtherRecoveryStall.id.U,
-    otherStall    -> TopDownCounters.OtherCoreStall.id.U // will be analyzed in dispatch stage
-  )))
+  io.stallReason.in.backReason.bits := Mux(io.stallReason.out.backReason.valid, io.stallReason.out.backReason.bits,
+    MuxCase(TopDownCounters.OtherCoreStall.id.U, Seq(
+      ctrlRecStall  -> TopDownCounters.ControlRecoveryStall.id.U,
+      mvioRecStall  -> TopDownCounters.MemVioRecoveryStall.id.U,
+      otherRecStall -> TopDownCounters.OtherRecoveryStall.id.U,
+      intFlStall    -> TopDownCounters.IntFlStall.id.U,
+      fpFlStall     -> TopDownCounters.FpFlStall.id.U
+    )
+  ))
   io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
     out := Mux(io.stallReason.in.backReason.valid,
                io.stallReason.in.backReason.bits,
