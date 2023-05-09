@@ -102,9 +102,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
   // req in s0
-  io.dwpu.req(0).bits.vaddr := s0_vaddr
-  io.dwpu.req(0).bits.replayCarry := s0_replayCarry
-  io.dwpu.req(0).valid := s0_valid
+  if(dwpuParam.enWPU){
+    io.dwpu.req(0).bits.vaddr := s0_vaddr
+    io.dwpu.req(0).bits.replayCarry := s0_replayCarry
+    io.dwpu.req(0).valid := s0_valid
+  }else{
+    io.dwpu.req(0) := DontCare
+  }
+
 
   val meta_read = io.meta_read.bits
   val tag_read = io.tag_read.bits
