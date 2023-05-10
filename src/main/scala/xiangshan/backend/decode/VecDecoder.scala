@@ -214,7 +214,7 @@ object VecDecoder extends DecodeConstants {
     VSSUB_VX      -> OPIVX(FuType.vialuF, VialuFixType.vssub_vv, T, F, T),
 
 
-    VSMUL_VX      -> OPIVX(FuType.vimac, VimacType.vsmul, T, F, T, UopSplitType.VEC_VVV),
+    VSMUL_VX      -> OPIVX(FuType.vimac, VimacType.vsmul, T, F, T, UopSplitType.VEC_VXV),
 
     VSSRL_VX      -> OPIVX(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F),
     VSSRA_VX      -> OPIVX(FuType.vialuF, VialuFixType.vssra_vv, T, F, F),
@@ -352,7 +352,7 @@ object VecDecoder extends DecodeConstants {
     VMULH_VX       -> OPMVX(T, FuType.vimac, VimacType.vmulh, F, T, F, UopSplitType.VEC_VXV),
     VMULHSU_VX     -> OPMVX(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VXV),
     VMULHU_VX      -> OPMVX(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VXV),
-    VMV_S_X        -> OPMVX(T, FuType.vipu, VipuType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV),
+    VMV_S_X        -> OPMVX(T, FuType.vialuF, VialuFixType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV),
 
     VNMSAC_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VXV),
     VNMSUB_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VXV),
@@ -545,7 +545,7 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),// src2=SrcType.X
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VpermType.vfmv_s_f, F, T, F),// vs2=0 // vs3 = vd
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vialuF, VialuFixType.vmv_s_x, F, T, F, UopSplitType.VEC_0VV),// vs2=0 // vs3 = vd
 
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]

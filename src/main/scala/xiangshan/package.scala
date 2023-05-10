@@ -594,6 +594,7 @@ package object xiangshan {
     def VEC_COMPRESS     = "b110000".U // vcompress.vm
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
+    def VEC_0VV          = "b000000".U // VEC_0XV
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")

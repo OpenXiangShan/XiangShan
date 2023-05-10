@@ -27,7 +27,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import freechips.rocketchip.rocket.Instructions._
-import yunsuan.VpermType
+import yunsuan.VialuFixType
 import scala.collection.Seq
 
 trait VectorConstants {
@@ -243,8 +243,8 @@ class DecodeUnitComplex(maxNumOfUop : Int)(implicit p : Parameters) extends XSMo
       csBundle(1).ctrl.lsrc(1) := 0.U
       csBundle(1).ctrl.lsrc(2) := dest
       csBundle(1).ctrl.ldest := dest
-      csBundle(1).ctrl.fuType := FuType.vppu
-      csBundle(1).ctrl.fuOpType := VpermType.vfmv_s_f
+      csBundle(1).ctrl.fuType := FuType.vialuF
+      csBundle(1).ctrl.fuOpType := VialuFixType.vmv_s_x
       csBundle(1).ctrl.rfWen := false.B
       csBundle(1).ctrl.fpWen := false.B
       csBundle(1).ctrl.vecWen := true.B
