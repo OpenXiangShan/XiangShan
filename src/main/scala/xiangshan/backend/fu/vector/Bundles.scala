@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.VtypeStruct
+import utils.NamedUInt
 
 object Bundles {
 
@@ -72,11 +73,8 @@ object Bundles {
   def tu: UInt = 0.U(1.W)
   def ta: UInt = 1.U(1.W)
 
-  object VSew {
-    def apply(): UInt = UInt(width.W)
-
-    def width = 2 // modify it when support more vector data width
-
+  // modify the width when support more vector data width
+  object VSew extends NamedUInt(2) {
     def e8  : UInt = "b000".U(width.W)
     def e16 : UInt = "b001".U(width.W)
     def e32 : UInt = "b010".U(width.W)
@@ -94,11 +92,7 @@ object Bundles {
     }
   }
 
-  object VLmul {
-    def apply(): UInt = UInt(width.W)
-
-    def width = 3
-
+  object VLmul extends NamedUInt(3) {
     def m1  : UInt = "b000".U(width.W)
     def m2  : UInt = "b001".U(width.W)
     def m4  : UInt = "b010".U(width.W)
@@ -120,4 +114,10 @@ object Bundles {
 
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
   }
+
+  object Vxsat extends NamedUInt(1)
+
+  object Vxrm extends NamedUInt(2)
+
+  object Nf extends NamedUInt(3)
 }

@@ -10,7 +10,8 @@ import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.fpu.Bundles.Frm
+import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType, Vl, Vxrm}
 import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
@@ -245,17 +246,28 @@ object Bundles {
   }
 
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-    val vlmul     = SInt(3.W) // 1/8~8      --> -3~3
-    val vsew      = VsewBundle()
-    val vta       = Bool()    // 1: agnostic, 0: undisturbed
-    val vma       = Bool()    // 1: agnostic, 0: undisturbed
-    val vm        = Bool()    // 0: need v0.t
+    // vtype
     val vill      = Bool()
+    val vma       = Bool()    // 1: agnostic, 0: undisturbed
+    val vta       = Bool()    // 1: agnostic, 0: undisturbed
+    val vsew      = VSew()
+    val vlmul     = VLmul()   // 1/8~8      --> -3~3
+
+    val vm        = Bool()    // 0: need v0.t
+    val vstart    = Vl()
+
+    // float rounding mode
+    val frm       = Frm()
+    // vector fix int rounding mode
+    val vxrm      = Vxrm()
+    // vector uop index, exclude other non-vector uop
+    val vuopIdx   = UInt(log2Up(p(XSCoreParamsKey).MaxUopSize).W)
+    // maybe used if data dependancy
+    val vmask     = UInt(MaskSrcData().dataWidth.W)
+    val vl        = Vl()
+
     // vector load/store
-    val nf        = UInt(3.W)
-    val lsumop    = UInt(5.W) // lumop or sumop
-    // used for vector index load/store and vrgatherei16.vv
-    val idxEmul   = UInt(3.W)
+    val nf        = Nf()
   }
 
   // DynInst --[IssueQueue]--> DataPath

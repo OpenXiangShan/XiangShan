@@ -6,9 +6,12 @@ import chisel3.util._
 import utility.DataHoldBypass
 import utils.OptionWrapper
 import xiangshan._
+import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.fu.fpu.Bundles.Fflags
+import xiangshan.backend.fu.vector.Bundles.Vxsat
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -26,6 +29,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val taken     = Bool()
   })
   val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -39,6 +43,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals) // only used in FMA
+  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -49,7 +54,8 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val data      = UInt(cfg.dataBits.W)
-  val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
+  val fflags    = OptionWrapper(cfg.writeFflags, Fflags())
+  val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
   val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
   val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
 }
@@ -112,7 +118,7 @@ trait HasPipelineReg { this: FuncUnit =>
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
   }
 
-  for (i <- 1 to latency) {
+  for (i <- 1 until latency) {
     when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
       validVec(i) := validVec(i - 1)
       robIdxVec(i) := robIdxVec(i - 1)
