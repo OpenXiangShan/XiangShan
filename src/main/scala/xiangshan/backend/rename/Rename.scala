@@ -26,6 +26,7 @@ import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 

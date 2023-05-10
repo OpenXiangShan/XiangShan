@@ -87,7 +87,7 @@ abstract class XSDecodeBase {
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: Int, fuOp: BitPat, selImm: BitPat,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -98,14 +98,14 @@ case class XSDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopDivType, selImm)
+    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopSplitType, selImm)
   }
 }
 
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: Int, fuOp: BitPat, selImm: BitPat = SelImm.X,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = uopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -116,7 +116,7 @@ case class FDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopDivType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
   }
 }
 
@@ -198,7 +198,7 @@ object XDecode extends DecodeConstants {
 
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopDivType = UopDivType.SCA_SIM, xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopSplitType = UopSplitType.SCA_SIM, xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
@@ -704,6 +704,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
   decodedInst.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
   decodedInst.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
+  // cs.lsrc(2) := Mux(FuType.isVecExu(cs.fuType), ctrl_flow.instr(RD_MSB, RD_LSB), ctrl_flow.instr(RS3_MSB, RS3_LSB))
   // read dest location
   decodedInst.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
 
