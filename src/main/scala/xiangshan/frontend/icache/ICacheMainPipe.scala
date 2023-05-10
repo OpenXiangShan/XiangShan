@@ -93,7 +93,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val dataArray   = new ICacheDataReqBundle
   val reMetaArray = new ICacheMetaReqBundle
   val reDataArray = new ICacheDataReqBundle
-  val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = PortNumber))
+  // val iwpu = Flipped(new IwpuBaseIO(nWays = nWays, nPorts = PortNumber))
   val tagwriteUpd = Flipped(ValidIO(new WPUUpdate(nWays)))
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -164,20 +164,20 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_final_double_line  = s0_double_line.head
   val s0_pred_way_en = Wire(Vec(PortNumber, UInt(nWays.W)))
 
-  // val iwpu = Module(new ICacheWpuWrapper(PortNumber))
-  // iwpu.io.tagwrite_upd <> io.tagwriteUpd
+  val iwpu = Module(new ICacheWpuWrapper(PortNumber))
+  iwpu.io.tagwrite_upd <> io.tagwriteUpd
   for(i <- 0 until PortNumber){
     if(iwpuParam.enWPU){
-      io.iwpu.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
-      io.iwpu.req(i).bits.vaddr := s0_final_vaddr(i)
-      when(io.iwpu.resp(i).valid) {
-        s0_pred_way_en(i) := io.iwpu.resp(i).bits.s0_pred_way_en
+      iwpu.io.req(i).valid := s0_final_valid && (if(i==0) true.B else s0_final_double_line)
+      iwpu.io.req(i).bits.vaddr := s0_final_vaddr(i)
+      when(iwpu.io.resp(i).valid) {
+        s0_pred_way_en(i) := iwpu.io.resp(i).bits.s0_pred_way_en
       }.otherwise {
         s0_pred_way_en(i) := 0.U(nWays.W)
       }
     }else{
-      io.iwpu.req(i).valid := false.B
-      io.iwpu.req(i).bits := DontCare
+      iwpu.io.req(i).valid := false.B
+      iwpu.io.req(i).bits := DontCare
       s0_pred_way_en(i) := ~0.U(nWays.W)
     }
   }
@@ -324,10 +324,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
 
   for (i <- 0 until PortNumber) {
-    io.iwpu.lookup_upd(i).valid := s1_valid
-    io.iwpu.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
-    io.iwpu.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
-    io.iwpu.lookup_upd(i).bits.s1_pred_way_en := s1_pred_way_en(i)
+    iwpu.io.lookup_upd(i).valid := s1_valid
+    iwpu.io.lookup_upd(i).bits.vaddr := s1_req_vaddr(i)
+    iwpu.io.lookup_upd(i).bits.s1_real_way_en := s1_tag_match_vec(i).asUInt
+    iwpu.io.lookup_upd(i).bits.s1_pred_way_en := s1_pred_way_en(i)
   }
 
   class WayEntry(nWays: Int) extends Bundle {
@@ -343,8 +343,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val table = ChiselDB.createTable(tableName, new WayEntry(nWays))
   val table_entry = Wire(new WayEntry(nWays))
   for (i <- 0 until PortNumber) {
-    val real_way_en = io.iwpu.lookup_upd(i).bits.s1_real_way_en
-    val pred_way_en = io.iwpu.lookup_upd(i).bits.s1_pred_way_en
+    val real_way_en = iwpu.io.lookup_upd(i).bits.s1_real_way_en
+    val pred_way_en = iwpu.io.lookup_upd(i).bits.s1_pred_way_en
     table_entry.real_way := OHToUInt(real_way_en)
     table_entry.real_way_en := real_way_en
     table_entry.real_miss := !real_way_en.orR
@@ -352,7 +352,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     table_entry.pred_way_en := pred_way_en
     table.log(
       data = table_entry,
-      en = RegNext(io.iwpu.req(i).valid) && io.iwpu.lookup_upd(i).valid,
+      en = RegNext(iwpu.io.req(i).valid) && iwpu.io.lookup_upd(i).valid,
       site = siteName + i.toString,
       clock = clock,
       reset = reset
@@ -395,7 +395,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     reToMeta.valid := false.B
     reToMeta.bits := DontCare
   }
-  XSPerfAccumulate("wpu_pred_total", PopCount((0 until PortNumber).map(i => RegNext(io.iwpu.req(i).valid) && io.iwpu.lookup_upd(i).valid)))
+  XSPerfAccumulate("wpu_pred_total", PopCount((0 until PortNumber).map(i => RegNext(iwpu.io.req(i).valid) && iwpu.io.lookup_upd(i).valid)))
   XSPerfAccumulate("count_first_send", PopCount(Seq(s1_valid, s1_valid && s1_double_line)))
   XSPerfAccumulate("count_second_send", replay_read_valid)
   XSPerfAccumulate("resend_block", !s1_resend_can_go)

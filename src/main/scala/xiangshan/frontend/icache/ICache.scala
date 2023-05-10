@@ -590,6 +590,7 @@ if(cacheParams.hasPrefetch){
   replacePipe.io.tagwriteUpd.bits.vaddr := metaArray.io.write.bits.vaddr
   replacePipe.io.tagwriteUpd.bits.s1_real_way_en := metaArray.io.write.bits.waymask
 
+/*
   /** wpu: unified predict */
   val iwpu = Module(new ICacheWpuWrapper(PortNumber + 1))
   for(i <- 0 until PortNumber){
@@ -605,6 +606,7 @@ if(cacheParams.hasPrefetch){
   iwpu.io.tagwrite_upd.valid := metaArray.io.write.valid
   iwpu.io.tagwrite_upd.bits.vaddr := metaArray.io.write.bits.vaddr
   iwpu.io.tagwrite_upd.bits.s1_real_way_en := metaArray.io.write.bits.waymask
+*/
 
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
