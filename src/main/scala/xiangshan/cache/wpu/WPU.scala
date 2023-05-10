@@ -153,18 +153,18 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
     val vtag = get_vir_tag(addr)
 
     /* old */
-    // vtag(utagBits * 2 - 1, utagBits) ^ vtag(utagBits - 1, 0)
+    vtag(utagBits * 2 - 1, utagBits) ^ vtag(utagBits - 1, 0)
     
     /* new */
-    val tmp = vtag(utagQuotient * utagBits - 1, 0).asTypeOf(Vec(utagQuotient, UInt(utagBits.W)))
-    val res1 = tmp.reduce(_ ^ _)
-    val res2 = Wire(UInt(utagRemainder.W))
-    if(utagRemainder!=0){
-      res2 := res1(utagRemainder - 1, 0) ^ vtag(vtagBits - 1, utagBits * utagQuotient)
-      Cat(res1(utagBits - 1, utagRemainder), res2)
-    }else{
-      res1
-    }
+    // val tmp = vtag(utagQuotient * utagBits - 1, 0).asTypeOf(Vec(utagQuotient, UInt(utagBits.W)))
+    // val res1 = tmp.reduce(_ ^ _)
+    // val res2 = Wire(UInt(utagRemainder.W))
+    // if(utagRemainder!=0){
+    //   res2 := res1(utagRemainder - 1, 0) ^ vtag(vtagBits - 1, utagBits * utagQuotient)
+    //   Cat(res1(utagBits - 1, utagRemainder), res2)
+    // }else{
+    //   res1
+    // }
   }
 
   def write_utag(upd: BaseWpuUpdateBundle): Unit = {
@@ -213,8 +213,10 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
       write_utag(io.updLookup(i))
     }
     // look up: vtag hit but other tag hit ==> unvalid pred way; write real way
-    when(!pred_miss && !real_miss && !way_match) {
+    when(!pred_miss && !way_match) {
       unvalid_utag(io.updLookup(i))
+    }
+    when(!pred_miss && !real_miss && !way_match) {
       write_utag(io.updLookup(i))
     }
     // replay carry
