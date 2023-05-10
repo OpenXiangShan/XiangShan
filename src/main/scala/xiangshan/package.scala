@@ -277,6 +277,12 @@ package object xiangshan {
   }
 
   object VSETOpType {
+    val setVlmaxBit = 0
+    val keepVlBit   = 1
+    // destTypeBit == 0: write vl to rd
+    // destTypeBit == 1: write vconfig
+    val destTypeBit = 5
+
     // vsetvli's uop
     //   rs1!=x0, normal
     //     uop0: r(rs1), w(vconfig)     | x[rs1],vtypei  -> vconfig
@@ -319,17 +325,17 @@ package object xiangshan {
     def isVsetvli (func: UInt)  = func(7)
     def isVsetivli(func: UInt)  = func(7, 6) === 0.U
     def isNormal  (func: UInt)  = func(1, 0) === 0.U
-    def isSetVlmax(func: UInt)  = func(0)
-    def isKeepVl  (func: UInt)  = func(1)
+    def isSetVlmax(func: UInt)  = func(setVlmaxBit)
+    def isKeepVl  (func: UInt)  = func(keepVlBit)
     // RG: region
     def writeIntRG(func: UInt)  = !func(5)
     def writeVecRG(func: UInt)  = func(5)
     def readIntRG (func: UInt)  = !func(4)
     def readVecRG (func: UInt)  = func(4)
-    // Todo: @fdy fix it
-    def convert2uvsetvl(func: UInt) = Cat(func(7, 3), "b1".U, func(1, 0))
-    def convert2oldvl(func: UInt) = Cat(func(7, 4), "b1".U, func(2, 0))
-    def convert2vlmax(func: UInt) = Cat(func(7, 5), "b1".U, func(3, 0))
+    // modify fuOpType
+    def switchDest(func: UInt)  = func ^ (1 << destTypeBit).U
+    def keepVl(func: UInt)      = func | (1 << keepVlBit).U
+    def setVlmax(func: UInt)    = func | (1 << setVlmaxBit).U
   }
 
   object BRUOpType {

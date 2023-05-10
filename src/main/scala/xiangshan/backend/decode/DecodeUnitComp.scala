@@ -91,9 +91,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   isVset_u := simple.io.deq.decodedInst.isVset
   when(isVset_u) {
     when(dest === 0.U && src1 === 0.U) {
-      decodedInsts_u.fuOpType := VSETOpType.convert2oldvl(simple.io.deq.decodedInst.fuOpType)
+      decodedInsts_u.fuOpType := VSETOpType.keepVl(simple.io.deq.decodedInst.fuOpType)
     }.elsewhen(src1 === 0.U) {
-      decodedInsts_u.fuOpType := VSETOpType.convert2vlmax(simple.io.deq.decodedInst.fuOpType)
+      decodedInsts_u.fuOpType := VSETOpType.setVlmax(simple.io.deq.decodedInst.fuOpType)
+    }
+    when(io.vtype.illegal){
+      decodedInsts_u.flushPipe := true.B
     }
   }
   //Type of uop Div
@@ -159,7 +162,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       when(isVset_u) {
         when(dest =/= 0.U) {
           csBundle(0).fuType := FuType.vsetiwi.U
-          csBundle(0).fuOpType := VSETOpType.convert2uvsetvl(decodedInsts_u.fuOpType)
+          csBundle(0).fuOpType := VSETOpType.switchDest(decodedInsts_u.fuOpType)
           csBundle(0).flushPipe := false.B
           csBundle(0).rfWen := true.B
           csBundle(0).vecWen := false.B

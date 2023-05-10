@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VSetFVConfig, VSetIVConfig, VSetIVL}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VSetRiWi, VSetRiWvf, VSetRvfWvf}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -19,6 +19,7 @@ case class FuConfig (
   writeFpRf: Boolean,
   writeVecRf: Boolean = false,
   writeFflags: Boolean = false,
+  writeVxsat: Boolean = false,
   dataBits: Int = 64,
   latency: HasFuLatency = CertainLatency(0),
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
@@ -220,10 +221,10 @@ object FuConfig {
     latency = CertainLatency(1),
   )
 
-  val VSetFVConfigCfg: FuConfig = FuConfig(
-    name = "vsetfvconfig",
+  val VSetRvfWvfCfg: FuConfig = FuConfig(
+    name = "vsetrvfwvf",
     fuType = FuType.vsetiwf,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetFVConfig(cfg)(p).suggestName("VSetFVConfig")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetRvfWvf(cfg)(p).suggestName("VSetRvfWvf")),
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
@@ -234,10 +235,10 @@ object FuConfig {
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
 
-  val VSetIVConfigCfg: FuConfig = FuConfig(
-    name = "vsetivconfig",
+  val VSetRiWvfCfg: FuConfig = FuConfig(
+    name = "vsetriwvf",
     fuType = FuType.vsetiwf,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetIVConfig(cfg)(p).suggestName("VSetIVConfig")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetRiWvf(cfg)(p).suggestName("VSetRiWvf")),
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
@@ -248,10 +249,10 @@ object FuConfig {
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
 
-  val VSetIVLCfg: FuConfig = FuConfig(
-    name = "vsetivl",
+  val VSetRiWiCfg: FuConfig = FuConfig(
+    name = "vsetriwi",
     fuType = FuType.vsetiwi,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetIVL(cfg)(p).suggestName("VSetIVL")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetRiWi(cfg)(p).suggestName("VSetRiWi")),
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),

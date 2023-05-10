@@ -158,6 +158,15 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
+class VtypeStruct(implicit p: Parameters) extends XSBundle {
+  val vill = UInt(1.W)
+  val reserved = UInt((XLEN - 9).W)
+  val vma = UInt(1.W)
+  val vta = UInt(1.W)
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
@@ -666,15 +675,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     val vxrm = UInt(2.W)
     val vxsat = UInt(1.W)
     assert(this.getWidth == XLEN)
-  }
-
-  class VtypeStruct extends Bundle {
-    val vill = UInt(1.W)
-    val reserved = UInt((XLEN-9).W)
-    val vma = UInt(1.W)
-    val vta = UInt(1.W)
-    val vsew = UInt(3.W)
-    val vlmul = UInt(3.W)
   }
 
   def vxrm_wfn(wdata: UInt): UInt = {

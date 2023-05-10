@@ -52,6 +52,7 @@ case class XSCoreParameters
   HartId: Int = 0,
   XLEN: Int = 64,
   VLEN: Int = 128,
+  ELEN: Int = 64,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -138,7 +139,7 @@ case class XSCoreParameters
   MaxUopSize: Int = 37,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IntLogicRegs: Int = 33,
+  IntLogicRegs: Int = 32,
   FpLogicRegs: Int = 33,
   VecLogicRegs: Int = 40,
   NRPhyRegs: Int = 192,
@@ -150,6 +151,7 @@ case class XSCoreParameters
   StoreQueueNWriteBanks: Int = 8,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
+  RabSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -299,7 +301,7 @@ case class XSCoreParameters
         ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(4, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(I2fCfg, VSetIVLCfg, VSetIVConfigCfg), Seq(VecWB(port = 6, Int.MaxValue), IntWB(port = 7, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+        ExeUnitParams(Seq(I2fCfg, VSetRiWiCfg, VSetRiWvfCfg), Seq(VecWB(port = 6, Int.MaxValue), IntWB(port = 7, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
     ),
       numPregs = intPreg.numEntries,
@@ -321,7 +323,7 @@ case class XSCoreParameters
         ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetFVConfigCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetRvfWvfCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
 
     ),
@@ -395,6 +397,7 @@ trait HasXSParameter {
 
   val XLEN = coreParams.XLEN
   val VLEN = coreParams.VLEN
+  val ELEN = coreParams.ELEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -492,6 +495,7 @@ trait HasXSParameter {
   val IntPregIdxWidth = log2Up(IntPhyRegs)
   val VfPregIdxWidth = log2Up(VfPhyRegs)
   val RobSize = coreParams.RobSize
+  val RabSize = coreParams.RabSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LoadQueueSize = coreParams.LoadQueueSize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks

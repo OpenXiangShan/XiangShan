@@ -168,7 +168,7 @@ class CtrlBlockImp(
   for (i <- 0 until CommitWidth) {
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).lastUop && (!s0_robFlushRedirect.valid || s0_robFlushRedirect.valid && rob.io.commits.info(i).isVset)
+    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !s0_robFlushRedirect.valid
     io.frontend.toFtq.rob_commits(i).valid := RegNext(s1_isCommit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
   }
@@ -230,21 +230,20 @@ class CtrlBlockImp(
   }
 
   // vtype commit
-  val commitIsVsetSeq = rob.io.commits.commitValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset && info.lastUop }
-  val pdestSeq = rob.io.commits.info.map(info => info.pdest)
-  io.toDataPath.vtypeAddr := PriorityMux(commitIsVsetSeq.reverse, pdestSeq.reverse)
   decode.io.commitVType.bits := io.fromDataPath.vtype
-  decode.io.commitVType.valid := RegNext(rob.io.commits.isCommit && Cat(commitIsVsetSeq).orR)
+  decode.io.commitVType.valid := RegNext(rob.io.isVsetFlushPipe)
 
-  io.toExuBlock.vsetCommit := decode.io.commitVType.valid
+  io.toDataPath.vtypeAddr := rob.io.vconfigPdest
 
   // vtype walk
-  val walkIsVsetSeq = rob.io.commits.walkValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset && info.lastUop }
-  val vtypeSeq = rob.io.commits.info.map(info => info.vtype)
-  decode.io.walkVType.bits := PriorityMux(walkIsVsetSeq.reverse, vtypeSeq.reverse)
-  decode.io.walkVType.valid := rob.io.commits.isWalk && walkIsVsetSeq.reduce(_ || _)
+  val isVsetSeq = rob.io.commits.walkValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset }.reverse
+  val walkVTypeReverse = rob.io.commits.info.map(info => info.vtype).reverse
+  val walkVType = PriorityMux(isVsetSeq, walkVTypeReverse)
 
-  decode.io.isRedirect := s1_robFlushRedirect.valid
+  decode.io.walkVType.bits := walkVType
+  decode.io.walkVType.valid := rob.io.commits.isWalk && isVsetSeq.reduce(_ || _)
+
+  decode.io.isRedirect := s1_s3_redirect.valid
 
   decode.io.in.zip(io.frontend.cfVec).foreach { case (decodeIn, frontendCf) =>
     decodeIn.valid := frontendCf.valid
@@ -321,13 +320,14 @@ class CtrlBlockImp(
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rat.io.redirect := s1_s3_redirect.valid
-  rat.io.robCommits := rob.io.commits
+  rat.io.robCommits := rob.io.rabCommits
+  rat.io.diffCommits := rob.io.diffCommits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
 
   rename.io.redirect := s1_s3_redirect
-  rename.io.robCommits <> rob.io.commits
+  rename.io.robCommits <> rob.io.rabCommits
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
@@ -337,8 +337,8 @@ class CtrlBlockImp(
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.debug_int_rat := rat.io.debug_int_rat
   rename.io.debug_fp_rat := rat.io.debug_fp_rat
-  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
   rename.io.debug_vec_rat := rat.io.debug_vec_rat
+  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -431,10 +431,10 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat := rat.io.debug_int_rat
-  io.debug_fp_rat := rat.io.debug_fp_rat
-  io.debug_vec_rat := rat.io.debug_vec_rat
-  io.debug_vconfig_rat := rat.io.debug_vconfig_rat
+  io.debug_int_rat := rat.io.diff_int_rat
+  io.debug_fp_rat := rat.io.diff_fp_rat
+  io.debug_vec_rat := rat.io.diff_vec_rat
+  io.debug_vconfig_rat := rat.io.diff_vconfig_rat
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
@@ -482,7 +482,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val flush = ValidIO(new Redirect)
   }
   val toExuBlock = new Bundle {
-    val vsetCommit = Output(Bool())
     val flush = ValidIO(new Redirect)
   }
   val fromWB = new Bundle {

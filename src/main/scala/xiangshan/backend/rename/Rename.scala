@@ -64,10 +64,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   intRefCounter.io.commit        <> io.robCommits
   intRefCounter.io.redirect      := io.redirect.valid
   intRefCounter.io.debug_int_rat <> io.debug_int_rat
-  intRefCounter.io.debug_vconfig_rat := io.debug_vconfig_rat
   intFreeList.io.commit    <> io.robCommits
   intFreeList.io.debug_rat <> io.debug_int_rat
-  intFreeList.io_extra.debug_vconfig_rat := io.debug_vconfig_rat
   fpFreeList.io.commit     <> io.robCommits
   fpFreeList.io.debug_rat  <> io.debug_fp_rat
 
@@ -108,7 +106,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter rob (from decode)
+  val validCount = PopCount(io.in.map(in => in.valid && in.bits.lastUop)) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
@@ -185,7 +183,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
 
-    uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(_.valid))
+    uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(in => in.valid && in.bits.lastUop))
 
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))

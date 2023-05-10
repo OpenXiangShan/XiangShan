@@ -5,6 +5,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.decode.isa.bitfield.InstVType
+import xiangshan.backend.fu.VsetModule
 
 class VTypeGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle(){
@@ -30,16 +32,24 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   vtypeArch := vtypeArchNext
   vtypeSpec := vtypeSpecNext
 
+  private val instVType: InstVType = io.firstInstr.bits.instr(VTYPE_IMM_MSB, VTYPE_IMM_LSB).asTypeOf(new InstVType)
+  private val vtype: VType = VType.fromInstVType(instVType)
+
+  private val vsetModule = Module(new VsetModule)
+  vsetModule.io.in.avl := 0.U
+  vsetModule.io.in.vtype := vtype
+  vsetModule.io.in.func := VSETOpType.uvsetvcfg_xi
+
   when(io.commitVType.valid) {
     vtypeArchNext := io.commitVType.bits
   }
 
-  when(io.walkVType.valid) {
-    vtypeSpecNext := io.walkVType.bits
-  }.elsewhen(RegNext(io.isRedirect)) {
+  when(io.isRedirect) {
     vtypeSpecNext := vtypeArch
+  }.elsewhen(io.walkVType.valid) {
+    vtypeSpecNext := io.walkVType.bits
   }.elsewhen(io.firstInstr.valid && io.firstInstr.bits.isVset) {
-    vtypeSpecNext := io.firstInstr.bits.instr(VTYPE_IMM_MSB, VTYPE_IMM_LSB).asTypeOf(new VType)
+    vtypeSpecNext := vsetModule.io.out.vconfig.vtype
   }
 
   io.vtype := vtypeSpec

@@ -310,6 +310,31 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
+class RabCommitInfo(implicit p: Parameters) extends XSBundle {
+  val ldest = UInt(6.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+  val isMove = Bool()
+}
+
+class RabCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
+  val isWalk = Bool()
+  val walkValid = Vec(CommitWidth, Bool())
+  val info = Vec(CommitWidth, new RabCommitInfo)
+}
+
+class DiffCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
+
+  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
+}
+
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(6.W)
   val rfWen = Bool()
@@ -322,14 +347,11 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
+  val isVset = Bool()
+  val vtype = new VType
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
-
-  val vtype = new VType
-  val isVset = Bool()
-  val firstUop = Bool()
-  val lastUop = Bool()
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
