@@ -107,7 +107,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     io.dwpu.req(0).bits.replayCarry := s0_replayCarry
     io.dwpu.req(0).valid := s0_valid
   }else{
-    io.dwpu.req(0) := DontCare
+    io.dwpu.req(0).valid := false.B
+    io.dwpu.req(0).bits := DontCare
   }
 
 
@@ -172,8 +173,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // dwpu.io.tagwrite_upd.bits.vaddr := io.vtag_update.bits.vaddr
   // dwpu.io.tagwrite_upd.bits.s1_real_way_en := io.vtag_update.bits.way_en
 
-  val s1_wpu_pred_fail = s1_valid && s1_tag_match_way_dup_dc =/= s1_wpu_pred_way_en
-  val s1_wpu_pred_fail_and_real_hit = s1_wpu_pred_fail && s1_tag_match_way_dup_dc.orR
   val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
   if(dwpuParam.enCfPred || !env.FPGAPlatform){
     io.dwpu.cfpred(0).s0_pc := io.lsu.s0_pc
@@ -185,14 +184,20 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
   val s1_pred_tag_match_way_dup_dc = Wire(UInt(nWays.W))
+  val s1_wpu_pred_fail = Wire(Bool())
+  val s1_wpu_pred_fail_and_real_hit = Wire(Bool())
   if (dwpuParam.enWPU) {
     when(s1_wpu_pred_valid) {
       s1_pred_tag_match_way_dup_dc := s1_wpu_pred_way_en
     }.otherwise {
       s1_pred_tag_match_way_dup_dc := s1_tag_match_way_dup_dc
     }
+    s1_wpu_pred_fail := s1_valid && s1_tag_match_way_dup_dc =/= s1_pred_tag_match_way_dup_dc
+    s1_wpu_pred_fail_and_real_hit := s1_wpu_pred_fail && s1_tag_match_way_dup_dc.orR
   } else {
     s1_pred_tag_match_way_dup_dc := s1_tag_match_way_dup_dc
+    s1_wpu_pred_fail := false.B
+    s1_wpu_pred_fail_and_real_hit := false.B
   }
 
   val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
