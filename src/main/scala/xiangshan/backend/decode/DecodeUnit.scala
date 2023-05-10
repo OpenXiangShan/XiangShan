@@ -693,7 +693,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
 //  decodedInst.srcType(3) := DontCare
 //  decodedInst.lsrc(3) := DontCare
-  decodedInst.uopIdx := "b11111".U
+  decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
 

@@ -189,7 +189,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     } else { None }
   private val vfDebugRead: Option[(Vec[UInt], Vec[UInt])] =
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
-      Some(Wire(Vec(32 + 32, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(32 + 32, UInt(VLEN.W))))
+      Some(Wire(Vec(32 + 32 + 1, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(32 + 32 + 1, UInt(VLEN.W))))
     } else { None }
 
   private val fpDebugReadData: Option[Vec[UInt]] =
@@ -211,6 +211,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     .slice(32, 64)
     .map(x => Seq(x(63, 0), x(127, 64))).flatten
   )
+
+  io.debugVconfig := vfDebugRead.get._2(64)(63, 0)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     debugReadAddr = intDebugRead.map(_._1),
@@ -238,7 +240,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
   vfDebugRead.foreach { case (addr, _) =>
-    addr := io.debugFpRat ++ io.debugVecRat
+    addr := io.debugFpRat ++ io.debugVecRat :+ io.debugVconfigRat
   }
   println(s"[DataPath] " +
     s"has intDebugRead: ${intDebugRead.nonEmpty}, " +
@@ -479,4 +481,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val debugIntRat = Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))
   val debugFpRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
   val debugVecRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
+  val debugVconfigRat = Input(UInt(vfSchdParams.pregIdxWidth.W))
+  val debugVconfig = Output(UInt(XLEN.W))
+
 }

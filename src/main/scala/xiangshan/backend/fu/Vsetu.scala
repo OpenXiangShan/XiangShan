@@ -19,7 +19,6 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl}
 
@@ -27,10 +26,9 @@ class VsetModuleIO(implicit p: Parameters) extends XSBundle {
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
   val in = Input(new Bundle {
-    val avl   : UInt = Vl()
+    val avl   : UInt = UInt(XLEN.W)
     val vtype : VType = VType()
     val func  : UInt = FuOpType()
-    val oldVl : UInt = Vl() // Todo: check if it can be optimized
   })
 
   val out = Output(new Bundle {
@@ -48,7 +46,6 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   val io = IO(new VsetModuleIO)
 
   private val avl   = io.in.avl
-  private val oldVL = io.in.oldVl
   private val func  = io.in.func
   private val vtype = io.in.vtype
 
@@ -56,53 +53,55 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
-  private val isKeepVl   = VSETOpType.isKeepVl(func)
   private val isSetVlmax = VSETOpType.isSetVlmax(func)
   private val isVsetivli = VSETOpType.isVsetivli(func)
 
   private val vlmul: UInt = vtype.vlmul
   private val vsew : UInt = vtype.vsew
 
-
   private val vl = WireInit(0.U(XLEN.W))
 
-  // VLMAX = VLEN * LMUL / SEW
-  //       = VLEN << (Cat(~vlmul(2), vlmul(1,0)) >> (vsew + 1.U)
-  //       = VLEN >> shamt
-  // shamt = (vsew + 1.U) - (Cat(~vlmul(2), vlmul(1,0))
+  // EncodedLMUL = log(LMUL)
+  // EncodedSEW  = log(SEW) - 3
+  //        VLMAX  = VLEN * LMUL / SEW
+  // => log(VLMAX) = log(VLEN * LMUL / SEW)
+  // => log(VLMAX) = log(VLEN) + log(LMUL) - log(SEW)
+  // =>     VLMAX  = 1 << log(VLMAX)
+  //               = 1 << (log(VLEN) + log(LMUL) - log(SEW))
 
   // vlen =  128
   private val log2Vlen = log2Up(VLEN)
   println(s"[VsetModule] log2Vlen: $log2Vlen")
   println(s"[VsetModule] vlWidth: $vlWidth")
-  // mf8-->b001, m1-->b100, m8-->b111
-  private val ilmul = Cat(!vlmul(2), vlmul(1, 0))
+
+  private val log2Vlmul = vlmul
+  private val log2Vsew = vsew +& "b011".U
 
   // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
-  // vlmul = b011, ilmul - 4 = b111 - 4 = 3, vsew = 0, vsew + 3 = 3, 7 + (7 - 4) - (0 + 3) = 7
+  // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
   // vlen = 128, lmul = 2, sew = 16
-  // vlmul = b001, ilmul - 4 = b101 - 4 = 3, vsew = 1, 7 + (5 - 4) - (1 + 3) = 4
-  private val log2Vlmax: UInt = log2Vlen.U(3.W) + (ilmul - "b100".U) - (vsew + "b011".U)
-  private val vlmax = (1.U(vlWidth.W) << (log2Vlmax - 1.U)).asUInt
-
-//  private val vlmaxVec: Seq[UInt] = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
-//  private val shamt = vlmul + (~vsew).asUInt + 1.U
-//  private val vlmax = ParallelMux((0 to 7).map(_.U === shamt), vlmaxVec)
+  // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
+  private val log2Vlmax: UInt = log2Vlen.U(3.W) + log2Vlmul - log2Vsew
+  private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
 
-  vl := MuxCase(normalVL, Seq(
-    isVsetivli -> normalVL,
-    isKeepVl   -> ZeroExt(oldVL, XLEN),
-    isSetVlmax -> vlmax,
-  ))
+  vl := Mux(isSetVlmax, vlmax, normalVL)
 
-  outVConfig.vl := vl
-  outVConfig.vtype.illegal := false.B // Todo
-  outVConfig.vtype.vta := vtype.vta
-  outVConfig.vtype.vma := vtype.vma
-  outVConfig.vtype.vlmul := vtype.vlmul
-  outVConfig.vtype.vsew := vtype.vsew
+  private val log2Elen = log2Up(ELEN)
+  private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
+
+  private val sewIllegal = log2Vsew > log2VsewMax
+  private val lmulIllegal = vlmul === "b100".U
+
+  private val illegal = lmulIllegal | sewIllegal | vtype.illegal
+
+  outVConfig.vl := Mux(illegal, 0.U, vl)
+  outVConfig.vtype.illegal := illegal
+  outVConfig.vtype.vta := Mux(illegal, 0.U, vtype.vta)
+  outVConfig.vtype.vma := Mux(illegal, 0.U, vtype.vma)
+  outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
+  outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
 
   io.testOut.vlmax := vlmax
   io.testOut.log2Vlmax := log2Vlmax

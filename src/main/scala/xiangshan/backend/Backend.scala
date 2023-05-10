@@ -11,7 +11,7 @@ import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataPath, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO}
 import xiangshan.backend.issue.Scheduler
 import xiangshan.backend.rob.RobLsqIO
@@ -131,6 +131,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugIntRat := ctrlBlock.io.debug_int_rat
   dataPath.io.debugFpRat := ctrlBlock.io.debug_fp_rat
   dataPath.io.debugVecRat := ctrlBlock.io.debug_vec_rat
+  dataPath.io.debugVconfigRat := ctrlBlock.io.debug_vconfig_rat
 
   intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
@@ -151,12 +152,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.isIllegal := false.B // Todo: remove it
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
-  csrio.vpu.set_vstart.valid := ctrlBlock.io.toExuBlock.vsetCommit
+
+  val debugVconfig = dataPath.io.debugVconfig.asTypeOf(new VConfig)
+  val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
+  val debugVl = debugVconfig.vl
+  csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vstart.bits := 0.U
-  csrio.vpu.set_vtype.valid := ctrlBlock.io.toExuBlock.vsetCommit
-  csrio.vpu.set_vtype.bits := ZeroExt(vconfig(7, 0), XLEN)
-  csrio.vpu.set_vl.valid := ctrlBlock.io.toExuBlock.vsetCommit
-  csrio.vpu.set_vl.bits := ZeroExt(vconfig(15, 8), XLEN)
+  csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
+  csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
+  csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
+  csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionVAddr
   csrio.externalInterrupt := io.fromTop.externalInterrupt

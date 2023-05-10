@@ -210,6 +210,8 @@ object Bundles {
       wakeup.pdest := this.pdest
       wakeup
     }
+
+    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
   }
 
   trait BundleSource {
@@ -356,6 +358,7 @@ object Bundles {
     val vecWen       = if (params.writeVecRf)   Some(Bool())                  else None
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
+    val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
     val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None

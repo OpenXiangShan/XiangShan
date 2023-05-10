@@ -2,16 +2,17 @@ package xiangshan.backend.fu.vector
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.{BitPat, log2Up}
+import chisel3.util._
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
+import xiangshan.backend.fu.VtypeStruct
 
 object Bundles {
 
   /**
     * vtype bundle, should not used as csr reg
     */
-  class VType extends Bundle {
+  class VType(implicit p: Parameters) extends Bundle {
     val illegal = Bool()
     val vma     = Bool()
     val vta     = Bool()
@@ -20,17 +21,37 @@ object Bundles {
   }
 
   object VType {
-    def apply() : VType = {
+    def apply()(implicit p: Parameters) : VType = {
       new VType
     }
 
-    def fromInstVType(instVType: InstVType) : VType = {
+    def fromInstVType(instVType: InstVType)(implicit p: Parameters) : VType = {
       val res = Wire(VType())
       res.vma   := instVType.vma
       res.vta   := instVType.vta
       res.vsew  := instVType.vsew(VSew.width - 1, 0)
       res.vlmul := instVType.vlmul
       res.illegal := false.B // Todo: add illegal check function
+      res
+    }
+
+    def fromVtypeStruct(vtypeStruct: VtypeStruct)(implicit p: Parameters): VType = {
+      val res = Wire(VType())
+      res.illegal := vtypeStruct.vill
+      res.vma := vtypeStruct.vma
+      res.vta := vtypeStruct.vta
+      res.vsew := vtypeStruct.vsew(VSew.width - 1, 0)
+      res.vlmul := vtypeStruct.vlmul
+      res
+    }
+
+    def toVtypeStruct(vtype: VType)(implicit p: Parameters) : VtypeStruct = {
+      val res = WireInit(0.U.asTypeOf(new VtypeStruct))
+      res.vill := vtype.illegal
+      res.vma := vtype.vma
+      res.vta := vtype.vta
+      res.vsew := Cat(0.U(1.W), vtype.vsew)
+      res.vlmul := vtype.vlmul
       res
     }
   }

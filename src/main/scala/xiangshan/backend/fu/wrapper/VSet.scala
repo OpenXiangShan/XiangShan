@@ -7,9 +7,13 @@ import xiangshan.VSETOpType
 import xiangshan.backend.decode.Imm_VSETIVLI
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.fu.{FuConfig, FuncUnit, VsetModule}
+import xiangshan.backend.fu.{FuConfig, FuncUnit, VsetModule, VtypeStruct}
+import xiangshan.backend.fu.vector.Bundles.VConfig
 
 class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
+  val debugIO = IO(new Bundle() {
+    val vconfig = Output(VConfig())
+  })
   protected val in = io.in.bits
   protected val out = io.out.bits
 
@@ -22,7 +26,7 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.src(1))
   protected val vtypeImm: VType = VType.fromInstVType(instVType)
-  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.fuOpType), in.src(1)(7, 0).asTypeOf(new VType), vtypeImm)
+  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.fuOpType), VType.fromVtypeStruct(in.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
   vsetModule.io.in.func := in.fuOpType
 
@@ -43,14 +47,15 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   * @param cfg [[FuConfig]]
   * @param p [[Parameters]]
   */
-class VSetIVL(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
+class VSetRiWi(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := avl
   vsetModule.io.in.vtype := vtype
-  vsetModule.io.in.oldVl := 0.U
 
   out.data := vsetModule.io.out.vconfig.vl
 
   connectNonPipedCtrlSingal
+
+  debugIO.vconfig := vsetModule.io.out.vconfig
 }
 
 /**
@@ -65,14 +70,15 @@ class VSetIVL(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   * @param cfg [[FuConfig]]
   * @param p [[Parameters]]
   */
-class VSetIVConfig(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
+class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := avl
   vsetModule.io.in.vtype := vtype
-  vsetModule.io.in.oldVl := 0.U
 
   out.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
 
   connectNonPipedCtrlSingal
+
+  debugIO.vconfig := vsetModule.io.out.vconfig
 }
 
 /**
@@ -84,12 +90,19 @@ class VSetIVConfig(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) 
   * @param cfg [[FuConfig]]
   * @param p [[Parameters]]
   */
-class VSetFVConfig(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
+class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := 0.U
   vsetModule.io.in.vtype := vtype
-  vsetModule.io.in.oldVl := in.src(0)
 
-  out.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
+  val oldVL = in.src(0).asTypeOf(VConfig()).vl
+  val res = WireInit(0.U.asTypeOf(VConfig()))
+  res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
+              Mux(VSETOpType.isKeepVl(in.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
+  res.vtype := vsetModule.io.out.vconfig.vtype
+
+  out.data := ZeroExt(res.asUInt, XLEN)
 
   connectNonPipedCtrlSingal
+
+  debugIO.vconfig := res
 }
