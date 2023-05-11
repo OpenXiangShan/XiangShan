@@ -6,12 +6,9 @@ import chisel3.util._
 import utility.DataHoldBypass
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.fu.fpu.Bundles.Fflags
-import xiangshan.backend.fu.vector.Bundles.Vxsat
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -29,7 +26,6 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val taken     = Bool()
   })
   val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
-  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -43,7 +39,6 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals) // only used in FMA
-  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -54,8 +49,7 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val data      = UInt(cfg.dataBits.W)
-  val fflags    = OptionWrapper(cfg.writeFflags, Fflags())
-  val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
+  val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
   val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
   val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
 }
@@ -101,15 +95,11 @@ trait HasPipelineReg { this: FuncUnit =>
 
   val validVec = io.in.valid +: Seq.fill(latency)(RegInit(false.B))
   val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ io.out.ready
-//  val ctrlVec = io.in.bits.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))
-//  val dataVec = io.in.bits.data +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.data)))
+  val ctrlVec = io.in.bits.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))
+  val dataVec = io.in.bits.data +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.data)))
 
-  val robIdxVec = io.in.bits.ctrl.robIdx +: Array.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl.robIdx)))
-  val pdestVec = io.in.bits.ctrl.pdest +: Array.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl.pdest)))
-
-  val pcVec = io.in.bits.data.pc.map(x => x) +: Array.fill(latency)( io.in.bits.data.pc.map(x => Reg(chiselTypeOf(x)))) // Reg(chiselTypeOf(io.in.bits.pc.get))
-  val preDecodeVec = io.in.bits.ctrl.preDecode.map(x => x) +: Array.fill(latency)(io.in.bits.ctrl.preDecode.map(x => Reg(chiselTypeOf(x))))
-  val fpuVec = io.in.bits.ctrl.fpu.map(x => x) +: Array.fill(latency)(io.in.bits.ctrl.fpu.map(x => Reg(chiselTypeOf(x))))
+  val robIdxVec = ctrlVec.map(_.robIdx)
+  val pcVec = dataVec.map(_.pc)
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
   val flushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
@@ -121,23 +111,17 @@ trait HasPipelineReg { this: FuncUnit =>
   for (i <- 1 until latency) {
     when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
       validVec(i) := validVec(i - 1)
-      robIdxVec(i) := robIdxVec(i - 1)
-      pdestVec(i) := pdestVec(i - 1)
-      pcVec(i).zip(pcVec(i - 1)).foreach{case (l,r) => l := r}
-      preDecodeVec(i).zip(preDecodeVec(i - 1)).foreach{case (l,r) => l := r}
-      fpuVec(i).zip(fpuVec(i - 1)).foreach{case (l,r) => l := r}
+      ctrlVec(i) := ctrlVec(i - 1)
+      dataVec(i) := dataVec(i - 1)
     }.elsewhen(flushVec(i) || rdyVec(i)){
       validVec(i) := false.B
     }
   }
 
-  io.in.ready := rdyVec(0)
+  io.in.ready := rdyVec.head
   io.out.valid := validVec.last
-  io.out.bits.ctrl.robIdx := robIdxVec.last
-  io.out.bits.ctrl.pdest := pdestVec.last
-  io.out.bits.res.pc.zip(pcVec.last).foreach{case (l,r) => l := r}
-  io.out.bits.ctrl.preDecode.zip(preDecodeVec.last).foreach{case (l,r) => l := r}
-  io.out.bits.ctrl.fpu.zip(fpuVec.last).foreach{case (l,r) => l := r}
+  io.out.bits.res.pc.zip(pcVec.last).foreach { case (l, r) => l := r }
+  io.out.bits.ctrl := ctrlVec.last
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
 
