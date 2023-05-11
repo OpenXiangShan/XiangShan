@@ -10,27 +10,73 @@ import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
+/**
+  *
+  * @param name [[String]] name of fuConfig
+  * @param fuType [[Int]] type of func, select from [[xiangshan.backend.fu.FuType]]
+  * @param fuGen how to create $fu
+  * @param srcData type of src data used by this $fu
+  * @param maybeBlock the $fu need ready signal to block internal pipeline
+  * @param writeIntRf the $fu write int regfiles
+  * @param writeFpRf the $fu write float regfiles
+  * @param writeVecRf the $fu write vector regfiles
+  * @param writeFflags the $fu write fflags csr
+  * @param writeVxsat the $fu write vxsat csr
+  * @param dataBits the width of data in the $fu
+  * @param piped if the $fu is pipelined
+  * @param latency the latency of instuction executed in the $fu
+  * @param hasInputBuffer if the $fu has input buffer
+  * @param exceptionOut the $fu can produce these exception
+  * @param hasLoadError if the $fu has load error out
+  * @param flushPipe if the instuction executed in the $fu need flush out
+  * @param replayInst if the instuction executed in the $fu can replay in some condition
+  * @param trigger if the $fu need trigger out
+  * @param needSrcFrm if the $fu need float rounding mode signal
+  * @param immType the immediate type of this $fu
+  * @param vconfigWakeUp
+  * @param maskWakeUp
+  *
+  * @define fu function unit
+  */
 case class FuConfig (
-  name: String,
-  fuType: Int,
-  fuGen: (Parameters, FuConfig) => FuncUnit,
-  srcData: Seq[Seq[DataConfig]],
-  writeIntRf: Boolean = false,
-  writeFpRf: Boolean = false,
-  writeVecRf: Boolean = false,
-  writeFflags: Boolean = false,
-  writeVxsat: Boolean = false,
-  dataBits: Int = 64,
-  latency: HasFuLatency = CertainLatency(0),
+  name          : String,
+  fuType        : Int,
+  fuGen         : (Parameters, FuConfig) => FuncUnit,
+  srcData       : Seq[Seq[DataConfig]],
+  maybeBlock    : Boolean = false,
+  writeIntRf    : Boolean = false,
+  writeFpRf     : Boolean = false,
+  writeVecRf    : Boolean = false,
+  writeFflags   : Boolean = false,
+  writeVxsat    : Boolean = false,
+  dataBits      : Int = 64,
+  piped         : Boolean = false,
+  latency       : HasFuLatency = CertainLatency(0),
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
-  exceptionOut: Seq[Int] = Seq(),
-  hasLoadError: Boolean = false,
-  flushPipe: Boolean = false,
-  replayInst: Boolean = false,
-  trigger: Boolean = false,
-  needSrcFrm: Boolean = false,
-  immType: Set[UInt] = Set(),
+  exceptionOut  : Seq[Int] = Seq(),
+  hasLoadError  : Boolean = false,
+  flushPipe     : Boolean = false,
+  replayInst    : Boolean = false,
+  trigger       : Boolean = false,
+  needSrcFrm    : Boolean = false,
+  immType       : Set[UInt] = Set(),
+  // vector
+  vconfigWakeUp : Boolean = false,
+  maskWakeUp    : Boolean = false,
 ) {
+  var vconfigIdx = -1
+  var maskSrcIdx = -1
+  if (vconfigWakeUp) {
+    vconfigIdx = getSpecialSrcIdx(VConfigData(), "when vconfigWakeUp is true, srcData must always contains VConfigData()")
+  }
+  if (maskWakeUp) {
+    maskSrcIdx = getSpecialSrcIdx(MaskSrcData(), "when maskWakeUp is true, srcData must always contains MaskSrcData()")
+  }
+
+  require(!piped || piped && latency.latencyVal.isDefined, "The latency value must be set when piped is enable")
+  require(!vconfigWakeUp || vconfigWakeUp && vconfigIdx >= 0, "The index of vl src must be set when vlWakeUp is enable")
+  require(!maskWakeUp || maskWakeUp && maskSrcIdx >= 0, "The index of mask src must be set when vlWakeUp is enable")
+
   def numIntSrc : Int = srcData.map(_.count(x => IntRegSrcDataSet.contains(x))).max
   def numFpSrc  : Int = srcData.map(_.count(x => FpRegSrcDataSet.contains(x))).max
   def numVecSrc : Int = srcData.map(_.count(x => VecRegSrcDataSet.contains(x))).max
@@ -108,6 +154,21 @@ case class FuConfig (
   def isCsr: Boolean = fuType == FuType.csr
 
   def isFence: Boolean = fuType == FuType.fence
+
+  /**
+    * Get index of special src data, like [[VConfigData]], [[MaskSrcData]]
+    * @param data [[DataConfig]]
+    * @param tips tips if get failed
+    * @return the index of special src data
+    */
+  protected def getSpecialSrcIdx(data: DataConfig, tips: String): Int = {
+    val srcIdxVec = srcData.map(x => x.indexOf(data))
+    val idx0 = srcIdxVec.head
+    for (idx <- srcIdxVec) {
+      require(idx >= 0 && idx == idx0, tips + ", and at the same index.")
+    }
+    idx0
+  }
 }
 
 object FuConfig {
@@ -397,7 +458,7 @@ object FuConfig {
     latency = UncertainLatency()
   )
 
-  val Vialu = FuConfig (
+  val VialuCfg = FuConfig (
     name = "vialu",
     fuType = FuType.vialuF,
     fuGen = null,
@@ -414,7 +475,6 @@ object FuConfig {
     fuGen = null, // Todo
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
-      Seq(VecData(), VecData(), VecData(), VecData(), VConfigData()),      // vs1_1, vs2, vs1_2, vs2_2 // no mask and vta
     ),
     writeIntRf = false,
     writeFpRf = false,
@@ -428,7 +488,6 @@ object FuConfig {
     fuGen = null, // Todo
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
-      Seq(VecData(), VecData(), VecData(), VecData(), VConfigData()),      // vs1_1, vs2, vs1_2, vs2_2 // no mask and vta
       Seq(FpData(), VecData(), VecData(), MaskSrcData(), VConfigData()),   // f[rs1], vs2, vd_old, v0
     ),
     writeIntRf = false,
