@@ -255,8 +255,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
         Seq(valid)
       } else {
         (0 until numSelectGroups).map(g => {
-          if (valid.length < g * SelectGroupSize) {
-            valid.takeRight(valid.length - (g - 1) * SelectGroupSize)
+          if (valid.length < (g + 1) * SelectGroupSize) {
+            valid.takeRight(valid.length - g * SelectGroupSize)
           } else {
             (0 until SelectGroupSize).map(j => valid(g * SelectGroupSize + j))
           }
