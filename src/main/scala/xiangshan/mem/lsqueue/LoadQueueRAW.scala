@@ -267,8 +267,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
         Seq(bits)
       } else {
         (0 until numSelectGroups).map(g => {
-          if (bits.length < g * SelectGroupSize) {
-            bits.takeRight(bits.length - (g - 1) * SelectGroupSize)
+          if (bits.length < (g + 1) * SelectGroupSize) {
+            bits.takeRight(bits.length - g * SelectGroupSize)
           } else {
             (0 until SelectGroupSize).map(j => bits(g * SelectGroupSize + j))
           }
