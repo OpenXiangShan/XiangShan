@@ -98,10 +98,8 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     }
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
       params.lsqFeedback = true
-      params.checkWaitBit = true
-    }
-    if(cfg == StaExeUnitCfg) {
       params.hasFeedback = true
+      params.checkWaitBit = false
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
