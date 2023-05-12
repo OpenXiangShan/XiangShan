@@ -396,7 +396,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // dealloc logic
   entries.zipWithIndex.foreach {
     case (e, i) => 
-      when ((e.io.select && e.io.loadOut.fire) || e.io.flush) {
+      when ((e.io.select && io.loadOut.fire) || e.io.flush) {
         freeMaskVec(i) := true.B
       }
   }
