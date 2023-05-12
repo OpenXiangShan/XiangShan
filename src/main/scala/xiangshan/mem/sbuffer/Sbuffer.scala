@@ -242,16 +242,17 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // sbuffer entry count
 
-  val plru = new PseudoLRU(StoreBufferSize)
+  val plru = new ValidPseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(EnsbufferWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
   val candidateVec = VecInit(stateVec.map(s => s.isDcacheReqCandidate()))
-  val candidateIdx = PriorityEncoder(candidateVec)
 
-  val replaceAlgoIdx = plru.way
+  val replaceAlgoIdx = plru.way(candidateVec.reverse)._2
   val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
 
-  val replaceIdx = Mux(replaceAlgoNotDcacheCandidate, candidateIdx, replaceAlgoIdx)
+  assert(!(candidateVec.asUInt().orR && replaceAlgoNotDcacheCandidate), "we have way to select, but replace algo selects invalid way")
+
+  val replaceIdx = replaceAlgoIdx
   plru.access(accessIdx)
 
   //-------------------------cohCount-----------------------------
