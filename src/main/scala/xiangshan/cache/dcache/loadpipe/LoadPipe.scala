@@ -87,11 +87,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val tag_read = io.tag_read.bits
 
   // Tag read for new requests
-  meta_read.idx := get_idx(io.lsu.req.bits.addr)
+  meta_read.idx := get_idx(io.lsu.req.bits.vaddr)
   meta_read.way_en := ~0.U(nWays.W)
   // meta_read.tag := DontCare
 
-  tag_read.idx := get_idx(io.lsu.req.bits.addr)
+  tag_read.idx := get_idx(io.lsu.req.bits.vaddr)
   tag_read.way_en := ~0.U(nWays.W)
 
   // Pipeline
@@ -103,7 +103,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
-  val s0_vaddr = s0_req.addr
+  val s0_vaddr = s0_req.vaddr
   val s0_replayCarry = s0_req.replayCarry
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
@@ -119,7 +119,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
-  val s1_vaddr = Cat(s1_req.addr(PAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  val s1_vaddr = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
@@ -398,7 +398,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       !s2_nack_no_mshr &&
       !s2_miss_merged
     )
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
     io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
   } else {
     // replacement is updated on both 1st and 2nd miss
@@ -407,7 +407,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
       !s2_nack_no_mshr
     )
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.addr)))
+    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
     io.replace_access.bits.way := RegNext(
       Mux(
         RegNext(s1_tag_match_dup_dc),

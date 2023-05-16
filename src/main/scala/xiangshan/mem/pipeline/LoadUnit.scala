@@ -238,7 +238,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   }
-  io.dcacheReq.bits.addr := s0_vaddr
+  io.dcacheReq.bits.vaddr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
   when(isPrefetch) {
