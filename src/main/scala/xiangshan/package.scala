@@ -560,8 +560,12 @@ package object xiangshan {
 
   object UopSplitType {
     def SCA_SIM          = "b000000".U //
+    def VEC_M0M          = "b000000".U // VEC_M0M
+    def VEC_MMM          = "b000000".U // VEC_MMM
+    def VEC_0VV          = "b000000".U // VEC_0XV
     def DIR              = "b010001".U // dirty: vset
     def VEC_VVV          = "b010010".U // VEC_VVV
+    def VEC_V0V          = "b010010".U // VEC_V0V
     def VEC_VXV          = "b010011".U // VEC_VXV
     def VEC_0XV          = "b010100".U // VEC_0XV
     def VEC_VVW          = "b010101".U // VEC_VVW
@@ -592,9 +596,6 @@ package object xiangshan {
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
     def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
     def VEC_COMPRESS     = "b110000".U // vcompress.vm
-    def VEC_M0M          = "b000000".U // VEC_M0M
-    def VEC_MMM          = "b000000".U // VEC_MMM
-    def VEC_0VV          = "b000000".U // VEC_0XV
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")

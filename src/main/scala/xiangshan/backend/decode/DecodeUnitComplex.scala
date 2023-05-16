@@ -27,7 +27,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import freechips.rocketchip.rocket.Instructions._
-import yunsuan.VialuFixType
+import yunsuan.{VialuFixType, VpermType}
 import scala.collection.Seq
 
 trait VectorConstants {
@@ -80,29 +80,31 @@ class DecodeUnitComplex(maxNumOfUop : Int)(implicit p : Parameters) extends XSMo
   val typeOfSplit = cf_ctrl_simple.ctrl.uopSplitType
 
   //LMUL
-  val lmul = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(4.W), Array(
+  val isVmvnr = cf_ctrl_simple.ctrl.fuType === FuType.vppu && VpermType.isVmvnr(cf_ctrl_simple.ctrl.fuOpType)
+  val lmulVmvnr = Mux(isVmvnr, VpermType.getLmulVmvnr(cf_ctrl_simple.ctrl.fuOpType), simple.io.vconfig.vtype.vlmul) // for VEC_V0V
+  val lmul = MuxLookup(lmulVmvnr, 1.U(4.W), Array(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
   ))
   val numOfUopVslide = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(log2Up(maxNumOfUop+1).W), Array(
-    "b001".U -> 3.U,
-    "b010".U -> 10.U,
-    "b011".U -> 36.U
+    "b001".U -> 3.U,  // = 2*(2+1)/2 = n*(n+1)/2
+    "b010".U -> 10.U, // = 4*(4+1)/2 = n*(n+1)/2
+    "b011".U -> 36.U  // = 8*(8+1)/2 = n*(n+1)/2
   ))
   val numOfUopVrgather = MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(log2Up(maxNumOfUop+1).W), Array(
-    "b001".U -> 4.U,
-    "b010".U -> 16.U,
-    "b011".U -> 64.U
+    "b001".U -> 4.U,  // = 2*2 = n*n
+    "b010".U -> 16.U, // = 4*4 = n*n
+    "b011".U -> 64.U  // = 8*8 = n*n
   ))
   val numOfUopVrgatherei16 = Mux((!simple.io.vconfig.vtype.vsew.orR()) && (simple.io.vconfig.vtype.vlmul =/= "b011".U),
                                   Cat(numOfUopVrgather, 0.U(1.W)),
                                   numOfUopVrgather
                                 )
   val numOfUopVcompress =  MuxLookup(simple.io.vconfig.vtype.vlmul, 1.U(4.W), Array(
-    "b001".U -> 4.U,
-    "b010".U -> 13.U,
-    "b011".U -> 43.U
+    "b001".U -> 4.U,  // = 2+(3+3)*1/2-1 = (n+4)*(n-1)/2+1
+    "b010".U -> 13.U, // = 2+(3+5)*3/2-1 = (n+4)*(n-1)/2+1
+    "b011".U -> 43.U  // = 2+(3+9)*7/2-1 = (n+4)*(n-1)/2+1
   ))
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(maxNumOfUop+1).W), Array(
