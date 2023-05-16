@@ -27,8 +27,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val diffCommits = Output(new DiffCommitIO)
   })
 
-  val VEC_VCONFIG = VecLogicRegs - 1
-
   class RenameBufferPtr extends CircularQueuePtr[RenameBufferPtr](size)
 
   object RenameBufferPtr {
@@ -157,7 +155,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U
   io.canEnq := allowEnqueue
 
-  io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VEC_VCONFIG.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
+  io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VCONFIG_IDX.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
 
   // for difftest
   io.diffCommits := 0.U.asTypeOf(new DiffCommitIO)

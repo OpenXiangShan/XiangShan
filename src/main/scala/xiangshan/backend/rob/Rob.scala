@@ -812,8 +812,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // sync v csr to csr
   // for difftest
-  val VEC_VCONFIG = VecLogicRegs - 1
-  val isDiffWriteVconfigVec = io.diffCommits.commitValid.zip(io.diffCommits.info).map { case (valid, info) => valid && info.ldest === VEC_VCONFIG.U && info.vecWen }.reverse
+  val isDiffWriteVconfigVec = io.diffCommits.commitValid.zip(io.diffCommits.info).map { case (valid, info) => valid && info.ldest === VCONFIG_IDX.U && info.vecWen }.reverse
   io.csr.vcsrFlag := RegNext(io.diffCommits.isCommit && Cat(isDiffWriteVconfigVec).orR)
 
   // commit load/store to lsq
