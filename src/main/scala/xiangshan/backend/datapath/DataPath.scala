@@ -209,6 +209,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       Some(Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
     } else { None }
+  private val vconfigDebugReadData: Option[UInt] =
+    if (env.AlwaysBasicDiff || env.EnableDifftest) {
+      Some(Wire(UInt(64.W)))
+    } else { None }
+
 
   fpDebugReadData.foreach(_ := vfDebugRead
     .get._2
@@ -220,8 +225,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     .slice(32, 64)
     .map(x => Seq(x(63, 0), x(127, 64))).flatten
   )
+  vconfigDebugReadData.foreach(_ := vfDebugRead
+    .get._2(64)(63, 0)
+  )
 
-  io.debugVconfig := vfDebugRead.get._2(64)(63, 0)
+  io.debugVconfig := vconfigDebugReadData.get
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     debugReadAddr = intDebugRead.map(_._1),
@@ -461,6 +469,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
 
+  // Todo: check if this can be removed
   val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =

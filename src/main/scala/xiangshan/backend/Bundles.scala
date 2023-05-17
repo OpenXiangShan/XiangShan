@@ -144,7 +144,6 @@ object Bundles {
     val vpu             = new VPUCtrlSignals
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
-    val vtype           = new VType
     val isVset          = Bool()
     val firstUop = Bool()
     val lastUop = Bool()

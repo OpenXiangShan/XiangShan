@@ -67,7 +67,7 @@ case class BackendParams(
   def numExu = allSchdParams.map(_.numExu).sum
   def numRfRead  = 14
   def numRfWrite = 8
-  def vconfigPort = 11
+  def vconfigPort = 0 // Todo: remove it
 
   def numException = allExuParams.count(_.exceptionOut.nonEmpty)
 
