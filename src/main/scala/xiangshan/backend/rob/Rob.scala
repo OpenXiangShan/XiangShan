@@ -1130,10 +1130,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
   sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
   val sourceHeadLsIssue = WireDefault(debug_lsIssue(deqPtr.value))
-  ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf, true)
   // dummy sink
   ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
 

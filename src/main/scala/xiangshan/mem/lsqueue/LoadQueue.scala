@@ -1119,16 +1119,16 @@ def detectRollback(i: Int) = {
   val rob_head_confilct_replay = lq_match && !cache_bank_no_conflict(lq_match_idx)
   val rob_head_other_replay    = lq_match && (!ld_ld_check_ok(lq_match_idx) || !forward_data_valid(lq_match_idx))
     
-  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   val rob_head_miss_in_dtlb = WireInit(false.B)
   ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
 
-  ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   val perfValidCount = RegNext(validCount)
 

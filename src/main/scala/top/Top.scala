@@ -102,7 +102,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
     case None =>
       val dummyMatch = WireDefault(false.B)
-      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf))
+      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf, true))
   }
 
   lazy val module = new LazyRawModuleImp(this) {

@@ -132,7 +132,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       })
     case None =>
       val dummyMatch = WireDefault(false.B)
-      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf)
+      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
