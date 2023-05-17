@@ -31,9 +31,11 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val isMove    = vecCtrl.isMove
   protected val isReverse = vecCtrl.isReverse
 
+  private val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
+
   // There is no difference between control-dependency or data-dependency for function unit,
-  // but spliting these in ctrl or data bundles is easy to codinpjfg.
-  protected val srcMask    = if(!cfg.maskWakeUp) inCtrl.vpu.get.vmask else inData.getSrcMask
+  // but spliting these in ctrl or data bundles is easy to coding.
+  protected val srcMask    = if(!cfg.maskWakeUp) inCtrl.vpu.get.vmask else Mux(vm, allMaskTrue, inData.getSrcMask)
   protected val srcVConfig = if(!cfg.vconfigWakeUp) inCtrl.vpu.get.vconfig else inData.getSrcVConfig.asTypeOf(new VConfig)
 
   // swap vs1 and vs2, used by vrsub, etc
