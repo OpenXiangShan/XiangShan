@@ -185,7 +185,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val storeWaitCycles = RegInit(0.U(4.W))
   val StoreWaitThreshold = WireInit(12.U(4.W))
   val storeWaitTooLong = storeWaitCycles >= StoreWaitThreshold
-  val loadsAreComing = VecInit(io.data_read :+ io.data_readline.valid).asUInt.orR
+  val loadsAreComing = VecInit(io.data_read).asUInt.orR
   val storeCanAccept = storeWaitTooLong || !loadsAreComing
 
   val store_req = Wire(DecoupledIO(new MainPipeReq))
