@@ -1051,7 +1051,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.ftqOffset := req.ftqOffset
     wdata.isMove := req.eliminatedMove
     wdata.pc := req.pc
-    wdata.vtype := req.vtype
+    wdata.vtype := req.vpu.vtype
     wdata.isVset := req.isVset
   }
   dispatchData.io.raddr := commitReadAddr_next

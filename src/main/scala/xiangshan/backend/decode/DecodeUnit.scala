@@ -666,6 +666,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
 
+  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields)
+
   val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
     FpDecode.table ++
     FDivSqrtDecode.table ++
@@ -741,16 +743,21 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
-  decodedInst.vtype := 0.U.asTypeOf(new VType)
-  when(FuType.isVpu(decodedInst.fuType)) {
-    decodedInst.vtype := io.enq.vtype
-  }
-  io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
   decodedInst.commitType := 0.U // Todo: remove it
-  io.deq.decodedInst := decodedInst
+
+  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
+  decodedInst.vpu.vill  := io.enq.vtype.illegal
+  decodedInst.vpu.vma   := io.enq.vtype.vma
+  decodedInst.vpu.vta   := io.enq.vtype.vta
+  decodedInst.vpu.vsew  := io.enq.vtype.vsew
+  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.vm    := inst.VM
+  decodedInst.vpu.nf    := inst.NF
+
+  io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
+  io.deq.decodedInst := decodedInst
 
   //-------------------------------------------------------------
   // Debug Info
