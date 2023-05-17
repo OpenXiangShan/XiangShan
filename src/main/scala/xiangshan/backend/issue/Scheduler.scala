@@ -279,6 +279,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       io.wbFuBusyTable.fuBusyTableWrite(i)(j).og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
       io.wbFuBusyTable.fuBusyTableWrite(i)(j).og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
     }
+    iq.io.wbBusyRead := io.wbFuBusyTable.fuBusyTableRead(i)
   }
 
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
