@@ -561,7 +561,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_mmio = !s2_is_prefetch && actually_mmio && !s2_exception && !s2_tlb_miss
   val s2_cache_miss = io.dcacheResp.bits.miss && !forward_D_or_mshr_valid
   val s2_cache_replay = io.dcacheResp.bits.replay && !forward_D_or_mshr_valid
-  val s2_cache_tag_error = io.dcacheResp.bits.tag_error
+  val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) && io.dcacheResp.bits.tag_error
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   val s2_wait_store = WireInit(false.B)
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
@@ -673,8 +673,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
     io.out.bits.miss := s2_cache_miss &&
-      !s2_exception &&
       !fullForward &&
+      !s2_exception &&
       !s2_is_prefetch &&
       !s2_mmio
   } else {
@@ -730,7 +730,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   //    may not be refilled
   // Such inst will be writebacked from load queue.
   io.dataForwarded := s2_cache_miss && !s2_exception &&
-    (fullForward || RegNext(io.csrCtrl.cache_error_enable) && s2_cache_tag_error)
+    (fullForward || s2_cache_tag_error)
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
   // data from dcache is not included in io.out.bits.forwardData
