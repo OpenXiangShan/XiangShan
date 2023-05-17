@@ -472,6 +472,7 @@ object FuConfig {
     latency = CertainLatency(1),
     vconfigWakeUp = true,
     maskWakeUp = true,
+    dataBits = 128,
   )
 
   val VipuCfg: FuConfig = FuConfig (
