@@ -363,6 +363,7 @@ object Bundles {
       this.fpWen        .foreach(_ := source.common.fpWen.get)
       this.vecWen       .foreach(_ := source.common.vecWen.get)
       this.fpu          .foreach(_ := source.common.fpu.get)
+      this.vpu          .foreach(_ := source.common.vpu.get)
       this.flushPipe    .foreach(_ := source.common.flushPipe.get)
       this.pc           .foreach(_ := source.jmp.get.pc)
       this.jalrTarget   .foreach(_ := source.jmp.get.target)
