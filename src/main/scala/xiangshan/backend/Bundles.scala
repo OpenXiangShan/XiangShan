@@ -278,6 +278,8 @@ object Bundles {
     val addrOH = UInt(iqParams.numEntries.W)
 
     def getSource: SchedulerType = exuParams.getWBSource
+    def getIntWbBusyBundle = common.rfWen.toSeq
+    def getVfWbBusyBundle = common.getVfWen.toSeq
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
     def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(x => x.readFp || x.readVec)
   }
@@ -327,6 +329,12 @@ object Bundles {
     }) else None
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
+
+    def getVfWen = {
+      if (params.writeFpRf) this.fpWen
+      else if(params.writeVecRf) this.vecWen
+      else None
+    }
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData

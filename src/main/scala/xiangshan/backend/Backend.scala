@@ -72,6 +72,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromIntExu.flatten.filter(x => x.bits.params.writeIntRf)
   private val allExuParams = params.allExuParams
   private val respWriteWithParams = allRespWrite.zip(allExuParams)
+  println(s"[respWriteWithParams] is ${respWriteWithParams}")
+  respWriteWithParams.foreach{ case(l,r) =>
+    println(s"FuBusyTableWriteBundle is ${l}, ExeUnitParams is ${r}")
+  }
+//  require(false)
 
   private val intWBFuGroup = params.getIntWBExeGroup.map{case(groupId, exeUnit) => (groupId, exeUnit.flatMap(_.fuConfigs))}
   private val intLatencyCertains = intWBFuGroup.map{case (k,v) => (k, v.map(_.latency.latencyVal.nonEmpty).reduce(_ && _))}
@@ -90,7 +95,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val vfWBFuLatencyValMax = vfWBFuLatencyMap.map(latencyMap => latencyMap.map(x => x.map(_._2).max))
 
   private val intWBFuBusyTable = intWBFuLatencyValMax.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
+  println(s"[intWBFuBusyTable] is ${intWBFuBusyTable.map(x => x) }")
   private val vfWBFuBusyTable = vfWBFuLatencyValMax.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
+
+  intWBFuBusyTable.map(x => x.map(dontTouch(_)))
+  dontTouch(intScheduler.io.wbFuBusyTable)
+  dontTouch(vfScheduler.io.wbFuBusyTable)
+  dontTouch(memScheduler.io.wbFuBusyTable)
 
   // intWBFuBusyTable write
   for (i <- 0 until intWBFuGroup.size) {
@@ -105,7 +116,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         val matchI = (p.wbPortConfigs.collectFirst{ case x: IntWB => x }.getOrElse(-1)) == i
         if(matchI){
           Mux(resps(0).valid && resps(0).bits.respType === RSFeedbackType.issueSuccess,
-            Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+            Cat((0 until intWBFuLatencyValMax(i).getOrElse(0)).map { case num =>
             val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num+1).map(_.fuType)
             val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(0).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
             isLatencyNum
@@ -124,14 +135,14 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         val matchI = (p.wbPortConfigs.collectFirst { case x: IntWB => x }.getOrElse(-1)) == i
         if (matchI) {
           Mux(resps(1).valid && resps(1).bits.respType === RSFeedbackType.issueSuccess,
-            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).getOrElse(0)).map { case num =>
               val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num + 1).map(_.fuType)
               val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(1).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
               isLatencyNum
             }), 0.U(1.W))),
             -1.S.asTypeOf(deqIsLatencyNumMask)).asTypeOf(deqIsLatencyNumMask)
         } else -1.S.asTypeOf(deqIsLatencyNumMask)
-      }.reduce(_|_)
+      }.reduce(_&_)
       val og1IsLatencyNumMask = WireInit(-1.S.asTypeOf(deqIsLatencyNumMask))
       og1IsLatencyNumMask := respWriteWithParams.zipWithIndex.map { case ((r, p), idx) =>
         val resps = p.schdType match {
@@ -143,14 +154,17 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         val matchI = (p.wbPortConfigs.collectFirst { case x: IntWB => x }.getOrElse(-1)) == i
         if (matchI && resps.length==3) {
           Mux(resps(2).valid && resps(2).bits.respType === RSFeedbackType.issueSuccess,
-            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).get).map { case num =>
+            ~(Cat(Cat((0 until intWBFuLatencyValMax(i).getOrElse(0)).map { case num =>
               val latencyNumFuType = p.fuConfigs.filter(_.latency.latencyVal.getOrElse(-1) == num + 1).map(_.fuType)
               val isLatencyNum = Cat(latencyNumFuType.map(futype => resps(2).bits.fuType === futype.U)).asUInt().orR() // The latency of the deqResp inst is Num
               isLatencyNum
             }), 0.U(1.W))),
             -1.S.asTypeOf(deqIsLatencyNumMask)).asTypeOf(deqIsLatencyNumMask)
         } else -1.S.asTypeOf(deqIsLatencyNumMask)
-      }.reduce(_ | _)
+      }.reduce(_ & _)
+      dontTouch(deqIsLatencyNumMask)
+      dontTouch(og0IsLatencyNumMask)
+      dontTouch(og1IsLatencyNumMask)
       intWBFuBusyTable(i).get := ((intWBFuBusyTable(i).get << 1.U).asUInt() | deqIsLatencyNumMask) & og0IsLatencyNumMask.asUInt() & og1IsLatencyNumMask.asUInt()
     }
   }

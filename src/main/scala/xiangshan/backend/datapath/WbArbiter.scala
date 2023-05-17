@@ -105,7 +105,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   intWbArbiter.io.flush <> io.flush
   require(intWbArbiter.io.in.size == intArbiterInputs.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all vf wb size: ${intArbiterInputs.size}")
   intWbArbiter.io.in.zip(intArbiterInputs).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid
+    arbiterIn.valid := in.valid && in.bits.intWen.getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits)
   }
@@ -114,7 +114,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vfWbArbiter.io.flush <> io.flush
   require(vfWbArbiter.io.in.size == vfArbiterInputs.size, s"vfWbArbiter input size: ${vfWbArbiter.io.in.size}, all vf wb size: ${vfArbiterInputs.size}")
   vfWbArbiter.io.in.zip(vfArbiterInputs).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid
+    arbiterIn.valid := in.valid && (in.bits.fpWen.getOrElse(false.B) || in.bits.vecWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits)
   }

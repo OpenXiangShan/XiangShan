@@ -1,7 +1,7 @@
 package xiangshan.backend.datapath
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3._
+import chisel3.{Data, _}
 import chisel3.util._
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestArchVecRegState}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -13,6 +13,54 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.regfile._
+import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
+
+class WbBusyArbiterIO(inPortSize: Int, outPortSize: Int)(implicit p: Parameters) extends XSBundle {
+  val in = Vec(inPortSize, Flipped(DecoupledIO(new Bundle{}))) // TODO: remote the bool
+  val flush = Flipped(ValidIO(new Redirect))
+}
+
+class WbBusyArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
+  val allExuParams = backendParams.allExuParams
+
+  val portConfigs = allExuParams.flatMap(_.wbPortConfigs).filter{
+    wbPortConfig =>
+      if(isInt){
+        wbPortConfig.isInstanceOf[IntWB]
+      }
+      else{
+        wbPortConfig.isInstanceOf[VfWB]
+      }
+  }
+
+  val numRfWrite = if (isInt) backendParams.numIntWb else backendParams.numVfWb
+
+  val io = IO(new WbBusyArbiterIO(portConfigs.size, numRfWrite))
+  // inGroup[port -> Bundle]
+  val inGroup = io.in.zip(portConfigs).groupBy{ case(port, config) => config.port}
+  // sort by priority
+  val inGroupSorted = inGroup.map{
+    case(key, value) => (key -> value.sortBy{ case(port, config) => config.asInstanceOf[PregWB].priority})
+  }
+
+  private val arbiters = Seq.tabulate(numRfWrite) { x => {
+    if (inGroupSorted.contains(x)) {
+      Some(Module(new Arbiter( new Bundle{} ,n = inGroupSorted(x).length)))
+    } else {
+      None
+    }
+  }}
+
+  arbiters.zipWithIndex.foreach { case (arb, i) =>
+    if (arb.nonEmpty) {
+      arb.get.io.in.zip(inGroupSorted(i).map(_._1)).foreach { case (arbIn, addrIn) =>
+        arbIn <> addrIn
+      }
+    }
+  }
+
+  arbiters.foreach(_.foreach(_.io.out.ready := true.B))
+}
 
 class RFArbiterBundle(addrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val addr = UInt(addrWidth.W)
@@ -101,18 +149,42 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val toExu = toIntExu ++ toVfExu ++ toMemExu
 
+  private val intWbBusyArbiter = Module(new WbBusyArbiter(true))
+  private val vfWbBusyArbiter = Module(new WbBusyArbiter(false))
   private val intRFReadArbiter = Module(new RFReadArbiter(true))
   private val vfRFReadArbiter = Module(new RFReadArbiter(false))
 
   private val issuePortsIn = fromIQ.flatten
+  private val intNotBlocksW = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
+  private val intNotBlocksSeqW = intNotBlocksW.flatten
+  private val vfNotBlocksW = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
+  private val vfNotBlocksSeqW = vfNotBlocksW.flatten
   private val intBlocks = fromIQ.map{ case iq => Wire(Vec(iq.size, Bool())) }
   private val intBlocksSeq = intBlocks.flatten
   private val vfBlocks = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
   private val vfBlocksSeq = vfBlocks.flatten
 
+  val intWbBusyInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntWbBusyBundle.size).scan(0)(_ + _)
   val intReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
   issuePortsIn.zipWithIndex.foreach{
     case (issuePortIn, idx) =>
+      val wbBusyIn = issuePortIn.bits.getIntWbBusyBundle
+      val lw = intWbBusyInSize(idx)
+      val rw = intWbBusyInSize(idx + 1)
+      val arbiterInW = intWbBusyArbiter.io.in.slice(lw, rw)
+      arbiterInW.zip(wbBusyIn).foreach {
+        case (sink, source) =>
+          sink.bits := DontCare
+          sink.valid := issuePortIn.valid && source
+      }
+      if (rw > lw) {
+        intNotBlocksSeqW(idx) := arbiterInW.zip(wbBusyIn).map {
+          case (sink, source) => sink.ready
+        }.reduce(_ & _)
+      }
+      else {
+        intNotBlocksSeqW(idx) := true.B
+      }
       val readPortIn = issuePortIn.bits.getIntRfReadBundle
       val l = intReadPortInSize(idx)
       val r = intReadPortInSize(idx + 1)
@@ -120,7 +192,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       arbiterIn.zip(readPortIn).foreach{
         case(sink, source) =>
           sink.bits.addr := source.addr
-          sink.valid := issuePortIn.valid && SrcType.isXp(source.srcType)
+          sink.valid := issuePortIn.valid && SrcType.isXp(source.srcType) && intNotBlocksSeqW(idx)
       }
       if(r > l){
         intBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
@@ -131,11 +203,30 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         intBlocksSeq(idx) := false.B
       }
   }
+  intWbBusyArbiter.io.flush := io.flush
   intRFReadArbiter.io.flush := io.flush
 
+  val vfWbBusyInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getVfWbBusyBundle.size).scan(0)(_ + _)
   val vfReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getFpRfReadBundle.size).scan(0)(_ + _)
   issuePortsIn.zipWithIndex.foreach {
     case (issuePortIn, idx) =>
+      val wbBusyIn = issuePortIn.bits.getVfWbBusyBundle
+      val lw = vfWbBusyInSize(idx)
+      val rw = vfWbBusyInSize(idx + 1)
+      val arbiterInW = vfWbBusyArbiter.io.in.slice(lw, rw)
+      arbiterInW.zip(wbBusyIn).foreach {
+        case (sink, source) =>
+          sink.bits := DontCare
+          sink.valid := issuePortIn.valid && source
+      }
+      if (rw > lw) {
+        vfNotBlocksSeqW(idx) := arbiterInW.zip(wbBusyIn).map {
+          case (sink, source) => sink.ready
+        }.reduce(_ & _)
+      }
+      else {
+        vfNotBlocksSeqW(idx) := true.B
+      }
       val readPortIn = issuePortIn.bits.getFpRfReadBundle
       val l = vfReadPortInSize(idx)
       val r = vfReadPortInSize(idx + 1)
@@ -143,7 +234,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       arbiterIn.zip(readPortIn).foreach {
         case (sink, source) =>
           sink.bits.addr := source.addr
-          sink.valid := issuePortIn.valid && SrcType.isVfp(source.srcType)
+          sink.valid := issuePortIn.valid && SrcType.isVfp(source.srcType) && vfNotBlocksSeqW(idx)
       }
       if (r > l) {
         vfBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
@@ -154,6 +245,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         vfBlocksSeq(idx) := false.B
       }
   }
+  vfWbBusyArbiter.io.flush := io.flush
   vfRFReadArbiter.io.flush := io.flush
 
   private val intSchdParams = params.schdParams(IntScheduler())
@@ -320,7 +412,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s1_data = s1_toExuData(i)(j)
       val s1_addrOH = s1_addrOHs(i)(j)
       val s0 = fromIQ(i)(j) // s0
-      val block = intBlocks(i)(j) || vfBlocks(i)(j)
+      val block = (intBlocks(i)(j) || !intNotBlocksW(i)(j)) || (vfBlocks(i)(j) || !vfNotBlocksW(i)(j))
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       when (s0.fire && !s1_flush && !block) {
         s1_valid := s0.valid
