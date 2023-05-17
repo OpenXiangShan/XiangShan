@@ -110,7 +110,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
+  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire()
   ))
 
@@ -156,7 +156,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       if(i == 0){
         debug_runahead_checkpoint_id := checkpoint_id
       } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
           io.fromRename(i).fire()
         ))
       }
@@ -209,6 +209,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // (1) resources are ready
   // (2) previous instructions are ready
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ, Dispatch Queue
@@ -343,6 +344,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+
+  XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
+  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
+  XSPerfHistogram("slots_valid_pure", PopCount(io.enqRob.req.map(_.valid)), thisActualOut(0), 0, RenameWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
     ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),

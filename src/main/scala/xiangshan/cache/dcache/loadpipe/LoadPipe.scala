@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utility.ParallelPriorityMux
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
 
@@ -195,15 +196,23 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
-  val s1_repl_way_en = UIntToOH(io.replace_way.way)
-  val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
-  val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).coh))
-  val s1_repl_extra_meta = Mux1H(s1_repl_way_en, wayMap(w => io.extra_meta_resp(w)))
+
+  val s1_invalid_vec = wayMap(w => !meta_resp(w).coh.isValid())
+  val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
+  val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
+  val s1_repl_way_en_oh = Mux(s1_have_invalid_way, s1_invalid_way_en, UIntToOH(io.replace_way.way))
+  val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
+  val s1_repl_tag = Mux1H(s1_repl_way_en_oh, wayMap(w => tag_resp(w)))
+  val s1_repl_coh = Mux1H(s1_repl_way_en_oh, wayMap(w => meta_resp(w).coh))
+  val s1_repl_extra_meta = Mux1H(s1_repl_way_en_oh, wayMap(w => io.extra_meta_resp(w)))
 
   val s1_need_replacement = !s1_tag_match_dup_dc
-  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way_dup_dc)
+  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en_oh, s1_tag_match_way_dup_dc)
   val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
   val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_paddr_dup_dcache))
+
+  XSPerfAccumulate("load_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
+  XSPerfAccumulate("load_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack
@@ -399,13 +408,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       !s2_miss_merged
     )
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), io.replace_way.way)))
+    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
   } else {
     // replacement is updated on both 1st and 2nd miss
     // timing is worse than !cfg.updateReplaceOn2ndmiss
     io.replace_access.valid := RegNext(RegNext(
       RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
-      !s2_nack_no_mshr
+      !s2_nack_no_mshr &&
+      // replacement is updated on 2nd miss only when this req is firstly issued
+      (!s2_miss_merged || s2_req.isFirstIssue)
     )
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
     io.replace_access.bits.way := RegNext(
@@ -414,7 +425,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
         RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
         Mux( // if miss
           !s2_miss_merged,
-          RegNext(io.replace_way.way), // 1st fire: access new selected replace way
+          RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
           OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
         )
       )

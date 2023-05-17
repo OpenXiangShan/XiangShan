@@ -208,7 +208,8 @@ object TopMain extends App with HasRocketChipStageUtils {
 
     // tools: init to close dpi-c when in fpga
     val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-    Constantin.init(envInFPGA)
+    val enableConstantin = config(DebugOptionsKey).EnableConstantin
+    Constantin.init(enableConstantin && !envInFPGA)
     ChiselDB.init(envInFPGA)
 
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)

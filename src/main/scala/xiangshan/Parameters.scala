@@ -183,6 +183,8 @@ case class XSCoreParameters
     superNWays = 4,
     superReplacer = Some("plru")
   ),
+  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     normalNSets = 64,
@@ -237,7 +239,8 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2,
     nProbeEntries = 2,
-    nPrefetchEntries = 2,
+    nPrefetchEntries = 12,
+    nPrefBufferEntries = 64,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
@@ -286,7 +289,8 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
-  UseDRAMSim: Boolean = false
+  UseDRAMSim: Boolean = false,
+  EnableConstantin: Boolean = false
 )
 
 trait HasXSParameter {

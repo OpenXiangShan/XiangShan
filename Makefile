@@ -48,7 +48,23 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# dynamic switch CONSTANTIN
+ifeq ($(WITH_CONSTANTIN),0)
+$(info disable WITH_CONSTANTIN)
+else
+ifndef NOOP_HOME
+$(error NOOP_HOME is not set)
+endif
+override SIM_ARGS += --with-constantin
+endif
+
 # top-down
+ifeq ($(CONFIG),DefaultConfig)
+ENABLE_TOPDOWN ?= 1
+endif
+ifneq ($(NUM_CORES),1)
+ENABLE_TOPDOWN = 0
+endif
 ifeq ($(ENABLE_TOPDOWN),1)
 override SIM_ARGS += --enable-topdown
 endif

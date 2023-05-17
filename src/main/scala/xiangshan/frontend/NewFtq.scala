@@ -516,11 +516,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     dontTouch(ptr)
   }
   val validEntries = distanceBetween(bpuPtr, commPtr)
+  val canCommit = Wire(Bool())
 
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U
+  val new_entry_ready = validEntries < FtqSize.U || canCommit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
@@ -1112,7 +1113,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
-  val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
@@ -1232,8 +1233,17 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   if(cacheParams.hasPrefetch){
     val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
     val diff_prefetch_addr = WireInit(update_target(prefetchPtr.value)) //TODO: remove this
-
+    // TODO : MUST WIDER
     prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
+
+    val prefetch_too_late = (isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)) || (prefetchPtr === ifuPtr)
+    when(prefetch_too_late){
+      when(prefetchPtr =/= bpuPtr){
+        prefetchPtr := bpuPtr - 1.U
+      }.otherwise{
+        prefetchPtr := ifuPtr
+      }
+    }
 
     ftq_pc_mem.io.other_raddrs(0) := prefetchPtr.value
 
@@ -1272,7 +1282,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
     XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
+//    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
   }
   else {
     io.toPrefetch.req <> DontCare

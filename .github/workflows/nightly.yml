@@ -13,7 +13,7 @@ jobs:
     # Build + 8 checkpoints * 1-hour timeout
     name: Nightly Regression - Checkpoints
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
