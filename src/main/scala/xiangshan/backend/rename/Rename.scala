@@ -32,6 +32,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   private val numRegSrc = backendParams.numRegSrc
+  private val vecOldVdIdx = 2
 
   println(s"[Rename] numRegSrc: $numRegSrc")
 
@@ -196,9 +197,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(3) := io.vecReadPorts(i)(3)
     uops(i).psrc(4) := io.vecReadPorts(i)(4) // Todo: vl read port
 
-    uops(i).srcType(3) := Mux(io.in(i).bits.vpu.vm, SrcType.DC, SrcType.vp) // mask src
-    uops(i).srcType(4) := SrcType.vp // vconfig
-
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
       when (io.fusionInfo(i).rs2FromRs2 || io.fusionInfo(i).rs2FromRs1) {
@@ -210,7 +208,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).oldPdest := Mux1H(Seq(
       uops(i).rfWen  -> io.intReadPorts(i).last,
       uops(i).fpWen  -> io.fpReadPorts (i).last,
-      uops(i).vecWen -> io.vecReadPorts(i).last
+      uops(i).vecWen -> io.vecReadPorts(i)(vecOldVdIdx),
     ))
     uops(i).eliminatedMove := isMove(i)
 
@@ -309,7 +307,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(3) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
       (z, next) => Mux(next._2, next._1, z)
     }
-    io.out(i).bits.psrc(4) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
+    io.out(i).bits.psrc(4) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(4)(i-1).asBools).foldLeft(uops(i).psrc(4)) {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.oldPdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(pdestLoc)(i-1).asBools).foldLeft(uops(i).oldPdest) {
