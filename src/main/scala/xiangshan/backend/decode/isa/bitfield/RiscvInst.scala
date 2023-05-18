@@ -41,6 +41,7 @@ trait BitFieldsFp { this: Riscv32BitInst =>
 }
 
 trait BitFieldsVec { this: Riscv32BitInst =>
+  def VCATEGORY     : UInt  = inst(14, 12)
   def NF            : UInt  = inst(31, 29)
   def MEW           : UInt  = inst(28)
   def MOP           : UInt  = inst(27, 26)
