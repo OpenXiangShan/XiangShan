@@ -28,7 +28,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{Category, VType}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -756,6 +756,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.vlmul := io.enq.vtype.vlmul
   decodedInst.vpu.vm    := inst.VM
   decodedInst.vpu.nf    := inst.NF
+  decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
 
   io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
   io.deq.decodedInst := decodedInst

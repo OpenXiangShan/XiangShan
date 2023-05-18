@@ -154,9 +154,9 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
       subIO.in.srcType(0)   := typeModule.io.out.vs2Type
       subIO.in.srcType(1)   := typeModule.io.out.vs1Type
       subIO.in.vdType       := typeModule.io.out.vdType
-      subIO.in.vs2          := inData.src(0)
-      subIO.in.vs1          := inData.src(1)
-      subIO.in.old_vd       := inData.src(2)
+      subIO.in.vs2          := vs2
+      subIO.in.vs1          := vs1
+      subIO.in.old_vd       := old_vd
       subIO.in.mask16b      := maskUsed // Todo: make mask16b more flexiable
       subIO.ctrl.narrow     := isNarrow
       subIO.ctrl.vstart_gte_vl := vstart >= vl

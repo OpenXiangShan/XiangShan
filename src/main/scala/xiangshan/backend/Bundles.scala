@@ -11,7 +11,7 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.vector.Bundles.{Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
+import xiangshan.backend.fu.vector.Bundles.{Category, Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
 import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
@@ -236,10 +236,6 @@ object Bundles {
     }
   }
 
-  object VsewBundle {
-    def apply()   = UInt(2.W)   // 8/16/32/64 --> 0/1/2/3
-  }
-
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
     // vtype
     val vill      = Bool()
@@ -263,6 +259,8 @@ object Bundles {
 
     // vector load/store
     val nf        = Nf()
+
+    val needScalaSrc = Bool()
 
     val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()

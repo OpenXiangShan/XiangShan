@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.VtypeStruct
-import utils.NamedUInt
+import _root_.utils.NamedUInt
 
 object Bundles {
 
@@ -120,4 +120,18 @@ object Bundles {
   object Vxrm extends NamedUInt(2)
 
   object Nf extends NamedUInt(3)
+
+  object Category extends NamedUInt(3) {
+    def OPIVV : UInt = "b000".U(width.W)
+    def OPFVV : UInt = "b001".U(width.W)
+    def OPMVV : UInt = "b010".U(width.W)
+    def OPIVI : UInt = "b011".U(width.W)
+    def OPIVX : UInt = "b100".U(width.W)
+    def OPFVF : UInt = "b101".U(width.W)
+    def OPMVX : UInt = "b110".U(width.W)
+    def OPCFG : UInt = "b111".U(width.W)
+    def needScalaSrc(category: UInt) : Bool = {
+      Seq(OPIVI, OPIVX, OPFVF, OPMVX).map(_ === category).reduce(_ || _)
+    }
+  }
 }
