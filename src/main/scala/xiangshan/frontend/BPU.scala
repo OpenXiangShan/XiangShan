@@ -649,22 +649,27 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     val redirectGHist = WireDefault(getHist(updated_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     val commitGHist = RegInit(0.U.asTypeOf(Vec(HistoryLength, Bool())))
     val commitGHistPtr = RegInit(0.U.asTypeOf(new CGHPtr))
-    def getCommitHist(): UInt =
-      (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (commitGHistPtr.value+1.U))(HistoryLength-1, 0)
-    val nextCommitGHist: Vec[Bool] = WireDefault(getCommitHist().asTypeOf(Vec(HistoryLength, Bool())))
+    def getCommitHist(ptr: CGHPtr): UInt =
+      (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
 
-    val updateValid = io.ftq_to_bpu.update.valid
-    val updateCfi   = io.ftq_to_bpu.update.bits.cfi_idx
-    val updateCfiIndex: UInt = Mux(updateCfi.valid, updateCfi.bits, 0.U)
-    val trueShift     : UInt = Mux(do_redirect.valid, shift, updateCfiIndex)
+    val updateValid       = io.ftq_to_bpu.update.valid
+    val updateShift: UInt = Mux(updateValid, OHToUInt(io.ftq_to_bpu.update.bits.spec_info.lastBrNumOH), 0.U)
+    val trueShift  : UInt = Mux(do_redirect.valid, shift, updateShift)
+    val shiftMask  : Vec[Bool] =
+      Mux(do_redirect.valid,
+        VecInit(Cat(0.U(1.W), taken && addIntoHist).asBools),
+        io.ftq_to_bpu.update.bits.br_taken_mask)
+    val nextCommitGHist: Vec[Bool] =
+      WireDefault(getCommitHist(commitGHistPtr - trueShift).asTypeOf(Vec(HistoryLength, Bool())))
     dontTouch(trueShift)
     dontTouch(commitGHist)
     dontTouch(commitGHistPtr)
+    dontTouch(shiftMask)
     // Maintain the commitGHist
     for (i <- 0 until numBr) {
       // These seems to be update time variables
       when(trueShift >= (i + 1).U) {
-        nextCommitGHist(i) := taken && addIntoHist && (i == 0).B
+        nextCommitGHist(i) := shiftMask(i)
       }
     }
     when(do_redirect.valid) {
@@ -692,7 +697,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     TageTableInfos.map {
       case (nRows, histLen, _) => {
         val nRowsPerBr = nRows / numBr
-        val commitTrueHist: UInt = computeFoldedHist(getCommitHist(), log2Ceil(nRowsPerBr))(histLen)
+        val commitTrueHist: UInt = computeFoldedHist(getCommitHist(commitGHistPtr), log2Ceil(nRowsPerBr))(histLen)
         val predictFHist         : UInt = predictFHistAll.
           getHistWithInfo((histLen, min(histLen, log2Ceil(nRowsPerBr)))).folded_hist
         dontTouch(predictFHist)
