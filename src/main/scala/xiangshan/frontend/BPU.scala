@@ -644,6 +644,64 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     }
   }
 
+  // Commit time history checker
+  if (EnableGHistDiff) {
+    val redirectGHist = WireDefault(getHist(updated_ptr).asTypeOf(Vec(HistoryLength, Bool())))
+    val commitGHist = RegInit(0.U.asTypeOf(Vec(HistoryLength, Bool())))
+    val commitGHistPtr = RegInit(0.U.asTypeOf(new CGHPtr))
+    def getCommitHist(): UInt =
+      (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (commitGHistPtr.value+1.U))(HistoryLength-1, 0)
+    val nextCommitGHist: Vec[Bool] = WireDefault(getCommitHist().asTypeOf(Vec(HistoryLength, Bool())))
+
+    val updateValid = io.ftq_to_bpu.update.valid
+    val updateCfi   = io.ftq_to_bpu.update.bits.cfi_idx
+    val updateCfiIndex: UInt = Mux(updateCfi.valid, updateCfi.bits, 0.U)
+    val trueShift     : UInt = Mux(do_redirect.valid, shift, updateCfiIndex)
+    dontTouch(trueShift)
+    dontTouch(commitGHist)
+    dontTouch(commitGHistPtr)
+    // Maintain the commitGHist
+    for (i <- 0 until numBr) {
+      // These seems to be update time variables
+      when(trueShift >= (i + 1).U) {
+        nextCommitGHist(i) := taken && addIntoHist && (i == 0).B
+      }
+    }
+    when(do_redirect.valid) {
+      // Recover history using metadata from FTQ
+      commitGHist := redirectGHist
+      commitGHistPtr := updated_ptr
+    } .elsewhen(updateValid) {
+      // Normal update at commit
+      commitGHistPtr := commitGHistPtr - trueShift
+    }
+
+    // Calculate true history using Parallel XOR
+    def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt = {
+      if (histLen > 0) {
+        val nChunks     = (histLen + compLen - 1) / compLen
+        val hist_chunks = (0 until nChunks) map { i =>
+          hist(min((i + 1) * compLen, histLen) - 1, i * compLen)
+        }
+        ParallelXOR(hist_chunks)
+      }
+      else 0.U
+    }
+    // Do differential
+    val predictFHistAll: AllFoldedHistories = io.ftq_to_bpu.update.bits.spec_info.folded_hist
+    TageTableInfos.map {
+      case (nRows, histLen, _) => {
+        val nRowsPerBr = nRows / numBr
+        val commitTrueHist: UInt = computeFoldedHist(getCommitHist(), log2Ceil(nRowsPerBr))(histLen)
+        val predictFHist         : UInt = predictFHistAll.
+          getHistWithInfo((histLen, min(histLen, log2Ceil(nRowsPerBr)))).folded_hist
+        dontTouch(predictFHist)
+        XSError(updateValid && predictFHist =/= commitTrueHist,
+          p"predict time ghist: ${predictFHist} is different from commit time: ${commitTrueHist}\n")
+      }
+    }
+  }
+
 
   // val updatedGh = oldGh.update(shift, taken && addIntoHist)
 
