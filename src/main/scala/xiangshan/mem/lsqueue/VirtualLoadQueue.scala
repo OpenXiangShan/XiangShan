@@ -197,10 +197,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         datavalid(loadWbIndex) := 
           (if (EnableFastForward) {
               hasExceptions ||
+              io.loadIn(i).bits.mmio ||
              !io.loadIn(i).bits.miss && // dcache miss
              !io.loadIn(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
            } else {
               hasExceptions ||
+              io.loadIn(i).bits.mmio ||
              !io.loadIn(i).bits.miss 
            })
 
