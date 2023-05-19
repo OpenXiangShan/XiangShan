@@ -119,7 +119,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val typeModule = Module(new VIAluSrcTypeModule)
   private val vIntFixpAlu = Module(new VIntFixpAlu)
 
-  val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(srcMask)
+  val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(srcMask, vsew)
   val maskIdx = Mux(isNarrow, (vuopIdx >> 1.U).asUInt, vuopIdx)
   val maskUsed = maskDataVec(maskIdx)
 
