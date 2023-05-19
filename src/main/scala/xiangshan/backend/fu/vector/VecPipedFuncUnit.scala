@@ -30,19 +30,24 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val isNarrow  = vecCtrl.isNarrow
   protected val isExt     = vecCtrl.isExt
   protected val isMove    = vecCtrl.isMove
+  // swap vs1 and vs2, used by vrsub, etc
   protected val isReverse = vecCtrl.isReverse
 
   private val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
+  private val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
+
+  // vadc.vv, vsbc.vv need this
+  protected val needClearMask: Bool = VialuFixType.needClearMask(inCtrl.fuOpType)
 
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val srcMask    = if(!cfg.maskWakeUp) inCtrl.vpu.get.vmask else Mux(vm, allMaskTrue, inData.getSrcMask)
-  protected val srcVConfig = if(!cfg.vconfigWakeUp) inCtrl.vpu.get.vconfig else inData.getSrcVConfig.asTypeOf(new VConfig)
-
-  // swap vs1 and vs2, used by vrsub, etc
-  protected val needReverse = VialuFixType.needReverse(inCtrl.fuOpType)
-  // vadc.vv, vsbc.vv need this
-  protected val needClearMask = VialuFixType.needClearMask(inCtrl.fuOpType)
+  protected val srcMask: UInt = if(!cfg.maskWakeUp) inCtrl.vpu.get.vmask else {
+    MuxCase(inData.getSrcMask, Seq(
+      needClearMask -> allMaskFalse,
+      vm -> allMaskTrue
+    ))
+  }
+  protected val srcVConfig: VConfig = if(!cfg.vconfigWakeUp) inCtrl.vpu.get.vconfig else inData.getSrcVConfig.asTypeOf(new VConfig)
 }
 
 class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -61,8 +66,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   private val src0 = Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
   private val src1 = WireInit(inData.src(1)) // vs2 only
 
-  protected val vs2 = Mux(needReverse, src0, src1)
-  protected val vs1 = Mux(needReverse, src1, src0)
+  protected val vs2 = Mux(isReverse, src0, src1)
+  protected val vs1 = Mux(isReverse, src1, src0)
   protected val old_vd = inData.src(2)
 
   override def latency: Int = cfg.latency.latencyVal.get
