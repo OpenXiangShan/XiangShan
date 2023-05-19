@@ -24,8 +24,16 @@ import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
-import xiangshan.backend.fu.vector.Bundles.VType
+class VConfigGen(implicit p: Parameters) extends XSModule{
 
+    val vconfig = Input(UInt(XLEN.W))
+  val vlLast = vconfig_spec(15, 8)
+  vconfig_spec_next := Cat(0.U(48.W), vl, vtype)
+  val isWalkVConfigVec = io.robCommits.walkValid.zip(io.robCommits.info).map{ case (valid, info) => valid && (info.ldest === 32.U)}
+  when(io.isVsetFlushPipe){
+  }.elsewhen(io.robCommits.isWalk && Cat(isWalkVConfigVec).orR){
+    vconfig_arch := PriorityMux(isWalkVConfigVec.zip(io.robCommits.info.reverse)).vconfig
+  }.elsewhen(io.robCommits.isWalk && Cat(isWalkVConfigVec).orR){
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
   with VectorConstants {

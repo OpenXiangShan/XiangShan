@@ -25,8 +25,9 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 
+// TODO: Should be discarded
 class VlsqPtr(implicit p: Parameters) extends CircularQueuePtr[VlsqPtr](
-  p => p(XSCoreParamsKey).VlsQueueSize
+  p => p(XSCoreParamsKey).VlFlowSize
 ){
 }
 
@@ -50,7 +51,7 @@ class Int2VLSUIO(implicit p: Parameters) extends XSBundle {
 // Vecblock to VLSU IO
 class Vec2VLSUIO(implicit p: Parameters) extends XSBundle {
   // mask, address offsets, store data from vec block
-  val in = Vec(VecMemSrcInWidth, Decoupled(new VecMemOperand)) 
+  val in = Vec(VecMemSrcInWidth, Decoupled(new VecMemOperand))
 }
 
 // VLSU to Vecblock IO
@@ -90,7 +91,7 @@ class VecMemCtrl(implicit p: Parameters) extends XSBundle {
   val mop = UInt(2.W)
   val nf = UInt(2.W)
   val xumop = UInt(5.W) // lumop or sumop
-  
+
   def Inst2VecMemCtrl(inst: UInt): VecMemCtrl = {
     val ctrl = Wire(new VecMemCtrl)
     ctrl.nf := inst(31, 29)
@@ -101,7 +102,7 @@ class VecMemCtrl(implicit p: Parameters) extends XSBundle {
     ctrl.vwidth := inst(14, 12)
     ctrl
   }
-  
+
   def fromInst(inst: UInt) = {
     nf := inst(31, 29)
     mew := inst(28)

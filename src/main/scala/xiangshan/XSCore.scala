@@ -145,6 +145,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   memBlock.io.hartId := io.hartId
+  exuBlocks.foreach(b => {
+    b.io.scheExtra.lcommit := memBlock.io.lqDeq
+  })
+  val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
+  ctrlBlock.io.lqDeq <> memBlock.io.lqDeq
+  ctrlBlock.io.vconfigReadPort <> exuBlocks(0).io.scheExtra.archVconfigReadPort.get
+  val vconfigDiff = exuBlocks(0).io.scheExtra.diffVconfigReadData.get
   memBlock.io.issue <> backend.io.mem.issueUops
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
@@ -171,6 +178,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
 //  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
+  csrioIn.vpu.set_vxsat <> ctrlBlock.io.robio.toCSR.vxsat
+  csrioIn.vpu.set_vstart.bits  <> 0.U(64.W)
+  csrioIn.vpu.set_vl.bits      <> Cat(0.U(56.W), vconfigArch.data(15, 8))
+  csrioIn.vpu.set_vtype.bits   <> Cat(0.U(56.W), vconfigArch.data(7, 0))
+  csrioIn.vpu.vxrm <> vecExuBlock.extraio.fuExtra.vxrm
+  csrioIn.vpu.vstart <> vecExuBlock.extraio.fuExtra.vstart
   memBlock.io.sfence <> backend.io.mem.sfence
   memBlock.io.fenceToSbuffer <> backend.io.mem.toSbuffer
 
@@ -180,6 +193,28 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.tlbCsr <> backend.io.mem.tlbCsr
   memBlock.io.lsqio.rob <> backend.io.mem.robLsqIO
   memBlock.io.lsqio.exceptionAddr.isStore := backend.io.mem.isStoreException
+  memBlock.io.vecStoreIn := DontCare
+  memBlock.io.VecloadRegIn <> vecExuBlock.extraio.issue.get
+  //for(i <- 0 until 2) {
+  //  memBlock.io.VecloadRegIn(i).bits.uop := vecExuBlock.extraio.issue.get(i).bits.uop
+  //  memBlock.io.VecloadRegIn(i).bits.vmask := vecExuBlock.extraio.issue.get(i).bits.src(3)
+  //  memBlock.io.VecloadRegIn(i).bits.baseaddr := vecExuBlock.extraio.issue.get(i).bits.src(0)
+  //  memBlock.io.VecloadRegIn(i).bits.stride := vecExuBlock.extraio.issue.get(i).bits.src(1)
+  //  memBlock.io.VecloadRegIn(i).bits.index := vecExuBlock.extraio.issue.get(i).bits.src(1)
+  //  memBlock.io.VecloadRegIn(i).bits.pvd := vecExuBlock.extraio.issue.get(i).bits.uop.pdest
+  //  memBlock.io.VecloadRegIn(i).bits.lmul := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.vconfig.vtype.vlmul
+  //  memBlock.io.VecloadRegIn(i).bits.sew := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.vconfig.vtype.vsew
+  //  memBlock.io.VecloadRegIn(i).bits.vma := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.vconfig.vtype.vma
+  //  memBlock.io.VecloadRegIn(i).bits.vta := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.vconfig.vtype.vta
+  //  memBlock.io.VecloadRegIn(i).bits.inner_idx := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.uopIdx
+  //  memBlock.io.VecloadRegIn(i).bits.vl := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.vconfig.vl
+  //  memBlock.io.VecloadRegIn(i).bits.total_num := vecExuBlock.extraio.issue.get(i).bits.uop.ctrl.total_num
+  //  memBlock.io.VecloadRegIn(i).valid := vecExuBlock.extraio.issue.get(i).valid
+  //  vecExuBlock.extraio.issue.get(i).ready := memBlock.io.VecloadRegIn(i).ready
+  //  //memBlock.io.vecFeedback
+  //}
+  //memBlock.io.VecloadRegIn <> vecExuBlock.extraio.issue.get
+  //memBlock.io.vecFeedback <> vecExuBlock.io.scheExtra.feedback.get
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, backend.io.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, backend.io.tlb)

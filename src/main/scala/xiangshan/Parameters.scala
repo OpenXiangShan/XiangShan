@@ -140,25 +140,34 @@ case class XSCoreParameters
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
+  IntLogicRegs: Int = 33,
   FpLogicRegs: Int = 33,
-  VecLogicRegs: Int = 40,
   NRPhyRegs: Int = 192,
+  LoadQueueFlagSize: Int = 80,
+  LoadQueueRARSize: Int = 48,
+  LoadQueueRAWSize: Int = 32, // LoadQueueRAWSize must be power of 2
+  LoadQueueReplaySize: Int = 50, // LoadQueueReplaySize > LoadQueueFlagSize - Load_RS size
+  LoadQueueNWriteBanks: Int = 2,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  LoadQueueNWriteBanks: Int = 8,
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8,
-  VlsQueueSize: Int = 8,
+  UsQueueSize: Int = 8,
+  VlFlowSize: Int = 32,
+  VlUopSize: Int = 32,
+  VsFlowSize: Int = 32,
+  VsUopSize: Int = 32,
   RobSize: Int = 256,
   RabSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16,
+    VlsDqSize = 16,
     IntDqDeqWidth = 6,
     FpDqDeqWidth = 6,
-    LsDqDeqWidth = 6,
+    LsDqDeqWidth = 4
+    VlsDqDeqWidth = 4,
   ),
   intPreg: PregParams = IntPregParams(
     numEntries = 64,
@@ -169,10 +178,15 @@ case class XSCoreParameters
     numEntries = 64,
     numRead = 14,
     numWrite = 8,
+    
   ),
+  VlCnt = 2,
+    VsCnt = 2,
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
+  VecLoadPipelineWidth: Int = 2,
+  VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
@@ -414,6 +428,7 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val VDataBytes = VLEN / 8
   val HasFPU = coreParams.HasFPU
   val HasVPU = coreParams.HasVPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
@@ -497,18 +512,28 @@ trait HasXSParameter {
   val RobSize = coreParams.RobSize
   val RabSize = coreParams.RabSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val LoadQueueSize = coreParams.LoadQueueSize
+  val LoadQueueFlagSize = coreParams.LoadQueueFlagSize
+  val LoadQueueRARSize = coreParams.LoadQueueRARSize
+  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
-  val VlsQueueSize = coreParams.VlsQueueSize
+  val UsQueueSize = coreParams.UsQueueSize
+  val VlFlowSize = coreParams.VlFlowSize
+  val VlUopSize = coreParams.VlUopSize
+  val VsFlowSize = coreParams.VsFlowSize
+  val VsUopSize = coreParams.VsUopSize
   val dpParams = coreParams.dpParams
 
   def backendParams: BackendParams = coreParams.backendParams
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
+  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
+  val VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
+  val VecStorePipelineWidth = coreParams.VecStorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
   val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
@@ -534,6 +559,11 @@ trait HasXSParameter {
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
+
+  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
+              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
+              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
+              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2 + (exuParameters.VlCnt+1)/2
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -564,6 +594,7 @@ trait HasXSParameter {
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
 
+  val vecLoadExuConfigs = coreParams.vecLoadExuConfigs
   val PCntIncrStep: Int = 6
   val numPCntHc: Int = 25
   val numPCntPtw: Int = 19

@@ -72,8 +72,9 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     for (j <- 0 until numEntries) {
       // io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
       val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
-      val wordhit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
-      io.forwardMmask(i)(j) := linehit && (wordhit || lineflag(j))
+     //val hit128bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheVWordOffset) === data(j)(DCacheLineOffset-1, DCacheVWordOffset)
+      val hit64bit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
+      io.forwardMmask(i)(j) := linehit && (hit64bit || lineflag(j))//TODO:when have 128 control logic,need modify this
     }
   }
 
@@ -202,8 +203,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   // forwarding
   // Compare ringBufferTail (deqPtr) and forward.sqIdx, we have two cases:
   // (1) if they have the same flag, we need to check range(tail, sqIdx)
-  // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
-  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
+  // (2) if they have different flags, we need to check range(tail, LoadQueueFlagSize) and range(0, sqIdx)
+  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueFlagSize))
   // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
   // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
@@ -254,8 +255,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 }
 
 class SQDataEntry(implicit p: Parameters) extends XSBundle {
-  val mask = UInt(8.W)
-  val data = UInt(XLEN.W)
+  val mask = UInt((VLEN/8).W)
+  val data = UInt(VLEN.W)
 }
 
 // SQDataModule is a wrapper of SQData8Modules
@@ -268,46 +269,46 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
-      val wdata = Vec(numWrite, Input(UInt(XLEN.W)))
+      val wdata = Vec(numWrite, Input(UInt(VLEN.W)))
     }
     // mask (data valid) write port
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
-      val wdata = Vec(numWrite, Input(UInt(8.W)))
+      val wdata = Vec(numWrite, Input(UInt((VLEN/8).W)))
     }
 
     // st-ld forward addr cam result input, used to select forward data
     val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
     // forward result valid bit generated in current cycle
-    val forwardMaskFast = Vec(numForward, Output(Vec(8, Bool())))
+    val forwardMaskFast = Vec(numForward, Output(Vec((VLEN/8), Bool())))
     // forward result generated in the next cycle
-    val forwardMask = Vec(numForward, Output(Vec(8, Bool()))) // forwardMask = RegNext(forwardMaskFast)
-    val forwardData = Vec(numForward, Output(Vec(8, UInt(8.W))))
+    val forwardMask = Vec(numForward, Output(Vec((VLEN/8), Bool()))) // forwardMask = RegNext(forwardMaskFast)
+    val forwardData = Vec(numForward, Output(Vec((VLEN/8), UInt(8.W))))
   })
 
-  val data8 = Seq.fill(8)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
+  val data16 = Seq.fill(16)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
 
   // writeback to lq/sq
   for (i <- 0 until numWrite) {
-    // write to data8
-    for (j <- 0 until 8) {
-      data8(j).io.mask.waddr(i) := io.mask.waddr(i)
-      data8(j).io.mask.wdata(i) := io.mask.wdata(i)(j)
-      data8(j).io.mask.wen(i)   := io.mask.wen(i)
-      data8(j).io.data.waddr(i) := io.data.waddr(i)
-      data8(j).io.data.wdata(i) := io.data.wdata(i)(8*(j+1)-1, 8*j)
-      data8(j).io.data.wen(i)   := io.data.wen(i)
+    // write to data16
+    for (j <- 0 until 16) {
+      data16(j).io.mask.waddr(i) := io.mask.waddr(i)
+      data16(j).io.mask.wdata(i) := io.mask.wdata(i)(j)
+      data16(j).io.mask.wen(i)   := io.mask.wen(i)
+      data16(j).io.data.waddr(i) := io.data.waddr(i)
+      data16(j).io.data.wdata(i) := io.data.wdata(i)(8*(j+1)-1, 8*j)
+      data16(j).io.data.wen(i)   := io.data.wen(i)
     }
   }
 
   // destorequeue read data
   for (i <- 0 until numRead) {
-    for (j <- 0 until 8) {
-      data8(j).io.raddr(i) := io.raddr(i)
+    for (j <- 0 until 16) {
+      data16(j).io.raddr(i) := io.raddr(i)
     }
-    io.rdata(i).mask := VecInit((0 until 8).map(j => data8(j).io.rdata(i).valid)).asUInt
-    io.rdata(i).data := VecInit((0 until 8).map(j => data8(j).io.rdata(i).data)).asUInt
+    io.rdata(i).mask := VecInit((0 until 16).map(j => data16(j).io.rdata(i).valid)).asUInt
+    io.rdata(i).data := VecInit((0 until 16).map(j => data16(j).io.rdata(i).data)).asUInt
   }
 
   // DataModuleTemplate should not be used when there're any write conflicts
@@ -324,11 +325,12 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
 
   (0 until numForward).map(i => {
     // parallel fwd logic
-    for (j <- 0 until 8) {
-      data8(j).io.needForward(i) <> io.needForward(i)
-      io.forwardMaskFast(i) := VecInit((0 until 8).map(j => data8(j).io.forwardValidFast(i)))
-      io.forwardMask(i) := VecInit((0 until 8).map(j => data8(j).io.forwardValid(i)))
-      io.forwardData(i) := VecInit((0 until 8).map(j => data8(j).io.forwardData(i)))
+    for (j <- 0 until 16) {
+      data16(j).io.needForward(i) <> io.needForward(i)
+      io.forwardMaskFast(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValidFast(i)))
+      io.forwardMask(i) := VecInit((0 until 16).map(j => data16(j).io.forwardValid(i)))
+      io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
+      //io.forwardData(i) := VecInit((0 until 16).map(j => data16(j).io.forwardData(i)))
     }
   })
 }

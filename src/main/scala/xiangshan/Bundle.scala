@@ -148,6 +148,18 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val rm = UInt(3.W)
 }
 
+class VType(implicit p: Parameters) extends XSBundle {
+  val vma   = Bool()
+  val vta   = Bool()
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class VConfig(implicit p: Parameters) extends XSBundle {
+  val vl    = UInt(8.W)
+  val vtype = new VType
+}
+
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val debug_globalID = UInt(XLEN.W)
@@ -159,6 +171,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val isXSTrap = Bool()
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
@@ -168,8 +181,13 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
-  val uopIdx = UInt(5.W)
+  val uopIdx = UInt(log2Up(MaxUopSize).W)
+  val total_num = UInt(log2Up(MaxUopSize).W)
+  val firstUop = Bool()
+  val lastUop = Bool()
+  val vconfig = new VConfig
   val isMove = Bool()
+  val vm = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
@@ -197,6 +215,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
+  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -258,6 +277,15 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
+      // FIXME: divide fpMatch and vecMatch then
+      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
+      val vecMatch = if (exuCfg.readVecRf) ctrl.vecWen else false.B
+      val allIntFpVec = exuCfg.readIntRf && exuCfg.readFpVecRf
+      val allStateMatch = Mux(SrcType.isVp(srcType), vecMatch, Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch))
+      val stateCond = pdestMatch && (if (allIntFpVec) allStateMatch else rfStateMatch || fpMatch || vecMatch)
+      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType) || vecMatch && SrcType.isVp(srcType))
+}
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
@@ -293,6 +321,16 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
+class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+
+
+  val src = Vec(4, UInt(dataWidth.W))
+}
+
+class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+  
+  val vxsat = UInt(1.W)
+}
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
@@ -340,6 +378,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
@@ -352,6 +391,9 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+
+  val uopIdx = UInt(log2Up(MaxUopSize).W)
+  val vconfig = new VConfig
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
@@ -366,6 +408,32 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class DiffCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
+
+  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
+
+  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class RabCommitInfo(implicit p: Parameters) extends XSBundle {
+  val ldest = UInt(6.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+}
+
+class RabCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
+  val isWalk = Bool()
+  val walkValid = Vec(CommitWidth, Bool())
+  val info = Vec(CommitWidth, new RabCommitInfo)
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {

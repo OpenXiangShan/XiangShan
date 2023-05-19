@@ -811,6 +811,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(lmul-1.U).fpWen := true.B
       csBundle(lmul-1.U).ldest := FP_TMP_REG_MV.U
       // FMV_X_D
+       */
       csBundle(lmul).srcType(0) := SrcType.fp
       csBundle(lmul).srcType(1) := SrcType.imm
       csBundle(lmul).lsrc(0) := FP_TMP_REG_MV.U

@@ -59,10 +59,14 @@ class MinimalConfig(n: Int = 1) extends Config(
         RenameWidth = 2,
         CommitWidth = 2,
         FetchWidth = 4,
+      
+        LoadQueueFlagSize = 16,
+        LoadQueueRARSize = 12,
+        LoadQueueRAWSize = 8,
+        LoadQueueReplaySize = 16,
         NRPhyRegs = 96,
         IntPhyRegs = 96,
         VfPhyRegs = 96,
-        LoadQueueSize = 16,
         LoadQueueNWriteBanks = 4,
         StoreQueueSize = 12,
         StoreQueueNWriteBanks = 4,
@@ -75,9 +79,11 @@ class MinimalConfig(n: Int = 1) extends Config(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
+          VlsDqSize = 12,
           IntDqDeqWidth = 4,
           FpDqDeqWidth = 4,
-          LsDqDeqWidth = 4
+          LsDqDeqWidth = 4,
+          VlsDqDeqWidth = 4
         ),
         intPreg = IntPregParams(
           numEntries = 128,
@@ -88,8 +94,11 @@ class MinimalConfig(n: Int = 1) extends Config(
           numEntries = 128,
           numRead = 14,
           numWrite = 8,
+          
         ),
-        icacheParameters = ICacheParameters(
+        VlCnt = 2,
+          VsCnt = 2
+	icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache
           tagECC = Some("parity"),
           dataECC = Some("parity"),
