@@ -69,6 +69,8 @@ case class ExeUnitParams(
 
   def hasMemAddrFu = hasLoadFu || hasStoreAddrFu
 
+  def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
+
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     fuConfigs.map(_.getSrcDataType(srcIdx)).reduce(_ ++ _)
   }

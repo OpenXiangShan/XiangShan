@@ -473,6 +473,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
   val VipuCfg: FuConfig = FuConfig (
@@ -506,6 +507,10 @@ object FuConfig {
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg
+  )
+
+  def VecArithFuConfigs = Seq(
+    VialuCfg, VipuCfg, VfpuCfg
   )
 }
 

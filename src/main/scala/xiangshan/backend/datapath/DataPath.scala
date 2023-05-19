@@ -361,7 +361,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
             s1_data.src(1) := ImmExtractor(
               s0.bits.common.imm,
               s0.bits.immType,
-              s1_data.DataBits,
+              s1_data.params.dataBitsMax,
               s1_data.params.immType.map(_.litValue)
             )
           }
@@ -369,6 +369,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         if (s1_data.params.hasJmpFu) {
           when(SrcType.isPc(s0.bits.srcType(0))) {
             s1_data.src(0) := SignExt(s0.bits.jmp.get.pc, XLEN)
+          }
+        } else if (s1_data.params.hasVecFu) {
+          // Fuck off riscv vector imm!!! Why not src1???
+          when(SrcType.isImm(s0.bits.srcType(0))) {
+            s1_data.src(0) := ImmExtractor(
+              s0.bits.common.imm,
+              s0.bits.immType,
+              s1_data.params.dataBitsMax,
+              s1_data.params.immType.map(_.litValue)
+            )
           }
         }
       }
@@ -433,6 +443,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
       if (sinkData.params.hasJmpFu) {
         when(SrcType.isPc(s1_srcType(i)(j)(0))) {
+          sinkData.src(0) := s1_toExuData(i)(j).src(0)
+        }
+      } else if (sinkData.params.hasVecFu) {
+        when(SrcType.isImm(s1_srcType(i)(j)(0))) {
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
       }
