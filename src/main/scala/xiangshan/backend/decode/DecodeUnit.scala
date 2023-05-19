@@ -758,6 +758,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.vm    := inst.VM
   decodedInst.vpu.nf    := inst.NF
   decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
+  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF)
+  decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
 
   io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
   io.deq.decodedInst := decodedInst
