@@ -441,6 +441,7 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := payloadArrayRdata(i).fpu)
     deq.bits.common.vpu.foreach(_ := payloadArrayRdata(i).vpu)
+    deq.bits.common.vpu.foreach(_.vuopIdx := payloadArrayRdata(i).uopIdx)
   }}
 }
 
