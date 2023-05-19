@@ -302,34 +302,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  //  var intRfRdataIdx = 0
-//  var vfRfRdataIdx = 0
-//  for (iqIdx <- toExu.indices) {
-//    for (exuIdx <- toExu(iqIdx).indices) {
-//      for (srcIdx <- toExu(iqIdx)(exuIdx).bits.src.indices) {
-//        val readDataCfgSet = toExu(iqIdx)(exuIdx).bits.params.getSrcDataType(srcIdx)
-//        // need read int reg
-//        if (readDataCfgSet.intersect(IntRegSrcDataSet).nonEmpty) {
-//          println(s"[DataPath] (iqIdx, exuIdx, srcIdx): ($iqIdx, $exuIdx, $srcIdx)")
-//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := intRfRdata(intRfRdataIdx)
-//        } else {
-//          // better for debug, should never assigned to other bundles
-//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef".U
-//        }
-//        // need read vf reg
-//        if (readDataCfgSet.intersect(VfRegSrcDataSet).nonEmpty) {
-//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := vfRfRdata(vfRfRdataIdx)
-//          vfRfRdataIdx += 1
-//        } else {
-//          // better for debug, should never assigned to other bundles
-//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef_dead_beef_dead_beef".U
-//        }
-//      }
-//    }
-//  }
-//
-//  println(s"[DataPath] assigned RegFile Rdata: int(${intRfRdataIdx}), vf(${vfRfRdataIdx})")
-
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
