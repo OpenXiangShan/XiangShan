@@ -154,6 +154,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     dst.lastUop := false.B
   }
 
+  csBundle(0).numUops := numOfUop
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 

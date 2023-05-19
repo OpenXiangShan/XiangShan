@@ -421,14 +421,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val valid = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
   // writeback status
 
-  val store_data_writebacked = Mem(RobSize, Bool())
-  val writebackedCounter = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
+  val stdWritebacked = Reg(Vec(RobSize, Bool()))
+  val uopNumVec          = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
   val realDestSize       = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
   val fflagsDataModule   = RegInit(VecInit(Seq.fill(RobSize)(0.U(5.W))))
   val vxsatDataModule    = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
   def isWritebacked(ptr: UInt): Bool = {
-    !writebackedCounter(ptr).orR
+    !uopNumVec(ptr).orR && stdWritebacked(ptr)
   }
 
   // data for redirect, exception, etc.
@@ -965,7 +965,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val instEnqValidSeq = io.enq.req.map (req => io.enq.canAccept && req.valid && req.bits.firstUop)
   val enqNeedWriteRFSeq = io.enq.req.map(_.bits.needWriteRf)
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
+  val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
+  val enqEliminatedMoveVec = VecInit(io.enq.req.map(req => req.bits.eliminatedMove))
 
+  private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
+    req => FuType.isAMO(req.bits.fuType) || FuType.isStore(req.bits.fuType)
+  })
   val enqWbSizeSeq = io.enq.req.map { req =>
     val enqHasException = ExceptionNO.selectFrontend(req.bits.exceptionVec).asUInt.orR
     val enqHasTriggerHit = req.bits.trigger.getHitFrontend
@@ -987,13 +992,31 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     realDestSize(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), realDestSize(i) + PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map{ case(writeFlag, valid) => writeFlag && valid }), 0.U)
 
-    val enqCnt = ParallelPriorityMux(uopCanEnqSeq.reverse :+ true.B, enqWbSizeSumSeq.reverse :+ 0.U)
+    val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
+    val enqEliminatedMove = PriorityMux(instCanEnqSeq, enqEliminatedMoveVec)
+    val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map{ case(canWb, blockWb) => canWb && !blockWb }
-    val canStuWbSeq = stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val wbCnt = PopCount(canWbNoBlockSeq ++ canStuWbSeq)
-    writebackedCounter(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), Mux(exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U, 0.U, writebackedCounter(i) + enqCnt - wbCnt), 0.U)
+    val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U))
+    val wbCnt = PopCount(canWbNoBlockSeq)
+    when (exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U) {
+      // exception flush
+      uopNumVec(i) := 0.U
+      stdWritebacked(i) := true.B
+    }.elsewhen(!valid(i) && instCanEnqFlag) {
+      // enq set num of uops
+      uopNumVec(i) := Mux(enqEliminatedMove, 0.U, enqUopNum)
+      stdWritebacked(i) := Mux(enqWriteStd, false.B, true.B)
+    }.elsewhen(valid(i)) {
+      // update by writing back
+      uopNumVec(i) := uopNumVec(i) - wbCnt
+      when (canStdWbSeq.asUInt.orR) {
+        stdWritebacked(i) := true.B
+      }
+    }.otherwise {
+      uopNumVec(i) := 0.U
+    }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.reduce(_ | _)

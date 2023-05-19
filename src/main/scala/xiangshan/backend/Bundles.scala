@@ -84,6 +84,7 @@ object Bundles {
     val isVset        = Bool()
     val firstUop      = Bool()
     val lastUop       = Bool()
+    val numUops       = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType    = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
@@ -145,8 +146,9 @@ object Bundles {
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
     val isVset          = Bool()
-    val firstUop = Bool()
-    val lastUop = Bool()
+    val firstUop        = Bool()
+    val lastUop         = Bool()
+    val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())

@@ -32,6 +32,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   private val numRegSrc = backendParams.numRegSrc
+  // Todo: move it
   private val vecOldVdIdx = 2
 
   println(s"[Rename] numRegSrc: $numRegSrc")
