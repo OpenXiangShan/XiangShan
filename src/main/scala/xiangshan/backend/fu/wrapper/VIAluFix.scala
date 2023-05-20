@@ -66,10 +66,18 @@ class VIAluSrcTypeModule extends Module {
   // Todo: use it
   private val illegal = widenIllegal || narrowIllegal || vextIllegal
 
+  private val intType = Cat(0.U(1.W), isSign)
+
   private class Vs2Vs1VdSew extends Bundle {
     val vs2 = VSew()
     val vs1 = VSew()
     val vd = VSew()
+  }
+
+  private class Vs2Vs1VdType extends Bundle {
+    val vs2 = Vs2IntType()
+    val vs1 = Vs1IntType()
+    val vd  = VdType()
   }
 
   private val addSubSews = Mux1H(Seq(
@@ -85,24 +93,25 @@ class VIAluSrcTypeModule extends Module {
     (format === VialuFixType.FMT.VF8) -> Cat(vsewF8, vsewF8, vsew),
   )).asTypeOf(new Vs2Vs1VdSew)
 
-  // Todo
-  private val maskSews = Mux1H(Seq(
-    (format === VialuFixType.FMT.VVMV) -> Cat(vsew, vsew, vsew),
-    (format === VialuFixType.FMT.VVM ) -> Cat(vsew, vsew, vsew),
-    (format === VialuFixType.FMT.MMM ) -> Cat(vsew, vsew, vsew),
-  )).asTypeOf(new Vs2Vs1VdSew)
+  private val maskTypes = Mux1H(Seq(
+    (format === VialuFixType.FMT.VVM) -> Cat(Cat(intType, vsew),  Cat(intType, vsew), VdType.mask),
+    (format === VialuFixType.FMT.MMM) -> Cat(Vs2IntType.mask,     Vs1IntType.mask,    VdType.mask),
+  )).asTypeOf(new Vs2Vs1VdType)
 
   private val vs2Type = Mux1H(Seq(
-    isExt     -> Cat(0.U(1.W), isSign, vextSews.vs2),
-    (!isExt && !isDstMask) -> Cat(0.U(1.W), isSign, addSubSews.vs2),
+    isDstMask               -> maskTypes.vs2,
+    isExt                   -> Cat(intType, vextSews.vs2),
+    (!isExt && !isDstMask)  -> Cat(intType, addSubSews.vs2),
   ))
   private val vs1Type = Mux1H(Seq(
-    isExt     -> Cat(0.U(1.W), isSign, vextSews.vs1),
-    (!isExt && !isDstMask) -> Cat(0.U(1.W), isSign, addSubSews.vs1),
+    isDstMask               -> maskTypes.vs1,
+    isExt                   -> Cat(intType, vextSews.vs1),
+    (!isExt && !isDstMask)  -> Cat(intType, addSubSews.vs1),
   ))
   private val vdType = Mux1H(Seq(
-    isExt     -> Cat(0.U(1.W), isSign, vextSews.vd),
-    (!isExt && !isDstMask) -> Cat(0.U(1.W), isSign, addSubSews.vd),
+    isDstMask               -> maskTypes.vd,
+    isExt                   -> Cat(intType, vextSews.vd),
+    (!isExt && !isDstMask)  -> Cat(intType, addSubSews.vd),
   ))
 
   io.out.vs2Type := vs2Type

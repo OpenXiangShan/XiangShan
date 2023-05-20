@@ -749,6 +749,18 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 
+  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF)
+  private val vextInsts = Seq(VZEXT_VF2, VZEXT_VF4, VZEXT_VF8, VSEXT_VF2, VSEXT_VF4, VSEXT_VF8)
+  private val narrowInsts = Seq(
+    VNSRA_WV, VNSRA_WX, VNSRA_WI, VNSRL_WV, VNSRL_WX, VNSRL_WI,
+    VNCLIP_WV, VNCLIP_WX, VNCLIP_WI, VNCLIPU_WV, VNCLIPU_WX, VNCLIPU_WI,
+  )
+  private val maskDstInsts = Seq(
+    VMADC_VV, VMADC_VX,  VMADC_VI,  VMADC_VVM, VMADC_VXM, VMADC_VIM,
+    VMSBC_VV, VMSBC_VX,  VMSBC_VVM, VMSBC_VXM,
+    VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+  )
+
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
   decodedInst.vpu.vill  := io.enq.vtype.illegal
   decodedInst.vpu.vma   := io.enq.vtype.vma
@@ -758,8 +770,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.vm    := inst.VM
   decodedInst.vpu.nf    := inst.NF
   decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
-  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF)
   decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isExt     := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isNarrow  := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
 
   io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
   io.deq.decodedInst := decodedInst
