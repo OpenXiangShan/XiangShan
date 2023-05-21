@@ -95,6 +95,7 @@ class VIAluSrcTypeModule extends Module {
 
   private val maskTypes = Mux1H(Seq(
     (format === VialuFixType.FMT.VVM) -> Cat(Cat(intType, vsew),  Cat(intType, vsew), VdType.mask),
+    (format === VialuFixType.FMT.VVMM)-> Cat(Cat(intType, vsew),  Cat(intType, vsew), VdType.mask),
     (format === VialuFixType.FMT.MMM) -> Cat(Vs2IntType.mask,     Vs1IntType.mask,    VdType.mask),
   )).asTypeOf(new Vs2Vs1VdType)
 

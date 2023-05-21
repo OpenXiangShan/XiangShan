@@ -759,6 +759,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VMADC_VV, VMADC_VX,  VMADC_VI,  VMADC_VVM, VMADC_VXM, VMADC_VIM,
     VMSBC_VV, VMSBC_VX,  VMSBC_VVM, VMSBC_VXM,
     VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+    VMSEQ_VV, VMSEQ_VX, VMSEQ_VI, VMSNE_VV, VMSNE_VX, VMSNE_VI,
+    VMSLE_VV, VMSLE_VX, VMSLE_VI, VMSLEU_VV, VMSLEU_VX, VMSLEU_VI,
+    VMSLT_VV, VMSLT_VX, VMSLTU_VV, VMSLTU_VX,
+    VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
   )
 
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
