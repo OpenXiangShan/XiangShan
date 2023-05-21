@@ -645,21 +645,21 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   }
 
   // Commit time history checker
-  if (EnableGHistDiff) {
+  if (EnableCommitGHistDiff) {
     val commitGHist = RegInit(0.U.asTypeOf(Vec(HistoryLength, Bool())))
     val commitGHistPtr = RegInit(0.U.asTypeOf(new CGHPtr))
     def getCommitHist(ptr: CGHPtr): UInt =
       (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
 
-    val updateValid               = io.ftq_to_bpu.update.valid
-    val branchValidMask    : UInt = io.ftq_to_bpu.update.bits.ftb_entry.brValids.asUInt
+    val updateValid        : Bool      = io.ftq_to_bpu.update.valid
+    val branchValidMask    : UInt      = io.ftq_to_bpu.update.bits.ftb_entry.brValids.asUInt
     val branchCommittedMask: Vec[Bool] = io.ftq_to_bpu.update.bits.br_committed
-    val misPredictMask     : UInt = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
-    val takenMask     : UInt =
+    val misPredictMask     : UInt      = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
+    val takenMask          : UInt      =
       io.ftq_to_bpu.update.bits.br_taken_mask.asUInt |
         io.ftq_to_bpu.update.bits.ftb_entry.always_taken.asUInt // Always taken branch is recorded in history
-    val takenIdx      : UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
-    val misPredictIdx : UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
+    val takenIdx       : UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
+    val misPredictIdx  : UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
     val shouldShiftMask: UInt = Mux(takenMask.orR,
         LowerMask(takenIdx).asUInt,
         ((1 << numBr) - 1).asUInt) &
@@ -667,23 +667,23 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
         LowerMask(misPredictIdx).asUInt,
         ((1 << numBr) - 1).asUInt) &
       branchCommittedMask.asUInt
-    val updateShift    : UInt   = Mux(updateValid && branchValidMask.orR, PopCount(branchValidMask & shouldShiftMask), 0.U)
+    val updateShift    : UInt   =
+      Mux(updateValid && branchValidMask.orR, PopCount(branchValidMask & shouldShiftMask), 0.U)
     dontTouch(updateShift)
     dontTouch(commitGHist)
     dontTouch(commitGHistPtr)
     dontTouch(takenMask)
     dontTouch(branchValidMask)
     dontTouch(branchCommittedMask)
+
     // Maintain the commitGHist
     for (i <- 0 until numBr) {
-      // These seems to be update time variables
       when(updateShift >= (i + 1).U) {
         val ptr: CGHPtr = commitGHistPtr - i.asUInt
         commitGHist(ptr.value) := takenMask(i)
       }
     }
     when(updateValid) {
-      // Normal update at commit
       commitGHistPtr := commitGHistPtr - updateShift
     }
 
@@ -706,7 +706,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
         val commitTrueHist: UInt = computeFoldedHist(getCommitHist(commitGHistPtr), log2Ceil(nRowsPerBr))(histLen)
         val predictFHist         : UInt = predictFHistAll.
           getHistWithInfo((histLen, min(histLen, log2Ceil(nRowsPerBr)))).folded_hist
-        dontTouch(predictFHist)
         XSWarn(updateValid && predictFHist =/= commitTrueHist,
           p"predict time ghist: ${predictFHist} is different from commit time: ${commitTrueHist}\n")
       }
