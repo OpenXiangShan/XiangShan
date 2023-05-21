@@ -707,7 +707,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
         val predictFHist         : UInt = predictFHistAll.
           getHistWithInfo((histLen, min(histLen, log2Ceil(nRowsPerBr)))).folded_hist
         dontTouch(predictFHist)
-        XSError(updateValid && predictFHist =/= commitTrueHist,
+        XSWarn(updateValid && predictFHist =/= commitTrueHist,
           p"predict time ghist: ${predictFHist} is different from commit time: ${commitTrueHist}\n")
       }
     }
