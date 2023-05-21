@@ -57,14 +57,15 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(3.W)
-  val mshrFull = 1.U(3.W)
-  val dataInvalid = 2.U(3.W)
-  val bankConflict = 3.U(3.W)
-  val ldVioCheckRedo = 4.U(3.W)
-
+  val lrqFull = 0.U(3.W)
+  val tlbMiss = 1.U(3.W)
+  val mshrFull = 2.U(3.W)
+  val dataInvalid = 3.U(3.W)
+  val bankConflict = 4.U(3.W)
+  val ldVioCheckRedo = 5.U(3.W)
   val feedbackInvalid = 7.U(3.W)
 
+  val allTypes = 8
   def apply() = UInt(3.W)
 }
 
