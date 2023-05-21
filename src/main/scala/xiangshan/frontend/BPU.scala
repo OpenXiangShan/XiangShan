@@ -646,39 +646,42 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // Commit time history checker
   if (EnableGHistDiff) {
-    val redirectGHist = WireDefault(getHist(updated_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     val commitGHist = RegInit(0.U.asTypeOf(Vec(HistoryLength, Bool())))
     val commitGHistPtr = RegInit(0.U.asTypeOf(new CGHPtr))
     def getCommitHist(ptr: CGHPtr): UInt =
       (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (ptr.value+1.U))(HistoryLength-1, 0)
 
-    val updateValid       = io.ftq_to_bpu.update.valid
-    val updateShift: UInt = Mux(updateValid, OHToUInt(io.ftq_to_bpu.update.bits.spec_info.lastBrNumOH), 0.U)
-    val trueShift  : UInt = Mux(do_redirect.valid, shift, updateShift)
-    val shiftMask  : Vec[Bool] =
-      Mux(do_redirect.valid,
-        VecInit(Cat(0.U(1.W), taken && addIntoHist).asBools),
-        io.ftq_to_bpu.update.bits.br_taken_mask)
-    val nextCommitGHist: Vec[Bool] =
-      WireDefault(getCommitHist(commitGHistPtr - trueShift).asTypeOf(Vec(HistoryLength, Bool())))
-    dontTouch(trueShift)
+    val updateValid               = io.ftq_to_bpu.update.valid
+    val branchMask    : UInt = io.ftq_to_bpu.update.bits.ftb_entry.brValids.asUInt
+    val misPredictMask: UInt = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
+    val takenMask     : UInt =
+      io.ftq_to_bpu.update.bits.br_taken_mask.asUInt |
+        io.ftq_to_bpu.update.bits.ftb_entry.always_taken.asUInt // Always taken branch is recorded in history
+    val takenIdx      : UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
+    val misPredictIdx : UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr)+1).W)).asUInt
+    val shouldShiftMask: UInt = Mux(takenMask.orR,
+      LowerMask(takenIdx).asUInt,
+      ((1 << numBr) - 1).asUInt) &
+      Mux(misPredictMask.orR,
+      LowerMask(misPredictIdx).asUInt,
+      ((1 << numBr) - 1).asUInt)
+    val updateShift    : UInt   = Mux(updateValid && branchMask.orR, PopCount(branchMask & shouldShiftMask), 0.U)
+    dontTouch(updateShift)
     dontTouch(commitGHist)
     dontTouch(commitGHistPtr)
-    dontTouch(shiftMask)
+    dontTouch(takenMask)
+    dontTouch(branchMask)
     // Maintain the commitGHist
     for (i <- 0 until numBr) {
       // These seems to be update time variables
-      when(trueShift >= (i + 1).U) {
-        nextCommitGHist(i) := shiftMask(i)
+      when(updateShift >= (i + 1).U) {
+        val ptr: CGHPtr = commitGHistPtr - i.asUInt
+        commitGHist(ptr.value) := takenMask(i)
       }
     }
-    when(do_redirect.valid) {
-      // Recover history using metadata from FTQ
-      commitGHist := redirectGHist
-      commitGHistPtr := updated_ptr
-    } .elsewhen(updateValid) {
+    when(updateValid) {
       // Normal update at commit
-      commitGHistPtr := commitGHistPtr - trueShift
+      commitGHistPtr := commitGHistPtr - updateShift
     }
 
     // Calculate true history using Parallel XOR
