@@ -31,9 +31,11 @@ import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+
+  // params alias
   private val numRegSrc = backendParams.numRegSrc
-  // Todo: move it
-  private val vecOldVdIdx = 2
+  private val numVecRegSrc = backendParams.numVecRegSrc
+  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
 
   println(s"[Rename] numRegSrc: $numRegSrc")
 
@@ -50,7 +52,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
-    val vecReadPorts = Vec(RenameWidth, Vec(5, Input(UInt(PhyRegIdxWidth.W))))
+    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
@@ -209,7 +211,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).oldPdest := Mux1H(Seq(
       uops(i).rfWen  -> io.intReadPorts(i).last,
       uops(i).fpWen  -> io.fpReadPorts (i).last,
-      uops(i).vecWen -> io.vecReadPorts(i)(vecOldVdIdx),
+      uops(i).vecWen -> io.vecReadPorts(i).last,
     ))
     uops(i).eliminatedMove := isMove(i)
 

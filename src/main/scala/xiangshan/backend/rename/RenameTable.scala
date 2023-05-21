@@ -41,10 +41,15 @@ class RatWritePort(implicit p: Parameters) extends XSBundle {
 }
 
 class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
+
+  // params alias
+  private val numVecRegSrc = backendParams.numVecRegSrc
+  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+
   val readPortsNum = reg_t match {
     case Reg_I => 3
     case Reg_F => 4
-    case Reg_V => 5
+    case Reg_V => numVecRatPorts // +1 ldest
   }
   val io = IO(new Bundle {
     val redirect = Input(Bool())
@@ -137,6 +142,11 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
 }
 
 class RenameTableWrapper(implicit p: Parameters) extends XSModule {
+
+  // params alias
+  private val numVecRegSrc = backendParams.numVecRegSrc
+  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val robCommits = Input(new RobCommitIO)
@@ -145,7 +155,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     val fpReadPorts = Vec(RenameWidth, Vec(4, new RatReadPort))
     val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
-    val vecReadPorts = Vec(RenameWidth, Vec(5, new RatReadPort))
+    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort))
     val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
     // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
