@@ -33,14 +33,12 @@ class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val waitAllStore = Bool()
 }
 
-class DebugLsInfo(implicit p: Parameters) extends XSBundle{
+class DebugLsInfo(implicit p: Parameters) extends XSBundle {
   val s1 = new Bundle {
     val isTlbFirstMiss = Bool() // in s1
     val isBankConflict = Bool() // in s1
     val isLoadToLoadForward = Bool()
     val isReplayFast = Bool()
-    val vaddr_valid = Bool()
-    val vaddr_bits = UInt(VAddrBits.W)
   }
   val s2 = new Bundle{
     val isDcacheFirstMiss = Bool() // in s2 (predicted result is in s1 when using WPU, real result is in s2)
@@ -48,8 +46,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle{
     val isReplaySlow = Bool()
     val isLoadReplayTLBMiss = Bool()
     val isLoadReplayCacheMiss = Bool()
-    val paddr_valid = Bool()
-    val paddr_bits = UInt(PAddrBits.W)
   }
   val replayCnt = UInt(XLEN.W)
 
@@ -60,10 +56,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle{
     when(ena.s1.isReplayFast) {
       s1.isReplayFast := true.B
       replayCnt := replayCnt + 1.U
-    }
-    when(ena.s1.vaddr_valid) {
-      s1.vaddr_valid := true.B
-      s1.vaddr_bits := ena.s1.vaddr_bits
     }
   }
 
@@ -76,29 +68,21 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle{
       s2.isReplaySlow := true.B
       replayCnt := replayCnt + 1.U
     }
-    when(ena.s2.paddr_valid) {
-      s2.paddr_valid := true.B
-      s2.paddr_bits := ena.s2.paddr_bits
-    }
   }
 
 }
-object DebugLsInfo{
+object DebugLsInfo {
   def init(implicit p: Parameters): DebugLsInfo = {
     val lsInfo = Wire(new DebugLsInfo)
     lsInfo.s1.isTlbFirstMiss := false.B
     lsInfo.s1.isBankConflict := false.B
     lsInfo.s1.isLoadToLoadForward := false.B
     lsInfo.s1.isReplayFast := false.B
-    lsInfo.s1.vaddr_valid := false.B
-    lsInfo.s1.vaddr_bits := 0.U
     lsInfo.s2.isDcacheFirstMiss := false.B
     lsInfo.s2.isForwardFail := false.B
     lsInfo.s2.isReplaySlow := false.B
     lsInfo.s2.isLoadReplayTLBMiss := false.B
     lsInfo.s2.isLoadReplayCacheMiss := false.B
-    lsInfo.s2.paddr_valid := false.B
-    lsInfo.s2.paddr_bits := 0.U
     lsInfo.replayCnt := 0.U
     lsInfo
   }
@@ -111,6 +95,37 @@ class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
 }
 class DebugLSIO(implicit p: Parameters) extends XSBundle {
   val debugLsInfo = Vec(exuParameters.LduCnt + exuParameters.StuCnt, Output(new DebugLsInfoBundle))
+}
+
+class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
+  val s1 = new Bundle {
+    val robIdx = UInt(log2Ceil(RobSize).W)
+    val vaddr_valid = Bool()
+    val vaddr_bits = UInt(VAddrBits.W)
+  }
+  val s2 = new Bundle {
+    val robIdx = UInt(log2Ceil(RobSize).W)
+    val paddr_valid = Bool()
+    val paddr_bits = UInt(PAddrBits.W)
+  }
+
+  def s1SignalEnable(ena: LsTopdownInfo) = {
+    when(ena.s1.vaddr_valid) {
+      s1.vaddr_valid := true.B
+      s1.vaddr_bits := ena.s1.vaddr_bits
+    }
+  }
+
+  def s2SignalEnable(ena: LsTopdownInfo) = {
+    when(ena.s2.paddr_valid) {
+      s2.paddr_valid := true.B
+      s2.paddr_bits := ena.s2.paddr_bits
+    }
+  }
+}
+
+object LsTopdownInfo {
+  def init(implicit p: Parameters): LsTopdownInfo = 0.U.asTypeOf(new LsTopdownInfo)
 }
 
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
@@ -399,6 +414,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val debugRobHead = Output(new MicroOp)
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
+    val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -437,6 +453,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
   val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
+  val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(false.B))
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
 
@@ -535,6 +552,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(enqIndex).debugInfo.tlbFirstReqTime := timer
       debug_microOp(enqIndex).debugInfo.tlbRespTime := timer
       debug_lsInfo(enqIndex) := DebugLsInfo.init
+      debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
       debug_lqIdxValid(enqIndex) := false.B
       debug_lsIssued(enqIndex) := false.B
       when (enqUop.ctrl.blockBackward) {
@@ -889,6 +907,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
   }
+  for (i <- 0 until exuParameters.LduCnt) {
+    debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
+    debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
+  }
 
   // status field: writebacked
   // enqueue logic set 6 writebacked to false
@@ -1121,11 +1143,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
 
   val sourceVaddr = Wire(Valid(UInt(VAddrBits.W)))
-  sourceVaddr.valid := debug_lsInfo(deqPtr.value).s1.vaddr_valid
-  sourceVaddr.bits  := debug_lsInfo(deqPtr.value).s1.vaddr_bits
+  sourceVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
+  sourceVaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
   val sourcePaddr = Wire(Valid(UInt(PAddrBits.W)))
-  sourcePaddr.valid := debug_lsInfo(deqPtr.value).s2.paddr_valid
-  sourcePaddr.bits  := debug_lsInfo(deqPtr.value).s2.paddr_bits
+  sourcePaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
+  sourcePaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
   val sourceLqIdx = Wire(Valid(new LqPtr))
   sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
   sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx

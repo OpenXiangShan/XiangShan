@@ -24,7 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.DebugLsInfoBundle
+import xiangshan.backend.rob.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.cache._
 import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
@@ -886,6 +886,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val reExecuteQuery = Flipped(Vec(StorePipelineWidth, Valid(new LoadReExecuteQueryIO)))    // load replay
     val lsqOut = Flipped(Decoupled(new LsPipelineBundle))
     val debug_ls = Output(new DebugLsInfoBundle)
+    val lsTopdownInfo = Output(new LsTopdownInfo)
     val s2IsPointerChasing = Output(Bool()) // provide right pc for hw prefetch
   })
 
@@ -1234,8 +1235,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.debug_ls.s1.isLoadToLoadForward := load_s1.io.out.valid && s1_tryPointerChasing && !cancelPointerChasing
   io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
   io.debug_ls.s1.isReplayFast := io.lsq.replayFast.valid && io.lsq.replayFast.needreplay
-  io.debug_ls.s1.vaddr_valid := load_s1.io.in.fire && load_s1.io.in.bits.hasROBEntry
-  io.debug_ls.s1.vaddr_bits := load_s1.io.in.bits.vaddr
   io.debug_ls.s1_robIdx := load_s1.io.in.bits.uop.robIdx.value
   // s2
   io.debug_ls.s2.isDcacheFirstMiss := load_s2.io.in.fire && load_s2.io.in.bits.isFirstIssue && load_s2.io.dcacheResp.bits.miss
@@ -1243,10 +1242,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.debug_ls.s2.isReplaySlow := io.lsq.replaySlow.valid && io.lsq.replaySlow.needreplay
   io.debug_ls.s2.isLoadReplayTLBMiss := io.lsq.replaySlow.valid && !io.lsq.replaySlow.tlb_hited
   io.debug_ls.s2.isLoadReplayCacheMiss := io.lsq.replaySlow.valid && !io.lsq.replaySlow.cache_hited
-  io.debug_ls.s2.paddr_valid := load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss
-  io.debug_ls.s2.paddr_bits := load_s2.io.in.bits.paddr
   io.debug_ls.replayCnt := DontCare
   io.debug_ls.s2_robIdx := load_s2.io.in.bits.uop.robIdx.value
+
+  io.lsTopdownInfo.s1.robIdx := load_s1.io.in.bits.uop.robIdx.value
+  io.lsTopdownInfo.s1.vaddr_valid := load_s1.io.in.fire && load_s1.io.in.bits.hasROBEntry
+  io.lsTopdownInfo.s1.vaddr_bits := load_s1.io.in.bits.vaddr
+  io.lsTopdownInfo.s2.robIdx := load_s2.io.in.bits.uop.robIdx.value
+  io.lsTopdownInfo.s2.paddr_valid := load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss
+  io.lsTopdownInfo.s2.paddr_bits := load_s2.io.in.bits.paddr
 
   // bug lyq: some signals in perfEvents are no longer suitable for the current MemBlock design
   // hardware performance counter

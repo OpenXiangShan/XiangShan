@@ -27,7 +27,7 @@ import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{DebugLSIO, Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
@@ -232,6 +232,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val lsq = new RobLsqIO
       // debug
       val debug_ls = Flipped(new DebugLSIO)
+      val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
     }
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val perfInfo = Output(new Bundle{
@@ -556,6 +557,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robHeadLsIssue
+  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robDeqPtr := rob.io.robDeqPtr
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)

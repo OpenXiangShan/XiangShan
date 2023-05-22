@@ -27,7 +27,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, RobLsqIO}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO}
 import xiangshan.cache._
 import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
@@ -114,6 +114,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val debug_ls = new DebugLSIO
+    val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -301,6 +302,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.StuCnt) {
     io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
   }
+
+  io.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
 
   // pmp
   val pmp = Module(new PMP())
