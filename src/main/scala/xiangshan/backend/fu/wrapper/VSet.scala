@@ -7,10 +7,10 @@ import xiangshan.VSETOpType
 import xiangshan.backend.decode.Imm_VSETIVLI
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.fu.{FuConfig, FuncUnit, VsetModule, VtypeStruct}
+import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 
-class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
+class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   val debugIO = IO(new Bundle() {
     val vconfig = Output(VConfig())
   })

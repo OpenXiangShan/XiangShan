@@ -16,6 +16,7 @@ import xiangshan.backend.datapath.DataConfig._
   * @param fuType [[Int]] type of func, select from [[xiangshan.backend.fu.FuType]]
   * @param fuGen how to create $fu
   * @param srcData type of src data used by this $fu
+  * @param piped if the $fu is pipelined
   * @param maybeBlock the $fu need ready signal to block internal pipeline
   * @param writeIntRf the $fu write int regfiles
   * @param writeFpRf the $fu write float regfiles
@@ -23,7 +24,6 @@ import xiangshan.backend.datapath.DataConfig._
   * @param writeFflags the $fu write fflags csr
   * @param writeVxsat the $fu write vxsat csr
   * @param dataBits the width of data in the $fu
-  * @param piped if the $fu is pipelined
   * @param latency the latency of instuction executed in the $fu
   * @param hasInputBuffer if the $fu has input buffer
   * @param exceptionOut the $fu can produce these exception
@@ -43,6 +43,7 @@ case class FuConfig (
   fuType        : Int,
   fuGen         : (Parameters, FuConfig) => FuncUnit,
   srcData       : Seq[Seq[DataConfig]],
+  piped         : Boolean,
   maybeBlock    : Boolean = false,
   writeIntRf    : Boolean = false,
   writeFpRf     : Boolean = false,
@@ -50,7 +51,6 @@ case class FuConfig (
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
   dataBits      : Int = 64,
-  piped         : Boolean = false,
   latency       : HasFuLatency = CertainLatency(0),
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),
@@ -179,8 +179,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()), // jal
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     immType = Set(SelImm.IMM_I, SelImm.IMM_UJ, SelImm.IMM_U),
   )
 
@@ -191,8 +191,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = true,
     immType = Set(SelImm.IMM_SB),
   )
 
@@ -203,7 +202,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    writeIntRf = false,
+    piped = true,
     writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
@@ -217,10 +216,10 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     exceptionOut = Seq(illegalInstr, breakPoint, ecallU, ecallS, ecallM),
-    flushPipe = true
+    flushPipe = true,
   )
 
   val AluCfg: FuConfig = FuConfig (
@@ -230,8 +229,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     immType = Set(SelImm.IMM_I, SelImm.IMM_U),
   )
 
@@ -242,8 +241,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     latency = CertainLatency(2),
   )
 
@@ -254,8 +253,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
+    piped = false,
     writeIntRf = true,
-    writeFpRf = false,
     latency = UncertainLatency(),
     hasInputBuffer = (true, 4, true)
   )
@@ -267,9 +266,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
-    latency = UncertainLatency(),
+    piped = true,
+    latency = CertainLatency(0),
     exceptionOut = Seq(illegalInstr),
     flushPipe = true
   )
@@ -282,8 +280,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     latency = CertainLatency(1),
   )
 
@@ -294,8 +292,7 @@ object FuConfig {
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = true,
     writeVecRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -308,8 +305,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = true,
     writeVecRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -322,8 +318,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
@@ -336,10 +332,10 @@ object FuConfig {
       Seq(FpData(), FpData()),
       Seq(FpData(), FpData(), FpData()),
     ),
-    writeIntRf = false,
+    piped = true,
     writeFpRf = true,
     writeFflags = true,
-    latency = UncertainLatency(),
+    latency = CertainLatency(3),
     needSrcFrm = true,
   )
 
@@ -351,8 +347,8 @@ object FuConfig {
       Seq(FpData(), FpData()),
       Seq(FpData()),
     ),
+    piped = true,
     writeIntRf = true,
-    writeFpRf = false,
     writeFflags = true,
     latency = CertainLatency(2),
     needSrcFrm = true,
@@ -366,7 +362,7 @@ object FuConfig {
       Seq(FpData(), FpData()),
       Seq(FpData()),
     ),
-    writeIntRf = false,
+    piped = true,
     writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
@@ -380,7 +376,7 @@ object FuConfig {
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
-    writeIntRf = false,
+    piped = false,
     writeFpRf = true,
     writeFflags = true,
     latency = UncertainLatency(),
@@ -395,6 +391,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
+    piped = false, // Todo: check it
     writeIntRf = true,
     writeFpRf = true,
     latency = UncertainLatency(),
@@ -412,8 +409,7 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
     immType = Set(SelImm.IMM_S),
@@ -427,9 +423,8 @@ object FuConfig {
       Seq(IntData()),
       Seq(FpData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
-    latency = CertainLatency(1),
+    piped = true,
+    latency = CertainLatency(0),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
   )
 
@@ -440,8 +435,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
+    piped = false, // Todo: check it
     writeIntRf = true,
-    writeFpRf = false,
     latency = UncertainLatency(),
     exceptionOut = (LduCfg.exceptionOut ++ StaCfg.exceptionOut ++ StdCfg.exceptionOut).distinct
   )
@@ -453,9 +448,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    writeIntRf = false,
-    writeFpRf = false,
-    latency = UncertainLatency()
+    piped = true,
+    latency = CertainLatency(0),
   )
 
   val VialuCfg = FuConfig (
@@ -465,6 +459,7 @@ object FuConfig {
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),
+    piped = true,
     writeVecRf = true,
     latency = CertainLatency(1),
   )
@@ -476,8 +471,7 @@ object FuConfig {
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = false,
     writeVecRf = true,
     latency = UncertainLatency(),
   )
@@ -490,8 +484,7 @@ object FuConfig {
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
       Seq(FpData(), VecData(), VecData(), MaskSrcData(), VConfigData()),   // f[rs1], vs2, vd_old, v0
     ),
-    writeIntRf = false,
-    writeFpRf = false,
+    piped = false,
     writeVecRf = true,
     latency = UncertainLatency(),
   )

@@ -78,10 +78,15 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
-    io.out.bits.ctrl.robIdx   := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
-    io.out.bits.ctrl.pdest    := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
+    io.out.bits.ctrl.pdest  := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.rfWen  .foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
+    io.out.bits.ctrl.fpWen  .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpWen.get, io.in.fire))
+    io.out.bits.ctrl.vecWen .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
+    // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
-    io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get,    io.in.fire))
+    io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.vpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
   }
 }
 
@@ -91,7 +96,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
 trait HasPipelineReg { this: FuncUnit =>
   def latency: Int
 
-  require(latency > 0)
+  require(latency >= 0)
 
   val validVec = io.in.valid +: Seq.fill(latency)(RegInit(false.B))
   val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ io.out.ready
@@ -108,12 +113,12 @@ trait HasPipelineReg { this: FuncUnit =>
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
   }
 
-  for (i <- 1 until latency) {
-    when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
+  for (i <- 1 to latency) {
+    when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)) {
       validVec(i) := validVec(i - 1)
       ctrlVec(i) := ctrlVec(i - 1)
       dataVec(i) := dataVec(i - 1)
-    }.elsewhen(flushVec(i) || rdyVec(i)){
+    }.elsewhen(flushVec(i) || rdyVec(i)) {
       validVec(i) := false.B
     }
   }
@@ -142,4 +147,7 @@ trait HasPipelineReg { this: FuncUnit =>
 
 }
 
-
+abstract class PipedFuncUnit(override val cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
+  with HasPipelineReg {
+  override def latency: Int = cfg.latency.latencyVal.get
+}

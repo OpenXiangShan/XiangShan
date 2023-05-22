@@ -236,4 +236,8 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
     mul_pipe.io.out.bits.res.fflags.get
   )
   io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA)
+  io.out.bits.ctrl.fpWen.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.ctrl.fpWen.get,
+    mul_pipe.io.out.bits.ctrl.fpWen.get
+  )
 }

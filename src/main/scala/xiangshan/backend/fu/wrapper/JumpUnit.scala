@@ -4,11 +4,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import fudian.SignExt
 import xiangshan.RedirectLevel
-import xiangshan.backend.fu.{FuncUnit, JumpDataModule, FuConfig}
+import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 
 
-class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
+class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   private val jumpDataModule = Module(new JumpDataModule)
 
   private val flushed = io.in.bits.ctrl.robIdx.needFlush(io.flush)
