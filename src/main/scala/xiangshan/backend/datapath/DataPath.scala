@@ -27,7 +27,7 @@ class RFReadArbiterIO(inPortSize: Int, outPortSize: Int, pregWidth: Int)(implici
 class RFReadArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
   val allExuParams = backendParams.allExuParams
 
-  val portConfigs = allExuParams.map(_.rfrPortConfigs.flatten).flatten.filter{
+  val portConfigs: Seq[RdConfig] = allExuParams.map(_.rfrPortConfigs.flatten).flatten.filter{
     rfrPortConfigs =>
       if(isInt){
         rfrPortConfigs.isInstanceOf[IntRD]
@@ -35,6 +35,13 @@ class RFReadArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
       else{
         rfrPortConfigs.isInstanceOf[VfRD]
       }
+  }
+
+  private val moduleName = this.getClass.getName + (if (isInt) "Int" else "Vf")
+
+  println(s"[$moduleName] ports(${portConfigs.size})")
+  for (portCfg <- portConfigs) {
+    println(s"[$moduleName] port: ${portCfg.port}, priority: ${portCfg.priority}")
   }
 
   val pregParams = if(isInt) backendParams.intPregParams else backendParams.vfPregParams
@@ -110,7 +117,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vfBlocks = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
   private val vfBlocksSeq = vfBlocks.flatten
 
-  val intReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
+  val intReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
   issuePortsIn.zipWithIndex.foreach{
     case (issuePortIn, idx) =>
       val readPortIn = issuePortIn.bits.getIntRfReadBundle
