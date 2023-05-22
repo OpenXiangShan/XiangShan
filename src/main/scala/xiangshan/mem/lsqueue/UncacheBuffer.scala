@@ -64,7 +64,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
-  val uncacheCommitFired = RegInit(false.B)
+  val uncacheCommitFired = WireInit(false.B)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
 
   // enqueue
@@ -101,9 +101,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     * (4) writeback to ROB (and other units): mark as writebacked
     * (5) ROB commits the instruction: same as normal instructions
     */
-  when (uncacheState === s_req) {
-    uncacheCommitFired := false.B
-  }
+
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
@@ -195,6 +193,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   
   val dummyCtrl = RegNext(io.loadOut.valid)
+  uncacheCommitFired := false.B
   when (io.loadOut.fire && dummyCtrl) {
     req_valid := false.B
     uncacheCommitFired := true.B
