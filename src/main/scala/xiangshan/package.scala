@@ -58,7 +58,7 @@ package object xiangshan {
     def isBusy(state: UInt): Bool = state === this.busy
   }
 
-  def FuOpTypeWidth = 8
+  def FuOpTypeWidth = 9
   object FuOpType {
     def apply() = UInt(FuOpTypeWidth.W)
     def X = BitPat("b00000000")
