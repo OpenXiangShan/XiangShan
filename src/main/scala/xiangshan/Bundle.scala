@@ -47,7 +47,6 @@ import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
-import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -279,31 +278,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
-  // Assume only the LUI instruction is decoded with IMM_U in ALU.
-  def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
-  // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
-  def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-    successor.map{ case (src, srcType) =>
-      val pdestMatch = pdest === src
-      // For state: no need to check whether src is x0/imm/pc because they are always ready.
-      val rfStateMatch = if (exuCfg.readIntRf) ctrl.rfWen else false.B
-      // FIXME: divide fpMatch and vecMatch then
-      val fpMatch = if (exuCfg.readFpRf) ctrl.fpWen else false.B
-      val vecMatch = if (exuCfg.readVecRf) ctrl.vecWen else false.B
-      val allIntFpVec = exuCfg.readIntRf && exuCfg.readFpVecRf
-      val allStateMatch = Mux(SrcType.isVp(srcType), vecMatch, Mux(SrcType.isFp(srcType), fpMatch, rfStateMatch))
-      val stateCond = pdestMatch && (if (allIntFpVec) allStateMatch else rfStateMatch || fpMatch || vecMatch)
-      // For data: types are matched and int pdest is not $zero.
-      val rfDataMatch = if (exuCfg.readIntRf) ctrl.rfWen && src =/= 0.U else false.B
-      val dataCond = pdestMatch && (rfDataMatch && SrcType.isReg(srcType) || fpMatch && SrcType.isFp(srcType) || vecMatch && SrcType.isVp(srcType))
-      (stateCond, dataCond)
-    }
-  }
-  // This MicroOp is used to wakeup another uop (the successor: MicroOp).
-  def wakeup(successor: MicroOp, exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
-    wakeup(successor.psrc.zip(successor.ctrl.srcType), exuCfg)
-  }
-  def isJump: Bool = FuType.isJumpExu(ctrl.fuType)
 }
 
 class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
@@ -421,32 +395,6 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
-}
-
-class DiffCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
-
-  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
-
-  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
-}
-
-class RabCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(6.W)
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
-  val rfWen = Bool()
-  val fpWen = Bool()
-  val vecWen = Bool()
-}
-
-class RabCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth, Bool())
-  val isWalk = Bool()
-  val walkValid = Vec(CommitWidth, Bool())
-  val info = Vec(CommitWidth, new RabCommitInfo)
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
