@@ -62,7 +62,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   val triggerResult = RegInit(VecInit(Seq.fill(3)(false.B)))
 
   //
-  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   val uncacheCommitFired = WireInit(false.B)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
@@ -119,7 +119,16 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     }
     is (s_resp) {
       when (io.uncache.resp.fire) {
-        uncacheState := s_wait
+        uncacheState := s_wb
+      }
+    }
+    is (s_wb) {
+      when (uncacheCommitFired) {
+        when (RegNext(io.rob.commit)) {
+          uncacheState := s_idle // ready for next mmio 
+        } .otherwise {
+          uncacheState := s_wait
+        }
       }
     }
     is (s_wait) {
@@ -175,7 +184,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     ))
   val rdataPartialLoad = rdataHelper(selUop, rdataSel) 
 
-  io.loadOut.valid := (uncacheState === s_wait) && !uncacheCommitFired
+  io.loadOut.valid := (uncacheState === s_wb)
   io.loadOut.bits := DontCare
   io.loadOut.bits.uop := selUop
   io.loadOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -197,7 +206,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   when (io.loadOut.fire && dummyCtrl) {
     req_valid := false.B
     uncacheCommitFired := true.B
-
     XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
       io.loadOut.bits.uop.robIdx.asUInt,
       io.loadOut.bits.uop.lqIdx.asUInt,
