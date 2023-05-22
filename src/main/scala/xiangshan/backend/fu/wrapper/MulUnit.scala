@@ -19,10 +19,10 @@ class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val op = MULOpType.getOp(func)
 
-  private val ctrl = Wire(new MulDivCtrl)
-  ctrl.isW := MULOpType.isW(func)
-  ctrl.isHi := MULOpType.isH(func)
-  ctrl.sign := DontCare
+  private val mdCtrl = Wire(new MulDivCtrl)
+  mdCtrl.isW := MULOpType.isW(func)
+  mdCtrl.isHi := MULOpType.isH(func)
+  mdCtrl.sign := DontCare
 
   val sext = SignExt(_: UInt, xlen + 1)
   val zext = ZeroExt(_: UInt, xlen + 1)
@@ -51,11 +51,11 @@ class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   mulDataModule.io.regEnables := VecInit((1 to latency) map (i => regEnable(i)))
   private val result = mulDataModule.io.result
 
-  private var ctrlVec = Seq(ctrl)
+  private var mdCtrlVec = Seq(mdCtrl)
   for (i <- 1 to latency) {
-    ctrlVec = ctrlVec :+ PipelineReg(i)(ctrlVec(i - 1))
+    mdCtrlVec = mdCtrlVec :+ PipelineReg(i)(mdCtrlVec(i - 1))
   }
-  private val res = Mux(ctrlVec.last.isHi, result(2 * xlen - 1, xlen), result(xlen - 1, 0))
+  private val res = Mux(mdCtrlVec.last.isHi, result(2 * xlen - 1, xlen), result(xlen - 1, 0))
 
-  io.out.bits.res.data := Mux(ctrlVec.last.isW, SignExt(res(31, 0), xlen), res)
+  io.out.bits.res.data := Mux(mdCtrlVec.last.isW, SignExt(res(31, 0), xlen), res)
 }
