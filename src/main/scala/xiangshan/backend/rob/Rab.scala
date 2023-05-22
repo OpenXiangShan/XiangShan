@@ -61,12 +61,12 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, CommitWidth] steps
   val headPtrOHVec = VecInit.tabulate(CommitWidth + 1)(headPtrOHShift.left)
-  val headPtrOHVec2 = VecInit.tabulate(CommitWidth * MaxUopSize + 1)(headPtrOHShift.left)
+  val headPtrOHVec2 = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => headPtrOHShift.left(step)))
 
   val diffPtrOH = RegInit(1.U(size.W))
   val diffPtrOHShift = CircularShift(diffPtrOH)
   // may shift [0, CommitWidth * MaxUopSize] steps
-  val diffPtrOHVec = VecInit.tabulate(CommitWidth * MaxUopSize + 1)(diffPtrOHShift.left)
+  val diffPtrOHVec = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => diffPtrOHShift.left(step)))
 
   val tailPtr = RegInit(RenameBufferPtr(false, 0))
   val tailPtrOH = RegInit(1.U(size.W))
