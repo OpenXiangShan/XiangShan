@@ -51,7 +51,7 @@ abstract trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
     //   |          |          |          |         |           |  |  |  |  |  |  |  uopDivType
     //   |          |          |          |         |           |  |  |  |  |  |  |  |             selImm
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopDivType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -105,7 +105,7 @@ case class XSDecode(
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: Int, fuOp: BitPat, selImm: BitPat = SelImm.X,
-  uopSplitType: BitPat = uopSplitType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -746,7 +746,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   when(FuType.isVpu(decodedInst.fuType)) {
     decodedInst.vtype := io.enq.vtype
   }
-  io.deq.isComplex := UopDivType.needSplit(decodedInst.uopDivType)
+  io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
   decodedInst.commitType := 0.U // Todo: remove it
   io.deq.decodedInst := decodedInst
 

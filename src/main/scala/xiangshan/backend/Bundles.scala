@@ -81,14 +81,14 @@ object Bundles {
     val isMove        = Bool()
     val uopIdx        = UInt(5.W)
     val vtype         = new VType
-    val uopDivType    = UopDivType()
+    val uopSplitType  = UopSplitType()
     val isVset        = Bool()
     val firstUop      = Bool()
     val lastUop       = Bool()
     val commitType    = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      isXSTrap, waitForward, blockBackward, flushPipe, uopDivType, selImm)
+      isXSTrap, waitForward, blockBackward, flushPipe, uopSplitType, selImm)
 
     def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodedInst = {
       val decoder: Seq[UInt] = ListLookup(
