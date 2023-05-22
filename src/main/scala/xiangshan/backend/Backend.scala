@@ -12,7 +12,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataPath, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO}
+import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO, FuConfig}
 import xiangshan.backend.issue.Scheduler
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
@@ -36,6 +36,10 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   println(s"Function Unit: Alu(${params.AluCnt}), Brh(${params.BrhCnt}), Jmp(${params.JmpCnt}), " +
     s"Ldu(${params.LduCnt}), Sta(${params.StaCnt}), Std(${params.StdCnt})")
+
+  for (cfg <- FuConfig.allConfigs) {
+    println(s"[Backend] $cfg")
+  }
 
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
@@ -181,7 +185,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
     }
   }
-  vfExuBlock.io.frm.get := csrio.fpu.frm
+  vfExuBlock.io.frm.foreach(_ := csrio.fpu.frm)
 
   wbDataPath.io.flush := ctrlBlock.io.redirect
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId

@@ -32,10 +32,11 @@ object FuType {
   val vppu = OHInt(21)
   val vsetiwf = OHInt(22) // vset read rs write vconfig
   val vsetfwf = OHInt(23) // vset read old vl write vconfig
+  val vimac = OHInt(24)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 24
+  def num = 25
 
   def width = num
 
@@ -61,7 +62,7 @@ object FuType {
 
   def isFence(fuType: UInt): Bool = fuType(7)
 
-  def isVpu(fuType: UInt): Bool = fuType(17, 16).orR
+  def isVpu(fuType: UInt): Bool = fuType(19, 16).orR || fuType(21) || fuType(24)
 
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 

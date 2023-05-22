@@ -424,17 +424,23 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       val numLSrc = s0_enqBits(i).srcType.size min enq.bits.data.srcType.size
-      for (j <- 0 until numLSrc) {
+      val numPSrc = s0_enqBits(i).srcState.size min enq.bits.data.srcState.size
+
+      for (j <- 0 until numPSrc) {
         enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
         enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
+      }
+
+      for (j <- 0 until numLSrc) {
         enq.bits.data.srcType(j) := s0_enqBits(i).srcType(j)
       }
-      // enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
-      // enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
+      if (enq.bits.data.srcType.isDefinedAt(3)) enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
+      if (enq.bits.data.srcType.isDefinedAt(4)) enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
     }
   }
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.get := payloadArrayRdata(i).fpu
+    deq.bits.common.fpu.foreach(_ := payloadArrayRdata(i).fpu)
+    deq.bits.common.vpu.foreach(_ := payloadArrayRdata(i).vpu)
   }}
 }
 

@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VSetRiWi, VSetRiWvf, VSetRvfWvf}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VIAluFix, VSetRiWi, VSetRiWvf, VSetRvfWvf}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -168,6 +168,14 @@ case class FuConfig (
       require(idx >= 0 && idx == idx0, tips + ", and at the same index.")
     }
     idx0
+  }
+
+  override def toString: String = {
+    var str = s"${this.name}: "
+    if (vconfigWakeUp) str += s"vconfigIdx($vconfigIdx), "
+    if (maskWakeUp) str += s"maskSrcIdx($maskSrcIdx), "
+    str += s"latency($latency)"
+    str
   }
 }
 
@@ -453,15 +461,17 @@ object FuConfig {
   )
 
   val VialuCfg = FuConfig (
-    name = "vialu",
+    name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = null,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
     latency = CertainLatency(1),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
   )
 
   val VipuCfg: FuConfig = FuConfig (
@@ -492,5 +502,9 @@ object FuConfig {
   // def VlduCfg = FuConfig ()
   // def VstuCfg = FuConfig ()
 
+  def allConfigs = Seq(
+    JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
+    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg
+  )
 }
 

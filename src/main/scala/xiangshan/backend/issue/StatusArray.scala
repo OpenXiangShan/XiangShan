@@ -93,7 +93,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   val statusNextVec = Wire(Vec(params.numEntries, new StatusEntry()))
 
   val enqStatusVec = Wire(Vec(params.numEntries, ValidIO(new StatusEntry)))
-  val srcWakeUpVec = Wire(Vec(params.numEntries, Vec(params.numRegSrcMax, Bool())))
+  val srcWakeUpVec = Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool())))
   val deqRespVec = Wire(Vec(params.numEntries, ValidIO(new StatusArrayDeqRespBundle)))
   val flushedVec = Wire(Vec(params.numEntries, Bool()))
   val clearVec = Wire(Vec(params.numEntries, Bool()))

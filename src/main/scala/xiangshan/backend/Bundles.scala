@@ -11,7 +11,7 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType, Vl, Vxrm}
+import xiangshan.backend.fu.vector.Bundles.{Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
 import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
@@ -265,6 +265,29 @@ object Bundles {
 
     // vector load/store
     val nf        = Nf()
+
+    val isReverse = Bool() // vrsub, vrdiv
+    val isExt     = Bool()
+    val isNarrow  = Bool()
+    val isDstMask = Bool() // vvm, vvvm, mmm
+    val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
+
+    def vtype: VType = {
+      val res = Wire(VType())
+      res.illegal := this.vill
+      res.vma     := this.vma
+      res.vta     := this.vta
+      res.vsew    := this.vsew
+      res.vlmul   := this.vlmul
+      res
+    }
+
+    def vconfig: VConfig = {
+      val res = Wire(VConfig())
+      res.vtype := this.vtype
+      res.vl    := this.vl
+      res
+    }
   }
 
   // DynInst --[IssueQueue]--> DataPath
@@ -291,7 +314,7 @@ object Bundles {
 
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
-    def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(x => x.readFp || x.readVec)
+    def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf)
   }
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
@@ -313,6 +336,7 @@ object Bundles {
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
     val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
+    val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val jalrTarget    = if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None

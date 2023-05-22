@@ -6,9 +6,11 @@ import chisel3.util._
 import utility.DataHoldBypass
 import utils.OptionWrapper
 import xiangshan._
+import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.fu.vector.Bundles.Vxsat
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -26,6 +28,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val taken     = Bool()
   })
   val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -39,17 +42,22 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals) // only used in FMA
+  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.dataBits.W)
   val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+
+  def getSrcVConfig : UInt = src(cfg.vconfigIdx)
+  def getSrcMask    : UInt = src(cfg.maskSrcIdx)
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val data      = UInt(cfg.dataBits.W)
   val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
+  val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
   val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
   val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
 }

@@ -140,10 +140,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
   intRFReadArbiter.io.flush := io.flush
 
-  val vfReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getFpRfReadBundle.size).scan(0)(_ + _)
+  val vfReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getVfRfReadBundle.size).scan(0)(_ + _)
+  println(s"vfReadPortInSize: $vfReadPortInSize")
+
   issuePortsIn.zipWithIndex.foreach {
     case (issuePortIn, idx) =>
-      val readPortIn = issuePortIn.bits.getFpRfReadBundle
+      val readPortIn = issuePortIn.bits.getVfRfReadBundle
       val l = vfReadPortInSize(idx)
       val r = vfReadPortInSize(idx + 1)
       val arbiterIn = vfRFReadArbiter.io.in.slice(l, r)

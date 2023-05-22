@@ -46,6 +46,7 @@ case class ExeUnitParams(
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
+  val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val wbPregIdxWidth = if (wbPortConfigs.nonEmpty) wbPortConfigs.map(_.pregIdxWidth).max else 0
 
   protected val latencyCertain = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_&&_)
