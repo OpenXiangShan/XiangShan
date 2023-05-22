@@ -47,6 +47,9 @@ case class BackendParams(
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
 
+  def numSrc    : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
+  def numRegSrc : Int = allSchdParams.map(_.issueBlockParams.map(_.numRegSrc).max).max
+
   def AluCnt = allSchdParams.map(_.AluCnt).sum
   def StaCnt = allSchdParams.map(_.StaCnt).sum
   def StdCnt = allSchdParams.map(_.StdCnt).sum

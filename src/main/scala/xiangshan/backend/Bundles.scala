@@ -49,8 +49,7 @@ object Bundles {
 
   // StaticInst --[Decode]--> DecodedInst
   class DecodedInst(implicit p: Parameters) extends XSBundle {
-    def numPSrc = 5
-    def numLSrc = 3
+    def numSrc = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
@@ -63,8 +62,8 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // decoded
-    val srcType       = Vec(numLSrc, SrcType())
-    val lsrc          = Vec(numLSrc, UInt(6.W))
+    val srcType       = Vec(numSrc, SrcType())
+    val lsrc          = Vec(numSrc, UInt(6.W))
     val ldest         = UInt(6.W)
     val fuType        = FuType()
     val fuOpType      = FuOpType()
@@ -115,9 +114,7 @@ object Bundles {
 
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
-    def numLSrc         = 3
-    // vector inst need vs1, vs2, vd, v0, vl&vtype, 5 psrcs
-    def numPSrc         = 5
+    def numSrc          = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
@@ -130,8 +127,8 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // passed from DecodedInst
-    val srcType         = Vec(numLSrc, SrcType())
-    val lsrc            = Vec(numLSrc, UInt(6.W))
+    val srcType         = Vec(numSrc, SrcType())
+    val lsrc            = Vec(numSrc, UInt(6.W))
     val ldest           = UInt(6.W)
     val fuType          = FuType()
     val fuOpType        = FuOpType()
@@ -154,8 +151,8 @@ object Bundles {
     val lastUop = Bool()
     val commitType      = CommitType()
     // rename
-    val srcState        = Vec(numPSrc, SrcState())
-    val psrc            = Vec(numPSrc, UInt(PhyRegIdxWidth.W))
+    val srcState        = Vec(numSrc, SrcState())
+    val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr

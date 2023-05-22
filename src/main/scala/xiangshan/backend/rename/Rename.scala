@@ -31,6 +31,10 @@ import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+  private val numRegSrc = backendParams.numRegSrc
+
+  println(s"[Rename] numRegSrc: $numRegSrc")
+
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val robCommits = Input(new RobCommitIO)
@@ -272,17 +276,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  private val numPSrc = 5
-  private val vconfigLregIdx = 32 // Todo: the idx of vconfig in another pregfile
-  val bypassCond = Wire(Vec(numPSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
-  require(io.in(0).bits.srcType.size == io.in(0).bits.numLSrc)
-  private val pdestLoc = io.in.head.bits.srcType.size + 2 // 2 vector src: v0, vl&vtype
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
+  private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
   for (i <- 1 until RenameWidth) {
-    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) ++ Seq.fill(2)(true.B) :+ needVecDest(i)
-    val fpCond = io.in(i).bits.srcType.map(_ === SrcType.fp) ++ Seq.fill(2)(false.B) :+ needFpDest(i)
-    val intCond = io.in(i).bits.srcType.map(_ === SrcType.reg) ++ Seq.fill(2)(false.B) :+ needIntDest(i)
-    val target = io.in(i).bits.lsrc ++ Seq(0.U, 32.U) :+ io.in(i).bits.ldest
+    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
+    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
+    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp) :+ needIntDest(i)
+    val target = io.in(i).bits.lsrc :+ io.in(i).bits.ldest
     for (((((cond1, cond2), cond3), t), j) <- vecCond.zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
         val indexMatch = in.bits.ldest === t
