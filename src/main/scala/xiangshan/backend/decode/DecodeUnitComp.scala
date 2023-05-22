@@ -38,7 +38,7 @@ trait VectorConstants {
   val MAX_VLMUL = 8
   val FP_TMP_REG_MV = 32
   val VECTOR_TMP_REG_LMUL = 32 // 32~38  ->  7
-  val VECTOR_VCONFIG = 39
+  val VCONFIG_IDX = 39
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -167,13 +167,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).flushPipe := false.B
           csBundle(0).rfWen := true.B
           csBundle(0).vecWen := false.B
-          csBundle(1).ldest := VECTOR_VCONFIG.U
+          csBundle(1).ldest := VCONFIG_IDX.U
         }.elsewhen(src1 =/= 0.U) {
-          csBundle(0).ldest := VECTOR_VCONFIG.U
+          csBundle(0).ldest := VCONFIG_IDX.U
         }.elsewhen(VSETOpType.isVsetvli(decodedInsts_u.fuOpType)) {
           csBundle(0).fuType := FuType.vsetfwf.U
           csBundle(0).srcType(0) := SrcType.vp
-          csBundle(0).lsrc(0) := VECTOR_VCONFIG.U
+          csBundle(0).lsrc(0) := VCONFIG_IDX.U
         }.elsewhen(VSETOpType.isVsetvl(decodedInsts_u.fuOpType)) {
           csBundle(0).srcType(0) := SrcType.reg
           csBundle(0).srcType(1) := SrcType.imm
@@ -195,10 +195,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).flushPipe := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VECTOR_VCONFIG.U
+          csBundle(1).lsrc(0) := VCONFIG_IDX.U
           csBundle(1).srcType(1) := SrcType.fp
           csBundle(1).lsrc(1) := FP_TMP_REG_MV.U
-          csBundle(1).ldest := VECTOR_VCONFIG.U
+          csBundle(1).ldest := VCONFIG_IDX.U
         }
       }
     }

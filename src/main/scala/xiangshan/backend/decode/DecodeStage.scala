@@ -48,7 +48,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   })
 
   private val v0Idx = 0
-  private val vconfigIdx = VECTOR_VCONFIG
+  private val vconfigIdx = VCONFIG_IDX
 
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
