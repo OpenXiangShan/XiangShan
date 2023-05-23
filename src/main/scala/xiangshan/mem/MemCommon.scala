@@ -75,6 +75,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For debug usage
   val isFirstIssue = Bool()
+  val hasROBEntry = Bool()
 
   // For load replay
   val isLoadReplay = Bool()
@@ -113,7 +114,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
     sleepIndex := input.sleepIndex
-
+    hasROBEntry := input.hasROBEntry
     meta_prefetch := DontCare
     meta_access := DontCare
     forward_tlDchannel := DontCare
@@ -150,6 +151,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    hasROBEntry := input.hasROBEntry
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel

@@ -24,8 +24,10 @@ import freechips.rocketchip.tilelink._
 import utils._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import huancun.{PreferCacheKey, ReqSourceKey}
+import xiangshan.{MemReqSource, XSCoreParamsKey}
 import utility._
-import xiangshan.XSCoreParamsKey
 
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
@@ -763,5 +765,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     fromSource      = io.id,
     toAddress       = Cat(req.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
+  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
+  io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1InstPrefetch.id.U)
 
 }

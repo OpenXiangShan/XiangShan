@@ -262,7 +262,7 @@ class WithNKBL2
           blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
+        reqField = Seq(PreferCacheField(), ReqSourceField()),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
         enablePerf = true,

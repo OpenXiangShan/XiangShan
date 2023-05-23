@@ -31,6 +31,7 @@ import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import utility.ChiselDB
 import difftest._
+import huancun.{ReqSourceField, ReqSourceKey}
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -38,7 +39,8 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
+    )),
+    requestFields = Seq(ReqSourceField())
   )))
 
   lazy val module = new L2TLBImp(this)
@@ -253,6 +255,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   )._2
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
   mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))

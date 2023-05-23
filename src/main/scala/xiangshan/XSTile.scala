@@ -80,7 +80,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   private val misc = LazyModule(new XSTileMisc())
   private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l2param.copy(enableTopDown = env.EnableTopDown)
+      case HCCacheParamsKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
     })))
   )
 
@@ -131,6 +131,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         recv := core.memBlock.pf_sender_opt.get
       })
     case None =>
+      val dummyMatch = WireDefault(false.B)
+      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
