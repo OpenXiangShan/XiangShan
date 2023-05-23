@@ -55,6 +55,8 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
     // flush this entry
     val flush = Output(Bool())
+
+    val commitFire = Output(Bool())
   })
 
   val req_valid = RegInit(false.B)
@@ -64,6 +66,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
+  val uncacheCommitFire = WireInit(false.B)
   val uncacheCommitFired = RegInit(false.B)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
 
@@ -195,8 +198,10 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   
   val dummyCtrl = RegNext(io.loadOut.valid)
+  uncacheCommitFire := false.B
   when (io.loadOut.fire && dummyCtrl) {
     req_valid := false.B
+    uncacheCommitFire := true.B
     uncacheCommitFired := true.B
 
     XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
@@ -206,6 +211,8 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
       true.B
     )    
   }
+
+  io.commitFire := uncacheCommitFire
   // end
 }
 
@@ -329,6 +336,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val loadOut = Wire(Valid(io.loadOut(0).bits.cloneType))
   val loadRawDataOut = Wire(io.loadRawDataOut(0).cloneType)
   val lqLoadAddrTriggerHitVec = Wire(io.trigger(0).lqLoadAddrTriggerHitVec.cloneType)
+  val commitFire = Wire(Bool())
 
   // init
   uncacheReq.valid := false.B 
@@ -337,6 +345,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   loadOut.bits := DontCare 
   loadRawDataOut := DontCare
   lqLoadAddrTriggerHitVec := DontCare
+  commitFire := false.B
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
@@ -364,6 +373,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
         loadOut.valid := e.io.loadOut.valid 
         loadOut.bits := e.io.loadOut.bits 
         loadRawDataOut := e.io.loadRawDataOut
+        commitFire := e.io.commitFire
         // Read vaddr for mem exception
         // no inst will be commited 1 cycle before tval update
         // read vaddr for mmio, and only port 0 is used 
@@ -377,7 +387,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   io.uncache.req.valid := RegNext(uncacheReq.valid)
   io.uncache.req.bits := RegNext(uncacheReq.bits)
-  io.loadOut(0).valid := RegNext(loadOut.valid)
+  io.loadOut(0).valid := RegNext(loadOut.valid) && !RegNext(commitFire)
   io.loadOut(0).bits := RegNext(loadOut.bits)
   io.loadRawDataOut(0) := RegNext(loadRawDataOut)
   io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
