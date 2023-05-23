@@ -509,8 +509,6 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     Seq(TLMasterParameters.v1(
       name = "icache",
       sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nPrefetchEntries),
-      supportsProbe = TransferSizes(blockBytes),
-      supportsHint = TransferSizes(blockBytes)
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields
