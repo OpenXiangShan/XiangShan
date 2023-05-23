@@ -18,6 +18,8 @@ class Riscv32BitInst extends RiscvInst(32) {
 
 trait BitFieldsI { this: Riscv32BitInst =>
   def IMM12   : UInt  = inst(31, 20)
+  def SHAMT6  : UInt  = inst(25, 20)
+  def SHAMT5  : UInt  = inst(24, 20)
 }
 
 trait BitFieldsS { this: Riscv32BitInst =>
@@ -37,7 +39,8 @@ trait BitFieldsFp { this: Riscv32BitInst =>
   def FS3     : UInt  = inst(31, 27)
   def RM      : UInt  = inst(14, 12) // round mode
   def CONV_SGN: UInt  = inst(24, 20)
-  def FUNCT2  : UInt  = inst(26, 25)
+  def FMT     : UInt  = inst(26, 25)
+  def TYP     : UInt  = inst(21, 20)
 }
 
 trait BitFieldsVec { this: Riscv32BitInst =>

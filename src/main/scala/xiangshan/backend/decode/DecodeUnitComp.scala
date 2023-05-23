@@ -29,6 +29,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.VType
 import yunsuan.VpermType
 
@@ -65,13 +66,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val maxUopSize = MaxUopSize
   //input bits
   val staticInst = Wire(new StaticInst)
+  private val inst: XSInstBitFields = staticInst.asTypeOf(new XSInstBitFields)
 
   staticInst := io.enq.staticInst
 
-  val src1 = Cat(0.U(1.W), staticInst.instr(19, 15))
-  val src2 = Cat(0.U(1.W), staticInst.instr(24, 20))
-  val dest = Cat(0.U(1.W), staticInst.instr(11, 7))
-  val width = staticInst.instr(14, 12)    //Vector LS eew
+  val src1 = Cat(0.U(1.W), inst.RS1)
+  val src2 = Cat(0.U(1.W), inst.RS2)
+  val dest = Cat(0.U(1.W), inst.RD)
+  val width = inst.RM //Vector LS eew
   val eew = Cat(0.U(1.W), width(1, 0))
 
   //output bits
