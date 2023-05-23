@@ -699,15 +699,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.numUops := 1.U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  decodedInst.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
+  decodedInst.isMove := isMove && inst.RD =/= 0.U
 
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
 
   // read src1~3 location
-  decodedInst.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
-  decodedInst.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
-  decodedInst.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
+  decodedInst.lsrc(0) := inst.RS1
+  decodedInst.lsrc(1) := inst.RS2
+  decodedInst.lsrc(2) := inst.FS3
   decodedInst.lsrc(3) := v0Idx.U
   decodedInst.lsrc(4) := vconfigIdx.U
   decodedInst.srcType(3) := Mux(inst.VM.asBool, SrcType.DC, SrcType.vp) // mask src
@@ -715,7 +715,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   // cs.lsrc(2) := Mux(FuType.isVecExu(cs.fuType), ctrl_flow.instr(RD_MSB, RD_LSB), ctrl_flow.instr(RS3_MSB, RS3_LSB))
   // read dest location
-  decodedInst.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
+  decodedInst.ldest := inst.RD
 
   // fill in exception vector
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR
