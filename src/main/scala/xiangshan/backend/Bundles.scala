@@ -80,6 +80,7 @@ object Bundles {
     val vpu           = new VPUCtrlSignals
     val isMove        = Bool()
     val uopIdx        = UInt(5.W)
+
     val uopSplitType  = UopSplitType()
     val isVset        = Bool()
     val firstUop      = Bool()
