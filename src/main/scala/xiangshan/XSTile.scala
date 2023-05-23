@@ -108,24 +108,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     (buffers, node)
   }
 
-  val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
-  misc.busPMU :=
-    TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-    l1i_to_l2_buf_node :=
-    core.frontend.icache.clientNode
-
-  val ptw_to_l2_buffers = if (!coreParams.softPTW) {
-    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
-    misc.busPMU :=
-      TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-      buf_node :=
-      core.ptw_to_l2_buffer.node
-    buffers
-  } else Seq()
+  misc.busPMU := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) := core.frontend.icache.clientNode
+  if (!coreParams.softPTW) {
+    misc.busPMU := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) := core.ptw_to_l2_buffer.node 
+  } 
 
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= misc.l1_xbar
       l2.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.pf_sender_opt.get
@@ -173,8 +163,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
     val resetChain = Seq(
       Seq(misc.module, core.module) ++
-        l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
