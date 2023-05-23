@@ -358,6 +358,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackStFtqOffset = stFtqOffset(rollbackUopExt.flag)
  
   // check if rollback request is still valid in parallel
+  io.rollback.bits := DontCare
+  io.rollback.bits.debugIsMemVio := true.B 
   io.rollback.bits.robIdx := rollbackUop.robIdx
   io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
   io.rollback.bits.stFtqIdx := rollbackStFtqIdx
