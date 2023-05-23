@@ -469,12 +469,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_tageTaken := Mux1H(Seq(
     (provided && !providerNull, providerInfo.ctr(ITTageCtrBits-1)),
     (altProvided && providerNull, altProviderInfo.ctr(ITTageCtrBits-1)),
-    (!provided, basePred)
+    (!provided || providerNull && !altProvided, basePred)
   )) // TODO: reintroduce BIM
   s2_tageTarget := Mux1H(Seq(
     (provided && !providerNull, providerInfo.target),
     (altProvided && providerNull, altProviderInfo.target),
-    (!provided, baseTarget)
+    (!provided || providerNull && !altProvided, baseTarget)
   ))
   s2_finalAltPred := Mux(altProvided, altProviderInfo.ctr(ITTageCtrBits-1), basePred)
   s2_provided       := provided

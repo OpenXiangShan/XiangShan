@@ -151,7 +151,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheLineOffset = DCacheSetOffset
 
   // uncache
-  val uncacheIdxBits = log2Up(StoreQueueSize) max log2Up(LoadQueueSize)
+  val uncacheIdxBits = log2Up(StoreQueueSize + 1) max log2Up(VirtualLoadQueueSize + 1)
   // hardware prefetch parameters
   // high confidence hardware prefetch port
   val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default
@@ -696,7 +696,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val bankedDataArray = Module(new BankedDataArray)
+  val bankedDataArray = if(EnableDCacheWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array

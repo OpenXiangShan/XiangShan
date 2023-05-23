@@ -93,3 +93,43 @@ class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
     val req     = Flipped(DecoupledIO(new ICacheReadBundle))
     val resp = Output(new ICacheMetaRespBundle)
 }
+
+class IPFBufferFilterRead(implicit p: Parameters) extends  IPrefetchBundle{
+  /** input */
+  val req = Flipped(new Bundle {
+    val vSetIdx = Output(UInt(log2Ceil(nSets).W))
+    val paddr = Output(UInt(PAddrBits.W))
+  })
+  /** output */
+  val resp = new Bundle {
+    val ipf_hit = Output(Bool())
+  }
+}
+
+class IPFBufferRead(implicit p: Parameters) extends IPrefetchBundle {
+  val req = Vec(PortNumber, Flipped(DecoupledIO(new Bundle {
+    val vaddr = UInt(VAddrBits.W)
+    val paddr = UInt(PAddrBits.W)
+  })))
+  val resp = Vec(PortNumber, ValidIO(new Bundle {
+    val ipf_hit = Bool()
+    val cacheline = UInt(blockBits.W)
+  }))
+}
+
+class PIQMetaWrite(implicit p: Parameters) extends  IPrefetchBundle{
+  val tag = UInt(tagBits.W)
+  val index = UInt(idxBits.W)
+  val paddr = UInt(PAddrBits.W)
+}
+
+class IPFBufferWrite(implicit p: Parameters) extends  IPrefetchBundle{
+  val buffIdx = UInt(log2Ceil(nPrefetchEntries).W)
+  val meta = new PIQMetaWrite
+  val data =  UInt(blockBits.W)
+}
+
+class IPFBufferMove(implicit p: Parameters) extends  IPrefetchBundle{
+  val vsetIdx = Output(UInt(idxBits.W))
+  val waymask = Input(UInt(nWays.W))
+}
