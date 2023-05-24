@@ -832,7 +832,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     }
   }
 
-  ExcitingUtils.addSource(!rob_head_miss_in_dcache && !lq_doing_other_replay, s"load_l1_cache_stall_without_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  // ExcitingUtils.addSource(!rob_head_miss_in_dcache && !lq_doing_other_replay, s"load_l1_cache_stall_without_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf, true)
   ExcitingUtils.addSource(rob_head_miss_in_dcache, s"load_l1_miss_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
