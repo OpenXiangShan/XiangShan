@@ -88,6 +88,7 @@ class XSArgs(object):
             self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
+        self.disable_db = args.no_db
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -246,7 +247,8 @@ class XiangShan(object):
             numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args}')
+        chiseldb_args = "--dump-db" if not self.args.disable_db else ""
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
         return return_code
 
     def run_simv(self, workload):
@@ -488,6 +490,7 @@ if __name__ == "__main__":
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
+    parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
 
     args = parser.parse_args()
 
