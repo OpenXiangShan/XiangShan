@@ -132,7 +132,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqCancelCnt := memBlock.io.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.sqCancelCnt
   backend.io.mem.otherFastWakeup := memBlock.io.otherFastWakeup
-  backend.io.mem.writeBack <> memBlock.io.writeback
+  backend.io.mem.writeBack.zip(memBlock.io.writeback).foreach { case(back, mem) =>
+    back <> mem
+  }
 
   frontend.io.reset_vector := io.reset_vector
 
@@ -145,7 +147,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   memBlock.io.hartId := io.hartId
-  memBlock.io.issue <> backend.io.mem.issueUops
+  memBlock.io.issue.zip(backend.io.mem.issueUops).foreach { case(memIssue, backIssue) =>
+    memIssue <> backIssue
+  }
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   backend.io.mem.loadFastMatch <> memBlock.io.loadFastMatch

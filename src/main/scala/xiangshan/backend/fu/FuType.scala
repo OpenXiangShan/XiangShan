@@ -62,7 +62,13 @@ object FuType {
 
   def isFence(fuType: UInt): Bool = fuType(7)
 
-  def isVpu(fuType: UInt): Bool = fuType(19, 16).orR || fuType(21) || fuType(24)
+  def isVpu(fuType: UInt): Bool = fuType(18, 16).orR || fuType(21) || fuType(24)
+
+  def isVls(fuType: UInt): Bool = fuType(20, 19).orR
+
+  def isVLoad(fuType: UInt): Bool = fuType(19)
+
+  def isVStore(fuType: UInt): Bool = fuType(20)
 
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 
