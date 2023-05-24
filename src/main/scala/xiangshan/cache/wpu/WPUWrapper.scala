@@ -52,10 +52,9 @@ class WPUUpdateLookup(nWays:Int)(implicit p:Parameters) extends WPUUpdate(nWays)
 
 class ConflictPredictIO(nWays:Int)(implicit p:Parameters) extends BaseWPUBundle{
   // pred
-  val s0_pc = Input(UInt(VAddrBits.W))
+  val s0_vaddr = Input(UInt(VAddrBits.W))
   // update
-  // FIXME lyq: Updating in s1 may result in insufficient timing
-  val s1_pc = Input(UInt(VAddrBits.W))
+  val s1_vaddr = Input(UInt(VAddrBits.W))
   val s1_dm_hit = Input(Bool())
 }
 
@@ -97,7 +96,7 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
 
   for(i <- 0 until nPorts){
     wayConflictPredictor.io.pred(i).en := io.req(i).valid
-    wayConflictPredictor.io.pred(i).pc := io.cfpred(i).s0_pc
+    wayConflictPredictor.io.pred(i).vaddr := io.cfpred(i).s0_vaddr
     s0_pred_way_conflict(i) := wayConflictPredictor.io.pred(i).way_conflict
 
     s0_dmSel(i) := false.B
@@ -133,7 +132,7 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
     val s1_replay_upd = RegNext(s0_replay_upd)
 
     wayConflictPredictor.io.update(i).en := io.lookup_upd(i).valid
-    wayConflictPredictor.io.update(i).pc := io.cfpred(i).s1_pc
+    wayConflictPredictor.io.update(i).vaddr := io.cfpred(i).s1_vaddr
     wayConflictPredictor.io.update(i).dm_hit := s1_dmSel(i) && io.cfpred(i).s1_dm_hit
     wayConflictPredictor.io.update(i).sa_hit := !s1_dmSel(i) && s1_hit(i)
 

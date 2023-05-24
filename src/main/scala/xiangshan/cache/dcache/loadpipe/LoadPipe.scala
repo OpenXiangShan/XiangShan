@@ -176,8 +176,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s1_direct_map_way_num = get_direct_map_way(s1_req.addr)
   if(dwpuParam.enCfPred || !env.FPGAPlatform){
-    io.dwpu.cfpred(0).s0_pc := io.lsu.s0_pc
-    io.dwpu.cfpred(0).s1_pc := io.lsu.s1_pc
+    /* method1: record the pc */
+    // if (!env.FPGAPlatform){
+    //    io.dwpu.cfpred(0).s0_vaddr := io.lsu.s0_pc
+    //    io.dwpu.cfpred(0).s1_vaddr := io.lsu.s1_pc
+    // }
+
+    /* method2: record the vaddr */
+    io.dwpu.cfpred(0).s0_vaddr := s0_vaddr
+    io.dwpu.cfpred(0).s1_vaddr := s1_vaddr
     // whether direct_map_way miss with valid tag value
     io.dwpu.cfpred(0).s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way_num && tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
   }else{
