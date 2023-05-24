@@ -98,6 +98,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   val flushedVec = Wire(Vec(params.numEntries, Bool()))
   val clearVec = Wire(Vec(params.numEntries, Bool()))
   val deqSelVec = Wire(Vec(params.numEntries, Bool()))
+  val deqSelVec2 = Wire(Vec(params.numDeq, Vec(params.numEntries, Bool())))            // per deq's deqSelVec
 
   dontTouch(deqRespVec)
   // Reg
@@ -159,6 +160,12 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqSel := VecInit(io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i))).asUInt.orR
   }
 
+  deqSelVec2.zip(io.deq).foreach { case (deqSelVecSingle, deqSingle) =>
+    deqSelVecSingle.zipWithIndex.foreach { case (deqSelBool, i) =>
+      deqSelBool := deqSingle.deqSelOH.valid && deqSingle.deqSelOH.bits(i)
+    }
+  }
+
   val resps = params.schdType match {
     case IntScheduler() => io.deqResp ++ io.og0Resp ++ io.og1Resp
     case MemScheduler() => io.deqResp ++ io.og1Resp
@@ -195,7 +202,9 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   io.canIssue := canIssueVec.asUInt
   io.clear := clearVec.asUInt
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback)
-  io.deq.foreach(_.isFirstIssue := Mux1H(deqSelVec, statusVec.map(!_.firstIssue)))
+  io.deq.zip(deqSelVec2).foreach { case (deqSingle, deqSelVecSingle) =>
+    deqSingle.isFirstIssue := Mux1H(deqSelVecSingle, statusVec.map(!_.firstIssue))
+  }
   dontTouch(io.deq)
 }
 

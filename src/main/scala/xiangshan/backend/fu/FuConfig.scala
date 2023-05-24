@@ -500,13 +500,31 @@ object FuConfig {
     writeVecRf = true,
     latency = UncertainLatency(),
   )
-  // Todo
-  // def VlduCfg = FuConfig ()
+
+  val VlduCfg: FuConfig = FuConfig (
+    name = "vldu",
+    fuType = FuType.vldu,
+    fuGen = null,
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  //vs1, vs2, vd_old, v0, vconfig
+    ),
+    piped = false, // Todo: check it
+    writeVecRf = true,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    flushPipe = true,
+    replayInst = true,
+    hasLoadError = true,
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+  //TODO
   // def VstuCfg = FuConfig ()
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg
+    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg, VlduCfg
   )
 
   def VecArithFuConfigs = Seq(

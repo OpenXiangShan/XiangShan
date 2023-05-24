@@ -482,16 +482,16 @@ object Bundles {
     val isInterrupt = Bool()
   }
 
-  class MemExuInput(implicit p: Parameters) extends XSBundle {
+  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val src = Vec(3, UInt(XLEN.W))
+    val src = if(isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
   }
 
-  class MemExuOutput(implicit p: Parameters) extends XSBundle {
+  class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val data = UInt(XLEN.W)
+    val data = if(isVector) UInt(VLEN.W) else UInt(XLEN.W)
     val debug = new DebugBundle
   }
 
