@@ -343,8 +343,15 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val blocked = selBlocked(i) || blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByOthers(i)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
+
+  /******************************************************************************************
+   * WARNING: Make sure that OldestSelectStride must less than or equal stages of load unit.*
+   ******************************************************************************************
+   */
+  val OldestSelectStride = 4
+  val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldWbPtr + i.U)
   val oldestSelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    loadReplaySelMask(i) && (io.ldWbPtr === uop(i).lqIdx)
+    loadReplaySelMask(i) && VecInit(oldestPtrExt.map(ptr => (ptr === uop(i).lqIdx))).asUInt.orR
   })).asUInt // use uint instead vec to reduce verilog lines
   val remReplaySelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadReplaySelMask)(rem)))
   val remOldestSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(oldestSelMask)(rem)))
