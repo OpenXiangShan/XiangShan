@@ -361,7 +361,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
    ******************************************************************************************
    */
   val OldestSelectStride = 4
-  val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldIssuePtr + i.U)
+  val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldWbPtr + i.U)
   val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
   val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
   val remOldsetMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.take(1)))(rem))
