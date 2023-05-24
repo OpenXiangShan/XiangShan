@@ -277,7 +277,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   // Input
-  val writeBack = Vec(params.LduCnt + params.StaCnt * 2, Flipped(DecoupledIO(new MemExuOutput())))
+  val writeBack = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++ Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
@@ -295,7 +295,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   // Output
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
-  val issueUops = Vec(params.LduCnt + 2 * params.StaCnt, DecoupledIO(new MemExuInput()))
+  val issueUops = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(DecoupledIO(new MemExuInput())) ++ Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
 
