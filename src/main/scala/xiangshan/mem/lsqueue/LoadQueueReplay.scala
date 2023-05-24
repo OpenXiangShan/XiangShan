@@ -186,6 +186,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     numWDelay = 2, 
     numCamPort = 0))
   vaddrModule.io := DontCare 
+  val debug_vaddr = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(VAddrBits.W))))
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
 
   // freeliset: store valid entries index.
@@ -481,6 +482,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       vaddrModule.io.wen(w) := true.B
       vaddrModule.io.waddr(w) := enqIndex 
       vaddrModule.io.wdata(w) := enq.bits.vaddr
+      debug_vaddr(enqIndex) := enq.bits.vaddr
 
       /**
        * used for feedback and replay
