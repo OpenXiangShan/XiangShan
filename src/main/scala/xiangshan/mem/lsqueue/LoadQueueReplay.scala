@@ -611,7 +611,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val rob_head_mshrfull_replay = lq_match && cause(lq_match_idx)(LoadReplayCauses.dcacheReplay)
   val rob_head_dcache_miss = lq_match && cause(lq_match_idx)(LoadReplayCauses.dcacheMiss)
   val rob_head_reject_enq = lq_match && cause(lq_match_idx)(LoadReplayCauses.rejectEnq)
-
+  val rob_head_other_replay    = lq_match && (rob_head_reject_enq || rob_head_forward_fail)
+    
   val rob_head_vio_replay = rob_head_sched_error || rob_head_wait_store
 
   val rob_head_miss_in_dtlb = WireInit(false.B)
@@ -621,7 +622,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
   ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
   ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf, true)
-
+  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf, true)
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt
