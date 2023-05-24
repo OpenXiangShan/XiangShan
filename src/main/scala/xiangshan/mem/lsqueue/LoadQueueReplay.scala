@@ -316,16 +316,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })  
 
   //  Replay is splitted into 3 stages
-  def getRem[T <: Data](input: T)(rem: Int): T = {
-    (0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => { input(LoadPipelineWidth * i + rem) })
-  }
-
   def getRemBits(input: UInt)(rem: Int): UInt = {
-    VecInit(getRem(input)(rem)).asUInt
+    VecInit((0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => { input(LoadPipelineWidth * i + rem) })).asUInt
   }
 
-  def getRemSeq(input: Seq[Seq[Bool]])(rem: Int): Seq[Bool] = {
-    getRem(input)(rem) 
+  def getRemSeq(input: Seq[Seq[Bool]])(rem: Int) = {
+    (0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => { input(LoadPipelineWidth * i + rem) })
   }
 
   // stage1: select 2 entries and read their vaddr
@@ -369,7 +365,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
   val remReplaySelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadReplaySelMask)(rem)))
   val remOldsetMatchMaskVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => VecInit(getRemSeq(oldestMatchMaskVec.map(_(0)))(rem))))
-  val remOlderMatchMaskVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemSeq(VecInit(oldestMatchMaskVec.drop(1))(rem))))
+  val remOlderMatchMaskVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemSeq(VecInit(oldestMatchMaskVec.map(_.drop(1)))(rem))))
   val remOldestSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => {
     VecInit((0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => {
       remReplaySelVec(rem)(i) && Mux(remOldsetMatchMaskVec(rem).asUInt.orR, remOldsetMatchMaskVec(rem)(i), remOlderMatchMaskVec(rem)(i).asUInt.orR)
