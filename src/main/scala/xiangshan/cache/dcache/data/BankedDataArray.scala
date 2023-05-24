@@ -112,7 +112,7 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
   data_sram.io.r.req.valid := io.r.en
   data_sram.io.r.req.bits.apply(setIdx = io.r.addr)
   io.r.data := data_sram.io.r.resp.data(0)
-  XSPerfAccumulate("data_sram_read_counter", data_sram.io.r.req.valid)
+  XSPerfAccumulate("part_data_read_counter", data_sram.io.r.req.valid)
 
   def dump_r() = {
     when(RegNext(io.r.en)) {
@@ -186,7 +186,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
     data_bank(w).io.r.req.valid := io.r.en
     data_bank(w).io.r.req.bits.apply(setIdx = io.r.addr)
   }
-  XSPerfAccumulate("data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
+  XSPerfAccumulate("part_data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
 
   val half = nWays / 2
   val data_read = data_bank.map(_.io.r.resp.data(0))
@@ -437,6 +437,14 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       read_error_delayed_result(bank_index)(way_index) := read_result(bank_index)(way_index).error_delayed
     }
   }
+  
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks * DCacheWays)(0.U(1.W))))
+  for (bank_index <- 0 until DCacheBanks) {
+    for (way_index <- 0 until DCacheWays) {
+      data_read_oh(bank_index * DCacheBanks + way_index) := data_banks(bank_index)(way_index).io.r.en
+    }
+  }
+  XSPerfAccumulate("data_read_counter", PopCount(Cat(data_read_oh)))
 
   // read result: expose banked read result
   /*
@@ -729,6 +737,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bank_result(bank_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
     read_bank_error_delayed(bank_index) := bank_result(bank_index).error_delayed
   }
+
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(XLEN.W))))
+  for (bank_index <- 0 until DCacheBanks) {
+    data_read_oh(bank_index) := PopCount(Fill(DCacheWays, data_banks(bank_index).io.r.en.asUInt))
+  }
+  XSPerfAccumulate("data_read_counter", data_read_oh.reduce(_ + _))
 
   // read result: expose banked read result
   io.readline_resp := bank_result

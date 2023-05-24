@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.{DebugLsInfoBundle, RobPtr}
 import xiangshan.cache._
-import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.mem.mdp._
 
@@ -40,7 +40,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle with HasDCacheP
   // wait for address from store queue index
   val addrInvalidSqIdx = new SqPtr
   // replay carry
-  val replayCarry = new ReplayCarry
+  val replayCarry = new ReplayCarry(nWays)
   // data in last beat
   val dataInLastBeat = Bool()
   // replay cause
@@ -119,11 +119,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_isFirstIssue = Wire(Bool())
   val s0_sqIdx = Wire(new SqPtr)
   val s0_tryFastpath = WireInit(false.B)
-  val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
+  val s0_replayCarry = Wire(new ReplayCarry(nWays)) // way info for way predict related logic
 
   // default value
-  s0_replayCarry.valid := false.B
-  s0_replayCarry.real_way_en := 0.U
+  s0_replayCarry := ReplayCarry.init(nWays)
   io.s0_sqIdx := s0_sqIdx
 
   val s0_replayShouldWait = io.in.valid && isAfter(io.replay.bits.uop.robIdx, io.in.bits.uop.robIdx)
@@ -134,7 +133,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // src2: int read / software prefetch first issue from RS (io.in)
   // src3: vec read first issue from RS (TODO)
   // src4: load try pointchaising when no issued or replayed load (io.fastpath)
-  // src5: hardware prefetch from prefetchor (high confidence) (io.prefetch)
+  // src5: hardware prefetch from prefetchor (low confidence) (io.prefetch)
 
   // load flow source valid
   val lfsrc0_loadReplay_valid = io.replay.valid && !s0_replayShouldWait 
@@ -149,10 +148,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   dontTouch(lfsrc3_vecloadFirstIssue_valid)
   dontTouch(lfsrc4_l2lForward_valid)
   dontTouch(lfsrc5_lowconfhwPrefetch_valid)
-  
+
   // load flow source ready
   val lfsrc_loadReplay_ready = WireInit(true.B)
-  val lfsrc_highconfhwPrefetch_ready = !lfsrc0_loadReplay_valid 
+  val lfsrc_highconfhwPrefetch_ready = !lfsrc0_loadReplay_valid
   val lfsrc_intloadFirstIssue_ready = !lfsrc0_loadReplay_valid &&
     !lfsrc1_highconfhwPrefetch_valid
   val lfsrc_vecloadFirstIssue_ready = !lfsrc0_loadReplay_valid &&
@@ -162,7 +161,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     !lfsrc1_highconfhwPrefetch_valid &&
     !lfsrc2_intloadFirstIssue_valid &&
     !lfsrc3_vecloadFirstIssue_valid
-  val lfsrc_lowconfhwPrefetch_ready = !lfsrc0_loadReplay_valid && 
+  val lfsrc_lowconfhwPrefetch_ready = !lfsrc0_loadReplay_valid &&
     !lfsrc1_highconfhwPrefetch_valid &&
     !lfsrc2_intloadFirstIssue_valid &&
     !lfsrc3_vecloadFirstIssue_valid &&
@@ -173,15 +172,15 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   dontTouch(lfsrc_vecloadFirstIssue_ready)
   dontTouch(lfsrc_l2lForward_ready)
   dontTouch(lfsrc_lowconfhwPrefetch_ready)
-    
+
   // load flow source select (OH)
   val lfsrc_loadReplay_select = lfsrc0_loadReplay_valid && lfsrc_loadReplay_ready
-  val lfsrc_hwprefetch_select = lfsrc_highconfhwPrefetch_ready && lfsrc1_highconfhwPrefetch_valid || 
+  val lfsrc_hwprefetch_select = lfsrc_highconfhwPrefetch_ready && lfsrc1_highconfhwPrefetch_valid ||
     lfsrc_lowconfhwPrefetch_ready && lfsrc5_lowconfhwPrefetch_valid
   val lfsrc_intloadFirstIssue_select = lfsrc_intloadFirstIssue_ready && lfsrc2_intloadFirstIssue_valid
   val lfsrc_vecloadFirstIssue_select = lfsrc_vecloadFirstIssue_ready && lfsrc3_vecloadFirstIssue_valid
   val lfsrc_l2lForward_select = lfsrc_l2lForward_ready && lfsrc4_l2lForward_valid
-  assert(!lfsrc_vecloadFirstIssue_select) // to be added
+  assert(!lfsrc_vecloadFirstIssue_select) // TODO: to be added
   dontTouch(lfsrc_loadReplay_select)
   dontTouch(lfsrc_hwprefetch_select)
   dontTouch(lfsrc_intloadFirstIssue_select)
@@ -207,7 +206,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // query DTLB
   io.dtlbReq.valid := s0_valid
   // hw prefetch addr does not need to be translated, give tlb paddr
-  io.dtlbReq.bits.vaddr := Mux(lfsrc_hwprefetch_select, io.prefetch_in.bits.paddr, s0_vaddr) 
+  io.dtlbReq.bits.vaddr := Mux(lfsrc_hwprefetch_select, io.prefetch_in.bits.paddr, s0_vaddr)
   io.dtlbReq.bits.cmd := Mux(isPrefetch,
     Mux(isPrefetchWrite, TlbCmd.write, TlbCmd.read),
     TlbCmd.read
@@ -362,6 +361,11 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   XSPerfAccumulate("software_prefetch_fire", io.out.fire && isPrefetch && lfsrc_intloadFirstIssue_select)
   XSPerfAccumulate("hardware_prefetch_blocked", io.prefetch_in.valid && !lfsrc_hwprefetch_select)
   XSPerfAccumulate("hardware_prefetch_total", io.prefetch_in.valid)
+  XSPerfAccumulate("loadsrc_loadReplay_select", lfsrc_loadReplay_select)
+  XSPerfAccumulate("loadsrc_hwprefetch_select", lfsrc_hwprefetch_select)
+  XSPerfAccumulate("loadsrc_intloadFirstIssue_select", lfsrc_intloadFirstIssue_select)
+  XSPerfAccumulate("loadsrc_vecloadFirstIssue_select", lfsrc_vecloadFirstIssue_select)
+  XSPerfAccumulate("loadsrc_l2lForward_select", lfsrc_l2lForward_select)
 }
 
 // Load Pipeline Stage 1
@@ -966,10 +970,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.meta_access := io.dcache.resp.bits.meta_access
   io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio && !load_s2.io.in.bits.tlbMiss
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
-  if (env.FPGAPlatform)
+  if (env.FPGAPlatform){
+    // FIXME lyq: it is needed in s0 and s1
+    io.dcache.s0_pc := DontCare
+    io.dcache.s1_pc := DontCare
     io.dcache.s2_pc := DontCare
-  else
+  }else{
+    io.dcache.s0_pc := load_s0.io.out.bits.uop.cf.pc
+    io.dcache.s1_pc := load_s1.io.out.bits.uop.cf.pc
     io.dcache.s2_pc := load_s2.io.out.bits.uop.cf.pc
+  }
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
   load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
