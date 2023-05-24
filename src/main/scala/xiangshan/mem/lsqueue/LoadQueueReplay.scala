@@ -361,14 +361,14 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
    ******************************************************************************************
    */
   val OldestSelectStride = 4
-  val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldWbPtr + i.U)
+  val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldIssuePtr + i.U)
   val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
   val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
-  val remOldsetMatchMaskVec = (0 until LoadPipelineWidth).map(rem => VecInit(getRemSeq(oldestMatchMaskVec.map(_(0)))(rem)))
+  val remOldsetMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.take(1)))(rem))
   val remOlderMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.drop(1)))(rem))
   val remOldestSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => {
     VecInit((0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => {
-      remReplaySelVec(rem)(i) && Mux(remOldsetMatchMaskVec(rem).asUInt.orR, remOldsetMatchMaskVec(rem)(i), VecInit(remOlderMatchMaskVec(rem)(i)).asUInt.orR)
+      remReplaySelVec(rem)(i) && Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
     })).asUInt
   }))
 
