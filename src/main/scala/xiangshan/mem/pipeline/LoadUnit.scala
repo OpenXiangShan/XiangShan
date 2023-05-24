@@ -971,7 +971,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio && !load_s2.io.in.bits.tlbMiss
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   if (env.FPGAPlatform){
-    // FIXME lyq: it is needed in s0 and s1
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
     io.dcache.s2_pc := DontCare

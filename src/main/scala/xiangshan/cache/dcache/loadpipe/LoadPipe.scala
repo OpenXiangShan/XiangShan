@@ -123,7 +123,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // meta_read.tag := DontCare
 
   tag_read.idx := get_idx(io.lsu.req.bits.addr)
-  // FIXME lyq: tag read will act on every way, it need to be changed in this experiment
   // tag_read.way_en := io.dwpu.resp(0).bits.s0_pred_way_en
   tag_read.way_en := ~0.U(nWays.W)
 
