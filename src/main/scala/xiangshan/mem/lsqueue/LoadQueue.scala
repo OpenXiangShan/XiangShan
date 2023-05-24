@@ -305,6 +305,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.lqFull <> io.lqReplayFull
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   loadQueueReplay.io.ldWbPtr := virtualLoadQueue.io.ldWbPtr
+  loadQueueReplay.io.rarFull := loadQueueRAR.io.lqFull
+  loadQueueReplay.io.rawFull := loadQueueRAW.io.lqFull
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
