@@ -137,7 +137,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   io.diff_rdata := difftest_table.take(32)
   io.diff_vconfig match {
     case None => Unit
-    case x => x.get := difftest_table.last
+    case x => x.get := difftest_table(VCONFIG_IDX)
   }
 }
 
