@@ -351,35 +351,38 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val remCancelSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadCancelSelMask)(rem)))
   
   // generate replay mask
-  val loadHigherReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+  val loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
     val blocked = blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
-  val loadLowerReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+  val loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
     val blocked = selBlocked(i)  || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
-  val loadReplaySelMask = Mux(loadHigherReplaySelMask.orR, loadHigherReplaySelMask, loadLowerReplaySelMask)
-  val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
+  val loadNormalReplaySelMask = loadLowerPriorityReplaySelMask | loadHigherPriorityReplaySelMask
+  val remNormalReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadNormalReplaySelMask)(rem)))
+  val loadPriorityReplaySelMask = Mux(loadHigherPriorityReplaySelMask.orR, loadHigherPriorityReplaySelMask, loadLowerPriorityReplaySelMask)
+  val remPriorityReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadPriorityReplaySelMask)(rem)))
+
   /******************************************************************************************
    * WARNING: Make sure that OldestSelectStride must less than or equal stages of load unit.*
    ******************************************************************************************
    */
   val OldestSelectStride = 4
   val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldWbPtr + i.U)
-  val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
+  val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadNormalReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
   val remOldsetMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.take(1)))(rem))
   val remOlderMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.drop(1)))(rem))
   val remOldestSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => {
     VecInit((0 until LoadQueueReplaySize / LoadPipelineWidth).map(i => {
-      remReplaySelVec(rem)(i) && Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
+      Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
     })).asUInt
   }))
 
   // select oldest logic
   s1_oldestSel := VecInit((0 until LoadPipelineWidth).map(rport => {
     // select enqueue earlest inst
-    val ageOldest = AgeDetector(LoadQueueReplaySize / LoadPipelineWidth, remEnqSelVec(rport), remFreeSelVec(rport), remReplaySelVec(rport))
+    val ageOldest = AgeDetector(LoadQueueReplaySize / LoadPipelineWidth, remEnqSelVec(rport), remFreeSelVec(rport), remPriorityReplaySelVec(rport))
     assert(!(ageOldest.valid && PopCount(ageOldest.bits) > 1.U), "oldest index must be one-hot!")
     val ageOldestValid = ageOldest.valid
     val ageOldestIndex = OHToUInt(ageOldest.bits)
@@ -403,7 +406,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }
 
   def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
-    val nullSel = WireInit(0.U.asTypeOf(Valid(new BalanceEntry)))
+    require(sel.length > 0)
     val balancePick = ParallelPriorityMux(sel.map(x => (x.valid && x.bits.balance) -> x))
     val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
     (0 until sel.length).map(i =>
@@ -437,7 +440,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   val s1_balanceOldestSelExt = (0 until LoadPipelineWidth).map(i => {
     val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid := RegNext(s1_oldestSel(i).valid)
+    wrapper.valid := s1_oldestSel(i).valid
     wrapper.bits.balance := cause(s1_oldestSel(i).bits)(LoadReplayCauses.bankConflict)
     wrapper.bits.index := s1_oldestSel(i).bits
     wrapper.bits.port := i.U
