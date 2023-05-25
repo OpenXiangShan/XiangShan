@@ -654,6 +654,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val deq = new Bundle {
     val decodedInst = Output(new DecodedInst)
     val isComplex = Output(Bool())
+    val uopInfo = Output(new UopInfo)
   }
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
@@ -779,7 +780,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.isNarrow  := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
 
-  io.deq.isComplex := UopSplitType.needSplit(decodedInst.uopSplitType)
+  val uopInfoGen = Module(new UopInfoGen)
+  uopInfoGen.io.in.preDecodeInfo.typeOfSplit := decodedInst.uopSplitType
+  uopInfoGen.io.in.preDecodeInfo.vsew := decodedInst.vpu.vsew
+  uopInfoGen.io.in.preDecodeInfo.vlmul := decodedInst.vpu.vlmul
+  uopInfoGen.io.in.preDecodeInfo.vwidth := inst.RM
+  io.deq.isComplex := uopInfoGen.io.out.isComplex
+  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
+
   io.deq.decodedInst := decodedInst
 
   //-------------------------------------------------------------
