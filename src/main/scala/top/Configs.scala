@@ -31,6 +31,9 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import device.{EnableJtag, XSDebugModuleParams}
+import huancun._
+import coupledL2._
 import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
@@ -62,10 +65,16 @@ class MinimalConfig(n: Int = 1) extends Config(
         NRPhyRegs = 96,
         IntPhyRegs = 96,
         VfPhyRegs = 96,
-        LoadQueueSize = 16,
-        LoadQueueNWriteBanks = 4,
+        VirtualLoadQueueSize = 16,
+        LoadQueueRARSize = 16,
+        LoadQueueRAWSize = 12,
+        LoadQueueReplaySize = 8,
+        LoadUncacheBufferSize = 8,
+        LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
+        RollbackGroupSize = 8,
         StoreQueueSize = 12,
-        StoreQueueNWriteBanks = 4,
+        StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
+        StoreQueueForwardWithMask = true,
         RobSize = 32,
         FtqSize = 8,
         IBufSize = 16,
@@ -98,7 +107,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 1,
           nProbeEntries = 2,
           nPrefetchEntries = 2,
-          hasPrefetch = false
+          nPrefBufferEntries = 32,
+          hasPrefetch = true
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -172,7 +182,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           l3nWays = 8,
           spSize = 2,
         ),
-        L2CacheParamsOpt = None, // remove L2 Cache
+        L2CacheParamsOpt = Some(L2Param(
+          name = "L2",
+          ways = 8,
+          sets = 128,
+          echoField = Seq(huancun.DirtyField()),
+          prefetch = None
+        )),
+        L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
     )
@@ -182,14 +199,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
           sets = 1024,
           inclusive = false,
-          clientCaches = tiles.map{ p =>
-            CacheParameters(
-              "dcache",
-              sets = 2 * p.dcacheParametersOpt.get.nSets,
-              ways = p.dcacheParametersOpt.get.nWays + 2,
-              blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets),
-              aliasBitsOpt = None
-            )
+          clientCaches = tiles.map{ core =>
+            val clientDirBytes = tiles.map{ t =>
+              t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+            }.sum
+            val l2params = core.L2CacheParamsOpt.get.toCacheParams
+            l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
           },
           simulation = !site(DebugOptionsKey).FPGAPlatform
         )),
@@ -240,28 +255,18 @@ class WithNKBL2
     val upParams = up(XSTileKey)
     val l2sets = n * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
-      L2CacheParamsOpt = Some(HCCacheParameters(
+      L2CacheParamsOpt = Some(L2Param(
         name = "L2",
-        level = 2,
         ways = ways,
         sets = l2sets,
-        inclusive = inclusive,
-        alwaysReleaseData = alwaysReleaseData,
-        clientCaches = Seq(CacheParameters(
+        clientCaches = Seq(L1Param(
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
-          blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
-        echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
-        enablePerf = true,
-        sramDepthDiv = 2,
-        tagECC = Some("secded"),
-        dataECC = Some("secded"),
-        simulation = !site(DebugOptionsKey).FPGAPlatform
+        echoField = Seq(huancun.DirtyField()),
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
       )),
       L2NBanks = banks
     ))

@@ -146,6 +146,10 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())
+  val pendingPtr = Output(new RobPtr)
+
+  val mmio = Input(Vec(LoadPipelineWidth, Bool()))
+  val uop = Input(Vec(LoadPipelineWidth, new MicroOp))
 }
 
 class RobEnqIO(implicit p: Parameters) extends XSBundle {
@@ -431,6 +435,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     !uopNumVec(ptr).orR && stdWritebacked(ptr)
   }
 
+  val mmio = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
+
   // data for redirect, exception, etc.
   val flagBkup = Mem(RobSize, Bool())
   // some instructions are not allowed to trigger interrupts
@@ -573,6 +579,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when (enqUop.isWFI && !enqHasException && !enqHasTriggerHit) {
         hasWFI := true.B
       }
+
+      mmio(enqIndex) := false.B
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(io.enq.req.map(req => req.valid && req.bits.firstUop)), 0.U)
@@ -656,6 +664,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val writebackNum = PopCount(exuWBs.map(_.valid))
   XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
 
+  for (i <- 0 until LoadPipelineWidth) {
+    when (RegNext(io.lsq.mmio(i))) {
+      mmio(RegNext(io.lsq.uop(i).robIdx).value) := true.B
+    }
+  }
 
   /**
     * RedirectOut: Interrupt and Exceptions
@@ -821,9 +834,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
-  io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value))
+  io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value) && mmio(deqPtr.value))
   io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
+  io.lsq.pendingPtr := RegNext(deqPtr)
 
   /**
     * state changes

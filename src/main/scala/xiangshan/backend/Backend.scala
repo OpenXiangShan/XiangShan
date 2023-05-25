@@ -269,6 +269,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
+  // params alias
+  private val LoadQueueSize = VirtualLoadQueueSize
   // In/Out // Todo: split it into one-direction bundle
   val lsqEnqIO = Flipped(new LsqEnqIO)
   val robLsqIO = new RobLsqIO

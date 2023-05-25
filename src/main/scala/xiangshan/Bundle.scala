@@ -39,8 +39,6 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
-import utils._
-import utility._
 
 import scala.math.max
 import Chisel.experimental.chiselName
@@ -65,17 +63,19 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss         = 0.U(4.W)
-  val mshrFull        = 1.U(4.W)
-  val dataInvalid     = 2.U(4.W)
-  val bankConflict    = 3.U(4.W)
-  val ldVioCheckRedo  = 4.U(4.W)
+  val lrqFull         = 0.U(4.W)
+  val tlbMiss         = 1.U(4.W)
+  val mshrFull        = 2.U(4.W)
+  val dataInvalid     = 3.U(4.W)
+  val bankConflict    = 4.U(4.W)
+  val ldVioCheckRedo  = 5.U(4.W)
   val feedbackInvalid = 7.U(4.W)
   val issueSuccess    = 8.U(4.W)
   val rfArbitFail     = 9.U(4.W)
   val fuIdle          = 10.U(4.W)
   val fuBusy          = 11.U(4.W)
 
+  val allTypes = 16
   def apply() = UInt(4.W)
 
   def isStageSuccess(feedbackType: UInt) = {
