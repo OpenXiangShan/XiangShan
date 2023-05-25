@@ -818,16 +818,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   // Perf count
-  XSPerfAccumulate("miss_req", io.req.fire())
-  XSPerfAccumulate("miss_req_allocate", io.req.fire() && alloc)
-  XSPerfAccumulate("miss_req_load_allocate", io.req.fire() && alloc && io.req.bits.isFromLoad)
-  XSPerfAccumulate("miss_req_store_allocate", io.req.fire() && alloc && io.req.bits.isFromStore)
-  XSPerfAccumulate("miss_req_amo_allocate", io.req.fire() && alloc && io.req.bits.isFromAMO)
-  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && io.req.bits.isFromLoad)
-  XSPerfAccumulate("miss_req_reject_load", io.req.valid && reject && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req", io.req.fire() && !io.req.bits.cancel)
+  XSPerfAccumulate("miss_req_allocate", io.req.fire() && !io.req.bits.cancel && alloc)
+  XSPerfAccumulate("miss_req_load_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req_store_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
+  XSPerfAccumulate("miss_req_amo_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
+  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
-  XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && alloc && io.req.bits.isFromPrefetch)
-  XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && merge && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   when (num_valids > max_inflight) {
