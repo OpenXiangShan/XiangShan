@@ -403,9 +403,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
     val nullSel = WireInit(0.U.asTypeOf(Valid(new BalanceEntry)))
-    val balancePick = sel.foldLeft(nullSel)((l, r) => {
-      Mux(l.valid && r.valid, Mux(!l.bits.balance && r.bits.balance, r, l), Mux(!l.valid && r.valid, r, l))
-    })
+    val balancePick = ParallelPriorityMux(sel.map(x => (x.valid && x.bits.balance) -> x))
     val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
     (0 until sel.length).map(i =>
       if (i == 0) {
@@ -451,7 +449,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val s2_replayCacheMissReplay = trueCacheMissReplay(s2_replayIdx)
     val cancelReplay = s2_replayUop.robIdx.needFlush(io.redirect)
 
-    s2_oldestSel(i).valid := RegNext(s1_balanceOldestSel(i).valid && !loadCancelSelMask(s2_replayIdx))
+    val s2_loadCancelSelMask = RegNext(loadCancelSelMask)
+    s2_oldestSel(i).valid := RegNext(s1_balanceOldestSel(i).valid) && !s2_loadCancelSelMask(s2_replayIdx)
     s2_oldestSel(i).bits := s2_replayIdx
 
     io.replay(i).valid := s2_oldestSel(i).valid && !cancelReplay && replayCanFire(i) 
