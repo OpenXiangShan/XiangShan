@@ -8,7 +8,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import huancun.debug.TLLogger
-import huancun.{HCCacheParamsKey, HuanCun}
+import coupledL2.{L2ParamKey, CoupledL2}
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
@@ -79,8 +79,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   private val core = LazyModule(new XSCore())
   private val misc = LazyModule(new XSTileMisc())
   private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l2param.copy(enableTopDown = env.EnableTopDown)
+    LazyModule(new CoupledL2()(new Config((_, _, _) => {
+      case L2ParamKey => l2param
     })))
   )
 
@@ -140,8 +140,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.hartId := io.hartId
     core.module.io.reset_vector := DelayN(io.reset_vector, 5)
     io.cpu_halt := core.module.io.cpu_halt
-    if(l2cache.isDefined){
-      core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+    if (l2cache.isDefined) {
+      // TODO: add perfEvents of L2
+      // core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }
     else {
       core.module.io.perfEvents <> DontCare
@@ -149,9 +150,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     misc.module.beu_errors.icache <> core.module.io.beu_errors.icache
     misc.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
-    if(l2cache.isDefined){
-      misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
-      misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
+    if (l2cache.isDefined) {
+      // TODO: add ECC interface of L2
+      // misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
+      // misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
+      misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
     }
