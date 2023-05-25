@@ -360,7 +360,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadReplaySelMask = Mux(loadHigherReplaySelMask.orR, loadHigherReplaySelMask, loadLowerReplaySelMask)
-
+  val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
   /******************************************************************************************
    * WARNING: Make sure that OldestSelectStride must less than or equal stages of load unit.*
    ******************************************************************************************
@@ -375,7 +375,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       remReplaySelVec(rem)(i) && Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
     })).asUInt
   }))
-  val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
 
   // select oldest logic
   s1_oldestSel := VecInit((0 until LoadPipelineWidth).map(rport => {
@@ -396,7 +395,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }))
 
 
-
+  // Replay port reorder
   class BalanceEntry extends XSBundle {
     val balance = Bool()
     val index = UInt(log2Up(LoadQueueReplaySize).W)
@@ -411,7 +410,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       if (i == 0) {
         reorderSel(i) := balancePick
       } else {
-        when (balancePick.valid && balancePick.balance && i.U === balancePick.bits.port) {
+        when (balancePick.valid && balancePick.bits.balance && i.U === balancePick.bits.port) {
           reorderSel(i) := sel(0)
         } .otherwise {
           reorderSel(i) := sel(i)
