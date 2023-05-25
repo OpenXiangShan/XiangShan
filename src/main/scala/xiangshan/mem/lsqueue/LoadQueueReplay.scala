@@ -441,7 +441,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })
   val s1_balanceOldestSel = balanceReOrder(s1_balanceOldestSelExt)
   (0 until LoadPipelineWidth).map(w => {
-    vaddrModule.io.raddr(w) := s1_balanceOldestSel(w).bits
+    vaddrModule.io.raddr(w) := s1_balanceOldestSel(w).bits.index
   })
 
   for (i <- 0 until LoadPipelineWidth) {
