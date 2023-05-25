@@ -401,7 +401,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val pos = UInt(log2Up(LoadPipelineWidth).W)
   }
 
-  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): (Seq[ValidIO[BalanceEntry]]) = {
+  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
     val nullSel = WireInit(0.U.asTypeOf(Valid(new BalanceEntry)))
     val balancePick = sel.foldLeft(nullSel)((l, r) => {
       Mux(l.valid && r.valid, Mux(!l.bits.balance && r.bits.balance, r, l), Mux(!l.valid && r.valid, r, l))
