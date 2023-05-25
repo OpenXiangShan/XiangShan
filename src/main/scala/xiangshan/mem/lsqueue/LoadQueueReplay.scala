@@ -408,7 +408,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
     (0 until sel.length).map(i =>
       if (i == 0) {
-        reorderSel(i) := balancePick
+        when (balancePick.valid && balancePick.bits.balance) {
+          reorderSel(i) := balancePick
+        } .otherwise {
+          reorderSel(i) := sel(i)
+        }
       } else {
         when (balancePick.valid && balancePick.bits.balance && i.U === balancePick.bits.port) {
           reorderSel(i) := sel(0)
