@@ -351,10 +351,15 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val remCancelSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadCancelSelMask)(rem)))
   
   // generate replay mask
-  val loadReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i) || blockByTlbMiss(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
+  val loadHigherReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+    val blocked = blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
+  val loadLowerReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+    val blocked = selBlocked(i)  || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
+    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
+  })).asUInt // use uint instead vec to reduce verilog lines
+  val loadReplaySelMask = Mux(loadHigherReplaySelMask.orR, loadHigherReplaySelMask, loadLowerReplaySelMask)
 
   /******************************************************************************************
    * WARNING: Make sure that OldestSelectStride must less than or equal stages of load unit.*
@@ -363,7 +368,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val OldestSelectStride = 4
   val oldestPtrExt = (0 until OldestSelectStride).map(i => io.ldWbPtr + i.U)
   val oldestMatchMaskVec = (0 until LoadQueueReplaySize).map(i => (0 until OldestSelectStride).map(j => loadReplaySelMask(i) && uop(i).lqIdx === oldestPtrExt(j)))
-  val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
   val remOldsetMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.take(1)))(rem))
   val remOlderMatchMaskVec = (0 until LoadPipelineWidth).map(rem => getRemSeq(oldestMatchMaskVec.map(_.drop(1)))(rem))
   val remOldestSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => {
@@ -371,6 +375,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       remReplaySelVec(rem)(i) && Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
     })).asUInt
   }))
+  val remReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadReplaySelMask)(rem)))
 
   // select oldest logic
   s1_oldestSel := VecInit((0 until LoadPipelineWidth).map(rport => {
@@ -391,14 +396,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }))
 
 
-  (0 until LoadPipelineWidth).map(w => {
-    vaddrModule.io.raddr(w) := s1_oldestSel(w).bits
-  })
 
   class BalanceEntry extends XSBundle {
     val balance = Bool()
     val index = UInt(log2Up(LoadQueueReplaySize).W)
-    val pos = UInt(log2Up(LoadPipelineWidth).W)
+    val port = UInt(log2Up(LoadPipelineWidth).W)
   }
 
   def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
@@ -409,7 +411,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       if (i == 0) {
         reorderSel(i) := balancePick
       } else {
-        when (balancePick.valid && i.U === balancePick.bits.pos) {
+        when (balancePick.valid && balancePick.balance && i.U === balancePick.bits.port) {
           reorderSel(i) := sel(0)
         } .otherwise {
           reorderSel(i) := sel(i)
@@ -418,7 +420,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     )
     reorderSel
   }
-
 
   // stage2: send replay request to load unit
   // replay cold down
@@ -431,14 +432,18 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def replayCanFire(i: Int) = coldCounter(i) >= 0.U && coldCounter(i) < ColdDownThreshold
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
-  val s1_balanceOldestSelExt = Wire(Vec(LoadPipelineWidth, Valid(new BalanceEntry)))
-  for (i <- 0 until LoadPipelineWidth) {
-    s1_balanceOldestSelExt(i).valid := s1_oldestSel(i).valid 
-    s1_balanceOldestSelExt(i).bits.balance := cause(s1_oldestSel(i).bits)(LoadReplayCauses.bankConflict)
-    s1_balanceOldestSelExt(i).bits.index := s1_oldestSel(i).bits
-    s1_balanceOldestSelExt(i).bits.pos := i.U
-  }
+  val s1_balanceOldestSelExt = (0 until LoadPipelineWidth).map(i => {
+    val wrapper = Wire(Valid(new BalanceEntry))
+    wrapper.valid := RegNext(s1_oldestSel(i).valid)
+    wrapper.bits.balance := cause(s1_oldestSel(i).bits)(LoadReplayCauses.bankConflict)
+    wrapper.bits.index := s1_oldestSel(i).bits
+    wrapper.bits.port := i.U
+    wrapper
+  })
   val s1_balanceOldestSel = balanceReOrder(s1_balanceOldestSelExt)
+  (0 until LoadPipelineWidth).map(w => {
+    vaddrModule.io.raddr(w) := s1_balanceOldestSel(w).bits
+  })
 
   for (i <- 0 until LoadPipelineWidth) {
     val s2_replayIdx = RegNext(s1_balanceOldestSel(i).bits.index)
