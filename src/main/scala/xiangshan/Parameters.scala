@@ -141,8 +141,8 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
   FpLogicRegs: Int = 33,
-  VecLogicRegs: Int = 32 + 8 + 1, // 8: tmp, 1: vconfig
-  VCONFIG_IDX: Int = 40,
+  VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
+  VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
   IntPhyRegs: Int = 192,
   VfPhyRegs: Int = 192,
