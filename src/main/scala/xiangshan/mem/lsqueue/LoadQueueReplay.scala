@@ -395,6 +395,33 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     vaddrModule.io.raddr(w) := s1_oldestSel(w).bits
   })
 
+  class BalanceEntry extends XSBundle {
+    val balance = Bool()
+    val index = UInt(log2Up(LoadQueueReplaySize).W)
+    val pos = UInt(log2Up(LoadPipelineWidth).W)
+  }
+
+  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): (Seq[ValidIO[BalanceEntry]]) = {
+    val nullSel = WireInit(0.U.asTypeOf(Valid(new BalanceEntry)))
+    val balancePick = sel.foldLeft(nullSel)((l, r) => {
+      Mux(l.valid && r.valid, Mux(!l.bits.balance && r.bits.balance, r, l), Mux(!l.valid && r.valid, r, l))
+    })
+    val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
+    (0 until sel.length).map(i =>
+      if (i == 0) {
+        reorderSel(i) := balancePick
+      } else {
+        when (balancePick.valid && i.U === balancePick.bits.pos) {
+          reorderSel(i) := sel(0)
+        } .otherwise {
+          reorderSel(i) := sel(i)
+        }
+      }
+    )
+    reorderSel
+  }
+
+
   // stage2: send replay request to load unit
   // replay cold down
   val ColdDownCycles = 16
@@ -406,17 +433,26 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def replayCanFire(i: Int) = coldCounter(i) >= 0.U && coldCounter(i) < ColdDownThreshold
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
+  val s1_balanceOldestSelExt = Wire(Vec(LoadPipelineWidth, Valid(new BalanceEntry)))
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_replayIdx = s1_oldestSel(i).bits
-    val s2_replayUop = RegNext(uop(s1_replayIdx))
-    val s2_replayMSHRId = RegNext(missMSHRId(s1_replayIdx))
-    val s2_replayCauses = RegNext(cause(s1_replayIdx))
-    val s2_replayCarry = RegNext(replayCarryReg(s1_replayIdx))
-    val s2_replayCacheMissReplay = RegNext(trueCacheMissReplay(s1_replayIdx))
+    s1_balanceOldestSelExt(i).valid := s1_oldestSel(i).valid 
+    s1_balanceOldestSelExt(i).bits.balance := cause(s1_oldestSel(i).bits)(LoadReplayCauses.bankConflict)
+    s1_balanceOldestSelExt(i).bits.index := s1_oldestSel(i).bits
+    s1_balanceOldestSelExt(i).bits.pos := i.U
+  }
+  val s1_balanceOldestSel = balanceReOrder(s1_balanceOldestSelExt)
+
+  for (i <- 0 until LoadPipelineWidth) {
+    val s2_replayIdx = RegNext(s1_balanceOldestSel(i).bits.index)
+    val s2_replayUop = uop(s2_replayIdx)
+    val s2_replayMSHRId = missMSHRId(s2_replayIdx)
+    val s2_replayCauses = cause(s2_replayIdx)
+    val s2_replayCarry = replayCarryReg(s2_replayIdx)
+    val s2_replayCacheMissReplay = trueCacheMissReplay(s2_replayIdx)
     val cancelReplay = s2_replayUop.robIdx.needFlush(io.redirect)
 
-    s2_oldestSel(i).valid := RegNext(s1_oldestSel(i).valid && !loadCancelSelMask(s1_replayIdx))
-    s2_oldestSel(i).bits := RegNext(s1_oldestSel(i).bits)
+    s2_oldestSel(i).valid := RegNext(s1_balanceOldestSel(i).valid && !loadCancelSelMask(s2_replayIdx))
+    s2_oldestSel(i).bits := s2_replayIdx
 
     io.replay(i).valid := s2_oldestSel(i).valid && !cancelReplay && replayCanFire(i) 
     io.replay(i).bits := DontCare
@@ -523,7 +559,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // update block pointer
       when (replayInfo.cause(LoadReplayCauses.dcacheReplay)) {
-        // normal case: dcache replay or rar/raw reject
+        // normal case: dcache replay
         blockByOthers(enqIndex) := true.B
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
       } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError)) {
