@@ -1,3 +1,19 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package top
 
 import chipsalliance.rocketchip.config.Parameters
@@ -7,12 +23,12 @@ import chisel3._
 import chisel3.util._
 import utils.{XSPerfAccumulate, XSPerfPrint}
 
-class BusPerfMonitor()(implicit p: Parameters) extends LazyModule {
+class BusPerfMonitor(name: String)(implicit p: Parameters) extends LazyModule {
   val node = TLAdapterNode()
-  lazy val module = new BusPerfMonitorImp(this)
+  lazy val module = new BusPerfMonitorImp(this, name)
 }
 
-class BusPerfMonitorImp(outer: BusPerfMonitor)
+class BusPerfMonitorImp(outer: BusPerfMonitor, name: String)
   extends LazyModuleImp(outer)
 {
 
@@ -71,7 +87,7 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
   }
 
   for(((in, edgeIn), i) <- outer.node.in.zipWithIndex) {
-    val clientName = s"${edgeIn.master.masters.head.name}_bank_$i"
+    val clientName = s"${name}_${edgeIn.master.masters.head.name}_bank_$i"
     PERF_CHN(clientName, in.a)
     PERF_CHN(clientName, in.d)
     if(in.params.hasBCE){
@@ -83,9 +99,9 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
 }
 
 object BusPerfMonitor {
-  def apply(enable: Boolean = false)(implicit p: Parameters) = {
+  def apply(name: String, enable: Boolean = false)(implicit p: Parameters) = {
     if(enable){
-      val busPMU = LazyModule(new BusPerfMonitor())
+      val busPMU = LazyModule(new BusPerfMonitor(name))
       busPMU.node
     } else {
       TLTempNode()

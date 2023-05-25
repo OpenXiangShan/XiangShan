@@ -232,7 +232,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val l3_in = TLTempNode()
   val l3_out = TLTempNode()
-  val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform)
 
   l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar
   bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
