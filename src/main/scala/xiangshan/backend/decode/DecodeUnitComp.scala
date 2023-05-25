@@ -73,8 +73,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val src1 = Cat(0.U(1.W), inst.RS1)
   val src2 = Cat(0.U(1.W), inst.RS2)
   val dest = Cat(0.U(1.W), inst.RD)
-  val width = inst.RM //Vector LS eew
-  val eew = Cat(0.U(1.W), width(1, 0))
+
 
   //output bits
   val decodedInsts = Wire(Vec(RenameWidth, new DecodedInst))
@@ -84,6 +83,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   //output of DecodeUnit
   val decodedInstsSimple = Wire(new DecodedInst)
+  val numOfUop = Wire(UInt(log2Up(maxUopSize+1).W))
+  val lmul = Wire(UInt(4.W))
   val isVsetSimple = Wire(Bool())
 
   //pre decode
@@ -92,6 +93,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   simple.io.enq.vtype := io.vtype
   simple.io.csrCtrl := io.csrCtrl
   decodedInstsSimple := simple.io.deq.decodedInst
+  lmul := simple.io.deq.uopInfo.lmul
   isVsetSimple := simple.io.deq.decodedInst.isVset
   when(isVsetSimple) {
     when(dest === 0.U && src1 === 0.U) {
@@ -106,78 +108,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   //Type of uop Div
   val typeOfSplit = decodedInstsSimple.uopSplitType
 
-  val sew = Cat(0.U(1.W), simple.io.enq.vtype.vsew)
-  val vlmul = simple.io.enq.vtype.vlmul
+  when(typeOfSplit === UopSplitType.DIR) {
+    numOfUop := Mux(dest =/= 0.U, 2.U,
+      Mux(src1 =/= 0.U, 1.U,
+        Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
+  } .otherwise {
+    numOfUop := simple.io.deq.uopInfo.numOfUop
+  }
 
-  //LMUL
-  val lmul = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(4.W), Array(
-    "b001".U -> 2.U,
-    "b010".U -> 4.U,
-    "b011".U -> 8.U
-  ))
-  val numOfUopVslide = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(log2Up(maxUopSize+1).W), Array(
-    "b001".U -> 3.U,
-    "b010".U -> 10.U,
-    "b011".U -> 36.U
-  ))
-  val numOfUopVrgather = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(log2Up(maxUopSize + 1).W), Array(
-    "b001".U -> 4.U,
-    "b010".U -> 16.U,
-    "b011".U -> 64.U
-  ))
-  val numOfUopVrgatherei16 = Mux((!simple.io.enq.vtype.vsew.orR) && (simple.io.enq.vtype.vlmul =/= "b011".U),
-    Cat(numOfUopVrgather, 0.U(1.W)),
-    numOfUopVrgather
-  )
-  val numOfUopVcompress = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(4.W), Array(
-    "b001".U -> 4.U,
-    "b010".U -> 13.U,
-    "b011".U -> 43.U
-  ))
-  val vemul : UInt = eew.asUInt + 1.U + vlmul.asUInt + ~sew.asUInt
-  val emul = MuxLookup(vemul, 1.U(4.W), Array(
-    "b001".U -> 2.U,
-    "b010".U -> 4.U,
-    "b011".U -> 8.U
-  ))                                                                                //TODO : eew and emul illegal exception need to be handled
-
-  //number of uop
-  val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(maxUopSize+1).W), Array(
-    UopSplitType.VEC_0XV         -> 2.U,
-    UopSplitType.DIR -> Mux(dest =/= 0.U, 2.U,
-                        Mux(src1 =/= 0.U, 1.U,
-                          Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U))),
-    UopSplitType.VEC_VVV         -> lmul,
-    UopSplitType.VEC_EXT2        -> lmul,
-    UopSplitType.VEC_EXT4        -> lmul,
-    UopSplitType.VEC_EXT8        -> lmul,
-    UopSplitType.VEC_VVM         -> lmul,
-    UopSplitType.VEC_VXM         -> (lmul +& 1.U),
-    UopSplitType.VEC_VXV         -> (lmul +& 1.U),
-    UopSplitType.VEC_VVW         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_WVW         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_VXW         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_WXW         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_WVV         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_WXV         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopSplitType.VEC_SLIDE1UP    -> (lmul +& 1.U),
-    UopSplitType.VEC_FSLIDE1UP   -> lmul,
-    UopSplitType.VEC_SLIDE1DOWN  -> Cat(lmul, 0.U(1.W)),
-    UopSplitType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) -1.U),
-    UopSplitType.VEC_VRED        -> lmul,
-    UopSplitType.VEC_SLIDEUP     -> (numOfUopVslide + 1.U),
-    UopSplitType.VEC_ISLIDEUP    -> numOfUopVslide,
-    UopSplitType.VEC_SLIDEDOWN   -> (numOfUopVslide + 1.U),
-    UopSplitType.VEC_ISLIDEDOWN  -> numOfUopVslide,
-    UopSplitType.VEC_M0X         -> (lmul +& 1.U),
-    UopSplitType.VEC_MVV         -> (Cat(lmul, 0.U(1.W)) -1.U),
-    UopSplitType.VEC_M0X_VFIRST  -> 2.U,
-    UopSplitType.VEC_VWW         -> Cat(lmul, 0.U(1.W)),
-    UopSplitType.VEC_RGATHER     -> numOfUopVrgather,
-    UopSplitType.VEC_RGATHER_VX  -> (numOfUopVrgather +& 1.U),
-    UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
-    UopSplitType.VEC_US_LD       -> (emul +& 1.U),
-  ))
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
