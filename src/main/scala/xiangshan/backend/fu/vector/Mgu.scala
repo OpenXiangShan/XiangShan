@@ -45,8 +45,8 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 
   private val eewOH = SewOH(info.eew).oneHot
 
-  private val vstartMapVdIdx = elemIdxMapVdIdx(info.vstart)
-  private val vlMapVdIdx = elemIdxMapVdIdx(info.vl)
+  private val vstartMapVdIdx = elemIdxMapVdIdx(info.vstart)(2, 0) // 3bits 0~7
+  private val vlMapVdIdx = elemIdxMapVdIdx(info.vl)(3, 0)         // 4bits 0~8
   private val uvlMax = numBytes.U >> info.eew
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
   private val maskUsed = maskDataVec(info.vdIdx)
@@ -93,7 +93,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   def elemIdxMapVdIdx(elemIdx: UInt) = {
     require(elemIdx.getWidth >= log2Up(vlen))
     // 3 = log2(8)
-    Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteWidth - x + 3 - 1, byteWidth - x)))
+    Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteWidth - x + 3, byteWidth - x)))
   }
 
   def elemIdxMapUElemIdx(elemIdx: UInt) = {
