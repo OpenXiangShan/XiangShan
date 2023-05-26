@@ -83,7 +83,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
     * [[vimacs]]'s in connection
     */
   private val vs2VecUsed: Vec[UInt] = Mux(widen, VecInit(vs2Split.io.outVec32b.take(numVecModule)), vs2Split.io.outVec64b)
-  private val vs1VecUsed: Vec[UInt] = Mux(widen, VecInit(vs1Split.io.outVec32b.take(numVecModule)), vs2Split.io.outVec64b)
+  private val vs1VecUsed: Vec[UInt] = Mux(widen, VecInit(vs1Split.io.outVec32b.take(numVecModule)), vs1Split.io.outVec64b)
   private val oldVdVecUsed: Vec[UInt] = WireInit(oldVdSplit.io.outVec64b)
 
   vimacs.zipWithIndex.foreach {
