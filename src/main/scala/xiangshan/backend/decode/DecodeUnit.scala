@@ -781,10 +781,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
 
   val uopInfoGen = Module(new UopInfoGen)
-  uopInfoGen.io.in.preDecodeInfo.typeOfSplit := decodedInst.uopSplitType
-  uopInfoGen.io.in.preDecodeInfo.vsew := decodedInst.vpu.vsew
-  uopInfoGen.io.in.preDecodeInfo.vlmul := decodedInst.vpu.vlmul
-  uopInfoGen.io.in.preDecodeInfo.vwidth := inst.RM
+  uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
+  uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
+  uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
+  uopInfoGen.io.in.preInfo.vwidth := inst.RM
   io.deq.isComplex := uopInfoGen.io.out.isComplex
   io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
