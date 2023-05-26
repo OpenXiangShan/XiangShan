@@ -48,6 +48,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
     ))
   }
   protected val srcVConfig: VConfig = if(!cfg.vconfigWakeUp) inCtrl.vpu.get.vconfig else inData.getSrcVConfig.asTypeOf(new VConfig)
+  protected val vl = srcVConfig.vl
 }
 
 class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -68,7 +69,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
 
   protected val vs2 = Mux(isReverse, src0, src1)
   protected val vs1 = Mux(isReverse, src1, src0)
-  protected val old_vd = inData.src(2)
+  protected val oldVd = inData.src(2)
 
   override def latency: Int = cfg.latency.latencyVal.get
 

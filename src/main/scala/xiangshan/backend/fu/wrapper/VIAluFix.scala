@@ -133,10 +133,6 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   val maskIdx = Mux(isNarrow, (vuopIdx >> 1.U).asUInt, vuopIdx)
   val maskUsed = maskDataVec(maskIdx)
 
-  val vconfig = srcVConfig
-  val vl = vconfig.vl
-
-
   /**
     * [[typeModule]]'s io connection
     */
@@ -166,7 +162,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
       subIO.in.vdType       := typeModule.io.out.vdType
       subIO.in.vs2          := vs2
       subIO.in.vs1          := vs1
-      subIO.in.old_vd       := old_vd
+      subIO.in.old_vd       := oldVd
       subIO.in.mask16b      := maskUsed // Todo: make mask16b more flexiable
       subIO.ctrl.narrow     := isNarrow
       subIO.ctrl.vstart_gte_vl := vstart >= vl
