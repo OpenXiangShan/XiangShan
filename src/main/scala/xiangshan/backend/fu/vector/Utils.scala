@@ -1,7 +1,8 @@
 package xiangshan.backend.fu.vector
 
 import chisel3._
-import chisel3.util.Mux1H
+import chisel3.util.BitPat.bitPatToUInt
+import chisel3.util.{BitPat, Mux1H}
 import xiangshan.backend.fu.vector.Bundles.VSew
 
 object Utils {
@@ -19,4 +20,8 @@ object Utils {
     }
     maskDataVec
   }
+
+  def NOnes(n: Int): UInt = bitPatToUInt(BitPat.Y(n))
+
+  def NZeros(n: Int): UInt = bitPatToUInt(BitPat.N(n))
 }
