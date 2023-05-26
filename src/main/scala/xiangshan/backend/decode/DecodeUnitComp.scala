@@ -66,9 +66,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val maxUopSize = MaxUopSize
   //input bits
   val staticInst = Wire(new StaticInst)
-  private val inst: XSInstBitFields = staticInst.asTypeOf(new XSInstBitFields)
+
 
   staticInst := io.enq.staticInst
+  private val inst: XSInstBitFields = staticInst.instr.asTypeOf(new XSInstBitFields)
 
   val src1 = Cat(0.U(1.W), inst.RS1)
   val src2 = Cat(0.U(1.W), inst.RS2)
