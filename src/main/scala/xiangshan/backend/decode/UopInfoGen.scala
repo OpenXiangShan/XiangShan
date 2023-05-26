@@ -35,10 +35,10 @@ import yunsuan.VpermType
 class UopInfoGen (implicit p: Parameters) extends XSModule {
   val io = IO(new UopInfoGenIO)
 
-  val typeOfSplit = io.in.preDecodeInfo.typeOfSplit
-  val vsew = Cat(0.U(1.W), io.in.preDecodeInfo.vsew)
-  val veew = Cat(0.U(1.W), io.in.preDecodeInfo.vwidth(1, 0))
-  val vlmul = io.in.preDecodeInfo.vlmul
+  val typeOfSplit = io.in.preInfo.typeOfSplit
+  val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
+  val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
+  val vlmul = io.in.preInfo.vlmul
   val isComplex = io.out.isComplex
 
   val lmul = MuxLookup(vlmul, 1.U(4.W), Array(
@@ -118,7 +118,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
 
 class UopInfoGenIO(implicit p: Parameters) extends XSBundle {
   val in = new Bundle {
-    val preDecodeInfo = Input(new PreDecodeInfo)
+    val preInfo = Input(new PreInfo)
   }
   val out = new Bundle {
     val isComplex = Output(Bool())
@@ -126,7 +126,7 @@ class UopInfoGenIO(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class PreDecodeInfo(implicit p: Parameters) extends XSBundle {
+class PreInfo(implicit p: Parameters) extends XSBundle {
   val typeOfSplit = UopSplitType()
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()
