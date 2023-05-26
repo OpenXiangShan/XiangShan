@@ -254,7 +254,7 @@ object Bundles {
     // vector fix int rounding mode
     val vxrm      = Vxrm()
     // vector uop index, exclude other non-vector uop
-    val vuopIdx   = UInt(log2Up(p(XSCoreParamsKey).MaxUopSize).W)
+    val vuopIdx   = UopIdx()
     // maybe used if data dependancy
     val vmask     = UInt(MaskSrcData().dataWidth.W)
     val vl        = Vl()
@@ -484,16 +484,20 @@ object Bundles {
     val isInterrupt = Bool()
   }
 
+  object UopIdx {
+    def apply()(implicit p: Parameters): UInt = UInt(log2Up(p(XSCoreParamsKey).MaxUopSize + 1).W)
+  }
+
   class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val src = if(isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
+    val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
   }
 
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val data = if(isVector) UInt(VLEN.W) else UInt(XLEN.W)
+    val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
     val debug = new DebugBundle
   }
 
