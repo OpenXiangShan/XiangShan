@@ -419,6 +419,7 @@ object Bundles {
     val replayInst = Bool()
     val redirect = ValidIO(new Redirect)
     val fflags = UInt(5.W)
+    val vxsat = Bool()
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
@@ -434,6 +435,7 @@ object Bundles {
       this.replayInst := source.replay.getOrElse(false.B)
       this.redirect := source.redirect.getOrElse(0.U.asTypeOf(this.redirect))
       this.fflags := source.fflags.getOrElse(0.U.asTypeOf(this.fflags))
+      this.vxsat := source.vxsat.getOrElse(0.U.asTypeOf(this.vxsat))
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
       this.debugInfo := source.debugInfo

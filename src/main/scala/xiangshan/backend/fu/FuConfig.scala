@@ -473,6 +473,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    writeVxsat = true,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
