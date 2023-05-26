@@ -162,6 +162,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   val debugVconfig = dataPath.io.debugVconfig.asTypeOf(new VConfig)
   val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
   val debugVl = debugVconfig.vl
+  csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vstart.bits := 0.U
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
