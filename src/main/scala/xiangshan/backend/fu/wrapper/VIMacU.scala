@@ -82,8 +82,16 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   /**
     * [[vimacs]]'s in connection
     */
-  private val vs2VecUsed: Vec[UInt] = Mux(widen, VecInit(vs2Split.io.outVec32b.take(numVecModule)), vs2Split.io.outVec64b)
-  private val vs1VecUsed: Vec[UInt] = Mux(widen, VecInit(vs1Split.io.outVec32b.take(numVecModule)), vs1Split.io.outVec64b)
+  // Vec(vs2(31,0), vs2(63,32), vs2(95,64), vs2(127,96)) ==>
+  // Vec(
+  //   Cat(vs2(95,64),  vs2(31,0)),
+  //   Cat(vs2(127,96), vs2(63,32)),
+  // )
+  private val vs2GroupedVec: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+
+  private val vs2VecUsed: Vec[UInt] = Mux(widen, vs2GroupedVec, vs2Split.io.outVec64b)
+  private val vs1VecUsed: Vec[UInt] = Mux(widen, vs1GroupedVec, vs1Split.io.outVec64b)
   private val oldVdVecUsed: Vec[UInt] = WireInit(oldVdSplit.io.outVec64b)
 
   vimacs.zipWithIndex.foreach {
@@ -113,6 +121,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
     * [[mgu]]'s in connection
     */
   private val vd = Cat(vimacs.reverse.map(_.io.vd))
+  private val eew = Mux(widen, vsew + 1.U, vsew)
   mgu.io.in.vd := vd
   mgu.io.in.oldVd := oldVd
   mgu.io.in.mask := srcMask
@@ -120,7 +129,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   mgu.io.in.info.ma := vma
   mgu.io.in.info.vl := vl
   mgu.io.in.info.vstart := vstart
-  mgu.io.in.info.eew := vsew
+  mgu.io.in.info.eew := eew
   mgu.io.in.info.vdIdx := vuopIdx
 
   io.out.bits.res.data := mgu.io.out.vd

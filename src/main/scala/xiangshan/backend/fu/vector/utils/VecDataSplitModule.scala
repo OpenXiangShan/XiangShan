@@ -4,10 +4,10 @@ import chisel3._
 
 class VecDataSplitIO(inDataWidth: Int, outDataWidth: Int) extends Bundle {
   val inVecData = Input(UInt(inDataWidth.W))
-  val outVec8b  = Output(Vec(inDataWidth /  8, UInt(outDataWidth.W)))
-  val outVec16b = Output(Vec(inDataWidth / 16, UInt(outDataWidth.W)))
-  val outVec32b = Output(Vec(inDataWidth / 32, UInt(outDataWidth.W)))
-  val outVec64b = Output(Vec(inDataWidth / 64, UInt(outDataWidth.W)))
+  val outVec8b  = Output(Vec(inDataWidth /  8, UInt( 8.W)))
+  val outVec16b = Output(Vec(inDataWidth / 16, UInt(16.W)))
+  val outVec32b = Output(Vec(inDataWidth / 32, UInt(32.W)))
+  val outVec64b = Output(Vec(inDataWidth / 64, UInt(64.W)))
 }
 
 class VecDataSplitModule(inDataWidth: Int, outDataWidth: Int) extends Module {
