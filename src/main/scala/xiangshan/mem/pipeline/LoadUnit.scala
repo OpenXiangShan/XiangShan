@@ -563,7 +563,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_cache_replay = io.dcacheResp.bits.replay && !forward_D_or_mshr_valid
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) && io.dcacheResp.bits.tag_error
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
-  val s2_wait_store = io.in.bits.uop.cf.storeSetHit && 
+  val s2_wait_store = (!io.in.bits.uop.cf.loadWaitStrict || io.in.bits.isFirstIssue) &&
+                      io.in.bits.uop.cf.storeSetHit && 
                       io.lsq.addrInvalid &&
                       !s2_mmio &&
                       !s2_is_prefetch 
