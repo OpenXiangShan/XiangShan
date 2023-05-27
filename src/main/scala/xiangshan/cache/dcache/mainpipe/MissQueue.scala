@@ -191,11 +191,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       }
     }
 
+    val latency_monitor = new DCacheBundle {
+      val load_miss_refilling  = Output(Bool())
+      val store_miss_refilling = Output(Bool())
+      val amo_miss_refilling   = Output(Bool())
+      val pf_miss_refilling    = Output(Bool())
+    }
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
 
   val req = Reg(new MissReqWoStoreData)
+  val req_primary_fire = Reg(new MissReqWoStoreData) // for perf use
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
@@ -270,6 +277,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   when (primary_fire) {
     req_valid := true.B
     req := io.req.bits
+    req_primary_fire := io.req.bits
     req.addr := get_block_addr(io.req.bits.addr)
 
     s_acquire := false.B
@@ -495,7 +503,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   when(prefetch && !secondary_fired) {
     io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
   }.otherwise {
-    io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUData.id.U)
+    when(req.isFromStore) {
+      io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
+    }.elsewhen(req.isFromLoad) {
+      io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
+    }.elsewhen(req.isFromAMO) {
+      io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUAtomicData.id.U)
+    }.otherwise {
+      io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
+    }
   }
   // prefer not to cache data in L2 by default
   io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
@@ -584,6 +600,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.debug_early_replace.bits.tag := req.replace_tag
 
   io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
+
+  // refill latency monitor
+  io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
+  io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
+  io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
+  io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
 
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
@@ -796,13 +818,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   // Perf count
-  XSPerfAccumulate("miss_req", io.req.fire())
-  XSPerfAccumulate("miss_req_allocate", io.req.fire() && alloc)
-  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && io.req.bits.isFromLoad)
-  XSPerfAccumulate("miss_req_reject_load", io.req.valid && reject && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req", io.req.fire() && !io.req.bits.cancel)
+  XSPerfAccumulate("miss_req_allocate", io.req.fire() && !io.req.bits.cancel && alloc)
+  XSPerfAccumulate("miss_req_load_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req_store_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
+  XSPerfAccumulate("miss_req_amo_allocate", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
+  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
+  XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
-  XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && alloc && io.req.bits.isFromPrefetch)
-  XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && merge && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   when (num_valids > max_inflight) {
@@ -817,6 +842,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
   XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
   XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
+
+  XSPerfAccumulate("miss_load_refill_latency", PopCount(entries.map(_.io.latency_monitor.load_miss_refilling)))
+  XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
+  XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
+  XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
 
   val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
   val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
