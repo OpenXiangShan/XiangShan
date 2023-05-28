@@ -481,6 +481,7 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
+  val LFSTEnable = false
   val loadExuConfigs = coreParams.loadExuConfigs
   val storeExuConfigs = coreParams.storeExuConfigs
 

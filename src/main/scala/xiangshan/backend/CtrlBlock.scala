@@ -417,11 +417,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
   // LFST lookup and update
-  val lfst = Module(new LFST)
-  lfst.io.redirect <> RegNext(io.redirect)
-  lfst.io.storeIssue <> RegNext(io.stIn)
-  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
-  lfst.io.dispatch <> dispatch.io.lfst
+  dispatch.io.lfst := DontCare
+  if (LFSTEnable) {
+    val lfst = Module(new LFST)
+    lfst.io.redirect <> RegNext(io.redirect)
+    lfst.io.storeIssue <> RegNext(io.stIn)
+    lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+    lfst.io.dispatch <> dispatch.io.lfst
+  }
+
 
   rat.io.redirect := stage2Redirect.valid
   rat.io.robCommits := rob.io.commits
