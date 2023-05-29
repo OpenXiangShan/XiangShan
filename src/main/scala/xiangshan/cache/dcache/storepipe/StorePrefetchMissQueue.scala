@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate, QueuePerf}
+import utility.Constantin
 
 // TODO: distinguish load and store
 class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
@@ -38,9 +39,13 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule{
     })
     require(StorePipelineWidth == 2)
     val QueueSize = 6
+    val Interval = RegInit(0.U(10.W))
     val valids = RegInit(VecInit(List.tabulate(QueueSize){_ => false.B}))
     val datas = RegInit(VecInit(List.tabulate(QueueSize){_ => 0.U.asTypeOf(new StorePrefetchReq)}))
+    val counters = RegInit(VecInit(List.tabulate(QueueSize){_ => 0.U(10.W)}))
     val cancel_mask = Wire(Vec(QueueSize, Bool()))
+
+    Interval := Constantin.createRecord("staInterval")
 
     def get_enq_mask(odd: Boolean): Vec[Bool] = {
         WireInit(VecInit(List.tabulate(QueueSize){i => ((i % 2) == (if (odd) 1 else 0)).B}))
@@ -58,6 +63,10 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule{
         }
         VecInit(match_vec).asUInt.orR
     }
+    
+    counters.foreach{case counter => {
+        counter := Mux(counter === 0.U, counter, counter - 1.U)
+    }}
     // enq
     for (i <- 0 until StorePipelineWidth) {
         val odd = i == 0
@@ -79,10 +88,12 @@ class StorePrefetchMissQueue(implicit p: Parameters) extends DCacheModule{
         when(enq_req.fire) {
             valids(enq_idx) := true.B
             datas(enq_idx) := enq_req.bits
+            counters(enq_idx) := Interval
         }
     }
 
-    val deq_valids = (valids.asUInt & ~cancel_mask.asUInt)
+    val counter_mask = VecInit(counters.map(_ === 0.U))
+    val deq_valids = (valids.asUInt & ~cancel_mask.asUInt & counter_mask.asUInt)
     val deq_idx = PriorityEncoder(deq_valids)
 
     val deq_req = io.deq
