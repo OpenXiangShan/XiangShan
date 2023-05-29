@@ -22,7 +22,7 @@ import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import coupledL2.{AliasField, DirtyField, PrefetchField, ReqSourceKey}
+import coupledL2.{AliasField, DirtyField, PrefetchField, ReqSourceField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._

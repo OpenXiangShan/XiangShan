@@ -264,7 +264,7 @@ class WithNKBL2
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(ReqSourceField()),
+        reqField = Seq(huancun.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
       )),

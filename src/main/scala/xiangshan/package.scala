@@ -790,7 +790,8 @@ package object xiangshan {
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
   // indicates where the memory access request comes from
-  // a dupliacte of this is in HuanCun.common
+  // a dupliacte of this is in HuanCun.common and CoupledL2.common
+  // TODO: consider moving it to Utility, so that they could share the same definition
   object MemReqSource extends Enumeration {
     val NoWhere = Value("NoWhere")
 

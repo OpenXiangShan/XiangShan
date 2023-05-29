@@ -513,8 +513,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
     }
   }
-  // prefer not to cache data in L2 by default
-  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   require(nSets <= 256)
 
   io.mem_grant.ready := !w_grantlast && s_acquire
