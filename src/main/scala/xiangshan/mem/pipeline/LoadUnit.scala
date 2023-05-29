@@ -609,7 +609,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_wait_store = io.in.bits.uop.cf.storeSetHit && 
                       io.lsq.addrInvalid &&
                       !s2_mmio &&
-                      !s2_is_prefetch
+                      !s2_is_prefetch 
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
   val s2_fullForward = WireInit(false.B)
 
