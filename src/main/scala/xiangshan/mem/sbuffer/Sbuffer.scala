@@ -249,13 +249,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val plru = new PseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(EnsbufferWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
-  val candidateVec = VecInit(stateVec.map(s => s.isDcacheReqCandidate()))
-  val candidateIdx = PriorityEncoder(candidateVec)
-
-  val replaceAlgoIdx = plru.way
-  val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
-
-  val replaceIdx = Mux(replaceAlgoNotDcacheCandidate, candidateIdx, replaceAlgoIdx)
+  val replaceIdx = plru.way
+  val replaceIdxOH = UIntToOH(plru.way)
   plru.access(accessIdx)
 
   //-------------------------cohCount-----------------------------
