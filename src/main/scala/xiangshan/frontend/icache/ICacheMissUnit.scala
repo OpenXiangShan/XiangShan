@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-import huancun.{AliasKey, DirtyKey, ReqSourceKey}
+import coupledL2.{AliasKey, ReqSourceKey}
 import xiangshan.cache._
 import utils._
 import utility._
