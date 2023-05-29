@@ -60,19 +60,20 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val beu = LazyModule(new BusErrorUnit(
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
   ))
-  val core_l2_pmu = BusPerfMonitor(name = "Core_L2", enable = !debugOpts.FPGAPlatform)
+  val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform)
+  val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform, stat_latency = true)
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
 
-  core_l2_pmu := l1d_logger
-  l1_xbar :=* core_l2_pmu
+  misc_l2_pmu := l1d_logger
+  l1_xbar :=* misc_l2_pmu
 
   l2_binder match {
     case Some(binder) =>
-      memory_port := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder
+      memory_port := TLBuffer.chainNode(2) := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* binder
     case None =>
       memory_port := l1_xbar
   }
@@ -108,11 +109,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val debug_int_sink = core.debug_int_sink
   val beu_int_source = misc.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
-  val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform)
+  val l1d_l2_pmu = BusPerfMonitor(name = "L1d_L2", enable = !debugOpts.FPGAPlatform, stat_latency = true)
 
   val l1d_to_l2_bufferOpt = coreParams.dcacheParametersOpt.map { _ =>
     val buffer = LazyModule(new TLBuffer)
-    misc.l1d_logger := buffer.node := core.memBlock.dcache.clientNode
+    misc.l1d_logger := buffer.node := l1d_l2_pmu := core.memBlock.dcache.clientNode
     buffer
   }
 
@@ -126,14 +127,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   }
 
   val (l1i_to_l2_buffers, l1i_to_l2_buf_node) = chainBuffer(3, "l1i_to_l2_buffer")
-  misc.core_l2_pmu :=
+  misc.misc_l2_pmu :=
     TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
     l1i_to_l2_buf_node :=
     core.frontend.icache.clientNode
 
   val ptw_to_l2_buffers = if (!coreParams.softPTW) {
     val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
-    misc.core_l2_pmu :=
+    misc.misc_l2_pmu :=
       TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
       buf_node :=
       core.ptw_to_l2_buffer.node
@@ -142,7 +143,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2_l3_pmu :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
       l2.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.pf_sender_opt.get
