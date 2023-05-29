@@ -33,8 +33,8 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   // swap vs1 and vs2, used by vrsub, etc
   protected val isReverse = vecCtrl.isReverse
 
-  private val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
-  private val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
+  protected val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
+  protected val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
 
   // vadc.vv, vsbc.vv need this
   protected val needClearMask: Bool = VialuFixType.needClearMask(inCtrl.fuOpType)
@@ -70,6 +70,29 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val vs2 = Mux(isReverse, src0, src1)
   protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
+
+  protected val outCtrl     = ctrlVec.last
+  protected val outData     = dataVec.last
+
+  protected val outVecCtrl  = outCtrl.vpu.get
+  protected val outVm       = outVecCtrl.vm
+
+  // vadc.vv, vsbc.vv need this
+  protected val outNeedClearMask: Bool = VialuFixType.needClearMask(outCtrl.fuOpType)
+
+  protected val outVConfig  = if(!cfg.vconfigWakeUp) outCtrl.vpu.get.vconfig else outData.getSrcVConfig.asTypeOf(new VConfig)
+  protected val outVl       = outVConfig.vl
+  protected val outOldVd    = outData.src(2)
+  // There is no difference between control-dependency or data-dependency for function unit,
+  // but spliting these in ctrl or data bundles is easy to coding.
+  protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {
+    MuxCase(
+      outData.getSrcMask, Seq(
+        outNeedClearMask -> allMaskFalse,
+        outVm -> allMaskTrue
+      )
+    )
+  }
 
   override def latency: Int = cfg.latency.latencyVal.get
 
