@@ -482,6 +482,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.sqCanAccept := io.sqCanAccept
   dispatch.io.robHeadNotReady := rob.io.headNotReady
+  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> redirectForExu
