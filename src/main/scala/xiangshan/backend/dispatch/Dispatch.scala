@@ -294,17 +294,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   ExcitingUtils.addSink(l2Miss, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(l3Miss, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
 
-  // val ldReason = MuxCase(TopDownCounters.LoadMemStall.id.U, Seq(
-  //   notIssue   -> TopDownCounters.MemNotReadyStall.id.U,
-  //   tlbReplay  -> TopDownCounters.LoadTLBStall.id.U,
-  //   tlbMiss    -> TopDownCounters.LoadTLBStall.id.U,
-  //   vioReplay  -> TopDownCounters.LoadVioReplayStall.id.U,
-  //   mshrReplay -> TopDownCounters.LoadMSHRReplayStall.id.U,
-  //   !l1Miss    -> TopDownCounters.LoadL1Stall.id.U,
-  //   !l2Miss    -> TopDownCounters.LoadL2Stall.id.U,
-  //   !l3Miss    -> TopDownCounters.LoadL3Stall.id.U
-  // ))
-
   val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
   Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
   Mux(l1Miss, TopDownCounters.LoadL2Stall.id.U,
@@ -321,25 +310,31 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).map { case (((update, in), recv), fire) =>
     import FuType._
+    val headIsInt     = isIntExu(io.robHead.ctrl.fuType)  && io.robHeadNotReady
+    val headIsFp      = isFpExu(io.robHead.ctrl.fuType)   && io.robHeadNotReady
+    val headIsDivSqrt = isDivSqrt(io.robHead.ctrl.fuType) && io.robHeadNotReady
+    val headIsLd      = io.robHead.ctrl.fuType === ldu && io.robHeadNotReady
+    val headIsSt      = io.robHead.ctrl.fuType === stu && io.robHeadNotReady || !io.sqCanAccept
+    val headIsAmo     = io.robHead.ctrl.fuType === mou && io.robHeadNotReady
+    val headIsLdSt    = headIsLd || headIsSt
+
     import TopDownCounters._
-    val fuType = io.robHead.ctrl.fuType
-    val notRdy = io.robHeadNotReady
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
-      (fire                                       ) -> NoStall.id.U          ,
+      (fire                               ) -> NoStall.id.U          ,
       // dispatch not stall / core stall from rename
-      (in =/= OtherCoreStall.id.U                 ) -> in                    ,
+      (in =/= OtherCoreStall.id.U         ) -> in                    ,
       // dispatch queue stall
-      (!io.toIntDq.canAccept                      ) -> IntDqStall.id.U       ,
-      (!io.toFpDq.canAccept                       ) -> FpDqStall.id.U        ,
-      (!io.toLsDq.canAccept                       ) -> LsDqStall.id.U        ,
+      (!io.toIntDq.canAccept && !headIsInt) -> IntDqStall.id.U       ,
+      (!io.toFpDq.canAccept && !headIsFp  ) -> FpDqStall.id.U        ,
+      (!io.toLsDq.canAccept && !headIsLdSt) -> LsDqStall.id.U        ,
       // rob stall
-      (fuType === mou                    && notRdy) -> AtomicStall.id.U      ,
-      (!io.sqCanAccept || fuType === stu && notRdy) -> StoreStall.id.U       ,
-      (fuType === ldu                    && notRdy) -> ldReason              ,
-      (isDivSqrt(fuType)                 && notRdy) -> DivStall.id.U         ,
-      (isIntExu(fuType)                  && notRdy) -> IntNotReadyStall.id.U ,
-      (isFpExu(fuType)                   && notRdy) -> FPNotReadyStall.id.U  ,
+      (headIsAmo                          ) -> AtomicStall.id.U      ,
+      (headIsSt                           ) -> StoreStall.id.U       ,
+      (headIsLd                           ) -> ldReason              ,
+      (headIsDivSqrt                      ) -> DivStall.id.U         ,
+      (headIsInt                          ) -> IntNotReadyStall.id.U ,
+      (headIsFp                           ) -> FPNotReadyStall.id.U  ,
     ))
   }
 
