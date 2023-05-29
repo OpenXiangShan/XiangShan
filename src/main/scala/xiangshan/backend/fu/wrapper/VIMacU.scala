@@ -53,6 +53,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val opcode  = VimacType.getOpcode(fuOpType)
   private val format  = VimacType.getFormat(fuOpType)
   private val widen   = format === VimacType.FMT.VVW
+  private val exchangeVs2Vd = VimacOpcode.overWriteMultiplicand(opcode)
 
   // modules
   private val typeMod = Module(new VIMacSrcTypeModule)
@@ -108,8 +109,8 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
       mod.io.srcType(1)  := typeMod.io.out.vs1Type
       mod.io.vdType      := typeMod.io.out.vdType
       mod.io.vs1         := vs1VecUsed(i)
-      mod.io.vs2         := vs2VecUsed(i)
-      mod.io.oldVd       := oldVdVecUsed(i)
+      mod.io.vs2         := Mux(!exchangeVs2Vd, vs2VecUsed(i), oldVdVecUsed(i))
+      mod.io.oldVd       := Mux(!exchangeVs2Vd, oldVdVecUsed(i), vs2VecUsed(i))
       mod.io.highHalf    := VimacOpcode.highHalf(opcode)
       mod.io.isMacc      := VimacOpcode.isMacc(opcode)
       mod.io.isSub       := VimacOpcode.isSub(opcode)
@@ -120,17 +121,20 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   /**
     * [[mgu]]'s in connection
     */
-  private val vd = Cat(vimacs.reverse.map(_.io.vd))
-  private val eew = Mux(widen, vsew + 1.U, vsew)
-  mgu.io.in.vd := vd
-  mgu.io.in.oldVd := oldVd
-  mgu.io.in.mask := srcMask
-  mgu.io.in.info.ta := vta
-  mgu.io.in.info.ma := vma
-  mgu.io.in.info.vl := vl
-  mgu.io.in.info.vstart := vstart
-  mgu.io.in.info.eew := eew
-  mgu.io.in.info.vdIdx := vuopIdx
+  private val outVd = Cat(vimacs.reverse.map(_.io.vd))
+  private val outFormat = VimacType.getFormat(outCtrl.fuOpType)
+  private val outWiden = outFormat === VimacType.FMT.VVW
+
+  private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  mgu.io.in.vd := outVd
+  mgu.io.in.oldVd := outOldVd
+  mgu.io.in.mask := outSrcMask
+  mgu.io.in.info.ta := outVecCtrl.vta
+  mgu.io.in.info.ma := outVecCtrl.vma
+  mgu.io.in.info.vl := outVl
+  mgu.io.in.info.vstart := outVecCtrl.vstart
+  mgu.io.in.info.eew := outEew
+  mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
 
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.res.vxsat.get := vimacs.map(_.io.vxsat).reduce(_ | _).orR
