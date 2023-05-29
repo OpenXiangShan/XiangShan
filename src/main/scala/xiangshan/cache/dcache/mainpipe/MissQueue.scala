@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey, ReqSourceKey}
+import coupledL2.{AliasKey, DirtyKey, PrefetchKey, ReqSourceKey}
 import utility.FastArbiter
 import mem.{AddPipelineReg}
 import mem.trace._

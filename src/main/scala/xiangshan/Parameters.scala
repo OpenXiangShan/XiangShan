@@ -30,6 +30,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import coupledL2._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
@@ -66,6 +67,7 @@ case class XSCoreParameters
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
+  EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
@@ -257,12 +259,11 @@ case class XSCoreParameters
     nProbeEntries = 8,
     nReleaseEntries = 18
   )),
-  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
+  L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
-    level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
+    prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
@@ -338,6 +339,7 @@ trait HasXSParameter {
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
+  val EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
   val EnableFauFTB = coreParams.EnableFauFTB
@@ -478,6 +480,7 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
+  val LFSTEnable = false
   val loadExuConfigs = coreParams.loadExuConfigs
   val storeExuConfigs = coreParams.storeExuConfigs
 
