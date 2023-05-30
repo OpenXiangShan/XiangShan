@@ -52,9 +52,6 @@ endif
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
 else
-ifndef NOOP_HOME
-$(error NOOP_HOME is not set)
-endif
 override SIM_ARGS += --with-constantin
 endif
 
