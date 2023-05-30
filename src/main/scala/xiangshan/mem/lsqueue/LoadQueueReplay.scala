@@ -166,6 +166,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W))) 
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
+    val l2Hint  = Input(Valid(new L2ToL1Hint()))
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
@@ -235,6 +236,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     selBlocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
   })
   val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueReplaySize)(ReplayCarry(0.U, false.B))))
+  val dataInLastBeatReg = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
 
   /**
    * Enqueue
@@ -349,19 +351,43 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     needCancel(i) || loadReplayFireMask(i)
   })).asUInt 
   val remCancelSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(loadCancelSelMask)(rem)))
+
+  // l2 hint wakes up cache missed load
+  // l2 will send GrantData in next 2/3 cycle, wake up the missed load early and sent them to load pipe, so them will hit the data in D channel or mshr in load S1
+  val loadHintWakeMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+    allocated(i) && sleep(i) && blockByCacheMiss(i) && missMSHRId(i) === io.l2Hint.bits.sourceId && io.l2Hint.valid
+  })).asUInt()
+  // l2 will send 2 beats data in 2 cycles, so if data needed by this load is in first beat, select it this cycle, otherwise next cycle
+  val loadHintSelMask = loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
+  val remLoadHintSelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadHintSelMask)(rem)))
+  val hintSelValid = loadHintSelMask.orR
+
+  // wake up cache missed load
+  (0 until LoadQueueReplaySize).foreach(i => {
+    when(loadHintWakeMask(i)) {
+      blockByCacheMiss(i) := false.B
+      creditUpdate(i) := 0.U
+    }
+  })
   
   // generate replay mask
+  // replay select priority is given as follow
+  // 1. hint wake up load
+  // 2. higher priority load
+  // 3. lower priority load
   val loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
-    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
+    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val hasHigherPriority = cause(i)(LoadReplayCauses.dcacheMiss) || cause(i)(LoadReplayCauses.forwardFail)
+    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i) && hasHigherPriority
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i)  || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
-    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
+    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val hasLowerPriority = !cause(i)(LoadReplayCauses.dcacheMiss) && !cause(i)(LoadReplayCauses.forwardFail)
+    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i) && hasLowerPriority
   })).asUInt // use uint instead vec to reduce verilog lines
-  val loadNormalReplaySelMask = loadLowerPriorityReplaySelMask | loadHigherPriorityReplaySelMask
+  val loadNormalReplaySelMask = loadLowerPriorityReplaySelMask | loadHigherPriorityReplaySelMask | loadHintSelMask
   val remNormalReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadNormalReplaySelMask)(rem)))
-  val loadPriorityReplaySelMask = Mux(loadHigherPriorityReplaySelMask.orR, loadHigherPriorityReplaySelMask, loadLowerPriorityReplaySelMask)
+  val loadPriorityReplaySelMask = Mux(hintSelValid, loadHintSelMask, Mux(loadHigherPriorityReplaySelMask.orR, loadHigherPriorityReplaySelMask, loadLowerPriorityReplaySelMask))
   val remPriorityReplaySelVec = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(loadPriorityReplaySelMask)(rem)))
 
   /******************************************************************************************
@@ -378,6 +404,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       Mux(VecInit(remOldsetMatchMaskVec(rem).map(_(0))).asUInt.orR, remOldsetMatchMaskVec(rem)(i)(0), remOlderMatchMaskVec(rem)(i).reduce(_|_))
     })).asUInt
   }))
+  val remOldestHintSelVec = remOldestSelVec.zip(remLoadHintSelMask).map {
+    case(oldestVec, hintVec) => oldestVec & hintVec
+  }
 
   // select oldest logic
   s1_oldestSel := VecInit((0 until LoadPipelineWidth).map(rport => {
@@ -388,8 +417,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ageOldestIndex = OHToUInt(ageOldest.bits)
 
     // select program order oldest
-    val issOldestValid = remOldestSelVec(rport).orR
-    val issOldestIndex = OHToUInt(PriorityEncoderOH(remOldestSelVec(rport)))
+    val issOldestValid = Mux(io.l2Hint.valid, remOldestHintSelVec(rport).orR, remOldestSelVec(rport).orR)
+    val issOldestIndex = Mux(io.l2Hint.valid, OHToUInt(PriorityEncoderOH(remOldestHintSelVec(rport))), OHToUInt(PriorityEncoderOH(remOldestSelVec(rport))))
 
     val oldest = Wire(Valid(UInt()))
     oldest.valid := ageOldest.valid || issOldestValid
@@ -622,6 +651,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // 
       replayCarryReg(enqIndex) := replayInfo.replayCarry
       missMSHRId(enqIndex) := replayInfo.missMSHRId
+      dataInLastBeatReg(enqIndex) := dataInLastBeat
     }
 
     //
@@ -675,6 +705,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_dcache_replay", replayDCacheReplayCount)
   XSPerfAccumulate("replay_forward_fail", replayForwardFailCount)
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
+  XSPerfAccumulate("replay_hint_wakeup", hintSelValid)
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqCount),
