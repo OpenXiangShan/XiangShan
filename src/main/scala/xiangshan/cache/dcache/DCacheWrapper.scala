@@ -27,7 +27,8 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import coupledL2.{AliasField, AliasKey, DirtyField, PrefetchField, ReqSourceField}
+import coupledL2.{AliasField, AliasKey, DirtyField, PrefetchField}
+import utility.ReqSourceField
 import utility.FastArbiter
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry

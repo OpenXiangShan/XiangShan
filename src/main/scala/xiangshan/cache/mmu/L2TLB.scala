@@ -29,9 +29,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
-import utility.ChiselDB
 import difftest._
-import huancun.{ReqSourceField, ReqSourceKey}
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 

@@ -24,7 +24,7 @@ import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams,
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utility.{BinaryArbiter, TLEdgeBuffer}
+import utility.{BinaryArbiter, TLClientsMerger, TLEdgeBuffer}
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
@@ -148,10 +148,13 @@ trait HaveAXI4MemPort {
   ))
 
   val mem_xbar = TLXbar()
+  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform, stat_latency = true, add_reqkey = true)
   mem_xbar :=*
+    TLBuffer.chainNode(2) :=
+    TLCacheCork() :=
+    l3_mem_pmu :=
+    TLClientsMerger() :=
     TLXbar() :=*
-    TLBuffer.chainNode(2) :=*
-    TLCacheCork() :=*
     bankedNode
 
   mem_xbar :=
@@ -232,10 +235,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val l3_in = TLTempNode()
   val l3_out = TLTempNode()
-  val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
   l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar
-  bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
+  bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
     l3_out :*= l3_in
