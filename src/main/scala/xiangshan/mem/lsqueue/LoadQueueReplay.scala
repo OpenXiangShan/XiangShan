@@ -352,11 +352,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   
   // generate replay mask
   val loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val blocked = blockByForwardFail(i) || blockByCacheMiss(i)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i)  || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
+    val blocked = selBlocked(i) || ((blockByTlbMiss(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)) && !(blockByForwardFail(i) || blockByCacheMiss(i)))
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadNormalReplaySelMask = loadLowerPriorityReplaySelMask | loadHigherPriorityReplaySelMask
