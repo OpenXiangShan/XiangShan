@@ -157,7 +157,7 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
           latency := timer - latencyRecord(channelD.bits.source).timeStamp
           latencySum := latencySum + timer
           nrRecord := nrRecord + 1.U
-          printf("timer: %x\n", latency)
+          // printf("timer: %x\n", latency)
         }
         XSPerfAccumulate(name + "_nrRecord_all", resolveRecord)
         XSPerfAccumulate(name + "_latencySum_all", Mux(resolveRecord, latency, 0.U))
