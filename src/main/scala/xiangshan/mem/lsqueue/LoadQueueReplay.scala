@@ -30,7 +30,7 @@ import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.mem.mdp._
 import utils._
 import utility._
-import xiangshan.backend.Bundles.MemExuOutput
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 
 object LoadReplayCauses {
   // these causes have priority, lower coding has higher priority.
@@ -178,7 +178,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   //  Flags       : rar/raw queue allocate flags
   val allocated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) // The control signals need to explicitly indicate the initial value
   val sleep = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) 
-  val uop = Reg(Vec(LoadQueueReplaySize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W), 
     numEntries = LoadQueueReplaySize, 

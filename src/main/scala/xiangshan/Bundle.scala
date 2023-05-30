@@ -281,7 +281,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
 }
 
 class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
-  val uop = new MicroOp
+  val uop = new DynInst
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {

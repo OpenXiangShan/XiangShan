@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chisel3._ 
+import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import xiangshan._
@@ -26,6 +26,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.DynInst
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -57,7 +58,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Datavalid   : data valid
   //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRAWSize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRAWSize,
@@ -359,18 +360,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
  
   // check if rollback request is still valid in parallel
   io.rollback.bits.robIdx := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
+  io.rollback.bits.ftqIdx := rollbackUop.ftqPtr
   io.rollback.bits.stFtqIdx := rollbackStFtqIdx
-  io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
+  io.rollback.bits.ftqOffset := rollbackUop.ftqOffset
   io.rollback.bits.stFtqOffset := rollbackStFtqOffset
   io.rollback.bits.level := RedirectLevel.flush
   io.rollback.bits.interrupt := DontCare
   io.rollback.bits.cfiUpdate := DontCare
-  io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
+  io.rollback.bits.cfiUpdate.target := rollbackUop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
 
-  io.rollback.valid := VecInit(rollbackLqWbValid).asUInt.orR 
+  io.rollback.valid := VecInit(rollbackLqWbValid).asUInt.orR
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))

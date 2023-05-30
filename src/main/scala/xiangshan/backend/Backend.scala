@@ -275,7 +275,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lsqEnqIO = Flipped(new LsqEnqIO)
   val robLsqIO = new RobLsqIO
   val toSbuffer = new FenceToSbuffer
-  val rsFeedBack = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
+  val rsFeedBack = Vec(params.StaCnt + params.LduCnt, Flipped(new MemRSFeedbackIO))
   val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   // Input

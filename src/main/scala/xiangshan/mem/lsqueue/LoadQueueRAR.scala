@@ -15,7 +15,7 @@
 ***************************************************************************************/
 package xiangshan.mem
 
-import chisel3._ 
+import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import xiangshan._
@@ -23,6 +23,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.DynInst
 
 class LoadQueueRAR(implicit p: Parameters) extends XSModule 
   with HasDCacheParameters
@@ -51,7 +52,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  Released    : DCache released.
   //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRARSize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRARSize,

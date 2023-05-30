@@ -66,6 +66,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   private val StaCnt = backendParams.StaCnt
   private val StdCnt = backendParams.StdCnt
   private val MemExuCnt = LduCnt + StaCnt + StdCnt
+  private val MemAddrExtCnt = LduCnt + StaCnt
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -74,7 +75,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val issue = Vec(MemExuCnt, Flipped(DecoupledIO(new MemExuInput)))
     val loadFastMatch = Vec(LduCnt, Input(UInt(LduCnt.W)))
     val loadFastImm = Vec(LduCnt, Input(UInt(12.W)))
-    val rsfeedback = Vec(StaCnt, new MemRSFeedbackIO)
+    val rsfeedback = Vec(MemAddrExtCnt, new MemRSFeedbackIO)
     val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)

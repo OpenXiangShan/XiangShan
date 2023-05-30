@@ -149,7 +149,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingPtr = Output(new RobPtr)
 
   val mmio = Input(Vec(LoadPipelineWidth, Bool()))
-  val uop = Input(Vec(LoadPipelineWidth, new MicroOp))
+  val uop = Input(Vec(LoadPipelineWidth, new DynInst))
 }
 
 class RobEnqIO(implicit p: Parameters) extends XSBundle {
