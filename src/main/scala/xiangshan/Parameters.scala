@@ -131,7 +131,7 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  VirtualLoadQueueSize: Int = 80,
+  LoadQueueSize: Int = 80,
   LoadQueueRARSize: Int = 80,
   LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
@@ -402,7 +402,7 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
+  val LoadQueueSize = coreParams.LoadQueueSize
   val LoadQueueRARSize = coreParams.LoadQueueRARSize
   val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
   val RollbackGroupSize = coreParams.RollbackGroupSize

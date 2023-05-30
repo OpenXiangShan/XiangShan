@@ -140,7 +140,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val addrReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val dataReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(VirtualLoadQueueSize + 1).W))
+  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
@@ -398,8 +398,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     // Compare deqPtr (deqPtr) and forward.sqIdx, we have two cases:
     // (1) if they have the same flag, we need to check range(tail, sqIdx)
-    // (2) if they have different flags, we need to check range(tail, VirtualLoadQueueSize) and range(0, sqIdx)
-    // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, VirtualLoadQueueSize))
+    // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
+    // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
     // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag

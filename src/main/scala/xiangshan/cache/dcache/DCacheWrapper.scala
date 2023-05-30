@@ -151,7 +151,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheLineOffset = DCacheSetOffset
 
   // uncache
-  val uncacheIdxBits = log2Up(StoreQueueSize + 1) max log2Up(VirtualLoadQueueSize + 1)
+  val uncacheIdxBits = log2Up(StoreQueueSize + 1) max log2Up(LoadQueueSize + 1)
   // hardware prefetch parameters
   // high confidence hardware prefetch port
   val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default

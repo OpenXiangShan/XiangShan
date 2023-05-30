@@ -32,7 +32,7 @@ import xiangshan.mem.mdp._
 import xiangshan.backend.rob.RobPtr
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
-  p => p(XSCoreParamsKey).VirtualLoadQueueSize
+  p => p(XSCoreParamsKey).LoadQueueSize
 ){
 }
 
@@ -186,7 +186,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize+1).W))
     val lqReplayFull = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W))) 
   })
@@ -194,7 +194,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
   val loadQueueRAW = Module(new LoadQueueRAW)  //  read-after-write violation
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
-  val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state 
+  val loadQueueCtrl = Module(new LoadQueueCtrl)  //  control state 
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
 
@@ -203,7 +203,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */  
   loadQueueRAR.io.redirect <> io.redirect
   loadQueueRAR.io.release <> io.release
-  loadQueueRAR.io.ldWbPtr <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.ldWbPtr <> loadQueueCtrl.io.ldWbPtr
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req <> io.ldu.loadLoadViolationQuery(w).req // from load_s1
     loadQueueRAR.io.query(w).resp <> io.ldu.loadLoadViolationQuery(w).resp // to load_s2
@@ -226,14 +226,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   /**
-   * VirtualLoadQueue
+   * LoadQueueCtrl
    */  
-  virtualLoadQueue.io.redirect <> io.redirect
-  virtualLoadQueue.io.enq <> io.enq 
-  virtualLoadQueue.io.loadIn <> io.ldu.loadIn // from load_s3
-  virtualLoadQueue.io.lqFull <> io.lqFull
-  virtualLoadQueue.io.lqDeq <> io.lqDeq
-  virtualLoadQueue.io.lqCancelCnt <> io.lqCancelCnt
+  loadQueueCtrl.io.redirect <> io.redirect
+  loadQueueCtrl.io.enq <> io.enq 
+  loadQueueCtrl.io.loadIn <> io.ldu.loadIn // from load_s3
+  loadQueueCtrl.io.lqFull <> io.lqFull
+  loadQueueCtrl.io.lqDeq <> io.lqDeq
+  loadQueueCtrl.io.lqCancelCnt <> io.lqCancelCnt
 
   /**
    * Load queue exception buffer
@@ -304,7 +304,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.sqEmpty <> io.sq.sqEmpty
   loadQueueReplay.io.lqFull <> io.lqReplayFull
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
-  loadQueueReplay.io.ldWbPtr := virtualLoadQueue.io.ldWbPtr
+  loadQueueReplay.io.ldWbPtr := loadQueueCtrl.io.ldWbPtr
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
@@ -318,7 +318,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("rollback", io.rollback.valid)
 
   // perf cnt
-  val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++ 
+  val perfEvents = Seq(loadQueueCtrl, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++ 
   Seq(
     ("full_mask_000", full_mask === 0.U),
     ("full_mask_001", full_mask === 1.U),

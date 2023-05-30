@@ -25,7 +25,7 @@ import xiangshan.cache._
 import utils._
 import utility._
 
-class VirtualLoadQueue(implicit p: Parameters) extends XSModule 
+class LoadQueueCtrl(implicit p: Parameters) extends XSModule 
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
@@ -38,27 +38,27 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val ldWbPtr = Output(new LqPtr)
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))   
+    val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize+1).W))   
   })
 
-  println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
-  //  VirtualLoadQueue field
+  println("LoadQueueCtrl: size: " + LoadQueueSize)
+  //  LoadQueueCtrl field
   //  +-----------+---------+-------+
   //  | Allocated | MicroOp | Flags |
   //  +-----------+---------+-------+
   //  Allocated   : entry has been allocated already
   //  MicroOp     : inst's microOp
   //  Flags       : load flags
-  val allocated = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(VirtualLoadQueueSize, new MicroOp))
-  val addrvalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio addr is valid
-  val datavalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio data is valid
+  val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // The control signals need to explicitly indicate the initial value
+  val uop = Reg(Vec(LoadQueueSize, new MicroOp))
+  val addrvalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // non-mmio addr is valid
+  val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // non-mmio data is valid
 
   /**
    * used for debug
    */ 
-  val debug_mmio = Reg(Vec(VirtualLoadQueueSize, Bool())) // mmio: inst is an mmio inst
-  val debug_paddr = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
+  val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
+  val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
 
   //  maintain pointers
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
@@ -73,9 +73,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LoadPipelineWidth).U
+  val allowEnqueue = validCount <= (LoadQueueSize - LoadPipelineWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
-  val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
+  val needCancel = WireInit(VecInit((0 until LoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect) && allocated(i) 
   })))
   val lastNeedCancel = RegNext(needCancel)
@@ -127,7 +127,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   /**
    * Enqueue at dispatch
    * 
-   * Currently, VirtualLoadQueue only allows enqueue when #emptyEntries > EnqWidth
+   * Currently, LoadQueueCtrl only allows enqueue when #emptyEntries > EnqWidth
    */
   io.enq.canAccept := allowEnqueue
   for (i <- 0 until io.enq.req.length) {
@@ -166,7 +166,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
-  for (i <- 0 until VirtualLoadQueueSize) {
+  for (i <- 0 until LoadQueueSize) {
     when (needCancel(i)) {
       allocated(i) := false.B
     }
@@ -252,7 +252,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   //  perf counter
-  QueuePerf(VirtualLoadQueueSize, validCount, !allowEnqueue)
+  QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
   io.lqFull := !allowEnqueue
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent() 
@@ -268,7 +268,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  for (i <- 0 until VirtualLoadQueueSize) {
+  for (i <- 0 until LoadQueueSize) {
     XSDebug(i + " pc %x pa %x ", uop(i).cf.pc, debug_paddr(i))
     PrintFlag(allocated(i), "v")
     PrintFlag(allocated(i) && datavalid(i), "d")
