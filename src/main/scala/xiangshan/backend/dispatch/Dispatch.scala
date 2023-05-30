@@ -318,7 +318,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val headIsSt  = io.robHead.ctrl.fuType === stu && io.robHeadNotReady || !io.sqCanAccept
     val headIsAmo = io.robHead.ctrl.fuType === mou && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
-    val robSqFull = io.robFull || io.sqCanAccept
+    val robSqFull = io.robFull || !io.sqCanAccept
 
     import TopDownCounters._
     update := MuxCase(OtherCoreStall.id.U, Seq(
