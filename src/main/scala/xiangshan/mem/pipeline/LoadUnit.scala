@@ -55,14 +55,15 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle with HasDCacheP
   def tlbMiss       = cause(LoadReplayCauses.tlbMiss)
   def waitStore     = cause(LoadReplayCauses.waitStore)
   def schedError    = cause(LoadReplayCauses.schedError)
-  def rejectEnq     = cause(LoadReplayCauses.rejectEnq)
+  def rarReject     = cause(LoadReplayCauses.rarReject)
+  def rawReject     = cause(LoadReplayCauses.rawReject)
   def dcacheMiss    = cause(LoadReplayCauses.dcacheMiss)
   def bankConflict  = cause(LoadReplayCauses.bankConflict)
   def dcacheReplay  = cause(LoadReplayCauses.dcacheReplay)
   def forwardFail   = cause(LoadReplayCauses.forwardFail)
 
-  def forceReplay() = rejectEnq || schedError || waitStore || tlbMiss
-  def needReplay()  = cause.asUInt.orR
+  def forceReplay() = rarReject || rawReject || schedError || waitStore || tlbMiss
+  def needReplay()  = cause.asUInt.orR 
 }
 
 class LoadToReplayIO(implicit p: Parameters) extends XSBundle {
@@ -622,7 +623,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
 
   val s2_rarCanAccept = !io.loadLoadViolationQueryReq.valid || io.loadLoadViolationQueryReq.ready
   val s2_rawCanAccept = !io.storeLoadViolationQueryReq.valid || io.storeLoadViolationQueryReq.ready
-  val s2_rejectEnq = !s2_rarCanAccept || !s2_rawCanAccept
+  val s2_rarReject = !s2_rarCanAccept
+  val s2_rawReject = !s2_rawCanAccept
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -762,7 +764,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := !(!s2_cache_replay || s2_is_prefetch || s2_mmio || s2_exception || io.dataForwarded)
   }
   io.out.bits.replayInfo.cause(LoadReplayCauses.forwardFail) := s2_data_invalid && !s2_mmio && !s2_is_prefetch
-  io.out.bits.replayInfo.cause(LoadReplayCauses.rejectEnq) := s2_rejectEnq && !s2_mmio && !s2_is_prefetch && !s2_exception
+  io.out.bits.replayInfo.cause(LoadReplayCauses.rarReject) := s2_rarReject && !s2_mmio && !s2_is_prefetch && !s2_exception
+  io.out.bits.replayInfo.cause(LoadReplayCauses.rawReject) := s2_rawReject && !s2_mmio && !s2_is_prefetch && !s2_exception
   io.out.bits.replayInfo.canForwardFullData := io.dataForwarded
   io.out.bits.replayInfo.dataInvalidSqIdx := io.dataInvalidSqIdx
   io.out.bits.replayInfo.addrInvalidSqIdx := io.addrInvalidSqIdx // io.in.bits.uop.sqIdx - io.oracleMDPQuery.resp.distance // io.addrInvalidSqIdx
