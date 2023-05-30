@@ -24,8 +24,8 @@ import chisel3.util._
 import utils.{XSPerfAccumulate, XSPerfPrint}
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import huancun.{MemReqSource, ReqSourceField, ReqSourceKey}
-import utility.GTimer
+import utility.{ReqSourceField, ReqSourceKey, GTimer}
+import xiangshan.MemReqSource
 
 class BusPerfMonitor(name: String, stat_latency: Boolean, add_reqkey: Boolean)(implicit p: Parameters) extends LazyModule {
   val node = if (add_reqkey) TLAdapterNode(managerFn = { m =>
@@ -35,7 +35,7 @@ class BusPerfMonitor(name: String, stat_latency: Boolean, add_reqkey: Boolean)(i
       },
       requestKeys = Seq(ReqSourceKey),
       beatBytes = 32,
-      endSinkId = 64
+      endSinkId = m.endSinkId
     )
   }) else {
     TLAdapterNode()
