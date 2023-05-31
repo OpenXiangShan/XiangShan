@@ -216,7 +216,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   //  Specific cycles to block
   val blockCyclesTlb = Reg(Vec(4, UInt(ReSelectLen.W)))
   blockCyclesTlb := io.tlbReplayDelayCycleCtrl
-  val blockCyclesCache = RegInit(VecInit(Seq(11.U(ReSelectLen.W), 18.U(ReSelectLen.W), 127.U(ReSelectLen.W), 17.U(ReSelectLen.W))))
+  val blockCyclesCache = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val blockCyclesOthers = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val blockSqIdx = Reg(Vec(LoadQueueReplaySize, new SqPtr))
   // block causes
@@ -312,7 +312,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
-    when (blockByCacheMiss(i) && creditUpdate(i) === 0.U) { blockByCacheMiss(i) := false.B }
     when (blockByRARReject(i) && (!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr))) { blockByRARReject(i) := false.B }
     when (blockByRAWReject(i) && (!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr))) { blockByRAWReject(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
@@ -619,10 +618,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       }
 
       // special case: dcache miss
-      when (replayInfo.cause(LoadReplayCauses.dcacheMiss)) {
+      when (replayInfo.cause(LoadReplayCauses.dcacheMiss) && enq.bits.handledByMSHR) {
         blockByCacheMiss(enqIndex) := !replayInfo.canForwardFullData && //  dcache miss
-                                  !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) && // no refill in this cycle
-                                  creditUpdate(enqIndex) =/= 0.U //  credit is not zero
+                                  !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) // no refill in this cycle
+                                  
         blockPtrCache(enqIndex) := Mux(blockPtrCache(enqIndex) === 3.U(2.W), blockPtrCache(enqIndex), blockPtrCache(enqIndex) + 1.U(2.W))
       }
 
