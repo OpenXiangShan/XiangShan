@@ -73,6 +73,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // perf only
     val robHead = Input(new MicroOp)
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
+    val lqCanAccept = Input(Bool())
     val sqCanAccept = Input(Bool())
     val robHeadNotReady = Input(Bool())
     val robFull = Input(Bool())
@@ -314,11 +315,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val headIsInt = isIntExu(io.robHead.ctrl.fuType)  && io.robHeadNotReady
     val headIsFp  = isFpExu(io.robHead.ctrl.fuType)   && io.robHeadNotReady
     val headIsDiv = isDivSqrt(io.robHead.ctrl.fuType) && io.robHeadNotReady
-    val headIsLd  = io.robHead.ctrl.fuType === ldu && io.robHeadNotReady
+    val headIsLd  = io.robHead.ctrl.fuType === ldu && io.robHeadNotReady || !io.lqCanAccept
     val headIsSt  = io.robHead.ctrl.fuType === stu && io.robHeadNotReady || !io.sqCanAccept
     val headIsAmo = io.robHead.ctrl.fuType === mou && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
-    val robSqFull = io.robFull || !io.sqCanAccept
+    val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
 
     import TopDownCounters._
     update := MuxCase(OtherCoreStall.id.U, Seq(
@@ -329,7 +330,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       // dispatch queue stall
       (!io.toIntDq.canAccept && !headIsInt && !io.robFull) -> IntDqStall.id.U       ,
       (!io.toFpDq.canAccept  && !headIsFp  && !io.robFull) -> FpDqStall.id.U        ,
-      (!io.toLsDq.canAccept  && !headIsLs  && !robSqFull ) -> LsDqStall.id.U        ,
+      (!io.toLsDq.canAccept  && !headIsLs  && !robLsFull ) -> LsDqStall.id.U        ,
       // rob stall
       (headIsAmo                                         ) -> AtomicStall.id.U      ,
       (headIsSt                                          ) -> StoreStall.id.U       ,
