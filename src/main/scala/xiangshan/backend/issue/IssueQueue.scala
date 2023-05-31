@@ -53,7 +53,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB: ${params.numWakeupFromWB}, " +
     s"numEntries: ${params.numEntries}, numRegSrc: ${params.numRegSrc}")
 
-  require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
+  require(params.numExu <= 3, "IssueQueue has not supported more than 3 deq ports")
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
   val latencyCertains: Seq[Boolean] = deqFuCfgs.map(x => x.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _))
   val fuLatencyMaps :  Seq[Option[Seq[(Int, Int)]]]  = params.exuBlockParams.map(x => x.fuLatencyMap)
@@ -240,6 +240,29 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     finalDeqSelOHVec(1)    := Mux(isSame,
                                   subDeqSelOHVec(1).getOrElse(Seq(0.U)).last,
                                   subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
+  } else if(params.numDeq == 3) {
+    val isSame10 = subDeqSelOHVec(0).getOrElse(Seq(0.U)).head === subDeqSelOHVec(1).getOrElse(Seq(0.U)).head
+    val isSame20 = Mux(isSame10, subDeqSelOHVec(2).getOrElse(Seq(0.U))(0) === subDeqSelOHVec(0).getOrElse(Seq(0.U))(0) || subDeqSelOHVec(2).getOrElse(Seq(0.U))(0) === subDeqSelOHVec(1).getOrElse(Seq(0.U))(1),
+                       subDeqSelOHVec(2).getOrElse(Seq(0.U))(0) === subDeqSelOHVec(0).getOrElse(Seq(0.U))(0) || subDeqSelOHVec(2).getOrElse(Seq(0.U))(0) === subDeqSelOHVec(1).getOrElse(Seq(0.U))(0))
+    val isSame21 = Mux(isSame10, subDeqSelOHVec(2).getOrElse(Seq(0.U))(1) === subDeqSelOHVec(0).getOrElse(Seq(0.U))(0) || subDeqSelOHVec(2).getOrElse(Seq(0.U))(1) === subDeqSelOHVec(1).getOrElse(Seq(0.U))(1),
+                       subDeqSelOHVec(2).getOrElse(Seq(0.U))(1) === subDeqSelOHVec(0).getOrElse(Seq(0.U))(0) || subDeqSelOHVec(2).getOrElse(Seq(0.U))(1) === subDeqSelOHVec(1).getOrElse(Seq(0.U))(0))
+    finalDeqSelValidVec(1) := Mux(isSame10,
+                                  subDeqSelValidVec(1).getOrElse(Seq(0.U))(1),
+                                  subDeqSelValidVec(1).getOrElse(Seq(0.U)).head)
+    finalDeqSelOHVec(1)    := Mux(isSame10,
+                                  subDeqSelOHVec(1).getOrElse(Seq(0.U))(1),
+                                  subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
+    finalDeqSelValidVec(2) := Mux(isSame20,
+                                  Mux(isSame21,
+                                      subDeqSelValidVec(2).getOrElse(Seq(0.U)).last,
+                                      subDeqSelValidVec(2).getOrElse(Seq(0.U))(1)),
+                                  subDeqSelValidVec(2).getOrElse(Seq(0.U)).head)
+    finalDeqSelOHVec(2) := Mux(isSame20,
+                                  Mux(isSame21,
+                                      subDeqSelOHVec(2).getOrElse(Seq(0.U)).last,
+                                      subDeqSelOHVec(2).getOrElse(Seq(0.U))(1)),
+                                  subDeqSelOHVec(2).getOrElse(Seq(0.U)).head)
+
   }
 
   // fuBusyTable write

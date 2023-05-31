@@ -286,8 +286,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   import FuType._
   private val dispatchCfg: Seq[(Seq[Int], Int)] = Seq(
-    (Seq(ldu), 2),
-    (Seq(stu, mou), 2),
+    (Seq(ldu), 3),
+    (Seq(stu, mou), 3),
     (Seq(vldu), 2),
   )
 
@@ -345,6 +345,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
   }
 
+  println(io.in.size)
   // enqLsq io
   require(enqLsqIO.req.size == enqLsqIO.resp.size)
   for (i <- enqLsqIO.req.indices) {
