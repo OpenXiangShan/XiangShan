@@ -232,7 +232,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val creditUpdate = WireInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(ReSelectLen.W))))
   (0 until LoadQueueReplaySize).map(i => {
     creditUpdate(i) := Mux(credit(i) > 0.U(ReSelectLen.W), credit(i)-1.U(ReSelectLen.W), credit(i))
-    selBlocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
+    selBlocked(i) := (creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)) && cause(i)(LoadReplayCauses.dcacheMiss)
   })
   val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueReplaySize)(ReplayCarry(0.U, false.B))))
 
@@ -352,11 +352,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   
   // generate replay mask
   val loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+    val blockByHigherPriority = cause(i)(LoadReplayCauses.forwardFail) || cause(i)(LoadReplayCauses.dcacheMiss) || cause(i)(LoadReplayCauses.tlbMiss)
     val blocked = blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
-    allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
+    allocated(i) && sleep(i) && blockByHigherPriority && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i)  || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)
+    val blockByHigherPriority = cause(i)(LoadReplayCauses.forwardFail) || cause(i)(LoadReplayCauses.dcacheMiss) || cause(i)(LoadReplayCauses.tlbMiss)
+    val blocked = selBlocked(i) || ((blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i)) & !blockByHigherPriority)
     allocated(i) && sleep(i) && !blocked && !loadCancelSelMask(i)
   })).asUInt // use uint instead vec to reduce verilog lines
   val loadNormalReplaySelMask = loadLowerPriorityReplaySelMask | loadHigherPriorityReplaySelMask
