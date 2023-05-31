@@ -337,6 +337,44 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
+  class BalanceEntry extends XSBundle {
+    val balance = Bool()
+    val req = new LqWriteBundle
+    val port = UInt(log2Up(LoadPipelineWidth).W)
+  }
+
+  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
+    require(sel.length > 0)
+    val balancePick = ParallelPriorityMux(sel.map(x => (x.valid && x.bits.balance) -> x))
+    val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
+    (0 until sel.length).map(i =>
+      if (i == 0) {
+        when (balancePick.valid && balancePick.bits.balance) {
+          reorderSel(i) := balancePick
+        } .otherwise {
+          reorderSel(i) := sel(i)
+        }
+      } else {
+        when (balancePick.valid && balancePick.bits.balance && i.U === balancePick.bits.port) {
+          reorderSel(i) := sel(0)
+        } .otherwise {
+          reorderSel(i) := sel(i)
+        }
+      }
+    )
+    reorderSel
+  }
+
+  val fastReplaySel = loadUnits.zipWithIndex.map { case (ldu, i) => {
+    val wrapper = Wire(Valid(new BalanceEntry))
+    wrapper.valid := ldu.io.fastReplayOut.valid 
+    wrapper.bits.req := ldu.io.fastReplayOut.bits
+    wrapper.bits.balance := ldu.io.fastReplayOut.bits.replayInfo.cause(LoadReplayCauses.bankConflict)
+    wrapper.bits.port := i.U
+    wrapper
+  }}
+  val balanceFastReplaySel = balanceReOrder(fastReplaySel)
+
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.isFirstIssue := true.B
@@ -346,7 +384,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
-    
+   
+    // fast replay
+    loadUnits(i).io.fastReplayIn.valid := balanceFastReplaySel(i).valid 
+    loadUnits(i).io.fastReplayIn.bits := balanceFastReplaySel(i).bits.req
+
+    loadUnits(i).io.fastReplayOut.ready := false.B
+    for (j <- 0 until exuParameters.LduCnt) {
+      when (balanceFastReplaySel(j).valid && balanceFastReplaySel(j).bits.port === i.U) {
+        loadUnits(i).io.fastReplayOut.ready := loadUnits(j).io.fastReplayIn.ready
+      }
+    }
+     
     // get input form dispatch
     loadUnits(i).io.loadIn <> io.issue(i)
     // dcache access
