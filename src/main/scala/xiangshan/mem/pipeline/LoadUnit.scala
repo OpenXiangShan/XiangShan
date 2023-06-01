@@ -557,6 +557,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
     val s2_can_replay_from_fetch = Output(Bool()) // dirty code
     val s2_dcache_require_replay = Output(Bool()) // dirty code
     val s2_dcache_require_fast_replay = Output(Bool()) // dirty code 
+    val l2Hint = Input(Valid(new L2ToL1Hint))
   })
 
   val pmp = WireInit(io.pmpResp)
@@ -642,7 +643,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_fast_replay = ((s2_schedError || io.in.bits.replayInfo.cause(LoadReplayCauses.schedError)) ||
                        (!s2_wait_store &&
                        !s2_tlb_miss &&
-                       s2_cache_replay)) &&
+                       s2_cache_replay) || 
+                      (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId))) &&
                        !s2_exception &&
                        !s2_mmio &&
                        !s2_is_prefetch
@@ -916,6 +918,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Load fast replay path
     val fastReplayIn = Flipped(Decoupled(new LqWriteBundle))
     val fastReplayOut = Decoupled(new LqWriteBundle)
+
+    val l2Hint = Input(Valid(new L2ToL1Hint))
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -1068,6 +1072,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   load_s2.io.storeLoadViolationQueryReq <> io.lsq.storeLoadViolationQuery.req
   load_s2.io.feedbackFast <> io.feedbackFast
   load_s2.io.lqReplayFull <> io.lqReplayFull
+  load_s2.io.l2Hint <> io.l2Hint
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.s0_sqIdx.value, StoreQueueSize))
@@ -1216,7 +1221,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.storeLoadViolationQuery.release := s3_needRelease
 
   // feedback slow
-  s3_fast_replay := RegNext(load_s2.io.s2_dcache_require_fast_replay)  && !s3_exception
+  s3_fast_replay := (RegNext(load_s2.io.s2_dcache_require_fast_replay) || 
+                    (s3_loadOutBits.replayInfo.cause(LoadReplayCauses.dcacheMiss) && io.l2Hint.valid && io.l2Hint.bits.sourceId === s3_loadOutBits.replayInfo.missMSHRId)) && 
+                    !s3_exception
   val s3_need_feedback = !s3_loadOutBits.isLoadReplay && !(s3_fast_replay && io.fastReplayOut.ready)
 
   //
