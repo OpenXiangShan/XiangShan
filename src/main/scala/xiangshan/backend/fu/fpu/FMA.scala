@@ -186,7 +186,7 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
   val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.ctrl.fpu.get.ren3
   // However, when sending instructions to add_pipe, we need to determine whether it's flushed.
   val mulFlushed = mul_pipe.io.out.bits.ctrl.robIdx.needFlush(io.flush)
-  val isFMAReg = RegNext(isFMA && !mulFlushed)
+  val isFMAReg = isFMA && !mulFlushed
 
   add_pipe.mulToAdd <> mul_pipe.toAdd
 
