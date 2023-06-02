@@ -24,7 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.{DebugLsInfoBundle, RobPtr}
+import xiangshan.backend.rob.{DebugLsInfoBundle, LsTopdownInfo, RobPtr}
 import xiangshan.cache._
 import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
@@ -120,10 +120,11 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_mask = Wire(UInt(8.W))
   val s0_uop = Wire(new MicroOp)
   val s0_isFirstIssue = Wire(Bool())
+  val s0_hasROBEntry = WireDefault(false.B)
+  val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
   val s0_sqIdx = Wire(new SqPtr)
   val s0_tryFastpath = WireInit(false.B)
   val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
-  val s0_rsIdx = Wire(UInt())
   val s0_isLoadReplay = WireInit(false.B)
   val s0_sleepIndex = Wire(UInt())
   // default value
@@ -251,7 +252,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.otherwise {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   }
-  io.dcacheReq.bits.addr := s0_vaddr
+  io.dcacheReq.bits.vaddr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
   io.dcacheReq.bits.isFirstIssue := s0_isFirstIssue
@@ -288,9 +289,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := genWmask(io.replay.bits.vaddr, io.replay.bits.uop.ctrl.fuOpType(1, 0))
     s0_uop := io.replay.bits.uop
     s0_isFirstIssue := io.replay.bits.isFirstIssue
+    s0_hasROBEntry := true.B
     s0_sqIdx := io.replay.bits.uop.sqIdx
-    s0_replayCarry := io.replay.bits.replayCarry
     s0_rsIdx := io.replay.bits.rsIdx
+    s0_replayCarry := io.replay.bits.replayCarry
     s0_isLoadReplay := true.B
     s0_sleepIndex := io.replay.bits.sleepIndex
     val replayUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.replay.bits.uop.ctrl.fuOpType))
@@ -303,9 +305,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := 0.U
     s0_uop := DontCare
     s0_isFirstIssue := false.B
+    s0_rsIdx := DontCare
     s0_sqIdx := DontCare
     s0_replayCarry := DontCare
-    s0_rsIdx := DontCare
     s0_isLoadReplay := DontCare
     // ctrl signal
     isPrefetch := true.B
@@ -317,8 +319,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := genWmask(s0_vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
     s0_uop := io.in.bits.uop
     s0_isFirstIssue := true.B
-    s0_sqIdx := io.in.bits.uop.sqIdx
+    s0_hasROBEntry := true.B
     s0_rsIdx := io.rsIdx
+    s0_sqIdx := io.in.bits.uop.sqIdx
     s0_isLoadReplay := false.B
     val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.ctrl.fuOpType))
     when (issueUopIsPrefetch) {
@@ -335,8 +338,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
       // because these signals will be updated in S1
       s0_isFirstIssue := true.B
-      s0_sqIdx := DontCare
       s0_rsIdx := DontCare
+      s0_sqIdx := DontCare
       s0_isLoadReplay := DontCare
     }
   }
@@ -360,6 +363,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.out.bits.uop := s0_uop
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
   io.out.bits.isFirstIssue := s0_isFirstIssue
+  io.out.bits.hasROBEntry := s0_hasROBEntry
   io.out.bits.isPrefetch := isPrefetch
   io.out.bits.isHWPrefetch := isHWPrefetch
   io.out.bits.isLoadReplay := s0_isLoadReplay
@@ -912,6 +916,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val reExecuteQuery = Flipped(Vec(StorePipelineWidth, Valid(new LoadReExecuteQueryIO)))    // load replay
     val replay = Flipped(Decoupled(new LsPipelineBundle))
     val debug_ls = Output(new DebugLsInfoBundle)
+    val lsTopdownInfo = Output(new LsTopdownInfo)
     val s2IsPointerChasing = Output(Bool()) // provide right pc for hw prefetch
     val lqReplayFull = Input(Bool())
 
@@ -1307,6 +1312,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.debug_ls.s2.isLoadReplayCacheMiss := io.lsq.replaySlow.valid && !io.lsq.replaySlow.cache_hited
   // io.debug_ls.replayCnt := DontCare
   // io.debug_ls.s2_robIdx := load_s2.io.in.bits.uop.robIdx.value
+
+  io.lsTopdownInfo.s1.robIdx := load_s1.io.in.bits.uop.robIdx.value
+  io.lsTopdownInfo.s1.vaddr_valid := load_s1.io.in.fire && load_s1.io.in.bits.hasROBEntry
+  io.lsTopdownInfo.s1.vaddr_bits := load_s1.io.in.bits.vaddr
+  io.lsTopdownInfo.s2.robIdx := load_s2.io.in.bits.uop.robIdx.value
+  io.lsTopdownInfo.s2.paddr_valid := load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss
+  io.lsTopdownInfo.s2.paddr_bits := load_s2.io.in.bits.paddr
 
   // bug lyq: some signals in perfEvents are no longer suitable for the current MemBlock design
   // hardware performance counter

@@ -28,6 +28,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import coupledL2.{AliasField, AliasKey, DirtyField, PrefetchField}
+import utility.ReqSourceField
 import utility.FastArbiter
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry
@@ -58,7 +59,8 @@ case class DCacheParameters
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField()
+    PrefetchField(),
+    ReqSourceField()
   ) ++ aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Nil
 
@@ -298,10 +300,10 @@ class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
 }
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
-class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
+class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
-  val addr   = UInt(PAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W)
   val data   = UInt(DataBits.W)
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
@@ -311,8 +313,8 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
-    XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
-      cmd, addr, data, mask, id)
+    XSDebug("DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",
+      cmd, vaddr, data, mask, id)
   }
 }
 
@@ -333,7 +335,7 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 }
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
-  val vaddr = UInt(VAddrBits.W)
+  val addr = UInt(PAddrBits.W)
   val wline = Bool()
 }
 
@@ -801,6 +803,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // data array
+  mainPipe.io.data_read.zip(ldu).map(x => x._1 := x._2.io.lsu.req.valid)
 
   val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
   dataWriteArb.io.in(0) <> refillPipe.io.data_write
@@ -818,7 +821,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bankedDataArray.io.write_dup(bank) <> dataWriteArb_dup.io.out
   }
 
-  bankedDataArray.io.readline <> mainPipe.io.data_read
+  bankedDataArray.io.readline <> mainPipe.io.data_readline
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
   mainPipe.io.data_resp := bankedDataArray.io.readline_resp
@@ -1139,7 +1142,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   ld_access.zip(ldu).foreach {
     case (a, u) =>
       a.valid := RegNext(u.io.lsu.req.fire()) && !u.io.lsu.s1_kill
-      a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.addr))
+      a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.vaddr))
       a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   }
   st_access.valid := RegNext(mainPipe.io.store_req.fire())
