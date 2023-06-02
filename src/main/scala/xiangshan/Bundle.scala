@@ -31,6 +31,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
+import xiangshan.cache.HasDCacheParameters
 import utils._
 import utility._
 
@@ -659,4 +660,9 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
+}
+
+// custom l2 - l1 interface
+class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+  val sourceId = UInt(log2Up(cfg.nMissEntries).W)    // tilelink sourceID -> mshr id
 }

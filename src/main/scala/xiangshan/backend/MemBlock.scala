@@ -117,6 +117,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
+    val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -443,11 +444,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.loadFastImm := io.loadFastImm(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
+    loadUnits(i).io.l2Hint <> io.l2Hint
+
     // passdown to lsq (load s2)
     lsq.io.ldu.loadIn(i) <> loadUnits(i).io.lsq.loadIn
     lsq.io.loadOut(i) <> loadUnits(i).io.lsq.loadOut
     lsq.io.ldRawDataOut(i) <> loadUnits(i).io.lsq.ldRawData
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
+
+    lsq.io.l2Hint.valid := io.l2Hint.valid
+    lsq.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
 
     // alter writeback exception info
     io.s3_delayed_load_error(i) := loadUnits(i).io.s3_delayedLoadError
