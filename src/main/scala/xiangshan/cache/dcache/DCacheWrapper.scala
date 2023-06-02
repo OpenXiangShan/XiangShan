@@ -366,8 +366,11 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   val meta_prefetch = Bool()
   val meta_access = Bool()
-  // 1 cycle after data resp
+  // s2
+  val handled = Bool()
+  // s3: 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
+  val replacementUpdated = Bool()
 }
 
 class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
@@ -494,6 +497,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_kill  = Output(Bool())
   val s2_kill  = Output(Bool())
   val s2_pc = Output(UInt(VAddrBits.W))
+  // cycle 0: load has updated replacement before
+  val replacementUpdated = Output(Bool())
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
