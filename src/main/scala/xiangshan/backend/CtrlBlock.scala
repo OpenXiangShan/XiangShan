@@ -27,7 +27,7 @@ import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{DebugLSIO, Rob, RobCSRIO, RobLsqIO}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
@@ -87,6 +87,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := exuOut.valid && exuOut.bits.redirect.cfiUpdate.isMisPred
     redirect.bits := exuOut.bits.redirect
+    redirect.bits.debugIsCtrl := true.B
+    redirect.bits.debugIsMemVio := false.B
     redirect
   }
 
@@ -215,6 +217,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val sqCanAccept = Input(Bool())
+    val lqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
@@ -230,6 +234,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val lsq = new RobLsqIO
       // debug
       val debug_ls = Flipped(new DebugLSIO)
+      val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
     }
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val perfInfo = Output(new Bundle{
@@ -243,8 +248,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val writeback = MixedVec(writebackLengths.map(num => Vec(num, Flipped(ValidIO(new ExuOutput)))))
     // redirect out
     val redirect = ValidIO(new Redirect)
+    // debug
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val robDeqPtr = Output(new RobPtr)
+    val robHeadLsIssue = Input(Bool())
   })
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
@@ -289,6 +297,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := RegNext(rob.io.flushOut.valid)
   flushRedirect.bits := RegEnable(rob.io.flushOut.bits, rob.io.flushOut.valid)
+  flushRedirect.bits.debugIsCtrl := false.B
+  flushRedirect.bits.debugIsMemVio := false.B
 
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
@@ -311,7 +321,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     !io.memoryViolation.bits.robIdx.needFlush(Seq(stage2Redirect, redirectForExu)),
     init = false.B
   )
-  loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
+  val memVioBits = WireDefault(io.memoryViolation.bits)
+  memVioBits.debugIsCtrl := false.B
+  memVioBits.debugIsMemVio := true.B
+  loadReplay.bits := RegEnable(memVioBits, io.memoryViolation.valid)
   pcMem.io.raddr(2) := redirectGen.io.redirectPcRead.ptr.value
   redirectGen.io.redirectPcRead.data := pcMem.io.rdata(2).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
   pcMem.io.raddr(3) := redirectGen.io.memPredPcRead.ptr.value
@@ -361,40 +374,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pendingRedirect := false.B
   }
 
-  if (env.EnableTopDown) {
-    val stage2Redirect_valid_when_pending = pendingRedirect && stage2Redirect.valid
-
-    val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
-    val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
-    val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
-    val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
-    
-    when(redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
-    when(flushRedirect.valid)              { RobFlushPending := true.B }
-    when(redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
-    
-    when (RegNext(io.frontend.toFtq.redirect.valid)) {
-      when(pendingRedirect) {                             stage2_redirect_cycles := true.B }
-      when(MissPredPending) { MissPredPending := false.B; branch_resteers_cycles := true.B }
-      when(RobFlushPending) { RobFlushPending := false.B; robFlush_bubble_cycles := true.B }
-      when(LdReplayPending) { LdReplayPending := false.B; ldReplay_bubble_cycles := true.B }
-    }
-
-    when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
-      when(stage2_redirect_cycles) { stage2_redirect_cycles := false.B }
-      when(branch_resteers_cycles) { branch_resteers_cycles := false.B }
-      when(robFlush_bubble_cycles) { robFlush_bubble_cycles := false.B }
-      when(ldReplay_bubble_cycles) { ldReplay_bubble_cycles := false.B }
-    }
-
-    XSPerfAccumulate("stage2_redirect_cycles", stage2_redirect_cycles)
-    XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
-    XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
-    XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
-    XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
-  }
-
   decode.io.in <> io.frontend.cfVec
+  decode.io.stallReason.in <> io.frontend.stallReason
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
@@ -417,11 +398,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
   // LFST lookup and update
-  val lfst = Module(new LFST)
-  lfst.io.redirect <> RegNext(io.redirect)
-  lfst.io.storeIssue <> RegNext(io.stIn)
-  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
-  lfst.io.dispatch <> dispatch.io.lfst
+  dispatch.io.lfst := DontCare
+  if (LFSTEnable) {
+    val lfst = Module(new LFST)
+    lfst.io.redirect <> RegNext(io.redirect)
+    lfst.io.storeIssue <> RegNext(io.stIn)
+    lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+    lfst.io.dispatch <> dispatch.io.lfst
+  }
+
 
   rat.io.redirect := stage2Redirect.valid
   rat.io.robCommits := rob.io.commits
@@ -480,6 +465,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rename.io.ssit <> ssit.io.rdata
   rename.io.debug_int_rat <> rat.io.debug_int_rat
   rename.io.debug_fp_rat <> rat.io.debug_fp_rat
+  rename.io.stallReason.in <> decode.io.stallReason.out
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -493,6 +479,12 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
+  dispatch.io.robHead := rob.io.debugRobHead
+  dispatch.io.stallReason <> rename.io.stallReason.out
+  dispatch.io.lqCanAccept := io.lqCanAccept
+  dispatch.io.sqCanAccept := io.sqCanAccept
+  dispatch.io.robHeadNotReady := rob.io.headNotReady
+  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> redirectForExu
@@ -519,6 +511,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       lsqCtrl.io.lqCancelCnt := io.lqCancelCnt
       lsqCtrl.io.sqCancelCnt := io.sqCancelCnt
       io.enqLsq <> lsqCtrl.io.enqLsq
+      rob.io.debugEnqLsq := io.enqLsq
     }
   }
   for ((dp2In, i) <- outer.dispatch2.flatMap(_.module.io.in).zipWithIndex) {
@@ -571,6 +564,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.robio.lsq <> rob.io.lsq
 
   rob.io.debug_ls := io.robio.debug_ls
+  rob.io.debugHeadLsIssue := io.robHeadLsIssue
+  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+  io.robDeqPtr := rob.io.robDeqPtr
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)

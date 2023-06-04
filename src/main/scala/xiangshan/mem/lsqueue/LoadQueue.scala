@@ -189,6 +189,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     val lqReplayFull = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W))) 
+    val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -305,6 +306,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.lqFull <> io.lqReplayFull
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   loadQueueReplay.io.ldWbPtr := virtualLoadQueue.io.ldWbPtr
+  loadQueueReplay.io.rarFull := loadQueueRAR.io.lqFull
+  loadQueueReplay.io.rawFull := loadQueueRAW.io.lqFull
+  loadQueueReplay.io.l2Hint  <> io.l2Hint
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)

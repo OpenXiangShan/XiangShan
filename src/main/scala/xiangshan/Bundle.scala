@@ -31,6 +31,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
+import xiangshan.cache.HasDCacheParameters
 import utils._
 import utility._
 
@@ -90,7 +91,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val histPtr = new CGHPtr
   val specCnt = Vec(numBr, UInt(10.W))
   // need pipeline update
-  val br_hit = Bool()
+  val br_hit = Bool() // if in ftb entry
+  val jr_hit = Bool() // if in ftb entry
+  val sc_hit = Bool() // if used in ftb entry, invalid if !br_hit
   val predTaken = Bool()
   val target = UInt(VAddrBits.W)
   val taken = Bool()
@@ -300,6 +303,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
   val debug_runahead_checkpoint_id = UInt(64.W)
+  val debugIsCtrl = Bool()
+  val debugIsMemVio = Bool()
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
@@ -412,6 +417,7 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
@@ -659,4 +665,14 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val action = Output(Bool())
   val chain = Output(Bool())
   val tdata2 = Output(UInt(64.W))
+}
+
+class StallReasonIO(width: Int) extends Bundle {
+  val reason = Output(Vec(width, UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+  val backReason = Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+}
+
+// custom l2 - l1 interface
+class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+  val sourceId = UInt(log2Up(cfg.nMissEntries).W)    // tilelink sourceID -> mshr id
 }

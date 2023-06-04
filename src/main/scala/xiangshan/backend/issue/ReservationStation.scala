@@ -99,7 +99,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
       params.lsqFeedback = true
       params.hasFeedback = true
-      params.checkWaitBit = true
+      params.checkWaitBit = false
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
@@ -935,21 +935,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     for (j <- 0 until params.numSrc) {
       XSPerfAccumulate(s"num_wakeup_${i}_$j", slowWakeupMatchVec(i)(j).asUInt.orR)
     }
-  }
-
-  if (env.EnableTopDown && params.isLoad) {
-    val l1d_loads_bound = WireDefault(0.B)
-    ExcitingUtils.addSink(l1d_loads_bound, "l1d_loads_bound", ExcitingUtils.Perf)
-    val mshrFull = statusArray.io.rsFeedback(RSFeedbackType.mshrFull.litValue.toInt)
-    val tlbMiss = !mshrFull && statusArray.io.rsFeedback(RSFeedbackType.tlbMiss.litValue.toInt)
-    val dataInvalid = !mshrFull && !tlbMiss && statusArray.io.rsFeedback(RSFeedbackType.dataInvalid.litValue.toInt)
-    val bankConflict = !mshrFull && !tlbMiss && !dataInvalid && statusArray.io.rsFeedback(RSFeedbackType.bankConflict.litValue.toInt)
-    val ldVioCheckRedo = !mshrFull && !tlbMiss && !dataInvalid && !bankConflict && statusArray.io.rsFeedback(RSFeedbackType.ldVioCheckRedo.litValue.toInt)
-    XSPerfAccumulate("l1d_loads_mshr_bound", l1d_loads_bound && mshrFull)
-    XSPerfAccumulate("l1d_loads_tlb_bound", l1d_loads_bound && tlbMiss)
-    XSPerfAccumulate("l1d_loads_store_data_bound", l1d_loads_bound && dataInvalid)
-    XSPerfAccumulate("l1d_loads_bank_conflict_bound", l1d_loads_bound && bankConflict)
-    XSPerfAccumulate("l1d_loads_vio_check_redo_bound", l1d_loads_bound && ldVioCheckRedo)
   }
 
   XSPerfAccumulate("redirect_num", io.redirect.valid)

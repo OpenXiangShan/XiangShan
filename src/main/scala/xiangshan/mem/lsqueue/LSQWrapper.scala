@@ -91,9 +91,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val lqCanAccept = Output(Bool())
+    val sqCanAccept = Output(Bool())
     val exceptionAddr = new ExceptionAddrIO
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
+    val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -111,6 +114,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // LSQ: send out canAccept when both load queue and store queue are ready
   // Dispatch: send instructions to LSQ only when they are ready
   io.enq.canAccept := loadQueue.io.enq.canAccept && storeQueue.io.enq.canAccept
+  io.lqCanAccept := loadQueue.io.enq.canAccept
+  io.sqCanAccept := storeQueue.io.enq.canAccept
   loadQueue.io.enq.sqCanAccept := storeQueue.io.enq.canAccept
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   for (i <- io.enq.req.indices) {
@@ -171,6 +176,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.lqFull <> io.lqFull
   loadQueue.io.lqReplayFull <> io.lqReplayFull
   loadQueue.io.lqDeq <> io.lqDeq
+  loadQueue.io.l2Hint.valid := io.l2Hint.valid
+  loadQueue.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit
