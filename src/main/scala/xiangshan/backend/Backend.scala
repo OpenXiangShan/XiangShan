@@ -103,6 +103,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop := 0.U.asTypeOf(sink.bits.uop)
     sink.bits.uop.robIdx := source.bits.robIdx
   }
+  io.mem.ldaIqFeedback <> memScheduler.io.fromMem.get.ldaFeedback
+  io.mem.staIqFeedback <> memScheduler.io.fromMem.get.staFeedback
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -252,7 +254,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
   io.mem.toSbuffer <> fenceio.sbuffer
-  io.mem.rsFeedBack <> memScheduler.io.memIO.get.feedbackIO
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
@@ -275,7 +276,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lsqEnqIO = Flipped(new LsqEnqIO)
   val robLsqIO = new RobLsqIO
   val toSbuffer = new FenceToSbuffer
-  val rsFeedBack = Vec(params.StaCnt + params.LduCnt, Flipped(new MemRSFeedbackIO))
+  val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
+  val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   // Input

@@ -75,7 +75,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val issue = Vec(MemExuCnt, Flipped(DecoupledIO(new MemExuInput)))
     val loadFastMatch = Vec(LduCnt, Input(UInt(LduCnt.W)))
     val loadFastImm = Vec(LduCnt, Input(UInt(12.W)))
-    val rsfeedback = Vec(MemAddrExtCnt, new MemRSFeedbackIO)
+    val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
+    val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
     val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
@@ -323,8 +324,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.redirect <> redirect
     // get input form dispatch
     loadUnits(i).io.loadIn <> io.issue(i)
-    loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.feedbackSlow <> io.ldaIqFeedback(i).feedbackSlow
+    loadUnits(i).io.feedbackFast <> io.ldaIqFeedback(i).feedbackFast
 
     // get input form dispatch
     loadUnits(i).io.loadIn <> io.issue(i)
@@ -431,7 +432,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.in.bits := io.issue(i + LduCnt + StaCnt).bits
 
     stu.io.redirect     <> redirect
-    stu.io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
+    stu.io.feedbackSlow <> io.staIqFeedback(i).feedbackSlow
     stu.io.stin         <> io.issue(LduCnt + i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
@@ -440,7 +441,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.pmp          <> pmp_check(i + LduCnt).resp
 
     // store unit does not need fast feedback
-    io.rsfeedback(LduCnt + i).feedbackFast := DontCare
+    io.staIqFeedback(i).feedbackFast := DontCare
 
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.storeMaskOut
@@ -616,10 +617,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!loadUnits(0).io.loadOut.valid)
   }
 
-  for (i <- 0 until StaCnt) when (state === s_atomics(i)) {
-    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs(i)).feedbackSlow
-
-    assert(!storeUnits(i).io.feedbackSlow.valid)
+  for (i <- 0 until StaCnt) {
+    when (state === s_atomics(i)) {
+      io.staIqFeedback(i).feedbackSlow := atomicsUnit.io.feedbackSlow
+      assert(!storeUnits(i).io.feedbackSlow.valid)
+    }
   }
 
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
