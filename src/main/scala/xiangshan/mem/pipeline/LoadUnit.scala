@@ -117,6 +117,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_mask = Wire(UInt(8.W))
   val s0_uop = Wire(new DynInst)
   val s0_isFirstIssue = Wire(Bool())
+  val s0_rsIdx = Wire(UInt(log2Up(MemIQSizeMax).W))
   val s0_sqIdx = Wire(new SqPtr)
   val s0_tryFastpath = WireInit(false.B)
   val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
@@ -255,6 +256,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := genWmask(io.replay.bits.vaddr, io.replay.bits.uop.fuOpType(1, 0))
     s0_uop := io.replay.bits.uop
     s0_isFirstIssue := io.replay.bits.isFirstIssue
+    s0_rsIdx := io.replay.bits.rsIdx
     s0_sqIdx := io.replay.bits.uop.sqIdx
     s0_replayCarry := io.replay.bits.replayCarry
     val replayUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.replay.bits.uop.fuOpType))
@@ -267,6 +269,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := 0.U
     s0_uop := DontCare
     s0_isFirstIssue := false.B
+    s0_rsIdx := DontCare
     s0_sqIdx := DontCare
     s0_replayCarry := DontCare
     // ctrl signal
@@ -279,6 +282,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_mask := genWmask(s0_vaddr, io.in.bits.uop.fuOpType(1,0))
     s0_uop := io.in.bits.uop
     s0_isFirstIssue := true.B
+    s0_rsIdx := io.in.bits.iqIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
     val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.fuOpType))
     when (issueUopIsPrefetch) {
@@ -295,6 +299,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
       // because these signals will be updated in S1
       s0_isFirstIssue := true.B
+      s0_rsIdx := DontCare
       s0_sqIdx := DontCare
     }
   }
@@ -316,6 +321,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.out.bits.mask := s0_mask
   io.out.bits.uop := s0_uop
   io.out.bits.uop.exceptionVec(loadAddrMisaligned) := !addrAligned
+  io.out.bits.rsIdx := s0_rsIdx
   io.out.bits.isFirstIssue := s0_isFirstIssue
   io.out.bits.isPrefetch := isPrefetch
   io.out.bits.isHWPrefetch := isHWPrefetch
@@ -846,6 +852,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val load_s0 = Module(new LoadUnit_S0)
   val load_s1 = Module(new LoadUnit_S1)
   val load_s2 = Module(new LoadUnit_S2)
+
+  dontTouch(load_s0.io)
+  dontTouch(load_s1.io)
+  dontTouch(load_s2.io)
 
   // load s0
   load_s0.io.in <> io.loadIn

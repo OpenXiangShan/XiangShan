@@ -202,9 +202,15 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
 class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends StatusArray
   with HasCircularQueuePtrHelper {
 
+  private val needMemFeedback = params.StaCnt > 0 || params.LduCnt > 0
+
   val fromMem = io.fromMem.get
 
-  val memResps = resps ++ io.fromMem.get.slowResp ++ io.fromMem.get.fastResp
+  var memResps = resps
+  if (needMemFeedback) {
+    memResps ++= io.fromMem.get.slowResp
+    memResps ++= io.fromMem.get.fastResp
+  }
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
     val deqRespValidVec = VecInit(memResps.map(x => x.valid && x.bits.addrOH(i)))
     XSError(PopCount(deqRespValidVec) > 1.U, p"mem status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
@@ -216,7 +222,7 @@ class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends
     val clearByFlush = (enqStatusVec(i).valid || validVec(i)) && flushedVec(i)
     val clearByResp = deqRespVec(i).valid && (
       //do: special mem success
-      if(params.StaCnt == 0) {
+      if(!needMemFeedback) {
         deqRespVec(i).bits.respType === RSFeedbackType.fuIdle
       }
       else{
