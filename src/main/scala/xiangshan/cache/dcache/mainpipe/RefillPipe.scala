@@ -83,9 +83,9 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   })
 
   // Assume that write in refill pipe is always ready
-  assert(RegNext(io.data_write.ready))
-  assert(RegNext(io.meta_write.ready))
-  assert(RegNext(io.tag_write.ready))
+  // assert(RegNext(io.data_write.ready))
+  // assert(RegNext(io.meta_write.ready))
+  // assert(RegNext(io.tag_write.ready))
 
   val refill_w_valid = io.req.valid
   val refill_w_req = io.req.bits

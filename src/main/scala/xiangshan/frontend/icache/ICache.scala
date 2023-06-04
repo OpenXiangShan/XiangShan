@@ -54,7 +54,8 @@ case class ICacheParameters(
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = DCacheParameters().aliasBitsOpt //if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField()
+    PrefetchField(),
+    ReqSourceField()
   ) ++ aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Nil
   def tagCode: Code = Code.fromString(tagECC)
@@ -628,6 +629,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
 
   io.fetch.resp     <>    mainPipe.io.fetch.resp
+  io.fetch.topdownIcacheMiss := mainPipe.io.fetch.topdownIcacheMiss
+  io.fetch.topdownItlbMiss   := mainPipe.io.fetch.topdownItlbMiss
 
   for(i <- 0 until PortNumber){
     missUnit.io.req(i)           <>   mainPipe.io.mshr(i).toMSHR

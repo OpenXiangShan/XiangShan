@@ -75,6 +75,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For debug usage
   val isFirstIssue = Bool()
+  val hasROBEntry = Bool()
 
   // For load replay
   val isLoadReplay = Bool()
@@ -82,6 +83,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For dcache miss load
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+  val handledByMSHR = Bool()
+  val replacementUpdated = Bool()
 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
@@ -111,6 +114,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    hasROBEntry := input.hasROBEntry
     dcacheRequireReplay := input.dcacheRequireReplay
     sleepIndex := input.sleepIndex
 
@@ -121,6 +125,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     replayCarry := DontCare
     atomic := DontCare
     isLoadReplay := DontCare
+    handledByMSHR := DontCare
+    replacementUpdated := DontCare
   }
 }
 
@@ -150,12 +156,15 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    hasROBEntry := input.hasROBEntry
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel
     replayCarry := input.replayCarry
     dcacheRequireReplay := input.dcacheRequireReplay
     sleepIndex := input.sleepIndex
+    handledByMSHR := input.handledByMSHR
+    replacementUpdated := input.replacementUpdated
 
     replayInfo := DontCare
     lqDataWenDup := DontCare
