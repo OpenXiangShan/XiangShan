@@ -20,8 +20,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{HasPerfEvents, OHToUIntStartOne, XSDebug, XSPerfAccumulate}
-import utility.ParallelPriorityMux
+import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utility.{ParallelPriorityMux, OneHot}
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.wpu._
 
@@ -382,9 +382,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
-  io.lsu.debug_s2_real_way_num := OHToUIntStartOne(s2_real_way_en)
+  io.lsu.debug_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
   if(dwpuParam.enWPU) {
-    io.lsu.debug_s2_pred_way_num := OHToUIntStartOne(s2_pred_way_en)
+    io.lsu.debug_s2_pred_way_num := OneHot.OHToUIntStartOne(s2_pred_way_en)
   }else{
     io.lsu.debug_s2_pred_way_num := 0.U
   }
