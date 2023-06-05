@@ -95,8 +95,6 @@ case class IssueBlockParams(
 
   def numNoDataWB: Int = exuBlockParams.count(_.hasNoDataWB)
 
-  def numRegSrcMax: Int = numIntSrc max numFpSrc max numVecSrc
-
   def dataBitsMax: Int = if (numVecSrc > 0) VLEN else XLEN
 
   def numDeq: Int = numDeqOutside + exuBlockParams.length

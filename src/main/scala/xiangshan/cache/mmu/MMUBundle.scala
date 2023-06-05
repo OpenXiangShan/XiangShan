@@ -538,8 +538,8 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
   val is_ld = Bool()
   val is_st = Bool()
   val idx =
-    if (LoadQueueSize >= StoreQueueSize) {
-      val idx = UInt(log2Ceil(LoadQueueSize).W)
+    if (VirtualLoadQueueSize >= StoreQueueSize) {
+      val idx = UInt(log2Ceil(VirtualLoadQueueSize).W)
       idx
     } else {
       val idx = UInt(log2Ceil(StoreQueueSize).W)

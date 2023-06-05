@@ -27,8 +27,8 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
-import xiangshan.backend.decode.isa.bitfield.{InstVType, RiscvVecInst}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.backend.fu.vector.Bundles.{Category, VType}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -51,7 +51,7 @@ abstract trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
     //   |          |          |          |         |           |  |  |  |  |  |  |  uopDivType
     //   |          |          |          |         |           |  |  |  |  |  |  |  |             selImm
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopDivType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -87,7 +87,7 @@ abstract class XSDecodeBase {
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: Int, fuOp: BitPat, selImm: BitPat,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -98,14 +98,14 @@ case class XSDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopDivType, selImm)
+    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, uopSplitType, selImm)
   }
 }
 
 case class FDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: Int, fuOp: BitPat, selImm: BitPat = SelImm.X,
-  uopDivType: BitPat = UopDivType.X,
+  uopSplitType: BitPat = UopSplitType.X,
   xWen: Boolean = false,
   fWen: Boolean = false,
   vWen: Boolean = false,
@@ -116,7 +116,7 @@ case class FDecode(
   flushPipe: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopDivType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe).generate()
   }
 }
 
@@ -198,7 +198,7 @@ object XDecode extends DecodeConstants {
 
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopDivType = UopDivType.SCA_SIM, xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopSplitType = UopSplitType.SCA_SIM, xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
@@ -579,7 +579,7 @@ case class Imm_VSETIVLI() extends Imm(13){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
-    val rvInst: RiscvVecInst = instr.asTypeOf(new RiscvVecInst)
+    val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
     val uimm5 = rvInst.UIMM_VSETIVLI
     val vtype8 = rvInst.ZIMM_VTYPE
     Cat(uimm5, vtype8)
@@ -654,6 +654,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val deq = new Bundle {
     val decodedInst = Output(new DecodedInst)
     val isComplex = Output(Bool())
+    val uopInfo = Output(new UopInfo)
   }
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
@@ -665,6 +666,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val io = IO(new DecodeUnitIO)
 
   val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
+
+  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields)
 
   val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
     FpDecode.table ++
@@ -691,21 +694,29 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.connectStaticInst(io.enq.ctrlFlow)
 
-//  decodedInst.srcType(3) := DontCare
-//  decodedInst.lsrc(3) := DontCare
   decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
+  decodedInst.numUops := 1.U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  decodedInst.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
+  decodedInst.isMove := isMove && inst.RD =/= 0.U
+
+  private val v0Idx = 0
+  private val vconfigIdx = VCONFIG_IDX
 
   // read src1~3 location
-  decodedInst.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
-  decodedInst.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
-  decodedInst.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
+  decodedInst.lsrc(0) := inst.RS1
+  decodedInst.lsrc(1) := inst.RS2
+  decodedInst.lsrc(2) := inst.FS3
+  decodedInst.lsrc(3) := v0Idx.U
+  decodedInst.lsrc(4) := vconfigIdx.U
+  decodedInst.srcType(3) := Mux(inst.VM.asBool, SrcType.DC, SrcType.vp) // mask src
+  decodedInst.srcType(4) := SrcType.vp // vconfig
+
+  // cs.lsrc(2) := Mux(FuType.isVecExu(cs.fuType), ctrl_flow.instr(RD_MSB, RD_LSB), ctrl_flow.instr(RS3_MSB, RS3_LSB))
   // read dest location
-  decodedInst.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
+  decodedInst.ldest := inst.RD
 
   // fill in exception vector
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR
@@ -735,16 +746,50 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
-  decodedInst.vtype := 0.U.asTypeOf(new VType)
-  when(FuType.isVpu(decodedInst.fuType)) {
-    decodedInst.vtype := io.enq.vtype
-  }
-  io.deq.isComplex := UopDivType.needSplit(decodedInst.uopDivType)
   decodedInst.commitType := 0.U // Todo: remove it
-  io.deq.decodedInst := decodedInst
+
+  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
+
+  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF)
+  private val vextInsts = Seq(VZEXT_VF2, VZEXT_VF4, VZEXT_VF8, VSEXT_VF2, VSEXT_VF4, VSEXT_VF8)
+  private val narrowInsts = Seq(
+    VNSRA_WV, VNSRA_WX, VNSRA_WI, VNSRL_WV, VNSRL_WX, VNSRL_WI,
+    VNCLIP_WV, VNCLIP_WX, VNCLIP_WI, VNCLIPU_WV, VNCLIPU_WX, VNCLIPU_WI,
+  )
+  private val maskDstInsts = Seq(
+    VMADC_VV, VMADC_VX,  VMADC_VI,  VMADC_VVM, VMADC_VXM, VMADC_VIM,
+    VMSBC_VV, VMSBC_VX,  VMSBC_VVM, VMSBC_VXM,
+    VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+    VMSEQ_VV, VMSEQ_VX, VMSEQ_VI, VMSNE_VV, VMSNE_VX, VMSNE_VI,
+    VMSLE_VV, VMSLE_VX, VMSLE_VI, VMSLEU_VV, VMSLEU_VX, VMSLEU_VI,
+    VMSLT_VV, VMSLT_VX, VMSLTU_VV, VMSLTU_VX,
+    VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
+  )
 
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
+  decodedInst.vpu.vill  := io.enq.vtype.illegal
+  decodedInst.vpu.vma   := io.enq.vtype.vma
+  decodedInst.vpu.vta   := io.enq.vtype.vta
+  decodedInst.vpu.vsew  := io.enq.vtype.vsew
+  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.vm    := inst.VM
+  decodedInst.vpu.nf    := inst.NF
+  decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
+  decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isExt     := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isNarrow  := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+
+  val uopInfoGen = Module(new UopInfoGen)
+  uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
+  uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
+  uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
+  uopInfoGen.io.in.preInfo.vwidth := inst.RM
+  io.deq.isComplex := uopInfoGen.io.out.isComplex
+  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
+
+  io.deq.decodedInst := decodedInst
 
   //-------------------------------------------------------------
   // Debug Info

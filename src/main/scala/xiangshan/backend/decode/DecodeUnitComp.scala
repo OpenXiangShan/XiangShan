@@ -29,6 +29,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.VType
 import yunsuan.VpermType
 
@@ -37,8 +38,7 @@ import scala.collection.Seq
 trait VectorConstants {
   val MAX_VLMUL = 8
   val FP_TMP_REG_MV = 32
-  val VECTOR_TMP_REG_LMUL = 32 // 32~38  ->  7
-  val VECTOR_VCONFIG = 39
+  val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -56,6 +56,7 @@ class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   }
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
+
 /**
   * @author zly
   */
@@ -66,11 +67,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   //input bits
   val staticInst = Wire(new StaticInst)
 
-  staticInst := io.enq.staticInst
 
-  val src1 = Cat(0.U(1.W), staticInst.instr(19, 15))
-  val src2 = Cat(0.U(1.W), staticInst.instr(24, 20))
-  val dest = Cat(0.U(1.W), staticInst.instr(11, 7))
+  staticInst := io.enq.staticInst
+  private val inst: XSInstBitFields = staticInst.instr.asTypeOf(new XSInstBitFields)
+
+  val src1 = Cat(0.U(1.W), inst.RS1)
+  val src2 = Cat(0.U(1.W), inst.RS2)
+  val dest = Cat(0.U(1.W), inst.RD)
+
 
   //output bits
   val decodedInsts = Wire(Vec(RenameWidth, new DecodedInst))
@@ -79,101 +83,72 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val complexNum = Wire(UInt(3.W))
 
   //output of DecodeUnit
-  val decodedInsts_u = Wire(new DecodedInst)
-  val isVset_u = Wire(Bool())
+  val decodedInstsSimple = Wire(new DecodedInst)
+  val numOfUop = Wire(UInt(log2Up(maxUopSize+1).W))
+  val lmul = Wire(UInt(4.W))
+  val isVsetSimple = Wire(Bool())
 
   //pre decode
   val simple = Module(new DecodeUnit)
   simple.io.enq.ctrlFlow := staticInst
   simple.io.enq.vtype := io.vtype
   simple.io.csrCtrl := io.csrCtrl
-  decodedInsts_u := simple.io.deq.decodedInst
-  isVset_u := simple.io.deq.decodedInst.isVset
-  when(isVset_u) {
+  decodedInstsSimple := simple.io.deq.decodedInst
+  lmul := simple.io.deq.uopInfo.lmul
+  isVsetSimple := simple.io.deq.decodedInst.isVset
+  when(isVsetSimple) {
     when(dest === 0.U && src1 === 0.U) {
-      decodedInsts_u.fuOpType := VSETOpType.keepVl(simple.io.deq.decodedInst.fuOpType)
+      decodedInstsSimple.fuOpType := VSETOpType.keepVl(simple.io.deq.decodedInst.fuOpType)
     }.elsewhen(src1 === 0.U) {
-      decodedInsts_u.fuOpType := VSETOpType.setVlmax(simple.io.deq.decodedInst.fuOpType)
+      decodedInstsSimple.fuOpType := VSETOpType.setVlmax(simple.io.deq.decodedInst.fuOpType)
     }
     when(io.vtype.illegal){
-      decodedInsts_u.flushPipe := true.B
+      decodedInstsSimple.flushPipe := true.B
     }
   }
   //Type of uop Div
-  val typeOfDiv = decodedInsts_u.uopDivType
+  val typeOfSplit = decodedInstsSimple.uopSplitType
 
-  //LMUL
-  val lmul = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(4.W), Array(
-    "b001".U -> 2.U,
-    "b010".U -> 4.U,
-    "b011".U -> 8.U
-  ))
-  val numOfUopVslide = MuxLookup(simple.io.enq.vtype.vlmul, 1.U(log2Up(maxUopSize+1).W), Array(
-    "b001".U -> 3.U,
-    "b010".U -> 10.U,
-    "b011".U -> 36.U
-  ))
-  //number of uop
-  val numOfUop = MuxLookup(typeOfDiv, 1.U(log2Up(maxUopSize+1).W), Array(
-    UopDivType.VEC_0XV         -> 2.U,
-    UopDivType.DIR -> Mux(dest =/= 0.U, 2.U,
-                        Mux(src1 =/= 0.U, 1.U,
-                          Mux(VSETOpType.isVsetvl(decodedInsts_u.fuOpType), 2.U, 1.U))),
-    UopDivType.VEC_VVV         -> lmul,
-    UopDivType.VEC_EXT2        -> lmul,
-    UopDivType.VEC_EXT4        -> lmul,
-    UopDivType.VEC_EXT8        -> lmul,
-    UopDivType.VEC_VVM         -> lmul,
-    UopDivType.VEC_VXM         -> (lmul +& 1.U),
-    UopDivType.VEC_VXV         -> (lmul +& 1.U),
-    UopDivType.VEC_VVW         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_WVW         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_VXW         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_WXW         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_WVV         -> Cat(lmul, 0.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_WXV         -> Cat(lmul, 1.U(1.W)),     // lmul <= 4
-    UopDivType.VEC_SLIDE1UP    -> (lmul +& 1.U),
-    UopDivType.VEC_FSLIDE1UP   -> lmul,
-    UopDivType.VEC_SLIDE1DOWN  -> Cat(lmul, 0.U(1.W)),
-    UopDivType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) -1.U),
-    UopDivType.VEC_VRED        -> lmul,
-    UopDivType.VEC_SLIDEUP     -> (numOfUopVslide + 1.U),
-    UopDivType.VEC_ISLIDEUP    -> numOfUopVslide,
-    UopDivType.VEC_SLIDEDOWN   -> (numOfUopVslide + 1.U),
-    UopDivType.VEC_ISLIDEDOWN  -> numOfUopVslide,
-    UopDivType.VEC_M0X         -> (lmul +& 1.U),
-    UopDivType.VEC_MVV         -> (Cat(lmul, 0.U(1.W)) -1.U),
-    UopDivType.VEC_M0X_VFIRST  -> 2.U,
-  ))
+  when(typeOfSplit === UopSplitType.DIR) {
+    numOfUop := Mux(dest =/= 0.U, 2.U,
+      Mux(src1 =/= 0.U, 1.U,
+        Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
+  } .otherwise {
+    numOfUop := simple.io.deq.uopInfo.numOfUop
+  }
+
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
   csBundle.map { case dst =>
-    dst := decodedInsts_u
+    dst := decodedInstsSimple
     dst.firstUop := false.B
     dst.lastUop := false.B
   }
 
+  csBundle(0).numUops := numOfUop
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 
-  switch(typeOfDiv) {
-    is(UopDivType.DIR) {
-      when(isVset_u) {
+  switch(typeOfSplit) {
+    is(UopSplitType.DIR) {
+      when(isVsetSimple) {
         when(dest =/= 0.U) {
           csBundle(0).fuType := FuType.vsetiwi.U
-          csBundle(0).fuOpType := VSETOpType.switchDest(decodedInsts_u.fuOpType)
+          csBundle(0).fuOpType := VSETOpType.switchDest(decodedInstsSimple.fuOpType)
           csBundle(0).flushPipe := false.B
           csBundle(0).rfWen := true.B
           csBundle(0).vecWen := false.B
-          csBundle(1).ldest := VECTOR_VCONFIG.U
+          csBundle(1).ldest := VCONFIG_IDX.U
+          csBundle(1).rfWen := false.B
+          csBundle(1).vecWen := true.B
         }.elsewhen(src1 =/= 0.U) {
-          csBundle(0).ldest := VECTOR_VCONFIG.U
-        }.elsewhen(VSETOpType.isVsetvli(decodedInsts_u.fuOpType)) {
+          csBundle(0).ldest := VCONFIG_IDX.U
+        }.elsewhen(VSETOpType.isVsetvli(decodedInstsSimple.fuOpType)) {
           csBundle(0).fuType := FuType.vsetfwf.U
           csBundle(0).srcType(0) := SrcType.vp
-          csBundle(0).lsrc(0) := VECTOR_VCONFIG.U
-        }.elsewhen(VSETOpType.isVsetvl(decodedInsts_u.fuOpType)) {
+          csBundle(0).lsrc(0) := VCONFIG_IDX.U
+        }.elsewhen(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType)) {
           csBundle(0).srcType(0) := SrcType.reg
           csBundle(0).srcType(1) := SrcType.imm
           csBundle(0).lsrc(1) := 0.U
@@ -194,14 +169,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).flushPipe := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VECTOR_VCONFIG.U
+          csBundle(1).lsrc(0) := VCONFIG_IDX.U
           csBundle(1).srcType(1) := SrcType.fp
           csBundle(1).lsrc(1) := FP_TMP_REG_MV.U
-          csBundle(1).ldest := VECTOR_VCONFIG.U
+          csBundle(1).ldest := VCONFIG_IDX.U
         }
       }
     }
-    is(UopDivType.VEC_VVV) {
+    is(UopSplitType.VEC_VVV) {
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i).lsrc(0) := src1 + i.U
         csBundle(i).lsrc(1) := src2 + i.U
@@ -210,7 +185,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).uopIdx := i.U
       }
     }
-    is(UopDivType.VEC_EXT2) {
+    is(UopSplitType.VEC_EXT2) {
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i).lsrc(1) := src2 + i.U
         csBundle(2 * i).lsrc(2) := dest + (2 * i).U
@@ -222,7 +197,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 1).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_EXT4) {
+    is(UopSplitType.VEC_EXT4) {
       for (i <- 0 until MAX_VLMUL / 4) {
         csBundle(4 * i).lsrc(1) := src2 + i.U
         csBundle(4 * i).lsrc(2) := dest + (4 * i).U
@@ -242,7 +217,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(4 * i + 3).uopIdx := (4 * i + 3).U
       }
     }
-    is(UopDivType.VEC_EXT8) {
+    is(UopSplitType.VEC_EXT8) {
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i).lsrc(1) := src2
         csBundle(i).lsrc(2) := dest + i.U
@@ -250,7 +225,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).uopIdx := i.U
       }
     }
-    is(UopDivType.VEC_0XV) {
+    is(UopSplitType.VEC_0XV) {
       /*
       FMV.D.X
        */
@@ -282,12 +257,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).lsrc(2) := dest
       csBundle(1).ldest := dest
       csBundle(1).fuType := FuType.vppu.U
-      csBundle(1).fuOpType := VpermType.vfmv_s_f
+      csBundle(1).fuOpType := VpermType.dummy
       csBundle(1).rfWen := false.B
       csBundle(1).fpWen := false.B
       csBundle(1).vecWen := true.B
     }
-    is(UopDivType.VEC_VXV) {
+    is(UopSplitType.VEC_VXV) {
       /*
       FMV.D.X
        */
@@ -320,7 +295,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).uopIdx := i.U
       }
     }
-    is(UopDivType.VEC_VVW) {
+    is(UopSplitType.VEC_VVW) {
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i).lsrc(0) := src1 + i.U
         csBundle(2 * i).lsrc(1) := src2 + i.U
@@ -334,7 +309,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 1).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_WVW) {
+    is(UopSplitType.VEC_WVW) {
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i).lsrc(0) := src1 + i.U
         csBundle(2 * i).lsrc(1) := src2 + (2 * i).U
@@ -348,7 +323,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 1).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_VXW) {
+    is(UopSplitType.VEC_VXW) {
       /*
       FMV.D.X
        */
@@ -385,7 +360,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 2).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_WXW) {
+    is(UopSplitType.VEC_WXW) {
       /*
       FMV.D.X
        */
@@ -422,22 +397,22 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 2).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_WVV) {
+    is(UopSplitType.VEC_WVV) {
       for (i <- 0 until MAX_VLMUL / 2) {
 
         csBundle(2 * i).lsrc(0) := src1 + i.U
         csBundle(2 * i).lsrc(1) := src2 + (2 * i).U
         csBundle(2 * i).lsrc(2) := dest + i.U
-        csBundle(2 * i).ldest := VECTOR_TMP_REG_LMUL.U
+        csBundle(2 * i).ldest := dest + i.U
         csBundle(2 * i).uopIdx := (2 * i).U
         csBundle(2 * i + 1).lsrc(0) := src1 + i.U
         csBundle(2 * i + 1).lsrc(1) := src2 + (2 * i + 1).U
-        csBundle(2 * i + 1).lsrc(2) := VECTOR_TMP_REG_LMUL.U
+        csBundle(2 * i + 1).lsrc(2) := dest + i.U
         csBundle(2 * i + 1).ldest := dest + i.U
         csBundle(2 * i + 1).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_WXV) {
+    is(UopSplitType.VEC_WXV) {
       /*
       FMV.D.X
        */
@@ -464,30 +439,30 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2 * i + 1).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(2 * i + 1).lsrc(1) := src2 + (2 * i).U
         csBundle(2 * i + 1).lsrc(2) := dest + i.U
-        csBundle(2 * i + 1).ldest := VECTOR_TMP_REG_LMUL.U
+        csBundle(2 * i + 1).ldest := dest + i.U
         csBundle(2 * i + 1).uopIdx := (2 * i).U
         csBundle(2 * i + 2).srcType(0) := SrcType.fp
         csBundle(2 * i + 2).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(2 * i + 2).lsrc(1) := src2 + (2 * i + 1).U
-        csBundle(2 * i + 2).lsrc(2) := VECTOR_TMP_REG_LMUL.U
+        csBundle(2 * i + 2).lsrc(2) := dest + i.U
         csBundle(2 * i + 2).ldest := dest + i.U
         csBundle(2 * i + 2).uopIdx := (2 * i + 1).U
       }
     }
-    is(UopDivType.VEC_VVM) {
+    is(UopSplitType.VEC_VVM) {
       csBundle(0).lsrc(2) := dest
-      csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
+      csBundle(0).ldest := dest
       csBundle(0).uopIdx := 0.U
-      for(i <- 1 until MAX_VLMUL) {
+      for (i <- 1 until MAX_VLMUL) {
         csBundle(i).lsrc(0) := src1 + i.U
         csBundle(i).lsrc(1) := src2 + i.U
-        csBundle(i).lsrc(2) := VECTOR_TMP_REG_LMUL.U
-        csBundle(i).ldest := VECTOR_TMP_REG_LMUL.U
+        csBundle(i).lsrc(2) := dest
+        csBundle(i).ldest := dest
         csBundle(i).uopIdx := i.U
       }
       csBundle(numOfUop - 1.U).ldest := dest
     }
-    is(UopDivType.VEC_VXM) {
+    is(UopSplitType.VEC_VXM) {
       /*
       FMV.D.X
        */
@@ -512,19 +487,19 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).srcType(0) := SrcType.fp
       csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
       csBundle(1).lsrc(2) := dest
-      csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
+      csBundle(1).ldest := dest
       csBundle(1).uopIdx := 0.U
       for (i <- 1 until MAX_VLMUL) {
         csBundle(i + 1).srcType(0) := SrcType.fp
         csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 1).lsrc(1) := src2 + i.U
-        csBundle(i + 1).lsrc(2) := VECTOR_TMP_REG_LMUL.U
-        csBundle(i + 1).ldest := VECTOR_TMP_REG_LMUL.U
+        csBundle(i + 1).lsrc(2) := dest
+        csBundle(i + 1).ldest := dest
         csBundle(i + 1).uopIdx := i.U
       }
       csBundle(numOfUop - 1.U).ldest := dest
     }
-    is(UopDivType.VEC_SLIDE1UP) {
+    is(UopSplitType.VEC_SLIDE1UP) {
       /*
       FMV.D.X
        */
@@ -560,7 +535,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).uopIdx := i.U
       }
     }
-    is(UopDivType.VEC_FSLIDE1UP) {
+    is(UopSplitType.VEC_FSLIDE1UP) {
       //LMUL
       csBundle(0).srcType(0) := SrcType.fp
       csBundle(0).lsrc(0) := src1
@@ -577,7 +552,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).uopIdx := i.U
       }
     }
-    is(UopDivType.VEC_SLIDE1DOWN) { // lmul+lmul = 16
+    is(UopSplitType.VEC_SLIDE1DOWN) { // lmul+lmul = 16
       /*
       FMV.D.X
        */
@@ -602,12 +577,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       for (i <- 0 until MAX_VLMUL) {
         csBundle(2 * i + 1).srcType(0) := SrcType.vp
         csBundle(2 * i + 1).srcType(1) := SrcType.vp
-        csBundle(2 * i + 1).lsrc(0) := src2 + (i+1).U
+        csBundle(2 * i + 1).lsrc(0) := src2 + (i + 1).U
         csBundle(2 * i + 1).lsrc(1) := src2 + i.U
         csBundle(2 * i + 1).lsrc(2) := dest + i.U
         csBundle(2 * i + 1).ldest := VECTOR_TMP_REG_LMUL.U
         csBundle(2 * i + 1).uopIdx := (2 * i).U
-        if (2 * i + 2 < MAX_VLMUL * 2 ){
+        if (2 * i + 2 < MAX_VLMUL * 2) {
           csBundle(2 * i + 2).srcType(0) := SrcType.fp
           csBundle(2 * i + 2).lsrc(0) := FP_TMP_REG_MV.U
           // csBundle(2 * i + 2).lsrc(1) := src2 + i.U         // DontCare
@@ -620,12 +595,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(numOfUop - 1.U).lsrc(0) := FP_TMP_REG_MV.U
       csBundle(numOfUop - 1.U).ldest := dest + lmul - 1.U
     }
-    is(UopDivType.VEC_FSLIDE1DOWN) {
+    is(UopSplitType.VEC_FSLIDE1DOWN) {
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(2 * i).srcType(0) := SrcType.vp
         csBundle(2 * i).srcType(1) := SrcType.vp
-        csBundle(2 * i).lsrc(0) := src2 + (i+1).U
+        csBundle(2 * i).lsrc(0) := src2 + (i + 1).U
         csBundle(2 * i).lsrc(1) := src2 + i.U
         csBundle(2 * i).lsrc(2) := dest + i.U
         csBundle(2 * i).ldest := VECTOR_TMP_REG_LMUL.U
@@ -640,8 +615,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(numOfUop - 1.U).lsrc(0) := src1
       csBundle(numOfUop - 1.U).ldest := dest + lmul - 1.U
     }
-    is(UopDivType.VEC_VRED) {
-      when(simple.io.enq.vtype.vlmul === "b001".U){
+    is(UopSplitType.VEC_VRED) {
+      when(simple.io.enq.vtype.vlmul === "b001".U) {
         csBundle(0).srcType(2) := SrcType.DC
         csBundle(0).lsrc(0) := src2 + 1.U
         csBundle(0).lsrc(1) := src2
@@ -658,26 +633,26 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).srcType(2) := SrcType.DC
         csBundle(1).lsrc(0) := src2 + 3.U
         csBundle(1).lsrc(1) := src2 + 2.U
-        csBundle(1).ldest := (VECTOR_TMP_REG_LMUL+1).U
+        csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
         csBundle(1).uopIdx := 1.U
 
         csBundle(2).srcType(2) := SrcType.DC
-        csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL+1).U
+        csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
         csBundle(2).lsrc(1) := VECTOR_TMP_REG_LMUL.U
-        csBundle(2).ldest := (VECTOR_TMP_REG_LMUL+2).U
+        csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
         csBundle(2).uopIdx := 2.U
       }
       when(simple.io.enq.vtype.vlmul === "b011".U) {
-        for(i <- 0 until MAX_VLMUL){
-          if(i < MAX_VLMUL - MAX_VLMUL/2){
+        for (i <- 0 until MAX_VLMUL) {
+          if (i < MAX_VLMUL - MAX_VLMUL / 2) {
             csBundle(i).lsrc(0) := src2 + (i * 2 + 1).U
             csBundle(i).lsrc(1) := src2 + (i * 2).U
             csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
-          } else if (i < MAX_VLMUL - MAX_VLMUL/4) {
-            csBundle(i).lsrc(0) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL/2)*2 + 1).U
-            csBundle(i).lsrc(1) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL/2)*2).U
+          } else if (i < MAX_VLMUL - MAX_VLMUL / 4) {
+            csBundle(i).lsrc(0) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL / 2) * 2 + 1).U
+            csBundle(i).lsrc(1) := (VECTOR_TMP_REG_LMUL + (i - MAX_VLMUL / 2) * 2).U
             csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
-          }else if (i < MAX_VLMUL - MAX_VLMUL/8) {
+          } else if (i < MAX_VLMUL - MAX_VLMUL / 8) {
             csBundle(6).lsrc(0) := (VECTOR_TMP_REG_LMUL + 5).U
             csBundle(6).lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
             csBundle(6).ldest := (VECTOR_TMP_REG_LMUL + 6).U
@@ -686,7 +661,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(i).uopIdx := i.U
         }
       }
-      when (simple.io.enq.vtype.vlmul.orR()){
+      when(simple.io.enq.vtype.vlmul.orR()) {
         csBundle(numOfUop - 1.U).srcType(2) := SrcType.vp
         csBundle(numOfUop - 1.U).lsrc(0) := src1
         csBundle(numOfUop - 1.U).lsrc(1) := VECTOR_TMP_REG_LMUL.U + numOfUop - 2.U
@@ -696,7 +671,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       }
     }
 
-    is(UopDivType.VEC_SLIDEUP) {
+    is(UopSplitType.VEC_SLIDEUP) {
       // FMV.D.X
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -716,33 +691,41 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
       // LMUL
-      for(i <- 0 until MAX_VLMUL)
-        for(j <- 0 to i){
-          val old_vd = if (j==0) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
-          val vd = if (j==i) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j).U
-          csBundle(i*(i+1)/2+j+1).srcType(0) := SrcType.fp
-          csBundle(i*(i+1)/2+j+1).lsrc(0) := FP_TMP_REG_MV.U
-          csBundle(i*(i+1)/2+j+1).lsrc(1) := src2 + j.U
-          csBundle(i*(i+1)/2+j+1).lsrc(2) := old_vd
-          csBundle(i*(i+1)/2+j+1).ldest := vd
-          csBundle(i*(i+1)/2+j+1).uopIdx := (i*(i+1)/2+j).U
+      for (i <- 0 until MAX_VLMUL)
+        for (j <- 0 to i) {
+          val old_vd = if (j == 0) {
+            dest + i.U
+          } else (VECTOR_TMP_REG_LMUL + j - 1).U
+          val vd = if (j == i) {
+            dest + i.U
+          } else (VECTOR_TMP_REG_LMUL + j).U
+          csBundle(i * (i + 1) / 2 + j + 1).srcType(0) := SrcType.fp
+          csBundle(i * (i + 1) / 2 + j + 1).lsrc(0) := FP_TMP_REG_MV.U
+          csBundle(i * (i + 1) / 2 + j + 1).lsrc(1) := src2 + j.U
+          csBundle(i * (i + 1) / 2 + j + 1).lsrc(2) := old_vd
+          csBundle(i * (i + 1) / 2 + j + 1).ldest := vd
+          csBundle(i * (i + 1) / 2 + j + 1).uopIdx := (i * (i + 1) / 2 + j).U
         }
     }
 
-    is(UopDivType.VEC_ISLIDEUP) {
+    is(UopSplitType.VEC_ISLIDEUP) {
       // LMUL
-      for(i <- 0 until MAX_VLMUL)
-        for(j <- 0 to i){
-          val old_vd = if (j==0) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
-          val vd = if (j==i) {dest + i.U} else (VECTOR_TMP_REG_LMUL+j).U
-          csBundle(i*(i+1)/2+j).lsrc(1) := src2 + j.U
-          csBundle(i*(i+1)/2+j).lsrc(2) := old_vd
-          csBundle(i*(i+1)/2+j).ldest := vd
-          csBundle(i*(i+1)/2+j).uopIdx := (i*(i+1)/2+j).U
+      for (i <- 0 until MAX_VLMUL)
+        for (j <- 0 to i) {
+          val old_vd = if (j == 0) {
+            dest + i.U
+          } else (VECTOR_TMP_REG_LMUL + j - 1).U
+          val vd = if (j == i) {
+            dest + i.U
+          } else (VECTOR_TMP_REG_LMUL + j).U
+          csBundle(i * (i + 1) / 2 + j).lsrc(1) := src2 + j.U
+          csBundle(i * (i + 1) / 2 + j).lsrc(2) := old_vd
+          csBundle(i * (i + 1) / 2 + j).ldest := vd
+          csBundle(i * (i + 1) / 2 + j).uopIdx := (i * (i + 1) / 2 + j).U
         }
     }
 
-    is(UopDivType.VEC_SLIDEDOWN) {
+    is(UopSplitType.VEC_SLIDEDOWN) {
       // FMV.D.X
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -762,40 +745,48 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
       // LMUL
-      for(i <- 0 until MAX_VLMUL)
-        for(j <- (0 to i).reverse){
-          when(i.U < lmul){
-            val old_vd = if (j==0) {dest + lmul -1.U - i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
-            val vd = if (j==i) {dest + lmul - 1.U - i.U} else (VECTOR_TMP_REG_LMUL+j).U
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).srcType(0) := SrcType.fp
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).lsrc(0) := FP_TMP_REG_MV.U
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).lsrc(1) := src2 + lmul - 1.U - j.U
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).lsrc(2) := old_vd
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ldest := vd
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).uopIdx := numOfUop-(i*(i+1)/2+i-j+2).U
+      for (i <- 0 until MAX_VLMUL)
+        for (j <- (0 to i).reverse) {
+          when(i.U < lmul) {
+            val old_vd = if (j == 0) {
+              dest + lmul - 1.U - i.U
+            } else (VECTOR_TMP_REG_LMUL + j - 1).U
+            val vd = if (j == i) {
+              dest + lmul - 1.U - i.U
+            } else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).srcType(0) := SrcType.fp
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(0) := FP_TMP_REG_MV.U
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(1) := src2 + lmul - 1.U - j.U
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(2) := old_vd
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).ldest := vd
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).uopIdx := numOfUop - (i * (i + 1) / 2 + i - j + 2).U
           }
         }
     }
 
-    is(UopDivType.VEC_ISLIDEDOWN) {
+    is(UopSplitType.VEC_ISLIDEDOWN) {
       // LMUL
-      for(i <- 0 until MAX_VLMUL)
-        for(j <- (0 to i).reverse){
-          when(i.U < lmul){
-            val old_vd = if (j==0) {dest + lmul -1.U - i.U} else (VECTOR_TMP_REG_LMUL+j-1).U
-            val vd = if (j==i) {dest + lmul - 1.U - i.U} else (VECTOR_TMP_REG_LMUL+j).U
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).lsrc(1) := src2 + lmul - 1.U - j.U
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).lsrc(2) := old_vd
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).ldest := vd
-            csBundle(numOfUop-(i*(i+1)/2+i-j+1).U).uopIdx := numOfUop-(i*(i+1)/2+i-j+1).U
+      for (i <- 0 until MAX_VLMUL)
+        for (j <- (0 to i).reverse) {
+          when(i.U < lmul) {
+            val old_vd = if (j == 0) {
+              dest + lmul - 1.U - i.U
+            } else (VECTOR_TMP_REG_LMUL + j - 1).U
+            val vd = if (j == i) {
+              dest + lmul - 1.U - i.U
+            } else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(1) := src2 + lmul - 1.U - j.U
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(2) := old_vd
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).ldest := vd
+            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).uopIdx := numOfUop - (i * (i + 1) / 2 + i - j + 1).U
           }
         }
     }
 
-    is(UopDivType.VEC_M0X) {
+    is(UopSplitType.VEC_M0X) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
-        val srcType0 = if (i==0) SrcType.DC else SrcType.vp
+        val srcType0 = if (i == 0) SrcType.DC else SrcType.vp
         val ldest = (VECTOR_TMP_REG_LMUL + i).U
         csBundle(i).srcType(0) := srcType0
         csBundle(i).srcType(1) := SrcType.vp
@@ -807,9 +798,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := ldest
         csBundle(i).uopIdx := i.U
       }
-      csBundle(lmul-1.U).vecWen := false.B
-      csBundle(lmul-1.U).fpWen := true.B
-      csBundle(lmul-1.U).ldest := FP_TMP_REG_MV.U
+      csBundle(lmul - 1.U).vecWen := false.B
+      csBundle(lmul - 1.U).fpWen := true.B
+      csBundle(lmul - 1.U).ldest := FP_TMP_REG_MV.U
       // FMV_X_D
       csBundle(lmul).srcType(0) := SrcType.fp
       csBundle(lmul).srcType(1) := SrcType.imm
@@ -831,29 +822,29 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(lmul).fpu.fcvt := false.B
     }
 
-    is(UopDivType.VEC_MVV) {
+    is(UopSplitType.VEC_MVV) {
       // LMUL
       for (i <- 0 until MAX_VLMUL) {
-        val srcType0 = if (i==0) SrcType.DC else SrcType.vp
-        csBundle(i*2+0).srcType(0) := srcType0
-        csBundle(i*2+0).srcType(1) := SrcType.vp
-        csBundle(i*2+0).lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
-        csBundle(i*2+0).lsrc(1) := src2
-        csBundle(i*2+0).lsrc(2) := dest + i.U
-        csBundle(i*2+0).ldest := dest + i.U
-        csBundle(i*2+0).uopIdx := (i*2+0).U
+        val srcType0 = if (i == 0) SrcType.DC else SrcType.vp
+        csBundle(i * 2 + 0).srcType(0) := srcType0
+        csBundle(i * 2 + 0).srcType(1) := SrcType.vp
+        csBundle(i * 2 + 0).lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
+        csBundle(i * 2 + 0).lsrc(1) := src2
+        csBundle(i * 2 + 0).lsrc(2) := dest + i.U
+        csBundle(i * 2 + 0).ldest := dest + i.U
+        csBundle(i * 2 + 0).uopIdx := (i * 2 + 0).U
 
-        csBundle(i*2+1).srcType(0) := srcType0
-        csBundle(i*2+1).srcType(1) := SrcType.vp
-        csBundle(i*2+1).lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
-        csBundle(i*2+1).lsrc(1) := src2
+        csBundle(i * 2 + 1).srcType(0) := srcType0
+        csBundle(i * 2 + 1).srcType(1) := SrcType.vp
+        csBundle(i * 2 + 1).lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
+        csBundle(i * 2 + 1).lsrc(1) := src2
         // csBundle(i).lsrc(2) := dest + i.U  DontCare
-        csBundle(i*2+1).ldest := (VECTOR_TMP_REG_LMUL + i).U
-        csBundle(i*2+1).uopIdx := (i*2+1).U
+        csBundle(i * 2 + 1).ldest := (VECTOR_TMP_REG_LMUL + i).U
+        csBundle(i * 2 + 1).uopIdx := (i * 2 + 1).U
       }
     }
 
-    is(UopDivType.VEC_M0X_VFIRST) {
+    is(UopSplitType.VEC_M0X_VFIRST) {
       // LMUL
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
@@ -878,35 +869,266 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).fpu.sqrt := false.B
       csBundle(1).fpu.fcvt := false.B
     }
+    is(UopSplitType.VEC_VWW) {
+      for (i <- 0 until MAX_VLMUL*2) {
+        when(i.U < lmul){
+          csBundle(i).srcType(2) := SrcType.DC
+          csBundle(i).lsrc(0) := src2 + i.U
+          csBundle(i).lsrc(1) := src2 + i.U
+          // csBundle(i).lsrc(2) := dest + (2 * i).U
+          csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).uopIdx :=  i.U
+        } otherwise {
+          csBundle(i).srcType(2) := SrcType.DC
+          csBundle(i).lsrc(0) := VECTOR_TMP_REG_LMUL.U + Cat((i.U-lmul),0.U(1.W)) + 1.U
+          csBundle(i).lsrc(1) := VECTOR_TMP_REG_LMUL.U + Cat((i.U-lmul),0.U(1.W))
+          // csBundle(i).lsrc(2) := dest + (2 * i).U
+          csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).uopIdx := i.U
+        }
+        csBundle(numOfUop-1.U).srcType(2) := SrcType.vp
+        csBundle(numOfUop-1.U).lsrc(0) := src1
+        csBundle(numOfUop-1.U).lsrc(2) := dest
+        csBundle(numOfUop-1.U).ldest := dest
+      }
+    }
+    is(UopSplitType.VEC_RGATHER) {
+      def genCsBundle_VEC_RGATHER(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            // csBundle(i * len + j).srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).srcType(1) := SrcType.vp
+            // csBundle(i * len + j).srcType(2) := SrcType.vp
+            csBundle(i * len + j).lsrc(0) := src1 + i.U
+            csBundle(i * len + j).lsrc(1) := src2 + j.U
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j - 1).U
+            csBundle(i * len + j).lsrc(2) := vd_old
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j).ldest := vd
+            csBundle(i * len + j).uopIdx := (i * len + j).U
+          }
+      }
+      switch(simple.io.enq.vtype.vlmul) {
+        is("b001".U ){
+          genCsBundle_VEC_RGATHER(2)
+        }
+        is("b010".U ){
+          genCsBundle_VEC_RGATHER(4)
+        }
+        is("b011".U ){
+          genCsBundle_VEC_RGATHER(8)
+        }
+      }
+    }
+    is(UopSplitType.VEC_RGATHER_VX) {
+      def genCsBundle_RGATHER_VX(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            csBundle(i * len + j + 1).srcType(0) := SrcType.fp
+            // csBundle(i * len + j + 1).srcType(1) := SrcType.vp
+            // csBundle(i * len + j + 1).srcType(2) := SrcType.vp
+            csBundle(i * len + j + 1).lsrc(0) := FP_TMP_REG_MV.U
+            csBundle(i * len + j + 1).lsrc(1) := src2 + j.U
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j - 1).U
+            csBundle(i * len + j + 1).lsrc(2) := vd_old
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j + 1).ldest := vd
+            csBundle(i * len + j + 1).uopIdx := (i * len + j).U
+          }
+      }
+      // FMV.D.X
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := FP_TMP_REG_MV.U
+      csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).rfWen := false.B
+      csBundle(0).fpWen := true.B
+      csBundle(0).vecWen := false.B
+      csBundle(0).fpu.isAddSub := false.B
+      csBundle(0).fpu.typeTagIn := FPU.D
+      csBundle(0).fpu.typeTagOut := FPU.D
+      csBundle(0).fpu.fromInt := true.B
+      csBundle(0).fpu.wflags := false.B
+      csBundle(0).fpu.fpWen := true.B
+      csBundle(0).fpu.div := false.B
+      csBundle(0).fpu.sqrt := false.B
+      csBundle(0).fpu.fcvt := false.B
+      switch(simple.io.enq.vtype.vlmul) {
+        is("b000".U ){
+          genCsBundle_RGATHER_VX(1)
+        }
+        is("b001".U ){
+          genCsBundle_RGATHER_VX(2)
+        }
+        is("b010".U ){
+          genCsBundle_RGATHER_VX(4)
+        }
+        is("b011".U ){
+          genCsBundle_RGATHER_VX(8)
+        }
+      }
+    }
+    is(UopSplitType.VEC_RGATHEREI16) {
+      def genCsBundle_VEC_RGATHEREI16_SEW8(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old0 = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j*2-1).U
+            val vd0 = (VECTOR_TMP_REG_LMUL + j*2 ).U
+            // csBundle(i * len + j).srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).srcType(1) := SrcType.vp
+            // csBundle(i * len + j).srcType(2) := SrcType.vp
+            csBundle((i * len + j)*2+0).lsrc(0) := src1 + (i*2+0).U
+            csBundle((i * len + j)*2+0).lsrc(1) := src2 + j.U
+            csBundle((i * len + j)*2+0).lsrc(2) := vd_old0
+            csBundle((i * len + j)*2+0).ldest := vd0
+            csBundle((i * len + j)*2+0).uopIdx := ((i * len + j)*2+0).U
+            val vd_old1 = (VECTOR_TMP_REG_LMUL + j*2).U
+            val vd1 = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j*2+1 ).U
+            csBundle((i * len + j)*2+1).lsrc(0) := src1 + (i*2+1).U
+            csBundle((i * len + j)*2+1).lsrc(1) := src2 + j.U
+            csBundle((i * len + j)*2+1).lsrc(2) := vd_old1
+            csBundle((i * len + j)*2+1).ldest := vd1
+            csBundle((i * len + j)*2+1).uopIdx := ((i * len + j)*2+1).U
+          }
+      }
+      def genCsBundle_VEC_RGATHEREI16(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j-1).U
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            // csBundle(i * len + j).srcType(0) := SrcType.vp // SrcType.imm
+            // csBundle(i * len + j).srcType(1) := SrcType.vp
+            // csBundle(i * len + j).srcType(2) := SrcType.vp
+            csBundle(i * len + j).lsrc(0) := src1 + i.U
+            csBundle(i * len + j).lsrc(1) := src2 + j.U
+            csBundle(i * len + j).lsrc(2) := vd_old
+            csBundle(i * len + j).ldest := vd
+            csBundle(i * len + j).uopIdx := (i * len + j).U
+          }
+      }
+      switch(simple.io.enq.vtype.vlmul) {
+        is("b000".U ){
+          when(!simple.io.enq.vtype.vsew.orR){
+            genCsBundle_VEC_RGATHEREI16_SEW8(1)
+          } .otherwise{
+            genCsBundle_VEC_RGATHEREI16(1)
+          }
+        }
+        is("b001".U) {
+          when(!simple.io.enq.vtype.vsew.orR) {
+            genCsBundle_VEC_RGATHEREI16_SEW8(2)
+          }.otherwise {
+            genCsBundle_VEC_RGATHEREI16(2)
+          }
+        }
+        is("b010".U) {
+          when(!simple.io.enq.vtype.vsew.orR) {
+            genCsBundle_VEC_RGATHEREI16_SEW8(4)
+          }.otherwise {
+            genCsBundle_VEC_RGATHEREI16(4)
+          }
+        }
+        is("b011".U) {
+          genCsBundle_VEC_RGATHEREI16(8)
+        }
+      }
+    }
+    is(UopSplitType.VEC_COMPRESS) {
+      def genCsBundle_VEC_COMPRESS(len:Int): Unit ={
+        for (i <- 0 until len){
+          val jlen = if (i == len-1) i+1 else i+2
+          for (j <- 0 until jlen) {
+            val vd_old = if(i==j) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j + 1).U
+            val vd = if(i==len-1) (dest + j.U) else{
+              if (j == i+1) VECTOR_TMP_REG_LMUL.U else (VECTOR_TMP_REG_LMUL + j + 1).U
+            }
+            val src23Type = if (j == i+1) DontCare else SrcType.vp
+            csBundle(i*(i+3)/2 + j).srcType(0) := SrcType.vp
+            csBundle(i*(i+3)/2 + j).srcType(1) := src23Type
+            csBundle(i*(i+3)/2 + j).srcType(2) := src23Type
+            csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            csBundle(i*(i+3)/2 + j).lsrc(1) := src2 + i.U
+            csBundle(i*(i+3)/2 + j).lsrc(2) := vd_old
+            // csBundle(i*(i+3)/2 + j).lsrc(3) := VECTOR_TMP_REG_LMUL.U
+            csBundle(i*(i+3)/2 + j).ldest := vd
+            csBundle(i*(i+3)/2 + j).uopIdx := (i*(i+3)/2 + j).U
+          }
+        }
+      }
+      switch(simple.io.enq.vtype.vlmul) {
+        is("b001".U ){
+          genCsBundle_VEC_COMPRESS(2)
+        }
+        is("b010".U ){
+          genCsBundle_VEC_COMPRESS(4)
+        }
+        is("b011".U ){
+          genCsBundle_VEC_COMPRESS(8)
+        }
+      }
+    }
+    is(UopSplitType.VEC_US_LD) {
+      /*
+      FMV.D.X
+       */
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := FP_TMP_REG_MV.U
+      csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).rfWen := false.B
+      csBundle(0).fpWen := true.B
+      csBundle(0).vecWen := false.B
+      csBundle(0).fpu.isAddSub := false.B
+      csBundle(0).fpu.typeTagIn := FPU.D
+      csBundle(0).fpu.typeTagOut := FPU.D
+      csBundle(0).fpu.fromInt := true.B
+      csBundle(0).fpu.wflags := false.B
+      csBundle(0).fpu.fpWen := true.B
+      csBundle(0).fpu.div := false.B
+      csBundle(0).fpu.sqrt := false.B
+      csBundle(0).fpu.fcvt := false.B
+      //LMUL
+      for (i <- 0 until MAX_VLMUL) {
+        csBundle(i + 1).srcType(0) := SrcType.fp
+        csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
+        csBundle(i + 1).ldest := dest + i.U
+        csBundle(i + 1).uopIdx := i.U
+      }
+    }
   }
 
   //uops dispatch
-  val normal :: ext :: Nil = Enum(2)
-  val stateReg = RegInit(normal)
+  val s_normal :: s_ext :: Nil = Enum(2)
+  val state = RegInit(s_normal)
+  val state_next = WireDefault(state)
   val uopRes = RegInit(0.U)
 
   //readyFromRename Counter
   val readyCounter = PriorityMuxDefault(io.readyFromRename.map(x => !x).zip((0 to (RenameWidth - 1)).map(_.U)), RenameWidth.U)
 
-  switch(stateReg) {
-    is(normal) {
-      stateReg := Mux(io.validFromIBuf(0) && (numOfUop > readyCounter) && (readyCounter =/= 0.U), ext, normal)
+  switch(state) {
+    is(s_normal) {
+      state_next := Mux(io.validFromIBuf(0) && (numOfUop > readyCounter) && (readyCounter =/= 0.U), s_ext, s_normal)
     }
-    is(ext) {
-      stateReg := Mux(io.validFromIBuf(0) && (uopRes > readyCounter), ext, normal)
+    is(s_ext) {
+      state_next := Mux(io.validFromIBuf(0) && (uopRes > readyCounter), s_ext, s_normal)
     }
   }
 
-  val uopRes0 = Mux(stateReg === normal, numOfUop, uopRes)
-  val uopResJudge = Mux(stateReg === normal,
+  state := state_next
+
+  val uopRes0 = Mux(state === s_normal, numOfUop, uopRes)
+  val uopResJudge = Mux(state === s_normal,
     io.validFromIBuf(0) && (readyCounter =/= 0.U) && (uopRes0 > readyCounter),
     io.validFromIBuf(0) && (uopRes0 > readyCounter))
   uopRes := Mux(uopResJudge, uopRes0 - readyCounter, 0.U)
 
   for(i <- 0 until RenameWidth) {
     decodedInsts(i) := MuxCase(csBundle(i), Seq(
-      (stateReg === normal) -> csBundle(i),
-      (stateReg === ext) -> Mux((i.U + numOfUop -uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
+      (state === s_normal) -> csBundle(i),
+      (state === s_ext) -> Mux((i.U + numOfUop -uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
     ))
   }
 
@@ -939,10 +1161,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   io.deq.decodedInsts := decodedInsts
-  io.deq.isVset := isVset_u
+  io.deq.isVset := isVsetSimple
   io.deq.complexNum := complexNum
   io.deq.validToRename := validToRename
   io.deq.readyToIBuf := readyToIBuf
 
 }
-

@@ -75,50 +75,52 @@ class ExeUnitImp(
       sink.valid := source.valid
       source.ready := sink.ready
 
-      sink.bits.src.zip(source.bits.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
-      sink.bits.fuOpType    := source.bits.fuOpType
-      sink.bits.imm         := source.bits.imm
-      sink.bits.robIdx      := source.bits.robIdx
-      sink.bits.pdest       := source.bits.pdest
-      sink.bits.rfWen       .foreach(x => x := source.bits.rfWen.get)
-      sink.bits.fpWen       .foreach(x => x := source.bits.fpWen.get)
-      sink.bits.vecWen      .foreach(x => x := source.bits.vecWen.get)
-      sink.bits.fpu         .foreach(x => x := source.bits.fpu.get)
-      sink.bits.flushPipe   .foreach(x => x := source.bits.flushPipe.get)
-      sink.bits.pc          .foreach(x => x := source.bits.pc.get)
-      sink.bits.preDecode   .foreach(x => x := source.bits.preDecode.get)
-      sink.bits.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
-      sink.bits.ftqOffset   .foreach(x => x := source.bits.ftqOffset.get)
-      sink.bits.predictInfo .foreach(x => x := source.bits.predictInfo.get)
+      sink.bits.data.src.zip(source.bits.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
+      sink.bits.data.pc          .foreach(x => x := source.bits.pc.get)
+      sink.bits.data.imm         := source.bits.imm
+      sink.bits.ctrl.fuOpType    := source.bits.fuOpType
+      sink.bits.ctrl.robIdx      := source.bits.robIdx
+      sink.bits.ctrl.pdest       := source.bits.pdest
+      sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.rfWen.get)
+      sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.fpWen.get)
+      sink.bits.ctrl.vecWen      .foreach(x => x := source.bits.vecWen.get)
+      sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.flushPipe.get)
+      sink.bits.ctrl.preDecode   .foreach(x => x := source.bits.preDecode.get)
+      sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
+      sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ftqOffset.get)
+      sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
+      sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
+      sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
   }
 
   private val fuOutValidOH = funcUnits.map(_.io.out.valid)
   XSError(PopCount(fuOutValidOH) > 1.U, p"fuOutValidOH ${Binary(VecInit(fuOutValidOH).asUInt)} should be one-hot)\n")
   private val fuOutBitsVec = funcUnits.map(_.io.out.bits)
-  private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = funcUnits.map(_.io.out.bits.redirect)
+  private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = funcUnits.map(_.io.out.bits.res.redirect)
 
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
-  private val fuIntWenVec = funcUnits.map(_.cfg.writeIntRf.B)
-  private val fuFpWenVec = funcUnits.map(_.cfg.writeFpRf.B)
-  private val fuVecWenVec = funcUnits.map(_.cfg.writeVecRf.B)
+  private val fuIntWenVec = funcUnits.map(x => x.cfg.writeIntRf.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
+  private val fuFpWenVec  = funcUnits.map(x => x.cfg.writeFpRf.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
+  private val fuVecWenVec = funcUnits.map(x => x.cfg.writeVecRf.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
   // FunctionUnits <---> ExeUnit.out
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
 
   // select one fu's result
-  io.out.bits.data := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.data))
-  io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.robIdx))
-  io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.pdest))
+  io.out.bits.data := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.data))
+  io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
+  io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
-  io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
-  io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
-  io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
-  io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
-  io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
+  io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
+  io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
+  io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
+  io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
+  io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
+  io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
 
   io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach{
     fuio =>
@@ -171,19 +173,19 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   fu.io.in.valid          := io.in.valid
   io.in.ready             := fu.io.in.ready
 
-  fu.io.in.bits.robIdx    := io.in.bits.uop.robIdx
-  fu.io.in.bits.pdest     := io.in.bits.uop.pdest
-  fu.io.in.bits.fuOpType  := io.in.bits.uop.fuOpType
-  fu.io.in.bits.imm       := io.in.bits.uop.imm
-  fu.io.in.bits.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
+  fu.io.in.bits.ctrl.robIdx    := io.in.bits.uop.robIdx
+  fu.io.in.bits.ctrl.pdest     := io.in.bits.uop.pdest
+  fu.io.in.bits.ctrl.fuOpType  := io.in.bits.uop.fuOpType
+  fu.io.in.bits.data.imm       := io.in.bits.uop.imm
+  fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
 
   io.out.valid            := fu.io.out.valid
   fu.io.out.ready         := io.out.ready
 
   io.out.bits             := 0.U.asTypeOf(io.out.bits) // dontCare other fields
-  io.out.bits.data        := fu.io.out.bits.data
-  io.out.bits.uop.robIdx  := fu.io.out.bits.robIdx
-  io.out.bits.uop.pdest   := fu.io.out.bits.pdest
+  io.out.bits.data        := fu.io.out.bits.res.data
+  io.out.bits.uop.robIdx  := fu.io.out.bits.ctrl.robIdx
+  io.out.bits.uop.pdest   := fu.io.out.bits.ctrl.pdest
   io.out.bits.uop.fuType  := io.in.bits.uop.fuType
   io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
   io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx

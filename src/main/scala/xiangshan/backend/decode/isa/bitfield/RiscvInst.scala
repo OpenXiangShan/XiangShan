@@ -16,31 +16,35 @@ class Riscv32BitInst extends RiscvInst(32) {
   def FUNCT7  : UInt  = inst(31, 25)
 }
 
-class RiscvITypeInst extends Riscv32BitInst {
+trait BitFieldsI { this: Riscv32BitInst =>
   def IMM12   : UInt  = inst(31, 20)
+  def SHAMT6  : UInt  = inst(25, 20)
+  def SHAMT5  : UInt  = inst(24, 20)
 }
 
-class RiscvSTypeInst extends Riscv32BitInst {
+trait BitFieldsS { this: Riscv32BitInst =>
   def IMM5    : UInt  = inst(11,  7)
   def IMM7    : UInt  = inst(31, 25)
 }
 
-class RiscvCSRInst extends Riscv32BitInst {
+trait BitFieldsCSR { this: Riscv32BitInst =>
   def CSRIDX  : UInt  = inst(31, 20)
   def CSRIMM  : UInt  = inst(19, 15)
 }
 
-class RiscvFpInst extends Riscv32BitInst {
+trait BitFieldsFp { this: Riscv32BitInst =>
   def FD      : UInt  = inst(11,  7)
   def FS1     : UInt  = inst(19, 15)
   def FS2     : UInt  = inst(24, 20)
   def FS3     : UInt  = inst(31, 27)
   def RM      : UInt  = inst(14, 12) // round mode
   def CONV_SGN: UInt  = inst(24, 20)
-  def FUNCT2  : UInt  = inst(26, 25)
+  def FMT     : UInt  = inst(26, 25)
+  def TYP     : UInt  = inst(21, 20)
 }
 
-class RiscvVecInst extends Riscv32BitInst {
+trait BitFieldsVec { this: Riscv32BitInst =>
+  def VCATEGORY     : UInt  = inst(14, 12)
   def NF            : UInt  = inst(31, 29)
   def MEW           : UInt  = inst(28)
   def MOP           : UInt  = inst(27, 26)
@@ -68,6 +72,13 @@ class RiscvVecInst extends Riscv32BitInst {
     res
   }
 }
+
+class XSInstBitFields extends Riscv32BitInst
+  with BitFieldsI
+  with BitFieldsS
+  with BitFieldsCSR
+  with BitFieldsFp
+  with BitFieldsVec
 
 class InstVType extends Bundle {
   val vma = Bool()

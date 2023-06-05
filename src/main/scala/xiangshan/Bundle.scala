@@ -30,6 +30,25 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
+import xiangshan.frontend.RASEntry
+import xiangshan.frontend.BPUCtrl
+import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.CGHPtr
+import xiangshan.frontend.FtqRead
+import xiangshan.frontend.FtqToCtrlIO
+
+import scala.math.max
+import Chisel.experimental.chiselName
+import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.BitPat.bitPatToUInt
+import chisel3.util.experimental.decode.EspressoMinimizer
+import xiangshan.backend.fu.PMPEntry
+import xiangshan.frontend.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -44,17 +63,19 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss         = 0.U(4.W)
-  val mshrFull        = 1.U(4.W)
-  val dataInvalid     = 2.U(4.W)
-  val bankConflict    = 3.U(4.W)
-  val ldVioCheckRedo  = 4.U(4.W)
+  val lrqFull         = 0.U(4.W)
+  val tlbMiss         = 1.U(4.W)
+  val mshrFull        = 2.U(4.W)
+  val dataInvalid     = 3.U(4.W)
+  val bankConflict    = 4.U(4.W)
+  val ldVioCheckRedo  = 5.U(4.W)
   val feedbackInvalid = 7.U(4.W)
   val issueSuccess    = 8.U(4.W)
   val rfArbitFail     = 9.U(4.W)
   val fuIdle          = 10.U(4.W)
   val fuBusy          = 11.U(4.W)
 
+  val allTypes = 16
   def apply() = UInt(4.W)
 
   def isStageSuccess(feedbackType: UInt) = {
@@ -62,7 +83,7 @@ object RSFeedbackType {
   }
 
   def isBlocked(feedbackType: UInt) = {
-    feedbackType === rfArbitFail || feedbackType === fuBusy || feedbackType === feedbackInvalid
+    feedbackType === rfArbitFail || feedbackType === fuBusy || feedbackType >= lrqFull && feedbackType <= feedbackInvalid
   }
 }
 
@@ -163,26 +184,24 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-  val uopDivType = UopDivType()
+  val uopSplitType = UopSplitType()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UInt(5.W)
   val isMove = Bool()
+  val vm = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
 
   private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, uopDivType, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, uopSplitType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder: Seq[UInt] = ListLookup(
-      inst, XDecode.decodeDefault.map(bitPatToUInt),
-      table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
-    )
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
     allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
     this
@@ -197,6 +216,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
+  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -258,6 +278,14 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+}
+
+class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
+  val uop = new DynInst
+}
+
+class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val flag = UInt(1.W)
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
@@ -340,6 +368,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)

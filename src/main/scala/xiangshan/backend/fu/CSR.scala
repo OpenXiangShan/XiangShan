@@ -85,6 +85,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vl = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
+  val set_vxsat = Output(Valid(UInt(1.W)))
 
   val dirty_vs = Output(Bool())
 }
@@ -180,9 +181,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val (valid, src1, src2, func) = (
     io.in.valid,
-    io.in.bits.src(0),
-    io.in.bits.imm,
-    io.in.bits.fuOpType
+    io.in.bits.data.src(0),
+    io.in.bits.data.imm,
+    io.in.bits.ctrl.fuOpType
   )
 
   // CSR define
@@ -404,6 +405,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   if (HasVPU) { extList = extList :+ 'v' }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0L)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal.U)
+  println(s"[CSR] supported isa ext: $extList")
 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
@@ -685,11 +687,16 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   }
   def vxrm_rfn(rdata: UInt): UInt = rdata(2,1)
 
-  def vxsat_wfn(wdata: UInt): UInt = {
+  def vxsat_wfn(update: Boolean)(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    val vcsrNew = WireInit(vcsrOld)
     csrw_dirty_vs_state := true.B
-    vcsrOld.vxsat := wdata(0)
-    vcsrOld.asUInt
+    if (update) {
+      vcsrNew.vxsat := wdata(0) | vcsrOld.vxsat
+    } else {
+      vcsrNew.vxsat := wdata(0)
+    }
+    vcsrNew.asUInt
   }
   def vxsat_rfn(rdata: UInt): UInt = rdata(0)
 
@@ -704,7 +711,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val vcsrMapping = Map(
     MaskedRegMap(Vstart, vstart),
     MaskedRegMap(Vxrm, vcsr, wfn = vxrm_wfn, rfn = vxrm_rfn),
-    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
+    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn(false), rfn = vxsat_rfn),
     MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
     MaskedRegMap(Vl, vl),
     MaskedRegMap(Vtype, vtype),
@@ -902,8 +909,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
-  io.out.bits.data := rdata
-  io.out.bits.flushPipe.get := flushPipe
+  io.out.bits.res.data := rdata
+  io.out.bits.ctrl.flushPipe.get := flushPipe
   connectNonPipedCtrlSingal
 
   // send distribute csr a w signal
@@ -929,6 +936,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   when (RegNext(csrio.fpu.fflags.valid)) {
     fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
+  }
+  when(RegNext(csrio.vpu.set_vxsat.valid)) {
+    vcsr := vxsat_wfn(update = true)(RegNext(csrio.vpu.set_vxsat.bits))
   }
   // set fs and sd in mstatus
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
@@ -989,8 +999,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val isDret   = addr === privDret   && func === CSROpType.jmp
   val isWFI    = func === CSROpType.wfi
 
-  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.pc.get, addr, rdata, wdata, func)
-  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
+  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.data.pc.get, addr, rdata, wdata, func)
+  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.data.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
 
   // Illegal priviledged operation list
   val illegalMret = valid && isMret && priviledgeMode < ModeM
@@ -1088,7 +1098,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // * unimplemented csr is being read/written
   // * csr access is illegal
   csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
-  io.out.bits.exceptionVec.get := csrExceptionVec
+  io.out.bits.ctrl.exceptionVec.get := csrExceptionVec
 
   XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
 
@@ -1279,7 +1289,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.pc.get)
+  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
 
   // Distributed CSR update req
   //

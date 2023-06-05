@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.{FPUCtrlSignals, XSModule}
 
@@ -29,6 +30,8 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     val instr = Input(UInt(32.W))
     val fpCtrl = Output(new FPUCtrlSignals)
   })
+
+  private val inst: XSInstBitFields = io.instr.asTypeOf(new XSInstBitFields)
 
   def X = BitPat("b?")
   def N = BitPat("b0")
@@ -120,9 +123,9 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     ctrl.div, ctrl.sqrt, ctrl.fcvt
   )
   sigs.zip(decoder).foreach({case (s, d) => s := d})
-  ctrl.typ := io.instr(21, 20)
-  ctrl.fmt := io.instr(26, 25)
-  ctrl.rm := io.instr(14, 12)
+  ctrl.typ := inst.TYP
+  ctrl.fmt := inst.FMT
+  ctrl.rm := inst.RM
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
     FADD_S  -> List(BitPat("b00"),N),

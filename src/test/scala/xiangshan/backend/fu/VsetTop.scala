@@ -46,17 +46,17 @@ class VsetTop(implicit p: Parameters) extends XSModule {
   vsetRiWi.io.in.valid := true.B
   vsetRiWi.io.out.ready := true.B
   vsetRiWi.io.in.bits := 0.U.asTypeOf(vsetRiWi.io.in.bits.cloneType)
-  vsetRiWi.io.in.bits.fuOpType := io.in.func
-  vsetRiWi.io.in.bits.src(0) := io.in.avl
-  vsetRiWi.io.in.bits.src(1) := vtypeStruct.asUInt
+  vsetRiWi.io.in.bits.ctrl.fuOpType := io.in.func
+  vsetRiWi.io.in.bits.data.src(0) := io.in.avl
+  vsetRiWi.io.in.bits.data.src(1) := vtypeStruct.asUInt
 
   vsetRiWvf.io.flush := 0.U.asTypeOf(vsetRiWvf.io.flush)
   vsetRiWvf.io.in.valid := true.B
   vsetRiWvf.io.out.ready := true.B
   vsetRiWvf.io.in.bits := 0.U.asTypeOf(vsetRiWvf.io.in.bits.cloneType)
-  vsetRiWvf.io.in.bits.fuOpType := io.in.func
-  vsetRiWvf.io.in.bits.src(0) := io.in.avl
-  vsetRiWvf.io.in.bits.src(1) := vtypeStruct.asUInt
+  vsetRiWvf.io.in.bits.ctrl.fuOpType := io.in.func
+  vsetRiWvf.io.in.bits.data.src(0) := io.in.avl
+  vsetRiWvf.io.in.bits.data.src(1) := vtypeStruct.asUInt
 
   val vconfig = WireInit(0.U.asTypeOf(VConfig()))
   vconfig.vl := io.in.oldVl
@@ -64,9 +64,9 @@ class VsetTop(implicit p: Parameters) extends XSModule {
   vsetRvfWvf.io.in.valid := true.B
   vsetRvfWvf.io.out.ready := true.B
   vsetRvfWvf.io.in.bits := 0.U.asTypeOf(vsetRvfWvf.io.in.bits.cloneType)
-  vsetRvfWvf.io.in.bits.fuOpType := io.in.func
-  vsetRvfWvf.io.in.bits.src(0) := vconfig.asUInt
-  vsetRvfWvf.io.in.bits.src(1) := Mux(VSETOpType.isVsetvl(io.in.func), vtypeStruct.asUInt, vtypeStruct.asUInt(7, 0))
+  vsetRvfWvf.io.in.bits.ctrl.fuOpType := io.in.func
+  vsetRvfWvf.io.in.bits.data.src(0) := vconfig.asUInt
+  vsetRvfWvf.io.in.bits.data.src(1) := Mux(VSETOpType.isVsetvl(io.in.func), vtypeStruct.asUInt, vtypeStruct.asUInt(7, 0))
 
   val selVsetIVL: Bool =  io.in.func === VSETOpType.uvsetrd_ii ||
                           io.in.func === VSETOpType.uvsetrd_xi ||
@@ -89,15 +89,15 @@ class VsetTop(implicit p: Parameters) extends XSModule {
     selVsetFVConfig -> vsetRvfWvf.debugIO.vconfig,
   ))
 
-  io.debug.fuOpType0 := vsetRiWi.io.in.bits.fuOpType
-  io.debug.src0(0) := vsetRiWi.io.in.bits.src(0)
-  io.debug.src0(1) := vsetRiWi.io.in.bits.src(1)
+  io.debug.fuOpType0 := vsetRiWi.io.in.bits.ctrl.fuOpType
+  io.debug.src0(0) := vsetRiWi.io.in.bits.data.src(0)
+  io.debug.src0(1) := vsetRiWi.io.in.bits.data.src(1)
 
-  io.debug.fuOpType1 := vsetRiWvf.io.in.bits.fuOpType
-  io.debug.src1(0) := vsetRiWvf.io.in.bits.src(0)
-  io.debug.src1(1) := vsetRiWvf.io.in.bits.src(1)
+  io.debug.fuOpType1 := vsetRiWvf.io.in.bits.ctrl.fuOpType
+  io.debug.src1(0) := vsetRiWvf.io.in.bits.data.src(0)
+  io.debug.src1(1) := vsetRiWvf.io.in.bits.data.src(1)
 
-  io.debug.fuOpType2 := vsetRvfWvf.io.in.bits.fuOpType
-  io.debug.src2(0) := vsetRvfWvf.io.in.bits.src(0)
-  io.debug.src2(1) := vsetRvfWvf.io.in.bits.src(1)
+  io.debug.fuOpType2 := vsetRvfWvf.io.in.bits.ctrl.fuOpType
+  io.debug.src2(0) := vsetRvfWvf.io.in.bits.data.src(0)
+  io.debug.src2(1) := vsetRvfWvf.io.in.bits.data.src(1)
 }

@@ -596,6 +596,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
 
   val cfi_idx = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val br_taken_mask = Vec(numBr, Bool())
+  val br_committed = Vec(numBr, Bool()) // High only when br valid && br committed
   val jmp_taken = Bool()
   val mispred_mask = Vec(numBr+1, Bool())
   val pred_hit = Bool()

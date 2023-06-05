@@ -58,7 +58,7 @@ package object xiangshan {
     def isBusy(state: UInt): Bool = state === this.busy
   }
 
-  def FuOpTypeWidth = 8
+  def FuOpTypeWidth = 9
   object FuOpType {
     def apply() = UInt(FuOpTypeWidth.W)
     def X = BitPat("b00000000")
@@ -568,43 +568,49 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
-  object UopDivType {
-    def SCA_SIM = "b000000".U //
-    def DIR     = "b010001".U // dirty: vset
-    def VEC_VVV = "b010010".U // VEC_VVV
-    def VEC_VXV = "b010011".U // VEC_VXV
-    def VEC_0XV = "b010100".U // VEC_0XV
-    def VEC_VVW = "b010101".U // VEC_VVW
-    def VEC_WVW = "b010110".U // VEC_WVW
-    def VEC_VXW = "b010111".U // VEC_VXW
-    def VEC_WXW = "b011000".U // VEC_WXW
-    def VEC_WVV = "b011001".U // VEC_WVV
-    def VEC_WXV = "b011010".U // VEC_WXV
-    def VEC_EXT2 = "b011011".U // VF2 0 -> V
-    def VEC_EXT4 = "b011100".U // VF4 0 -> V
-    def VEC_EXT8 = "b011101".U // VF8 0 -> V
-    def VEC_VVM = "b011110".U // VEC_VVM
-    def VEC_VXM = "b011111".U // VEC_VXM
-    def VEC_SLIDE1UP = "b100000".U // vslide1up.vx
-    def VEC_FSLIDE1UP = "b100001".U // vfslide1up.vf
-    def VEC_SLIDE1DOWN = "b100010".U // vslide1down.vx
-    def VEC_FSLIDE1DOWN = "b100011".U // vfslide1down.vf
-    def VEC_VRED = "b100100".U // VEC_VRED
-    def VEC_SLIDEUP = "b100101".U // VEC_SLIDEUP
-    def VEC_ISLIDEUP = "b100110".U // VEC_ISLIDEUP
-    def VEC_SLIDEDOWN = "b100111".U // VEC_SLIDEDOWN
-    def VEC_ISLIDEDOWN = "b101000".U // VEC_ISLIDEDOWN
-    def VEC_M0X = "b101001".U // VEC_M0X  0MV
-    def VEC_MVV = "b101010".U // VEC_MVV  VMV
-    def VEC_M0X_VFIRST = "b101011".U //
-    def VEC_M0M = "b000000".U // VEC_M0M
-    def VEC_MMM = "b000000".U // VEC_MMM
-    def dummy = "b111111".U
+  object UopSplitType {
+    def SCA_SIM          = "b000000".U //
+    def DIR              = "b010001".U // dirty: vset
+    def VEC_VVV          = "b010010".U // VEC_VVV
+    def VEC_VXV          = "b010011".U // VEC_VXV
+    def VEC_0XV          = "b010100".U // VEC_0XV
+    def VEC_VVW          = "b010101".U // VEC_VVW
+    def VEC_WVW          = "b010110".U // VEC_WVW
+    def VEC_VXW          = "b010111".U // VEC_VXW
+    def VEC_WXW          = "b011000".U // VEC_WXW
+    def VEC_WVV          = "b011001".U // VEC_WVV
+    def VEC_WXV          = "b011010".U // VEC_WXV
+    def VEC_EXT2         = "b011011".U // VF2 0 -> V
+    def VEC_EXT4         = "b011100".U // VF4 0 -> V
+    def VEC_EXT8         = "b011101".U // VF8 0 -> V
+    def VEC_VVM          = "b011110".U // VEC_VVM
+    def VEC_VXM          = "b011111".U // VEC_VXM
+    def VEC_SLIDE1UP     = "b100000".U // vslide1up.vx
+    def VEC_FSLIDE1UP    = "b100001".U // vfslide1up.vf
+    def VEC_SLIDE1DOWN   = "b100010".U // vslide1down.vx
+    def VEC_FSLIDE1DOWN  = "b100011".U // vfslide1down.vf
+    def VEC_VRED         = "b100100".U // VEC_VRED
+    def VEC_SLIDEUP      = "b100101".U // VEC_SLIDEUP
+    def VEC_ISLIDEUP     = "b100110".U // VEC_ISLIDEUP
+    def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
+    def VEC_ISLIDEDOWN   = "b101000".U // VEC_ISLIDEDOWN
+    def VEC_M0X          = "b101001".U // VEC_M0X  0MV
+    def VEC_MVV          = "b101010".U // VEC_MVV  VMV
+    def VEC_M0X_VFIRST   = "b101011".U //
+    def VEC_VWW          = "b101100".U //
+    def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
+    def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
+    def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
+    def VEC_COMPRESS     = "b110000".U // vcompress.vm
+    def VEC_US_LD        = "b110001".U // vector unit strided load
+    def VEC_M0M          = "b000000".U // VEC_M0M
+    def VEC_MMM          = "b000000".U // VEC_MMM
+    def dummy     = "b111111".U
 
     def X = BitPat("b000000")
 
     def apply() = UInt(6.W)
-    def needSplit(UopDivType: UInt) = UopDivType(4) || UopDivType(5)
+    def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
   }
 
   object ExceptionNO {

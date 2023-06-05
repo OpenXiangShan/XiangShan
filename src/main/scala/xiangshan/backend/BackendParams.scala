@@ -47,10 +47,16 @@ case class BackendParams(
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
 
+  def numSrc      : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
+  def numRegSrc   : Int = allSchdParams.map(_.issueBlockParams.map(_.numRegSrc).max).max
+  def numVecRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numVecSrc).max).max
+
+
   def AluCnt = allSchdParams.map(_.AluCnt).sum
   def StaCnt = allSchdParams.map(_.StaCnt).sum
   def StdCnt = allSchdParams.map(_.StdCnt).sum
   def LduCnt = allSchdParams.map(_.LduCnt).sum
+  def VlduCnt = allSchdParams.map(_.VlduCnt).sum
   def LsExuCnt = StaCnt + LduCnt
   def JmpCnt = allSchdParams.map(_.JmpCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum
@@ -64,7 +70,7 @@ case class BackendParams(
   def numExu = allSchdParams.map(_.numExu).sum
   def numRfRead  = 14
   def numRfWrite = 8
-  def vconfigPort = 11
+  def vconfigPort = 0 // Todo: remove it
 
   def numException = allExuParams.count(_.exceptionOut.nonEmpty)
 

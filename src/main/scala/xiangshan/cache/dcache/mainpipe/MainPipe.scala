@@ -293,8 +293,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
+  val s1_invalid_vec = wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid())
+  val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
+  val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
-  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(io.replace_way.way), RegNext(s1_repl_way_en))
+  s1_repl_way_en := Mux(
+    RegNext(s0_fire),
+    Mux(
+      s1_have_invalid_way,
+      s1_invalid_way_en,
+      UIntToOH(io.replace_way.way)
+      ),
+    RegNext(s1_repl_way_en)
+  )
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_miss_tag = Mux1H(s1_req.miss_way_en, wayMap(w => tag_resp(w)))
@@ -336,6 +347,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
     )
   )
+
+  XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
+  XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_hit = s1_tag_match && s1_has_permission

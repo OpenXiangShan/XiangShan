@@ -27,7 +27,7 @@ class RFReadArbiterIO(inPortSize: Int, outPortSize: Int, pregWidth: Int)(implici
 class RFReadArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
   val allExuParams = backendParams.allExuParams
 
-  val portConfigs = allExuParams.map(_.rfrPortConfigs.flatten).flatten.filter{
+  val portConfigs: Seq[RdConfig] = allExuParams.map(_.rfrPortConfigs.flatten).flatten.filter{
     rfrPortConfigs =>
       if(isInt){
         rfrPortConfigs.isInstanceOf[IntRD]
@@ -35,6 +35,13 @@ class RFReadArbiter(isInt: Boolean)(implicit p: Parameters) extends XSModule {
       else{
         rfrPortConfigs.isInstanceOf[VfRD]
       }
+  }
+
+  private val moduleName = this.getClass.getName + (if (isInt) "Int" else "Vf")
+
+  println(s"[$moduleName] ports(${portConfigs.size})")
+  for (portCfg <- portConfigs) {
+    println(s"[$moduleName] port: ${portCfg.port}, priority: ${portCfg.priority}")
   }
 
   val pregParams = if(isInt) backendParams.intPregParams else backendParams.vfPregParams
@@ -110,7 +117,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vfBlocks = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
   private val vfBlocksSeq = vfBlocks.flatten
 
-  val intReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
+  val intReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
   issuePortsIn.zipWithIndex.foreach{
     case (issuePortIn, idx) =>
       val readPortIn = issuePortIn.bits.getIntRfReadBundle
@@ -133,10 +140,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
   intRFReadArbiter.io.flush := io.flush
 
-  val vfReadPortInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getFpRfReadBundle.size).scan(0)(_ + _)
+  val vfReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getVfRfReadBundle.size).scan(0)(_ + _)
+  println(s"vfReadPortInSize: $vfReadPortInSize")
+
   issuePortsIn.zipWithIndex.foreach {
     case (issuePortIn, idx) =>
-      val readPortIn = issuePortIn.bits.getFpRfReadBundle
+      val readPortIn = issuePortIn.bits.getVfRfReadBundle
       val l = vfReadPortInSize(idx)
       val r = vfReadPortInSize(idx + 1)
       val arbiterIn = vfRFReadArbiter.io.in.slice(l, r)
@@ -200,6 +209,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       Some(Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
     } else { None }
+  private val vconfigDebugReadData: Option[UInt] =
+    if (env.AlwaysBasicDiff || env.EnableDifftest) {
+      Some(Wire(UInt(64.W)))
+    } else { None }
+
 
   fpDebugReadData.foreach(_ := vfDebugRead
     .get._2
@@ -211,8 +225,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     .slice(32, 64)
     .map(x => Seq(x(63, 0), x(127, 64))).flatten
   )
+  vconfigDebugReadData.foreach(_ := vfDebugRead
+    .get._2(64)(63, 0)
+  )
 
-  io.debugVconfig := vfDebugRead.get._2(64)(63, 0)
+  io.debugVconfig := vconfigDebugReadData.get
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     debugReadAddr = intDebugRead.map(_._1),
@@ -285,34 +302,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  //  var intRfRdataIdx = 0
-//  var vfRfRdataIdx = 0
-//  for (iqIdx <- toExu.indices) {
-//    for (exuIdx <- toExu(iqIdx).indices) {
-//      for (srcIdx <- toExu(iqIdx)(exuIdx).bits.src.indices) {
-//        val readDataCfgSet = toExu(iqIdx)(exuIdx).bits.params.getSrcDataType(srcIdx)
-//        // need read int reg
-//        if (readDataCfgSet.intersect(IntRegSrcDataSet).nonEmpty) {
-//          println(s"[DataPath] (iqIdx, exuIdx, srcIdx): ($iqIdx, $exuIdx, $srcIdx)")
-//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := intRfRdata(intRfRdataIdx)
-//        } else {
-//          // better for debug, should never assigned to other bundles
-//          s1_intPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef".U
-//        }
-//        // need read vf reg
-//        if (readDataCfgSet.intersect(VfRegSrcDataSet).nonEmpty) {
-//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := vfRfRdata(vfRfRdataIdx)
-//          vfRfRdataIdx += 1
-//        } else {
-//          // better for debug, should never assigned to other bundles
-//          s1_vfPregRData(iqIdx)(exuIdx)(srcIdx) := "hdead_beef_dead_beef_dead_beef_dead_beef".U
-//        }
-//      }
-//    }
-//  }
-//
-//  println(s"[DataPath] assigned RegFile Rdata: int(${intRfRdataIdx}), vf(${vfRfRdataIdx})")
-
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -344,7 +333,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
             s1_data.src(1) := ImmExtractor(
               s0.bits.common.imm,
               s0.bits.immType,
-              s1_data.DataBits,
+              s1_data.params.dataBitsMax,
               s1_data.params.immType.map(_.litValue)
             )
           }
@@ -352,6 +341,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         if (s1_data.params.hasJmpFu) {
           when(SrcType.isPc(s0.bits.srcType(0))) {
             s1_data.src(0) := SignExt(s0.bits.jmp.get.pc, XLEN)
+          }
+        } else if (s1_data.params.hasVecFu) {
+          // Fuck off riscv vector imm!!! Why not src1???
+          when(SrcType.isImm(s0.bits.srcType(0))) {
+            s1_data.src(0) := ImmExtractor(
+              s0.bits.common.imm,
+              s0.bits.immType,
+              s1_data.params.dataBitsMax,
+              s1_data.params.immType.map(_.litValue)
+            )
           }
         }
       }
@@ -418,6 +417,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         when(SrcType.isPc(s1_srcType(i)(j)(0))) {
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
+      } else if (sinkData.params.hasVecFu) {
+        when(SrcType.isImm(s1_srcType(i)(j)(0))) {
+          sinkData.src(0) := s1_toExuData(i)(j).src(0)
+        }
       }
       // s1Reg --[Data]--> exu(s1) ---------- end
     }
@@ -452,6 +455,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
 
+  // Todo: check if this can be removed
   val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =

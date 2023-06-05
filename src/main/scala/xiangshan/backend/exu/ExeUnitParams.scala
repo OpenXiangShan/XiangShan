@@ -46,6 +46,7 @@ case class ExeUnitParams(
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
+  val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val wbPregIdxWidth = if (wbPortConfigs.nonEmpty) wbPortConfigs.map(_.pregIdxWidth).max else 0
 
   protected val latencyCertain = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_&&_)
@@ -62,11 +63,15 @@ case class ExeUnitParams(
 
   def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
 
+  def hasVLoadFu = fuConfigs.map(_.fuType == FuType.vldu).reduce(_ || _)
+
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
 
-  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu
+
+  def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     fuConfigs.map(_.getSrcDataType(srcIdx)).reduce(_ ++ _)

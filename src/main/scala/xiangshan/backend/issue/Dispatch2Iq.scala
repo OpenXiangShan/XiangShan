@@ -288,12 +288,14 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val dispatchCfg: Seq[(Seq[Int], Int)] = Seq(
     (Seq(ldu), 2),
     (Seq(stu, mou), 2),
+    (Seq(vldu), 2),
   )
 
   private val enqLsqIO = io.enqLsqIO.get
 
   private val numLoadDeq = LoadPipelineWidth
   private val numStoreAMODeq = StorePipelineWidth
+  private val numVLoadDeq = LoadPipelineWidth
   private val numDeq = enqLsqIO.req.size
   private val numEnq = io.in.size
 
@@ -314,17 +316,23 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val isStoreVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType)))
   private val isAMOVec = io.in.map(x => x.valid && FuType.isAMO(x.bits.fuType))
   private val isStoreAMOVec = io.in.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isAMO(x.bits.fuType)))
+  private val isVLoadVec = VecInit(io.in.map(x => x.valid && FuType.isVLoad(x.bits.fuType)))
+  private val isVStoreVec = VecInit(io.in.map(x => x.valid && FuType.isVStore(x.bits.fuType)))
 
   private val loadCntVec = VecInit(isLoadVec.indices.map(x => PopCount(isLoadVec.slice(0, x + 1))))
   private val storeAMOCntVec = VecInit(isStoreAMOVec.indices.map(x => PopCount(isStoreAMOVec.slice(0, x + 1))))
+  private val vloadCntVec = VecInit(isVLoadVec.indices.map(x => PopCount(isVLoadVec.slice(0, x + 1))))
 
   val loadBlockVec = VecInit(loadCntVec.map(_ > numLoadDeq.U))
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
-  val lsStructBlockVec = VecInit(loadBlockVec.zip(storeAMOBlockVec).map(x => x._1 || x._2))
+  val vloadBlockVec = VecInit(vloadCntVec.map(_ > numVLoadDeq.U))
+  val lsStructBlockVec = VecInit((loadBlockVec.zip(storeAMOBlockVec)).zip(vloadBlockVec).map(x => x._1._1 || x._1._2 || x._2))
   dontTouch(loadBlockVec)
   dontTouch(storeAMOBlockVec)
   dontTouch(lsStructBlockVec)
+  dontTouch(vloadBlockVec)
   dontTouch(isLoadVec)
+  dontTouch(isVLoadVec)
   dontTouch(loadCntVec)
 
   s0_in <> io.in
@@ -342,10 +350,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   for (i <- enqLsqIO.req.indices) {
     when (!io.in(i).valid) {
       enqLsqIO.needAlloc(i) := 0.U
-    }.elsewhen(isStoreAMOVec(i)) {
-      enqLsqIO.needAlloc(i) := 2.U // store | amo
+    }.elsewhen(isStoreAMOVec(i) || isVStoreVec(i)) {
+      enqLsqIO.needAlloc(i) := 2.U // store | amo | vstore
     }.otherwise {
-      enqLsqIO.needAlloc(i) := 1.U // load
+      enqLsqIO.needAlloc(i) := 1.U // load | vload
     }
     enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i) && !iqNotAllReady && !lsqCannotAccept && !FuType.isAMO(io.in(i).bits.fuType)
     enqLsqIO.req(i).bits := io.in(i).bits

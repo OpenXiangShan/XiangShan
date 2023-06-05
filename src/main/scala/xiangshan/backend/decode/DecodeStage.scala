@@ -29,6 +29,11 @@ import xiangshan.backend.fu.vector.Bundles.VType
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
   with VectorConstants {
+
+  // params alias
+  private val numVecRegSrc = backendParams.numVecRegSrc
+  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
@@ -37,7 +42,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // RAT read
     val intRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort))) // Todo: make it configurable
     val fpRat = Vec(RenameWidth, Vec(4, Flipped(new RatReadPort)))
-    val vecRat = Vec(RenameWidth, Vec(5, Flipped(new RatReadPort)))
+    val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
@@ -48,7 +53,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   })
 
   private val v0Idx = 0
-  private val vconfigIdx = VECTOR_VCONFIG
+  private val vconfigIdx = VCONFIG_IDX
 
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
@@ -110,9 +115,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // TODO: vec uop dividers need change this
     io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
     io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
-    io.vecRat(i)(2).addr := io.out(i).bits.ldest   // old_vd0
+    io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
     io.vecRat(i)(3).addr := v0Idx.U                // v0
     io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
+    io.vecRat(i)(5).addr := io.out(i).bits.ldest   // vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 

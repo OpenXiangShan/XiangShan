@@ -10,7 +10,8 @@ import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.fpu.Bundles.Frm
+import xiangshan.backend.fu.vector.Bundles.{Category, Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
 import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
@@ -48,8 +49,7 @@ object Bundles {
 
   // StaticInst --[Decode]--> DecodedInst
   class DecodedInst(implicit p: Parameters) extends XSBundle {
-    def numPSrc = 5
-    def numLSrc = 3
+    def numSrc = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
@@ -62,8 +62,8 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // decoded
-    val srcType       = Vec(numLSrc, SrcType())
-    val lsrc          = Vec(numLSrc, UInt(6.W))
+    val srcType       = Vec(numSrc, SrcType())
+    val lsrc          = Vec(numSrc, UInt(6.W))
     val ldest         = UInt(6.W)
     val fuType        = FuType()
     val fuOpType      = FuOpType()
@@ -80,15 +80,15 @@ object Bundles {
     val vpu           = new VPUCtrlSignals
     val isMove        = Bool()
     val uopIdx        = UInt(5.W)
-    val vtype         = new VType
-    val uopDivType    = UopDivType()
+    val uopSplitType  = UopSplitType()
     val isVset        = Bool()
     val firstUop      = Bool()
     val lastUop       = Bool()
+    val numUops       = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType    = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      isXSTrap, waitForward, blockBackward, flushPipe, uopDivType, selImm)
+      isXSTrap, waitForward, blockBackward, flushPipe, uopSplitType, selImm)
 
     def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodedInst = {
       val decoder: Seq[UInt] = ListLookup(
@@ -114,9 +114,7 @@ object Bundles {
 
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
-    def numLSrc         = 3
-    // vector inst need vs1, vs2, vd, v0, vl&vtype, 5 psrcs
-    def numPSrc         = 5
+    def numSrc          = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
@@ -129,8 +127,8 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // passed from DecodedInst
-    val srcType         = Vec(numLSrc, SrcType())
-    val lsrc            = Vec(numLSrc, UInt(6.W))
+    val srcType         = Vec(numSrc, SrcType())
+    val lsrc            = Vec(numSrc, UInt(6.W))
     val ldest           = UInt(6.W)
     val fuType          = FuType()
     val fuOpType        = FuOpType()
@@ -147,14 +145,14 @@ object Bundles {
     val vpu             = new VPUCtrlSignals
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
-    val vtype           = new VType
     val isVset          = Bool()
-    val firstUop = Bool()
-    val lastUop = Bool()
+    val firstUop        = Bool()
+    val lastUop         = Bool()
+    val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType()
     // rename
-    val srcState        = Vec(numPSrc, SrcState())
-    val psrc            = Vec(numPSrc, UInt(PhyRegIdxWidth.W))
+    val srcState        = Vec(numSrc, SrcState())
+    val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
@@ -240,22 +238,54 @@ object Bundles {
     }
   }
 
-  object VsewBundle {
-    def apply()   = UInt(2.W)   // 8/16/32/64 --> 0/1/2/3
-  }
-
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-    val vlmul     = SInt(3.W) // 1/8~8      --> -3~3
-    val vsew      = VsewBundle()
-    val vta       = Bool()    // 1: agnostic, 0: undisturbed
-    val vma       = Bool()    // 1: agnostic, 0: undisturbed
-    val vm        = Bool()    // 0: need v0.t
+    // vtype
     val vill      = Bool()
+    val vma       = Bool()    // 1: agnostic, 0: undisturbed
+    val vta       = Bool()    // 1: agnostic, 0: undisturbed
+    val vsew      = VSew()
+    val vlmul     = VLmul()   // 1/8~8      --> -3~3
+
+    val vm        = Bool()    // 0: need v0.t
+    val vstart    = Vl()
+
+    // float rounding mode
+    val frm       = Frm()
+    // vector fix int rounding mode
+    val vxrm      = Vxrm()
+    // vector uop index, exclude other non-vector uop
+    val vuopIdx   = UopIdx()
+    // maybe used if data dependancy
+    val vmask     = UInt(MaskSrcData().dataWidth.W)
+    val vl        = Vl()
+
     // vector load/store
-    val nf        = UInt(3.W)
-    val lsumop    = UInt(5.W) // lumop or sumop
-    // used for vector index load/store and vrgatherei16.vv
-    val idxEmul   = UInt(3.W)
+    val nf        = Nf()
+
+    val needScalaSrc = Bool()
+
+    val isReverse = Bool() // vrsub, vrdiv
+    val isExt     = Bool()
+    val isNarrow  = Bool()
+    val isDstMask = Bool() // vvm, vvvm, mmm
+    val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
+
+    def vtype: VType = {
+      val res = Wire(VType())
+      res.illegal := this.vill
+      res.vma     := this.vma
+      res.vta     := this.vta
+      res.vsew    := this.vsew
+      res.vlmul   := this.vlmul
+      res
+    }
+
+    def vconfig: VConfig = {
+      val res = Wire(VConfig())
+      res.vtype := this.vtype
+      res.vl    := this.vl
+      res
+    }
   }
 
   // DynInst --[IssueQueue]--> DataPath
@@ -282,7 +312,7 @@ object Bundles {
 
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
-    def getFpRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(x => x.readFp || x.readVec)
+    def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf)
   }
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
@@ -304,6 +334,7 @@ object Bundles {
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
     val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
+    val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val jalrTarget    = if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None
@@ -332,6 +363,7 @@ object Bundles {
       this.fpWen        .foreach(_ := source.common.fpWen.get)
       this.vecWen       .foreach(_ := source.common.vecWen.get)
       this.fpu          .foreach(_ := source.common.fpu.get)
+      this.vpu          .foreach(_ := source.common.vpu.get)
       this.flushPipe    .foreach(_ := source.common.flushPipe.get)
       this.pc           .foreach(_ := source.jmp.get.pc)
       this.jalrTarget   .foreach(_ := source.jmp.get.target)
@@ -387,6 +419,7 @@ object Bundles {
     val replayInst = Bool()
     val redirect = ValidIO(new Redirect)
     val fflags = UInt(5.W)
+    val vxsat = Bool()
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
@@ -402,6 +435,7 @@ object Bundles {
       this.replayInst := source.replay.getOrElse(false.B)
       this.redirect := source.redirect.getOrElse(0.U.asTypeOf(this.redirect))
       this.fflags := source.fflags.getOrElse(0.U.asTypeOf(this.fflags))
+      this.vxsat := source.vxsat.getOrElse(0.U.asTypeOf(this.vxsat))
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
       this.debugInfo := source.debugInfo
@@ -450,16 +484,20 @@ object Bundles {
     val isInterrupt = Bool()
   }
 
-  class MemExuInput(implicit p: Parameters) extends XSBundle {
+  object UopIdx {
+    def apply()(implicit p: Parameters): UInt = UInt(log2Up(p(XSCoreParamsKey).MaxUopSize + 1).W)
+  }
+
+  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val src = Vec(3, UInt(XLEN.W))
+    val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
   }
 
-  class MemExuOutput(implicit p: Parameters) extends XSBundle {
+  class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
-    val data = UInt(XLEN.W)
+    val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
     val debug = new DebugBundle
   }
 

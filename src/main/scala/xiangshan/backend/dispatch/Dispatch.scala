@@ -82,10 +82,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // cover auipc (a fake branch)
     !req.bits.preDecodeInfo.notCFI || FuType.isJump(req.bits.fuType)
   ))
-  val isFp     = VecInit(io.fromRename.map(req => FuType.isFp (req.bits.fuType)))
-  val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType)))
+  val isFp     = VecInit(io.fromRename.map(req => FuType.isFp (req.bits.fuType) ||
+                                                  FuType.isVpu (req.bits.fuType)))
+  val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType) ||
+                                                  FuType.isVls (req.bits.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
+  val isVls    = VecInit(io.fromRename.map(req => FuType.isVls (req.bits.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStore(req.bits.fuType)))
+  val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(_.bits.waitForward))
@@ -107,7 +111,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
+    updatedCommitType(i) := Cat(isLs(i) | isVls(i), (isStore(i) && !isAMO(i)) | isVStore(i) | isBranch(i))
 
     updatedUop(i) := io.fromRename(i).bits
     updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
@@ -121,7 +125,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     when (io.fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
     }
-
+    //TODO: vec ls mdp
     io.lfst.req(i).valid := io.fromRename(i).fire && updatedUop(i).storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).ssid
@@ -252,7 +256,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     )
 
     io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.rfWen && (io.fromRename(i).bits.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
-    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.fpWen
+    io.allocPregs(i).isFp  := io.fromRename(i).valid && (io.fromRename(i).bits.fpWen || io.fromRename(i).bits.vecWen)
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.recv)

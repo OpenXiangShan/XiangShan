@@ -424,17 +424,24 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       val numLSrc = s0_enqBits(i).srcType.size min enq.bits.data.srcType.size
-      for (j <- 0 until numLSrc) {
+      val numPSrc = s0_enqBits(i).srcState.size min enq.bits.data.srcState.size
+
+      for (j <- 0 until numPSrc) {
         enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
         enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
+      }
+
+      for (j <- 0 until numLSrc) {
         enq.bits.data.srcType(j) := s0_enqBits(i).srcType(j)
       }
-      // enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
-      // enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
+      if (enq.bits.data.srcType.isDefinedAt(3)) enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
+      if (enq.bits.data.srcType.isDefinedAt(4)) enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
     }
   }
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.get := payloadArrayRdata(i).fpu
+    deq.bits.common.fpu.foreach(_ := payloadArrayRdata(i).fpu)
+    deq.bits.common.vpu.foreach(_ := payloadArrayRdata(i).vpu)
+    deq.bits.common.vpu.foreach(_.vuopIdx := payloadArrayRdata(i).uopIdx)
   }}
 }
 
@@ -454,7 +461,7 @@ class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends 
 class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
   extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
 
-  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ")
+  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.VlduCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
@@ -513,7 +520,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     statusArray.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
       fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
       fastResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackFast.bits.rsIdx)
-      fastResp.bits.success          := false.B
+      fastResp.bits.success          := memIO.feedbackIO(i).feedbackFast.bits.hit
       fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
       fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
     }

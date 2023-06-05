@@ -35,6 +35,9 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
 }
 
 class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSBundle {
+  // params alias
+  private val LoadQueueSize = VirtualLoadQueueSize
+
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
   }
@@ -55,10 +58,11 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val fromDataPath: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
-    val feedbackIO = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val lsqEnqIO = Flipped(new LsqEnqIO)
   }) else None
   val fromMem = if (params.isMemSchd) Some(new Bundle {
+    val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
+    val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
@@ -205,6 +209,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   val memAddrIQs = issueQueues.filter(iq => iq.params.StdCnt == 0)
   val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
+  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
@@ -235,6 +240,15 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     iq.io.wakeup := wakeupFromWBVec
   }
 
+  ldAddrIQs.foreach {
+    case imp: IssueQueueMemAddrImp => imp.io.memIO.get.feedbackIO <> io.fromMem.get.ldaFeedback
+    case _ =>
+  }
+
+  stAddrIQs.foreach {
+    case imp: IssueQueueMemAddrImp => imp.io.memIO.get.feedbackIO <> io.fromMem.get.staFeedback
+    case _ =>
+  }
 
   dispatch2Iq.io.out(1).zip(stAddrIQs(0).io.enq).zip(stDataIQs(0).io.enq).foreach{ case((di, staIQ), stdIQ) =>
     val isAllReady = staIQ.ready && stdIQ.ready
@@ -264,12 +278,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     stdIQ.io.wakeup := wakeupFromWBVec
   }
 
-  val iqMemBundleVec = stAddrIQs.map {
-    case imp: IssueQueueMemAddrImp => imp.io.memIO
-    case _ => None
-  }.filter(_.nonEmpty).map(_.get)
-  println(s"[Scheduler] iqMemBundleVec: ${iqMemBundleVec}")
-
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
 
   lsqEnqCtrl.io.redirect <> io.fromCtrlBlock.flush
@@ -279,10 +287,4 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   lsqEnqCtrl.io.lqCancelCnt := io.fromMem.get.lqCancelCnt
   lsqEnqCtrl.io.sqCancelCnt := io.fromMem.get.sqCancelCnt
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
-  require(io.memIO.get.feedbackIO.size == iqMemBundleVec.map(_.feedbackIO.size).sum,
-    s"[SchedulerMemImp] io.memIO.feedbackIO.size(${io.memIO.get.feedbackIO.size}) " +
-      s"should be equal to sum of memIQ.io.feedbackIO.size(${iqMemBundleVec.map(_.feedbackIO.size).sum})")
-
-  val memIQFeedbackIO: Seq[MemRSFeedbackIO] = iqMemBundleVec.flatMap(_.feedbackIO)
-  io.memIO.get.feedbackIO <> memIQFeedbackIO
 }

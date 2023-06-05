@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.datapath.DataConfig.{DataConfig, FpData, IntData, VecData}
+import xiangshan.backend.datapath.DataConfig.{DataConfig, FpData, FpRegSrcDataSet, IntData, IntRegSrcDataSet, VecData, VecRegSrcDataSet, VfRegSrcDataSet}
 import xiangshan.backend.Bundles.IssueQueueWakeUpBundle
 
 class RfReadPort(dataWidth: Int, addrWidth: Int) extends Bundle {
@@ -39,9 +39,10 @@ class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extend
   val data: UInt = Output(UInt(rfReadDataCfg.dataWidth.W))
   val srcType: UInt = Input(UInt(3.W))
 
-  def readInt: Boolean = rfReadDataCfg.isInstanceOf[IntData]
-  def readFp : Boolean = rfReadDataCfg.isInstanceOf[FpData]
-  def readVec: Boolean = rfReadDataCfg.isInstanceOf[VecData]
+  def readInt: Boolean = IntRegSrcDataSet.contains(rfReadDataCfg)
+  def readFp : Boolean = FpRegSrcDataSet .contains(rfReadDataCfg)
+  def readVec: Boolean = VecRegSrcDataSet.contains(rfReadDataCfg)
+  def readVf : Boolean = VfRegSrcDataSet .contains(rfReadDataCfg)
 }
 
 class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {

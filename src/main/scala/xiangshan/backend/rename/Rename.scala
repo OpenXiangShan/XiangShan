@@ -26,10 +26,19 @@ import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+
+  // params alias
+  private val numRegSrc = backendParams.numRegSrc
+  private val numVecRegSrc = backendParams.numVecRegSrc
+  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+
+  println(s"[Rename] numRegSrc: $numRegSrc")
+
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val robCommits = Input(new RobCommitIO)
@@ -43,7 +52,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
-    val vecReadPorts = Vec(RenameWidth, Vec(5, Input(UInt(PhyRegIdxWidth.W))))
+    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
@@ -190,6 +199,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(io.fpReadPorts(i)(2), io.vecReadPorts(i)(2)))
     uops(i).psrc(3) := io.vecReadPorts(i)(3)
     uops(i).psrc(4) := io.vecReadPorts(i)(4) // Todo: vl read port
+
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
       when (io.fusionInfo(i).rs2FromRs2 || io.fusionInfo(i).rs2FromRs1) {
@@ -201,7 +211,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).oldPdest := Mux1H(Seq(
       uops(i).rfWen  -> io.intReadPorts(i).last,
       uops(i).fpWen  -> io.fpReadPorts (i).last,
-      uops(i).vecWen -> io.vecReadPorts(i).last
+      uops(i).vecWen -> io.vecReadPorts(i).last,
     ))
     uops(i).eliminatedMove := isMove(i)
 
@@ -271,17 +281,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  private val numPSrc = 5
-  private val vconfigLregIdx = 32 // Todo: the idx of vconfig in another pregfile
-  val bypassCond = Wire(Vec(numPSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
-  require(io.in(0).bits.srcType.size == io.in(0).bits.numLSrc)
-  private val pdestLoc = io.in.head.bits.srcType.size + 2 // 2 vector src: v0, vl&vtype
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
+  private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
   for (i <- 1 until RenameWidth) {
-    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) ++ Seq.fill(2)(true.B) :+ needVecDest(i)
-    val fpCond = io.in(i).bits.srcType.map(_ === SrcType.fp) ++ Seq.fill(2)(false.B) :+ needFpDest(i)
-    val intCond = io.in(i).bits.srcType.map(_ === SrcType.reg) ++ Seq.fill(2)(false.B) :+ needIntDest(i)
-    val target = io.in(i).bits.lsrc ++ Seq(0.U, 32.U) :+ io.in(i).bits.ldest
+    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
+    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
+    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp) :+ needIntDest(i)
+    val target = io.in(i).bits.lsrc :+ io.in(i).bits.ldest
     for (((((cond1, cond2), cond3), t), j) <- vecCond.zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
         val indexMatch = in.bits.ldest === t
@@ -302,7 +310,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(3) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
       (z, next) => Mux(next._2, next._1, z)
     }
-    io.out(i).bits.psrc(4) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
+    io.out(i).bits.psrc(4) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(4)(i-1).asBools).foldLeft(uops(i).psrc(4)) {
       (z, next) => Mux(next._2, next._1, z)
     }
     io.out(i).bits.oldPdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(pdestLoc)(i-1).asBools).foldLeft(uops(i).oldPdest) {

@@ -500,11 +500,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     dontTouch(ptr)
   }
   val validEntries = distanceBetween(bpuPtr, commPtr)
+  val canCommit = Wire(Bool())
 
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U
+  val new_entry_ready = validEntries < FtqSize.U || canCommit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
@@ -1038,7 +1039,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
-  val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
@@ -1081,14 +1082,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_cfi = RegNext(can_commit_cfi)
   val debug_cfi = RegNext(commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited && can_commit_cfi.valid)
 
-  val commit_mispredict = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
+  val commit_mispredict  : Vec[Bool] = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
     case (mis, state) => mis && state === c_commited
   })
-  val can_commit_hit = entry_hit_status(commPtr.value)
-  val commit_hit = RegNext(can_commit_hit)
-  val diff_commit_target = RegNext(update_target(commPtr.value)) // TODO: remove this
-  val commit_stage = RegNext(pred_stage(commPtr.value))
-  val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
+  val commit_instCommited: Vec[Bool] = VecInit(commit_state.map(_ === c_commited)) // [PredictWidth]
+  val can_commit_hit                 = entry_hit_status(commPtr.value)
+  val commit_hit                     = RegNext(can_commit_hit)
+  val diff_commit_target             = RegNext(update_target(commPtr.value)) // TODO: remove this
+  val commit_stage                   = RegNext(pred_stage(commPtr.value))
+  val commit_valid                   = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
   switch (bpu_ftb_update_stall) {
@@ -1141,6 +1143,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.old_entry         := ftbEntryGen.is_old_entry
   update.pred_hit          := commit_hit === h_hit || commit_hit === h_false_hit
   update.br_taken_mask     := ftbEntryGen.taken_mask
+  update.br_committed      := (ftbEntryGen.new_entry.brValids zip ftbEntryGen.new_entry.brOffset) map {
+    case (valid, offset) => valid && commit_instCommited(offset)
+  }
   update.jmp_taken         := ftbEntryGen.jmp_taken
 
   // update.full_pred.fromFtbEntry(ftbEntryGen.new_entry, update.pc)
@@ -1158,8 +1163,17 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   if(cacheParams.hasPrefetch){
     val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
     val diff_prefetch_addr = WireInit(update_target(prefetchPtr.value)) //TODO: remove this
-
+    // TODO : MUST WIDER
     prefetchPtr := prefetchPtr + io.toPrefetch.req.fire()
+
+    val prefetch_too_late = (isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)) || (prefetchPtr === ifuPtr)
+    when(prefetch_too_late){
+      when(prefetchPtr =/= bpuPtr){
+        prefetchPtr := bpuPtr - 1.U
+      }.otherwise{
+        prefetchPtr := ifuPtr
+      }
+    }
 
     ftq_pc_mem.io.other_raddrs(0) := prefetchPtr.value
 
@@ -1198,7 +1212,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
     XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
+//    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
   }
   else {
     io.toPrefetch.req <> DontCare
