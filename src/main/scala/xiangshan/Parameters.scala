@@ -297,7 +297,9 @@ case class DebugOptions
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false,
-  EnableConstantin: Boolean = false
+  EnableConstantin: Boolean = false,
+  EnableChiselDB: Boolean = false,
+  AlwaysBasicDB: Boolean = true,
 )
 
 trait HasXSParameter {

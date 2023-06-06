@@ -23,11 +23,10 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
-import huancun.debug.TLLogger
 import coupledL2.{L2ParamKey, CoupledL2}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer}
+import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -62,7 +61,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   ))
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform)
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform, stat_latency = true)
-  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
+  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB)
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   val i_mmio_port = TLTempNode()
@@ -126,9 +125,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     (buffers, node)
   }
 
-  misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) := core.frontend.icache.clientNode
+  misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
-    misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) := core.ptw_to_l2_buffer.node 
+    misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.ptw_to_l2_buffer.node 
   } 
 
   l2cache match {
