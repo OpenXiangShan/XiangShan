@@ -36,7 +36,7 @@ trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePar
 
   val SATURATE_COUNTER_BITS = 7
 
-  val ENABLE_STRIDE = true
+  val ENABLE_STRIDE = false
   val ENABLE_SPB = true
 
   def block_addr(x: UInt): UInt = {

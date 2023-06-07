@@ -119,6 +119,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   }
 }
 
+class StPrefetchTrainBundle(implicit p: Parameters) extends LdPrefetchTrainBundle {}
+
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // queue entry data, except flag bits, will be updated if writeQueue is true,
   // valid bit in LqWriteBundle will be ignored

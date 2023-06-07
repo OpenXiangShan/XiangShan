@@ -218,6 +218,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val sqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+    val st_pc_read = Vec(exuParameters.StuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -280,9 +281,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
   val PCMEMIDX_LD = 5
+  val PCMEMIDX_ST = PCMEMIDX_LD + exuParameters.LduCnt
   val pcMem = Module(new SyncDataModuleTemplate(
     new Ftq_RF_Components, FtqSize,
-    6 + exuParameters.LduCnt, 1, "CtrlPcMem")
+    6 + exuParameters.LduCnt + exuParameters.StuCnt, 1, "CtrlPcMem")
   )
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
@@ -532,7 +534,12 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for(i <- 0 until exuParameters.LduCnt){
     // load s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
     pcMem.io.raddr(i + PCMEMIDX_LD) := io.ld_pc_read(i).ptr.value
-    io.ld_pc_read(i).data := pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset))
+    io.ld_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_LD).getPc(RegNext(io.ld_pc_read(i).offset))
+  }
+  for(i <- 0 until exuParameters.StuCnt){
+    // store s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
+    pcMem.io.raddr(i + PCMEMIDX_ST) := io.st_pc_read(i).ptr.value
+    io.st_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset))
   }
 
   rob.io.hartId := io.hartId

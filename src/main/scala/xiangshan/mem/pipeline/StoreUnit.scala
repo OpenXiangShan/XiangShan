@@ -266,6 +266,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val reExecuteQuery = Valid(new LoadReExecuteQueryIO)
     val issue = Valid(new ExuInput)
     val debug_ls = Output(new DebugLsInfoBundle)
+    // provide prefetch info
+    val prefetch_train = ValidIO(new StPrefetchTrainBundle())
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -310,6 +312,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s2.io.pmpResp <> io.pmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   io.lsq_replenish := store_s2.io.out.bits // mmio and exception
+
+  io.prefetch_train.bits.fromLsPipelineBundle(store_s2.io.in.bits)
+  // override miss bit
+  io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  // TODO: add prefetch and access bit
+  io.prefetch_train.bits.meta_prefetch := false.B
+  io.prefetch_train.bits.meta_access := false.B
+  io.prefetch_train.valid := store_s2.io.in.fire && io.dcache.resp.fire && !store_s2.io.out.bits.mmio && !store_s2.io.in.bits.tlbMiss
+
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout

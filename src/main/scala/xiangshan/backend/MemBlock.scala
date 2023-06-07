@@ -75,6 +75,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.StuCnt, new MemRSFeedbackIO)
     val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
+    val storePc = Vec(exuParameters.StuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
@@ -377,7 +378,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     for (s <- 0 until StorePipelineWidth) {
       loadUnits(i).io.reExecuteQuery(s) := storeUnits(s).io.reExecuteQuery
     }
-    // prefetch
+    // load prefetch train
     prefetcherOpt.foreach(pf => {
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
         loadUnits(i).io.prefetch_train.valid,
@@ -495,6 +496,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // Lsq to std unit's rs
     lsq.io.storeDataIn(i) := stData(i)
 
+    // store prefetch train
+    prefetcherOpt.foreach(pf => {
+      pf.io.st_in(i).valid := Mux(pf_train_on_hit,
+        stu.io.prefetch_train.valid,
+        stu.io.prefetch_train.valid && stu.io.prefetch_train.bits.isFirstIssue && (
+          stu.io.prefetch_train.bits.miss || stu.io.prefetch_train.bits.meta_prefetch
+          )
+      )
+      pf.io.st_in(i).bits := stu.io.prefetch_train.bits
+      pf.io.st_in(i).bits.uop.cf.pc := RegNext(io.storePc(i))
+    })
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts

@@ -168,7 +168,9 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   // TODO: consider tag error
   io.lsu.resp.bits.tag_error := false.B
 
-  io.to_store_pf_miss_queue.valid := s2_valid && !s2_hit && !io.lsu.s2_kill 
+  // io.to_store_pf_miss_queue.valid := s2_valid && !s2_hit && !io.lsu.s2_kill 
+  // disable prefetch at issue for now
+  io.to_store_pf_miss_queue.valid := false.B
   io.to_store_pf_miss_queue.bits.vaddr  := s2_req.vaddr
   io.to_store_pf_miss_queue.bits.paddr  := get_block_addr(s2_paddr)
 
