@@ -69,7 +69,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param.copy(enableTopDown = debugOpts.EnableTopDown)
+      case HCCacheParamsKey => l3param.copy(hartIds = tiles.map(_.HartId))
     })))
   )
 
@@ -101,6 +101,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
     case None =>
+      val dummyMatch = WireDefault(false.B)
+      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf, true))
   }
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -202,9 +204,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+
+    // tools: init to close dpi-c when in fpga
+    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+    val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
+    val enableConstantin = config(DebugOptionsKey).EnableConstantin
+    Constantin.init(enableConstantin && !envInFPGA)
+    ChiselDB.init(enableChiselDB && !envInFPGA)
+
     val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firrtlComplier)
+    Generator.execute(firrtlOpts, soc.module, firrtlComplier, firtoolOpts)
     FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
   }
 }

@@ -133,6 +133,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
 class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
+  val rob_head_miss_in_tlb = Output(Bool())
 
   def apply(tlb: VectorTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.tlb <> tlb
@@ -247,6 +248,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.addr_low := ptwResp.addr_low
   io.tlb.resp.bits.data.ppn_low := ptwResp.ppn_low
   io.tlb.resp.bits.data.valididx := ptwResp.valididx
+  io.tlb.resp.bits.data.pteidx := ptwResp.pteidx
   io.tlb.resp.bits.data.pf := ptwResp.pf
   io.tlb.resp.bits.data.af := ptwResp.af
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
@@ -322,6 +324,14 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     counter := 0.U
     inflight_counter := 0.U
   }
+
+  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
+
+  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+
+  io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
+    vi && sourceVaddr.valid && vpni === get_pn(sourceVaddr.bits)
+  }}).asUInt.orR
 
   // perf
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
