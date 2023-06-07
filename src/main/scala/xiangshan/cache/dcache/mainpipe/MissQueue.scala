@@ -189,8 +189,16 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
     // trigger prefetch
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
-    // prefer not to cache data in L2 by default
-    acquire.user.lift(PreferCacheKey).foreach(_ := false.B)
+    // req source
+    when(req.isFromLoad) {
+      acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
+    }.elsewhen(req.isFromStore) {
+      acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
+    }.elsewhen(req.isFromAMO) {
+      acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUAtomicData.id.U)
+    }.otherwise {
+      acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
+    }
 
     acquire
   }
