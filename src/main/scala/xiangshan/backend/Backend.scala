@@ -21,11 +21,16 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
 
+  println("[Backend] ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs
     val wbPortConfigs = exuCfg.wbPortConfigs
     val immType = exuCfg.immType
-    println(s"exu: ${fuConfigs.map(_.name)}, wb: ${wbPortConfigs}, imm: ${immType}")
+    println("[Backend]   " +
+      s"${exuCfg.name}: " +
+      s"${ fuConfigs.map(_.name).mkString("fu(s): {", ",", "}") }, " +
+      s"${ wbPortConfigs.mkString("wb: {", ",", "}") }, " +
+      s"${ immType.map(SelImm.mkString(_)).mkString("imm: {", "," , "}") }")
     require(wbPortConfigs.collectFirst { case x: IntWB => x }.nonEmpty ==
       fuConfigs.map(_.writeIntRf).reduce(_ || _),
       "int wb port has no priority" )
@@ -33,9 +38,6 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
       fuConfigs.map(x => x.writeFpRf || x.writeVecRf).reduce(_ || _),
       "vec wb port has no priority" )
   }
-
-  println(s"Function Unit: Alu(${params.AluCnt}), Brh(${params.BrhCnt}), Jmp(${params.JmpCnt}), " +
-    s"Ldu(${params.LduCnt}), Sta(${params.StaCnt}), Std(${params.StdCnt})")
 
   for (cfg <- FuConfig.allConfigs) {
     println(s"[Backend] $cfg")
