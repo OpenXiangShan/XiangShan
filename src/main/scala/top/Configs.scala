@@ -452,6 +452,11 @@ class NanHuGFPGAConfig(n: Int = 1) extends Config(
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false
     )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      ))
+    )
   })
 )
 
