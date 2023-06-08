@@ -32,6 +32,7 @@ import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, 
 // Generate addr, use addr to query DCache and DTLB
 class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
+    val prefetch_req = Flipped(DecoupledIO(new StorePrefetchReq))
     val in = Flipped(Decoupled(new ExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
@@ -51,43 +52,54 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
 
   val use_flow_fromRS = io.in.valid
+  val use_flow_fromPrefetch = !use_flow_fromRS && io.prefetch_req.valid
+
+  val prefetch_vaddr = io.prefetch_req.bits.vaddr
+  val fake_prefetch_exinput = WireInit(0.U.asTypeOf(new ExuInput))
+  val fake_prefetch_exinput_uop = fake_prefetch_exinput.uop
 
   // request to tlb
-  io.dtlbReq.bits.vaddr := saddr
-  io.dtlbReq.valid := use_flow_fromRS
+  io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
+  io.dtlbReq.valid := use_flow_fromRS || use_flow_fromPrefetch
   io.dtlbReq.bits.cmd := TlbCmd.write
-  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
+  io.dtlbReq.bits.size := Mux(use_flow_fromRS, LSUOpType.size(io.in.bits.uop.ctrl.fuOpType), 3.U)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := false.B
   io.dtlbReq.bits.memidx.is_st := true.B
-  io.dtlbReq.bits.memidx.idx := io.in.bits.uop.sqIdx.value
-  io.dtlbReq.bits.debug.robIdx := io.in.bits.uop.robIdx
+  io.dtlbReq.bits.memidx.idx := Mux(use_flow_fromRS, io.in.bits.uop.sqIdx.value, DontCare)
+  io.dtlbReq.bits.debug.robIdx := Mux(use_flow_fromRS, io.in.bits.uop.robIdx, DontCare)
+  // TODO: prefetch use paddr and set no_translate
   io.dtlbReq.bits.no_translate := false.B
-  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
-  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
+  io.dtlbReq.bits.debug.pc := Mux(use_flow_fromRS, io.in.bits.uop.cf.pc, DontCare)
+  io.dtlbReq.bits.debug.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
 
-  // not real dcache write
-  // just triger a write intent to dcache
-  io.dcache.valid           := use_flow_fromRS
+  io.prefetch_req.ready := io.out.ready && io.dcache.fire && !io.in.valid
+
+  // Dcache access here: not **real** dcache write
+  // just read meta and tag in dcache, to find out the store will hit or miss
+
+  // NOTE: The store request does not wait for the dcache to be ready.
+  //       If the dcache is not ready at this time, the dcache is not queried.
+  //       But, store prefetch request will always wait for dcache to be ready to make progress.
+  io.dcache.valid           := use_flow_fromRS || use_flow_fromPrefetch
   io.dcache.bits.cmd        := MemoryOpConstants.M_PFW
-  io.dcache.bits.vaddr      := saddr
-  io.dcache.bits.mask       := DontCare
-  io.dcache.bits.instrtype  := DCACHE_PREFETCH_SOURCE.U
+  io.dcache.bits.vaddr      := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
+  io.dcache.bits.instrtype  := Mux(use_flow_fromRS, STORE_SOURCE.U, DCACHE_PREFETCH_SOURCE.U)
 
   io.out.bits := DontCare
-  io.out.bits.vaddr := saddr
+  io.out.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
 
   // Now data use its own io
   // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_prefetch_exinput_uop)
   io.out.bits.miss := DontCare
-  io.out.bits.rsIdx := io.rsIdx
-  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
-  io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
-  io.out.bits.isHWPrefetch := !use_flow_fromRS
-  io.out.valid := use_flow_fromRS
+  io.out.bits.rsIdx := Mux(use_flow_fromRS, io.rsIdx, DontCare)
+  io.out.bits.mask := Mux(use_flow_fromRS, genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0)), 3.U)
+  io.out.bits.isFirstIssue := Mux(use_flow_fromRS, io.isFirstIssue, false.B)
+  io.out.bits.wlineflag := Mux(use_flow_fromRS, io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero, false.B)
+  io.out.bits.isHWPrefetch := use_flow_fromPrefetch
+  io.out.valid := use_flow_fromRS || (use_flow_fromPrefetch && io.dcache.fire)
   io.in.ready := io.out.ready
   when(io.in.fire && io.isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -101,7 +113,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
     "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
   ))
 
-  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := Mux(use_flow_fromRS, !addrAligned, false.B)
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -251,6 +263,7 @@ class StoreUnit_S3(implicit p: Parameters) extends XSModule {
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
+    val prefetch_req = Flipped(DecoupledIO(new StorePrefetchReq))
     val redirect = Flipped(ValidIO(new Redirect))
     val dcache = new DCacheStoreIO
     val feedbackSlow = ValidIO(new RSFeedback)
@@ -278,6 +291,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.dcache <> io.dcache.req
+  store_s0.io.prefetch_req <> io.prefetch_req
   io.tlb.req_kill := false.B
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
@@ -312,6 +326,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s2.io.pmpResp <> io.pmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   io.lsq_replenish := store_s2.io.out.bits // mmio and exception
+  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
   io.prefetch_train.bits.fromLsPipelineBundle(store_s2.io.in.bits)
   // override miss bit
@@ -319,7 +334,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
-  io.prefetch_train.valid := store_s2.io.in.fire && io.dcache.resp.fire && !store_s2.io.out.bits.mmio && !store_s2.io.in.bits.tlbMiss
+  if(EnableStorePrefetchSMS) {
+    io.prefetch_train.valid := store_s2.io.in.fire && io.dcache.resp.fire && !store_s2.io.out.bits.mmio && !store_s2.io.in.bits.tlbMiss && !store_s2.io.in.bits.isHWPrefetch
+  }else {
+    io.prefetch_train.valid := false.B
+  }
 
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 

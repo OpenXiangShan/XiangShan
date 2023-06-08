@@ -681,6 +681,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     // Give paddr out when Release a entry
     val entry_release_info = Valid(new MissEntryReleaseInfo)
+    val memSetPattenDetected = Output(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -719,7 +720,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val Threshold = 16
   val memSetPattenDetected = source_except_load_cnt >= Threshold.U
 
-  XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
+  io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {
@@ -857,6 +858,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
   XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && merge && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   when (num_valids > max_inflight) {

@@ -341,8 +341,8 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val wline = Bool()
 }
 
-class DCacheWordReqWithVaddrAndPc(implicit p: Parameters) extends DCacheWordReqWithVaddr {
-  val pc = UInt(VAddrBits.W)
+class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWordReqWithVaddr {
+  val prefetch = Bool()
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
@@ -663,6 +663,11 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   }
 }
 
+class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
+  val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
@@ -681,7 +686,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
-  val sta_prefetch = DecoupledIO(new StorePrefetchReq)
+  val memSetPattenDetected = Output(Bool())
 }
 
 
@@ -736,7 +741,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
-  val staMissQueue = Module(new StorePrefetchMissQueue)
   val mainPipe     = Module(new MainPipe)
   val refillPipe   = Module(new RefillPipe)
   val missQueue    = Module(new MissQueue(edge))
@@ -745,6 +749,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
+  io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error 
@@ -924,11 +929,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Sta pipe
   for (w <- 0 until StorePipelineWidth) {
     stu(w).io.lsu <> io.lsu.sta(w)
-    staMissQueue.io.enq(w) <> stu(w).io.to_store_pf_miss_queue
   }
-
-  staMissQueue.io.mshr_release_info <> missQueue.io.entry_release_info
-  staMissQueue.io.deq <> io.sta_prefetch
 
   //----------------------------------------
   // atomics
@@ -941,8 +942,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // miss queue
-  // load pipe * 2 + main pipe * 1 + store pipe * 2
-  val MissReqPortCount = LoadPipelineWidth + 1
+  // missReqArb port:
+  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 2; disable: main pipe * 1 + load pipe * 2
+  // higher priority is given to lower indices
+  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
+  val MissReqPortCount = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
   val MainPipeMissReqPort = 0
 
   // Request
@@ -953,6 +957,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp
+
+  if(StorePrefetchL1Enabled) {
+    for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
+  }else {
+    for (w <- 0 until StorePipelineWidth) { stu(w).io.miss_req.ready := false.B }
+  }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr

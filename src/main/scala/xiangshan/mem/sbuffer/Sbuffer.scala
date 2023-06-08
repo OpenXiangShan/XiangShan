@@ -180,18 +180,19 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
-    val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPc)))  //Todo: store logic only support Width == 2 now
+    val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPfFlag)))  //Todo: store logic only support Width == 2 now
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
-    val lq_deq  = Flipped(Valid(new DCacheWordReqWithVaddr))
-    val l2_store_prefetch = Decoupled(new StorePrefetchReq) // to L2
+    val store_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq)) // to dcache
+    val memSetPattenDetected = Input(Bool())
   })
 
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
+  val prefetcher = Module(new StorePfWrapper())
   val writeReq = dataModule.io.writeReq
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
@@ -203,8 +204,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
-
-  val l2_prefetcher = Module(new EastLakeLikeStorePfWrapper())
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -363,15 +362,28 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
-  // train
   for(i <- 0 until EnsbufferWidth) {
-    l2_prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
-    l2_prefetcher.io.sbuffer_enq(i).bits := DontCare
-    l2_prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-    l2_prefetcher.io.sbuffer_enq(i).bits.addr := io.in(i).bits.addr
-    l2_prefetcher.io.sbuffer_enq(i).bits.pc := io.in(i).bits.pc
+    // train
+    if(EnableStorePrefetchSPB) {
+      prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
+      prefetcher.io.sbuffer_enq(i).bits := DontCare
+      prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
+    }else {
+      prefetcher.io.sbuffer_enq(i).valid := false.B
+      prefetcher.io.sbuffer_enq(i).bits := DontCare
+    }
+
+    // prefetch req
+    if(EnableStorePrefetchAtCommit) {
+      io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
+      io.store_prefetch(i).bits.paddr := DontCare
+      io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
+      prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
+    }else {
+      io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
+    }
   }
-  io.l2_store_prefetch <> l2_prefetcher.io.prefetch_req
+  prefetcher.io.memSetPattenDetected := io.memSetPattenDetected
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,

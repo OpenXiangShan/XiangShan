@@ -26,7 +26,6 @@ import xiangshan.L1CacheErrorInfo
 class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
   val vaddr = UInt(VAddrBits.W)
-  val mask   = UInt((DataBits/8).W)
   val instrtype   = UInt(sourceTypeWidth.W)
 }
 
@@ -53,8 +52,9 @@ class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
 /** Non-Blocking Store Dcache Pipeline
   *
   *  Associated with STA Pipeline
-  *  Issue a store write intent to L2 cache if miss
-  *  NOTE: Now, all stores will enter this pipeline associatively
+  *  Issue a store write prefetch to dcache if miss (if EnableStorePrefetchAtIssue)
+  *  Issue a prefetch train request to sms if miss (if EnableStorePrefetchSMS)
+  *  Recieve prefetch request, Issue a store write prefetch to dcache if miss (if EnableStorePrefetchAtCommit or EnableStorePrefetchSPB)
   */
 class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val io = IO(new DCacheBundle {
@@ -70,8 +70,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
-    // send dcache miss request to store prefetch miss queue, this queue will send these requests to L2 cache
-    val to_store_pf_miss_queue = DecoupledIO(new StorePrefetchReq)
+    // send miss request to dcache miss queue
+    val miss_req = DecoupledIO(new MissReq)
 
     // update state vec in replacement algo, for now, set this as false
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -161,6 +161,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_valid)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_valid)
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_valid)
+  val s2_is_prefetch = RegEnable(s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U, s1_valid)
 
   io.lsu.resp.valid := s2_valid
   io.lsu.resp.bits.miss := !s2_hit
@@ -168,11 +169,30 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   // TODO: consider tag error
   io.lsu.resp.bits.tag_error := false.B
 
-  // io.to_store_pf_miss_queue.valid := s2_valid && !s2_hit && !io.lsu.s2_kill 
-  // disable prefetch at issue for now
-  io.to_store_pf_miss_queue.valid := false.B
-  io.to_store_pf_miss_queue.bits.vaddr  := s2_req.vaddr
-  io.to_store_pf_miss_queue.bits.paddr  := get_block_addr(s2_paddr)
+
+  /** 
+    * send req to Dcache MissQueue
+    */
+  if(EnableStorePrefetchAtIssue) {
+    // all miss stores, whether prefetched or normal, send requests directly to mshr
+    io.miss_req.valid := s2_valid && !s2_hit
+  }else {
+    // only prefetched miss stores will send requests directly to mshr
+    io.miss_req.valid := s2_valid && !s2_hit && s2_is_prefetch
+  }
+  io.miss_req.bits := DontCare
+  // only send out a prefetch write to Dcache
+  io.miss_req.bits.source := DCACHE_PREFETCH_SOURCE.U
+  io.miss_req.bits.cmd := MemoryOpConstants.M_PFW
+  io.miss_req.bits.addr := get_block_addr(s2_paddr)
+  io.miss_req.bits.vaddr := s2_req.vaddr
+  io.miss_req.bits.way_en := s2_way_en
+  io.miss_req.bits.req_coh := s2_hit_coh
+  io.miss_req.bits.replace_coh := s2_repl_coh
+  io.miss_req.bits.replace_tag := s2_repl_tag
+  // TODO: consider tag error
+  io.miss_req.bits.cancel := io.lsu.s2_kill
+  io.miss_req.bits.pc := io.lsu.s2_pc
 
   /** 
     * update replacer, for now, disable this
@@ -184,5 +204,6 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   XSPerfAccumulate("store_fire", s2_valid && !io.lsu.s2_kill)
   XSPerfAccumulate("sta_hit",  s2_valid &&  s2_hit && !io.lsu.s2_kill)
   XSPerfAccumulate("sta_miss", s2_valid && !s2_hit && !io.lsu.s2_kill)
-  XSPerfAccumulate("store_miss_prefetch_fire", io.to_store_pf_miss_queue.valid)
+  XSPerfAccumulate("store_miss_prefetch_fire", io.miss_req.fire && !io.miss_req.bits.cancel)
+  XSPerfAccumulate("store_miss_prefetch_not_fire", io.miss_req.valid && !io.miss_req.ready && !io.miss_req.bits.cancel)
 }

@@ -172,6 +172,10 @@ case class XSCoreParameters
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
+  EnableStorePrefetchAtIssue: Boolean = false,
+  EnableStorePrefetchAtCommit: Boolean = true,
+  EnableStorePrefetchSMS: Boolean = true,
+  EnableStorePrefetchSPB: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
@@ -419,6 +423,10 @@ trait HasXSParameter {
   val EnableDCacheWPU = coreParams.EnableDCacheWPU
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
+  val EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
+  val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

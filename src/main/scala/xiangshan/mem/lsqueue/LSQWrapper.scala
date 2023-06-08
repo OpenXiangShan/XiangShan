@@ -72,7 +72,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val s3_delayed_load_error = Vec(LoadPipelineWidth, Input(Bool()))
     val s2_dcache_require_replay = Vec(LoadPipelineWidth, Input(Bool()))
     val s3_replay_from_fetch = Vec(LoadPipelineWidth, Input(Bool()))
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPc))
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput)) // writeback int load
     val ldRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val uncacheOutstanding = Input(Bool())
@@ -94,7 +94,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val sqCanAccept = Output(Bool())
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
-    val lq_deq  = Valid(new DCacheWordReqWithVaddr)
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -154,7 +153,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.trigger <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.lqCancelCnt <> io.lqCancelCnt
-  loadQueue.io.lq_deq <> io.lq_deq
 
   // store queue wiring
   // storeQueue.io <> DontCare
