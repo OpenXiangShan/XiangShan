@@ -107,7 +107,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   
 
   dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
-  val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(15.U(ReSelectLen.W), 0.U(ReSelectLen.W), 126.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
+  val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
 
   // io.enq logic
