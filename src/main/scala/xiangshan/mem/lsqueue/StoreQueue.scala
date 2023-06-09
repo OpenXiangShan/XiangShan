@@ -760,30 +760,41 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val lastCycleRedirect = RegNext(io.brqRedirect.valid)
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect) {
-    // we recover the pointers in the next cycle after redirect
-    enqPtrExt := VecInit(enqPtrExt.map(_ - (lastCycleCancelCount + lastEnqCancel)))
+/**
+* update pointers
+**/
+  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect 
+  val lastCycleCancelCount = PopCount(RegNext(needCancel)) //1 cycle after redirect 
+  val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect  
+  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) //1 cycle after redirect 
+  
+  val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
+  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect 
+  
+  when (lastlastCycleRedirect) {
+    // we recover the pointers in 2 cycle after redirect for better timing
+    enqPtrExt := VecInit(enqPtrExt.map(_ - redirectCancelCount))
   }.otherwise {
+    // lastCycleRedirect.valid or nornal case
+    // when lastCycleRedirect.valid, enqNumber === 0.U, enqPtrExt will not change
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
-
+  assert(!(lastCycleRedirect && enqNumber =/= 0.U))
+  
   deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExtNext
 
   // val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
 
   // If redirect at T0, sqCancelCnt is at T2
-  io.sqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
+  io.sqCancelCnt := redirectCancelCount
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
-  io.sqEmpty := RegNext(
-    enqPtrExt(0).value === deqPtrExt(0).value && 
+  io.sqEmpty :=enqPtrExt(0).value === deqPtrExt(0).value && 
     enqPtrExt(0).flag === deqPtrExt(0).flag
-  )
-
   // perf counter
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
   io.sqFull := !allowEnqueue
@@ -806,6 +817,36 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     ("stq_3_4_valid  ", (perfValidCount > (StoreQueueSize.U/2.U)) & (perfValidCount <= (StoreQueueSize.U*3.U/4.U))),
     ("stq_4_4_valid  ", (perfValidCount > (StoreQueueSize.U*3.U/4.U))),
   )
+  generatePerfEvent()
+
+  // debug info
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
+
+  def PrintFlag(flag: Bool, name: String): Unit = {
+    when(flag) {
+      XSDebug(false, true.B, name)
+    }.otherwise {
+      XSDebug(false, true.B, " ")
+    }
+  }
+
+  for (i <- 0 until StoreQueueSize) {
+    XSDebug(i + ": pc %x va %x pa %x data %x ",
+      uop(i).cf.pc,
+      debug_vaddr(i),
+      debug_paddr(i),
+      debug_data(i)
+    )
+    PrintFlag(allocated(i), "a")
+    PrintFlag(allocated(i) && addrvalid(i), "a")
+    PrintFlag(allocated(i) && datavalid(i), "d")
+    PrintFlag(allocated(i) && committed(i), "c")
+    PrintFlag(allocated(i) && pending(i), "p")
+    PrintFlag(allocated(i) && mmio(i), "m")
+    XSDebug(false, true.B, "\n")
+  }
+
+}
   generatePerfEvent()
 
   // debug info
