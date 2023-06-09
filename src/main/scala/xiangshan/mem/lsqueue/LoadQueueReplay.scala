@@ -332,7 +332,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // stage1: select 2 entries and read their vaddr
   val s0_oldestSel = Wire(Vec(LoadPipelineWidth, Valid(UInt(log2Up(LoadQueueReplaySize + 1).W))))
   val s1_can_go = Wire(Vec(LoadPipelineWidth, Bool()))
-  val s1_can_cross_go = Wire(Vec(LoadPipelineWidth, Bool()))
   val s1_oldestSel = Wire(Vec(LoadPipelineWidth, Valid(UInt(log2Up(LoadQueueReplaySize + 1).W))))
   val s2_can_go = Wire(Vec(LoadPipelineWidth, Bool()))
   val s2_oldestSel = Wire(Vec(LoadPipelineWidth, Valid(UInt(log2Up(LoadQueueReplaySize + 1).W))))
@@ -474,7 +473,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     wrapper
   })
 
-  s1_can_cross_go.foreach(_ := true.B)
   val s1_balanceOldestSel = VecInit(balanceReOrder(s1_balanceOldestSelExt))
   for (i <- 0 until LoadPipelineWidth) {
     val s0_can_go = s1_can_go(s1_balanceOldestSel(i).bits.port) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
