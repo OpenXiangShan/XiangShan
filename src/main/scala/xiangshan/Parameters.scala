@@ -173,12 +173,12 @@ case class XSCoreParameters
     LsDqDeqWidth = 6,
   ),
   intPreg: PregParams = IntPregParams(
-    numEntries = 64,
+    numEntries = 256,
     numRead = 14,
     numWrite = 8,
   ),
   vfPreg: VfPregParams = VfPregParams(
-    numEntries = 64,
+    numEntries = 256,
     numRead = 14,
     numWrite = 8,
   ),
