@@ -12,7 +12,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataPath, NewPipelineConnect, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO, FuConfig}
+import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
 import xiangshan.backend.issue.{Scheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
@@ -292,6 +292,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     }
   }
 
+  private val vconfig = dataPath.io.vconfigReadPort.data
+
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
   ctrlBlock.io.fromWB.wbData <> wbDataPath.io.toCtrlBlock.writeback
@@ -303,6 +305,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
+  ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -312,6 +315,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
+  intScheduler.io.fromDataPath := dataPath.io.toIntIQ
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -329,8 +333,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop := 0.U.asTypeOf(sink.bits.uop)
     sink.bits.uop.robIdx := source.bits.robIdx
   }
-  io.mem.ldaIqFeedback <> memScheduler.io.fromMem.get.ldaFeedback
-  io.mem.staIqFeedback <> memScheduler.io.fromMem.get.staFeedback
+  memScheduler.io.fromDataPath := dataPath.io.toMemIQ
+  memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
+  memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -338,16 +343,15 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.vfUops
   vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  vfScheduler.io.fromDataPath := dataPath.io.toVfIQ
 
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
-  val vconfig = dataPath.io.vconfigReadPort.data
-  ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
+
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
       NewPipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
         intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("intScheduler2DataPathPipe"))
-      intScheduler.io.fromDataPath(i)(j) := dataPath.io.toIntIQ(i)(j)
     }
   }
 
@@ -355,7 +359,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     for (j <- 0 until dataPath.io.fromVfIQ(i).length) {
       NewPipelineConnect(vfScheduler.io.toDataPath(i)(j), dataPath.io.fromVfIQ(i)(j), dataPath.io.fromVfIQ(i)(j).valid,
         vfScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("vfScheduler2DataPathPipe"))
-      vfScheduler.io.fromDataPath(i)(j) := dataPath.io.toVfIQ(i)(j)
     }
   }
 
@@ -363,7 +366,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     for (j <- 0 until dataPath.io.fromMemIQ(i).length) {
       NewPipelineConnect(memScheduler.io.toDataPath(i)(j), dataPath.io.fromMemIQ(i)(j), dataPath.io.fromMemIQ(i)(j).valid,
         memScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("memScheduler2DataPathPipe"))
-      memScheduler.io.fromDataPath(i)(j) := dataPath.io.toMemIQ(i)(j)
     }
   }
 
