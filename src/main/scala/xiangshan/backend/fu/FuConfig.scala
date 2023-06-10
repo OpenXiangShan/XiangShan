@@ -290,7 +290,7 @@ object FuConfig {
     ),
     piped = true,
     writeIntRf = true,
-    latency = CertainLatency(1),
+    latency = CertainLatency(2),
   )
 
   val VSetRvfWvfCfg: FuConfig = FuConfig(
@@ -340,10 +340,10 @@ object FuConfig {
       Seq(FpData(), FpData()),
       Seq(FpData(), FpData(), FpData()),
     ),
-    piped = true,
+    piped = false,
     writeFpRf = true,
     writeFflags = true,
-    latency = CertainLatency(3),
+    latency = UncertainLatency(),
     needSrcFrm = true,
   )
 
