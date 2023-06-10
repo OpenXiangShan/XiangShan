@@ -7,6 +7,7 @@ import xiangshan.HasXSParameter
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, WbConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
@@ -20,6 +21,10 @@ case class ExeUnitParams(
   implicit
   val schdType: SchedulerType,
 ) {
+  // calculated configs
+  var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
+  var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
+
   val numIntSrc: Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc: Int = fuConfigs.map(_.numFpSrc).max
   val numVecSrc: Int = fuConfigs.map(_.numVecSrc).max
@@ -110,6 +115,16 @@ case class ExeUnitParams(
   }
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
+
+  def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
+    this.iqWakeUpSourcePairs = cfgs.filter(_.source == this.name)
+    this.iqWakeUpSinkPairs = cfgs.filter(_.sink == this.name)
+    require(this.isIQWakeUpSource && !this.hasUncertainLatency)
+  }
+
+  def isIQWakeUpSource = this.iqWakeUpSourcePairs.nonEmpty
+
+  def isIQWakeUpSink = this.iqWakeUpSinkPairs.nonEmpty
 
   def getIntWBPort = {
     wbPortConfigs.collectFirst {
