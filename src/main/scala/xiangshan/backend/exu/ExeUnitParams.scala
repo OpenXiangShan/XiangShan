@@ -12,6 +12,7 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
 
 case class ExeUnitParams(
+  name          : String,
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[WbConfig],
   rfrPortConfigs: Seq[Seq[RdConfig]],
