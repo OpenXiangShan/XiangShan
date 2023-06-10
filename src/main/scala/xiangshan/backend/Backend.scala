@@ -288,10 +288,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionVAddr = Input(UInt(VAddrBits.W))
-  val sqDeq = Input(UInt(params.StaCnt.W))
-  val lqDeq = Input(UInt(params.LduCnt.W))
+  val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+  val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
 
-  val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+  val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
 
   val otherFastWakeup = Flipped(Vec(params.LduCnt + 2 * params.StaCnt, ValidIO(new DynInst)))
