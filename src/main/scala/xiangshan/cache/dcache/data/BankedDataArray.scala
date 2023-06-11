@@ -585,7 +585,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).raw_data
-    eccReadResult(bank_index) := read_result(cacheOpDivAddr)(bank_index)(RegNext(cacheOpWayNum)).ecc
+    eccReadResult(bank_index) := ecc_banks(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).io.r.resp.data(0)
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
@@ -901,7 +901,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(RegNext(cacheOpDivAddr))(bank_index).raw_data
-    eccReadResult(bank_index) := bank_result(RegNext(cacheOpDivAddr))(bank_index).ecc
+    eccReadResult(bank_index) := Mux1H(RegNext(cacheOpWayMask), ecc_banks(RegNext(cacheOpDivAddr))(bank_index).io.r.resp.data)
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid,
