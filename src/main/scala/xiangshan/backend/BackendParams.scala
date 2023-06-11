@@ -23,6 +23,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbArbiterParams
 import xiangshan.backend.datapath.WbConfig._
+import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue._
@@ -32,6 +33,9 @@ case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
 ) {
+
+  configChecks
+
   def intSchdParams = schdParams.get(IntScheduler())
   def vfSchdParams = schdParams.get(VfScheduler())
   def memSchdParams = schdParams.get(MemScheduler())
@@ -106,6 +110,54 @@ case class BackendParams(
 
   def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
   def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+
+  def configChecks = {
+    // check 0
+    val maxPortSource = 2
+
+    allExuParams.map {
+      case exuParam => exuParam.wbPortConfigs.collectFirst { case x: IntWB => x }
+    }.filter(_.isDefined).groupBy(_.get.port).foreach {
+      case (wbPort, priorities) => assert(priorities.size <= maxPortSource, "There has " + priorities.size + " exu's " + "Int WBport is " + wbPort + ", but the maximum is " + maxPortSource + ".")
+    }
+    allExuParams.map {
+      case exuParam => exuParam.wbPortConfigs.collectFirst { case x: VfWB => x }
+    }.filter(_.isDefined).groupBy(_.get.port).foreach {
+      case (wbPort, priorities) => assert(priorities.size <= maxPortSource, "There has " + priorities.size + " exu's " + "Vf  WBport is " + wbPort + ", but the maximum is " + maxPortSource + ".")
+    }
+
+    // check 1
+    val wbTypes = Seq(IntWB(), VfWB())
+    val rdTypes = Seq(IntRD(), VfRD())
+    for(wbType <- wbTypes){
+      for(rdType <- rdTypes){
+        allExuParams.map {
+          case exuParam =>
+            val wbPortConfigs = exuParam.wbPortConfigs
+            val wbConfigs = wbType match{
+              case _: IntWB => wbPortConfigs.collectFirst { case x: IntWB => x }
+              case _: VfWB  => wbPortConfigs.collectFirst { case x: VfWB => x }
+              case _        => None
+            }
+            val rfReadPortConfigs = exuParam.rfrPortConfigs
+            val rdConfigs = rdType match{
+              case _: IntRD => rfReadPortConfigs.flatten.filter(_.isInstanceOf[IntRD])
+              case _: VfRD  => rfReadPortConfigs.flatten.filter(_.isInstanceOf[VfRD])
+              case _        => Seq()
+            }
+            (wbConfigs, rdConfigs)
+        }.filter(_._1.isDefined)
+          .sortBy(_._1.get.priority)
+          .groupBy(_._1.get.port).map {
+            case (_, intWbRdPairs) =>
+              intWbRdPairs.map(_._2).flatten
+        }.map(rdCfgs => rdCfgs.groupBy(_.port).foreach {
+          case (_, rdCfgs) =>
+            rdCfgs.zip(rdCfgs.drop(1)).foreach { case (cfg0, cfg1) => assert(cfg0.priority <= cfg1.priority) }
+        })
+      }
+    }
+  }
 }
 
 
