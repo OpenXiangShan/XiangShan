@@ -9,7 +9,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, FuBusyTableWriteBundle}
 import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.datapath.{DataPath, WbDataPath}
+import xiangshan.backend.datapath.{DataPath, NewPipelineConnect, WbDataPath}
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, PerfCounterIO, FuConfig}
@@ -238,16 +238,27 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
-      PipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
-        intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush))
+      NewPipelineConnect(intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
+        intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("intScheduler2DataPathPipe"))
       intScheduler.io.fromDataPath(i)(j) := dataPath.io.toIntIQ(i)(j)
     }
   }
 
-  dataPath.io.fromVfIQ <> vfScheduler.io.toDataPath
-  vfScheduler.io.fromDataPath := dataPath.io.toVfIQ
-  dataPath.io.fromMemIQ <> memScheduler.io.toDataPath
-  memScheduler.io.fromDataPath := dataPath.io.toMemIQ
+  for (i <- 0 until dataPath.io.fromVfIQ.length) {
+    for (j <- 0 until dataPath.io.fromVfIQ(i).length) {
+      NewPipelineConnect(vfScheduler.io.toDataPath(i)(j), dataPath.io.fromVfIQ(i)(j), dataPath.io.fromVfIQ(i)(j).valid,
+        vfScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("vfScheduler2DataPathPipe"))
+      vfScheduler.io.fromDataPath(i)(j) := dataPath.io.toVfIQ(i)(j)
+    }
+  }
+
+  for (i <- 0 until dataPath.io.fromMemIQ.length) {
+    for (j <- 0 until dataPath.io.fromMemIQ(i).length) {
+      NewPipelineConnect(memScheduler.io.toDataPath(i)(j), dataPath.io.fromMemIQ(i)(j), dataPath.io.fromMemIQ(i)(j).valid,
+        memScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush), Option("memScheduler2DataPathPipe"))
+      memScheduler.io.fromDataPath(i)(j) := dataPath.io.toMemIQ(i)(j)
+    }
+  }
 
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
   println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
@@ -261,7 +272,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
-      PipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
+      NewPipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
         Mux(dataPath.io.toIntExu(i)(j).fire,
           dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
           intExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
@@ -301,7 +312,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
     for (j <- 0 until vfExuBlock.io.in(i).size) {
-      PipelineConnect(dataPath.io.toFpExu(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
+      NewPipelineConnect(dataPath.io.toFpExu(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
         Mux(dataPath.io.toFpExu(i)(j).fire,
           dataPath.io.toFpExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
