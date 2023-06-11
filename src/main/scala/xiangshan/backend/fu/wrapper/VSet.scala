@@ -53,8 +53,6 @@ class VSetRiWi(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   out.res.data := vsetModule.io.out.vconfig.vl
 
-  connectNonPipedCtrlSingal
-
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
 
@@ -75,8 +73,6 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.vtype := vtype
 
   out.res.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
-
-  connectNonPipedCtrlSingal
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
@@ -101,8 +97,6 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   res.vtype := vsetModule.io.out.vconfig.vtype
 
   out.res.data := ZeroExt(res.asUInt, XLEN)
-
-  connectNonPipedCtrlSingal
 
   debugIO.vconfig := res
 }
