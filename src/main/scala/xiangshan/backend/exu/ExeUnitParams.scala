@@ -3,10 +3,11 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan.HasXSParameter
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.datapath.WbConfig.{VfWB, IntWB, WbConfig}
+import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, WbConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
 
@@ -49,9 +50,21 @@ case class ExeUnitParams(
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val wbPregIdxWidth = if (wbPortConfigs.nonEmpty) wbPortConfigs.map(_.pregIdxWidth).max else 0
 
-  protected val latencyCertain = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_&&_)
-  val fuLatencyMap = if (latencyCertain) Some(fuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
-  val latencyValMax = fuLatencyMap.map(x => x.map(_._2).max)
+  val writeIntFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
+  val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf || x.writeVecRf)
+
+  val latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_&&_)
+  val intLatencyCertain = if (writeIntFuConfigs.nonEmpty) writeIntFuConfigs.map(x => x.latency.latencyVal.nonEmpty).fold(true)(_ && _) else false
+  val vfLatencyCertain = if (writeVfFuConfigs.nonEmpty) writeVfFuConfigs.map(x => x.latency.latencyVal.nonEmpty).fold(true)(_ && _) else false
+
+  val fuLatencyMap: Option[Seq[(Int, Int)]] = if (latencyCertain) Some(fuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
+  val latencyValMax: Option[Int] = fuLatencyMap.map(x => x.map(_._2).max)
+
+  val intFuLatencyMap = if (intLatencyCertain) Some(writeIntFuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
+  val intLatencyValMax = intFuLatencyMap.map(x => x.map(_._2).max)
+
+  val vfFuLatencyMap = if (vfLatencyCertain) Some(writeVfFuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
+  val vfLatencyValMax = vfFuLatencyMap.map(x => x.map(_._2).max)
 
   def hasCSR: Boolean = fuConfigs.map(_.isCsr).reduce(_ || _)
 

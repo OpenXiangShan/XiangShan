@@ -328,10 +328,32 @@ object Bundles {
     val fuType = FuType()
   }
 
-  class FuBusyTableWriteBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+  class WbFuBusyTableWriteBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val deqResp = Valid(new fuBusyRespBundle)
     val og0Resp = Valid(new fuBusyRespBundle)
     val og1Resp = Valid(new fuBusyRespBundle)
+  }
+
+  class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val intWbBusyTable = params.intLatencyValMax match {
+      case Some(latency) => Some(UInt((latency + 1).W))
+      case None => None
+    }
+    val vfWbBusyTable = params.vfLatencyValMax match {
+      case Some(latency) => Some(UInt((latency + 1).W))
+      case None => None
+    }
+  }
+
+  class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val intConflict = params.intLatencyValMax match {
+      case Some(latency) => Some(Bool())
+      case None => None
+    }
+    val vfConflict = params.vfLatencyValMax match {
+      case Some(latency) => Some(Bool())
+      case None => None
+    }
   }
 
   // DataPath --[ExuInput]--> Exu

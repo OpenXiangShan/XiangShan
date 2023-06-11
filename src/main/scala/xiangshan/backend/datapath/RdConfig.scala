@@ -6,8 +6,8 @@ object RdConfig {
     val priority: Int
   }
 
-  case class IntRD(port: Int, priority: Int) extends RdConfig()
+  case class IntRD(port: Int = -1, priority: Int = Int.MaxValue) extends RdConfig()
 
-  case class VfRD(port: Int, priority: Int) extends RdConfig()
+  case class VfRD(port: Int = -1, priority: Int = Int.MaxValue) extends RdConfig()
 }
 

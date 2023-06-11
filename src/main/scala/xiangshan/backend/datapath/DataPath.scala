@@ -170,6 +170,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val intBlocksSeq = intBlocks.flatten
   private val vfBlocks = fromIQ.map { case iq => Wire(Vec(iq.size, Bool())) }
   private val vfBlocksSeq = vfBlocks.flatten
+  private val intWbConflictReads = io.wbConfictRead.flatten.flatten.map(_.intConflict)
+  private val vfWbConflictReads = io.wbConfictRead.flatten.flatten.map(_.vfConflict)
 
   val intWbBusyInSize = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntWbBusyBundle.size).scan(0)(_ + _)
   val intReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
@@ -184,14 +186,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           sink.bits := DontCare
           sink.valid := issuePortIn.valid && source
       }
-      if (rw > lw) {
-        intNotBlocksSeqW(idx) := arbiterInW.zip(wbBusyIn).map {
+       val notBlockFlag = if (rw > lw) {
+        val arbiterRes = arbiterInW.zip(wbBusyIn).map {
           case (sink, source) => sink.ready
         }.reduce(_ & _)
-      }
-      else {
-        intNotBlocksSeqW(idx) := true.B
-      }
+        if (intWbConflictReads(idx).isDefined) {
+          Mux(intWbConflictReads(idx).get, arbiterRes, true.B)
+        } else arbiterRes
+      } else true.B
+      intNotBlocksSeqW(idx) := notBlockFlag
       val readPortIn = issuePortIn.bits.getIntRfReadBundle
       val l = intReadPortInSize(idx)
       val r = intReadPortInSize(idx + 1)
@@ -199,7 +202,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       arbiterIn.zip(readPortIn).foreach{
         case(sink, source) =>
           sink.bits.addr := source.addr
-          sink.valid := issuePortIn.valid && SrcType.isXp(source.srcType) && intNotBlocksSeqW(idx)
+          sink.valid := issuePortIn.valid && SrcType.isXp(source.srcType)
       }
       if(r > l){
         intBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
@@ -228,14 +231,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           sink.bits := DontCare
           sink.valid := issuePortIn.valid && source
       }
-      if (rw > lw) {
-        vfNotBlocksSeqW(idx) := arbiterInW.zip(wbBusyIn).map {
+      val notBlockFlag = if (rw > lw){
+        val arbiterRes = arbiterInW.zip(wbBusyIn).map {
           case (sink, source) => sink.ready
         }.reduce(_ & _)
-      }
-      else {
-        vfNotBlocksSeqW(idx) := true.B
-      }
+        if(vfWbConflictReads(idx).isDefined) {
+          Mux(vfWbConflictReads(idx).get, arbiterRes, true.B)
+        }else arbiterRes
+      }else true.B
+      vfNotBlocksSeqW(idx) := notBlockFlag
+
       val readPortIn = issuePortIn.bits.getVfRfReadBundle
       val l = vfReadPortInSize(idx)
       val r = vfReadPortInSize(idx + 1)
@@ -243,7 +248,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       arbiterIn.zip(readPortIn).foreach {
         case (sink, source) =>
           sink.bits.addr := source.addr
-          sink.valid := issuePortIn.valid && SrcType.isVfp(source.srcType) && vfNotBlocksSeqW(idx)
+          sink.valid := issuePortIn.valid && SrcType.isVfp(source.srcType)
       }
       if (r > l) {
         vfBlocksSeq(idx) := !arbiterIn.zip(readPortIn).map {
@@ -412,7 +417,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }.otherwise {
         s1_valid := false.B
       }
-
+      dontTouch(block)
       s0.ready := (s1_ready || !s1_valid) && !block
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
 
@@ -553,6 +558,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   // Todo: check if this can be removed
   val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
+
+  val wbConfictRead = Input(MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => x.genWbConflictBundle())))))
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
