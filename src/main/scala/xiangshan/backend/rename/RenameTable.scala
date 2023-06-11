@@ -82,9 +82,6 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   val arch_table = RegInit(rename_table_init)
   val arch_table_next = WireDefault(arch_table)
 
-  val difftest_table = RegInit(rename_table_init)
-  val difftest_table_next = WireDefault(difftest_table)
-
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
   // (2) Reading is synchronous now.
@@ -121,23 +118,34 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   }
   arch_table := arch_table_next
 
-  for (w <- io.diffWritePorts) {
-    when(w.wen) {
-      difftest_table_next(w.addr) := w.data
-    }
-  }
-  difftest_table := difftest_table_next
-
   io.debug_rdata := arch_table.take(32)
   io.debug_vconfig match {
     case None => Unit
-    case x    => x.get := arch_table.last
+    case x => x.get := arch_table.last
   }
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val difftest_table = RegInit(rename_table_init)
+    val difftest_table_next = WireDefault(difftest_table)
 
-  io.diff_rdata := difftest_table.take(32)
-  io.diff_vconfig match {
-    case None => Unit
-    case x => x.get := difftest_table(VCONFIG_IDX)
+    for (w <- io.diffWritePorts) {
+      when(w.wen) {
+        difftest_table_next(w.addr) := w.data
+      }
+    }
+    difftest_table := difftest_table_next
+
+    io.diff_rdata := difftest_table.take(32)
+    io.diff_vconfig match {
+      case None => Unit
+      case x => x.get := difftest_table(VCONFIG_IDX)
+    }
+  }
+  else {
+    io.diff_rdata := 0.U.asTypeOf(io.debug_rdata)
+    io.diff_vconfig match {
+      case None => Unit
+      case x => x.get := 0.U
+    }
   }
 }
 
