@@ -585,7 +585,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).raw_data
-    eccReadResult(bank_index) := ecc_banks(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).io.r.resp.data(0)
+    eccReadResult(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).ecc
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
@@ -723,6 +723,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   XSPerfAccumulate("data_array_write", io.write.valid)
 
   val bank_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, new L1BankedDataReadResult())))
+  val ecc_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, UInt(eccBits.W)))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Bool())))
   dontTouch(bank_result)
   dontTouch(read_bank_error_delayed)
@@ -777,6 +778,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       val ecc_bank = ecc_banks(div_index)(bank_index)
       ecc_bank.io.r.req.valid := read_enable
       ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
+      ecc_result(div_index)(bank_index) := ecc_bank.io.r.resp.data
       bank_result(div_index)(bank_index).ecc := Mux1H(bank_way_en_reg, ecc_bank.io.r.resp.data)
 
       // use ECC to check error
@@ -901,7 +903,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(RegNext(cacheOpDivAddr))(bank_index).raw_data
-    eccReadResult(bank_index) := Mux1H(RegNext(cacheOpWayMask), ecc_banks(RegNext(cacheOpDivAddr))(bank_index).io.r.resp.data)
+    eccReadResult(bank_index) := Mux1H(RegNext(cacheOpWayMask), ecc_result(RegNext(cacheOpDivAddr))(bank_index))
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid,
