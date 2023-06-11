@@ -40,7 +40,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-  val wbBusyRead = Input(params.genFuBusyTableReadBundle)
+  val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wakeup = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle(params.pregBits))))
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
@@ -57,6 +57,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
   val fuLatencyMaps :  Seq[Option[Seq[(Int, Int)]]]  = params.exuBlockParams.map(x => x.fuLatencyMap)
+  val intFuLatencyMaps: Seq[Option[Seq[(Int, Int)]]]  = params.exuBlockParams.map(x => x.intFuLatencyMap)
+  val vfFuLatencyMaps : Seq[Option[Seq[(Int, Int)]]]  = params.exuBlockParams.map(x => x.vfFuLatencyMap)
   val latencyValMaxs: Seq[Option[Int]] = params.exuBlockParams.map(x => x.latencyValMax)
   val allDeqFuCfgs: Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
@@ -74,13 +76,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val fuBusyTable = latencyValMaxs.map { case y => if (y.getOrElse(0)>0) Some(Reg(UInt(y.getOrElse(1).W))) else None }
 
   // Wires
-  val resps = params.schdType match {
-    case IntScheduler() => Seq(io.deqResp, io.og0Resp, io.og1Resp)
-    case MemScheduler() => Seq(io.deqResp, io.og1Resp)
-    case VfScheduler() => Seq(io.deqResp, io.og1Resp)
-    case _ => null
-  }
+  val resps = Seq(io.deqResp, io.og0Resp, io.og1Resp)
+
+  val intWbBusyTableRead = io.wbBusyTableRead.map(_.intWbBusyTable)
+  val vfWbBusyTableRead = io.wbBusyTableRead.map(_.vfWbBusyTable)
   val fuBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+  val wbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val s0_enqValidVec = io.enq.map(_.valid)
   val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
   val s0_enqSelOHVec = Wire(Vec(params.numEnq, UInt(params.numEntries.W)))
@@ -230,7 +231,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   subDeqPolicies.zipWithIndex.map { case (dpOption: Option[DeqPolicy], i) =>
     if (dpOption.nonEmpty) {
       val dp = dpOption.get
-      dp.io.request             := canIssueVec.asUInt & VecInit(deqCanAcceptVec(i)).asUInt & (~fuBusyTableMask(i)).asUInt()
+      dp.io.request             := canIssueVec.asUInt & VecInit(deqCanAcceptVec(i)).asUInt & (~fuBusyTableMask(i)).asUInt & (~wbBusyTableMask(i)).asUInt
       subDeqSelValidVec(i).get  := dp.io.deqSelOHVec.map(oh => oh.valid)
       subDeqSelOHVec(i).get     := dp.io.deqSelOHVec.map(oh => oh.bits)
     }
@@ -260,7 +261,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         0.U
       ) // |  when N cycle is 2 latency, N+1 cycle could not 1 latency
       val isLNumVecOg0 = WireInit(~(0.U.asTypeOf(isLatencyNumVec)))
-      isLNumVecOg0 := Mux(resps(1)(i).valid && (resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail || resps(1)(i).bits.respType === RSFeedbackType.fuBusy),
+      isLNumVecOg0 := Mux(resps(1)(i).valid && resps(1)(i).bits.respType === RSFeedbackType.rfArbitFail,
         ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
           val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == num+1).map(_._1) // futype with latency equal to num+1
           val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og0Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
@@ -270,54 +271,80 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         // & ~
       )
       val isLNumVecOg1 = WireInit(~(0.U.asTypeOf(isLatencyNumVec)))
-      if(resps.length == 3){
-        isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
-          ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
-            val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == num+1).map(_._1) // futype with latency equal to num+1
-            val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
-            isLatencyNum
-          }), 0.U(2.W))),
-          ~(0.U.asTypeOf(isLatencyNumVec))
-        )
-        // & ~
-      }
+      isLNumVecOg1 := Mux(resps(2)(i).valid && resps(2)(i).bits.respType === RSFeedbackType.fuBusy,
+        ~(Cat(Cat((0 until latencyValMaxs(i).get).map { case num =>
+          val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == num+1).map(_._1) // futype with latency equal to num+1
+          val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(io.og1Resp(i).bits.addrOH)) === futype.U)).asUInt().orR() // The latency of the deq inst is Num
+          isLatencyNum
+        }), 0.U(2.W))),
+        ~(0.U.asTypeOf(isLatencyNumVec))
+      )
+      // & ~
+
 
       fuBusyTable(i).get := ((fuBusyTable(i).get << 1.U).asUInt() | isLatencyNumVec) & isLNumVecOg0.asUInt() & isLNumVecOg1.asUInt()
     }
   }
-  // fuBusyTable read
+
   for (i <- 0 until params.numDeq){
+    // fuBusyTable read
     if(fuBusyTable(i).nonEmpty){
       val isReadLatencyNumVec2 = fuBusyTable(i).get.asBools().reverse.zipWithIndex.map { case (en, idx) =>
         val isLatencyNumVec = WireInit(0.U(params.numEntries.W))
         when(en) {
           isLatencyNumVec := VecInit(fuTypeRegVec.map { case futype =>
             val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == idx).map(_._1)
-            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt().orR()
+            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt.orR
             isLatencyNum
-          }).asUInt()
-        }
-        isLatencyNumVec
-      }
-      val isWBReadLatencyNumVec2 = io.wbBusyRead(i).asBools().reverse.zipWithIndex.map { case (en, idx) =>
-        val isLatencyNumVec = WireInit(0.U(params.numEntries.W))
-        when(en) {
-          isLatencyNumVec := VecInit(fuTypeRegVec.map { case futype =>
-            val latencyNumFuType = fuLatencyMaps(i).get.filter(_._2 == idx).map(_._1)
-            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt().orR()
-            isLatencyNum
-          }).asUInt()
+          }).asUInt
         }
         isLatencyNumVec
       }
       if ( latencyValMaxs(i).get > 1 ){
-        fuBusyTableMask(i) := isReadLatencyNumVec2.reduce(_ | _) | isWBReadLatencyNumVec2.reduce(_ | _)
+        fuBusyTableMask(i) := isReadLatencyNumVec2.reduce(_ | _)
       }else{
-        fuBusyTableMask(i) := isReadLatencyNumVec2.head | isWBReadLatencyNumVec2.head
+        fuBusyTableMask(i) := isReadLatencyNumVec2.head
       }
     } else {
       fuBusyTableMask(i) := 0.U(params.numEntries.W)
     }
+
+    // intWbFuBusyTable read
+    val intWbBusyTableMask = if (intWbBusyTableRead(i).isDefined) {
+      intWbBusyTableRead(i).get.asBools.zipWithIndex.map { case (en, idx) =>
+        val isLatencyNumVec = WireInit(0.U(params.numEntries.W))
+        when(en) {
+          isLatencyNumVec := VecInit(fuTypeRegVec.map { case futype =>
+            val latencyNumFuType = intFuLatencyMaps(i).get.filter(_._2 == idx).map(_._1)
+            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt.orR
+            isLatencyNum
+          }).asUInt
+        }
+        isLatencyNumVec
+      }
+    }.fold(0.U)(_ | _)
+    else{
+      0.U(params.numEntries.W)
+    }
+    // vfWbFuBusyTable read
+    val vfWbBusyTableMask = if (vfWbBusyTableRead(i).isDefined) {
+      vfWbBusyTableRead(i).get.asBools.zipWithIndex.map { case (en, idx) =>
+        val isLatencyNumVec = WireInit(0.U(params.numEntries.W))
+        when(en) {
+          isLatencyNumVec := VecInit(fuTypeRegVec.map { case futype =>
+            val latencyNumFuType = vfFuLatencyMaps(i).get.filter(_._2 == idx).map(_._1)
+            val isLatencyNum = Cat(latencyNumFuType.map(_.U === futype)).asUInt().orR()
+            isLatencyNum
+          }).asUInt()
+        }
+        isLatencyNumVec
+      }
+    }.fold(0.U)(_ | _)
+    else{
+      0.U(params.numEntries.W)
+    }
+
+    wbBusyTableMask(i) := intWbBusyTableMask | vfWbBusyTableMask
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>

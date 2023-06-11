@@ -39,6 +39,15 @@ object WbConfig {
     override def numPreg: Int = 160
   }
 
+  case class VecWB(
+    port: Int = -1,
+    priority: Int = Int.MaxValue,
+  ) extends PregWB {
+    def dataCfg: DataConfig = VecData()
+
+    override def numPreg: Int = 160
+  }
+
   case class CtrlWB(
     port: Int = -1,
   ) extends WbConfig {

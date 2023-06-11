@@ -3,7 +3,7 @@ package xiangshan.backend.issue
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import chisel3._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle, FuBusyTableWriteBundle}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle, WbConflictBundle, WbFuBusyTableReadBundle, WbFuBusyTableWriteBundle}
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -177,14 +177,23 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))
   }
 
-  def genFuBusyTableWriteBundle(implicit p: Parameters) = {
+  def genWbFuBusyTableWriteBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
-    MixedVec(exuBlockParams.map(_ => new FuBusyTableWriteBundle))
+    MixedVec(exuBlockParams.map(_ => new WbFuBusyTableWriteBundle()))
   }
 
-  def genFuBusyTableReadBundle(implicit p: Parameters) = {
+  def genWbFuBusyTableReadBundle()(implicit p: Parameters) = {
     implicit val issueBlockParams = this
-    MixedVec(exuBlockParams.map(x => UInt(x.latencyValMax.getOrElse(0).W)))
+    MixedVec(exuBlockParams.map{ x =>
+      new WbFuBusyTableReadBundle(x)
+    })
+  }
+
+  def genWbConflictBundle()(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map { x =>
+      new WbConflictBundle(x)
+    })
   }
 
   def getIQName = {

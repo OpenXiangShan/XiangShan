@@ -169,12 +169,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  val resps = params.schdType match {
-    case IntScheduler() => io.deqResp ++ io.og0Resp ++ io.og1Resp
-    case MemScheduler() => io.deqResp ++ io.og1Resp
-    case VfScheduler()  => io.deqResp ++ io.og1Resp
-    case _ => null
-  }
+  val resps = io.deqResp ++ io.og0Resp ++ io.og1Resp
 
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
     val deqRespValidVec = VecInit(resps.map(x => x.valid && x.bits.addrOH(i)))
