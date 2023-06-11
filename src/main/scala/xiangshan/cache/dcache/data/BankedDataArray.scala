@@ -754,6 +754,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         io.readline.bits.way_en,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> way_en(i)))
       )
+      // it is too long of bank_way_en's caculation, so bank_way_en_reg can not be caculated by RegNext(bank_way_en)
+      val bank_way_en_reg = Mux(RegNext(readline_match),
+        RegNext(io.readline.bits.way_en),
+        PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => RegNext(bank_addr_matchs(i)) -> RegNext(way_en(i))))
+      )
       val bank_set_addr = Mux(readline_match,
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
@@ -772,7 +777,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       val ecc_bank = ecc_banks(div_index)(bank_index)
       ecc_bank.io.r.req.valid := read_enable
       ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
-      bank_result(div_index)(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
+      bank_result(div_index)(bank_index).ecc := Mux1H(bank_way_en_reg, ecc_bank.io.r.resp.data)
 
       // use ECC to check error
       val ecc_data = bank_result(div_index)(bank_index).asECCData()
