@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.HasCircularQueuePtrHelper
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
@@ -69,10 +70,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val payloadArray  = Module(new DataArray(Output(new DynInst), params.numDeq, params.numEnq, params.numEntries))
   val enqPolicy     = Module(new EnqPolicy)
   val subDeqPolicies  = deqFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
-  val fuBusyTableWrite = params.exuBlockParams.zipWithIndex.map { case (x, i) => if (x.latencyValMax.getOrElse(0)>0) Some(Module(new FuBusyTableWrite(i))) else None}
-  val fuBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => if (x.latencyValMax.getOrElse(0)>0) Some(Module(new FuBusyTableRead(i, false))) else None}
-  val intWbBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => if (x.intLatencyValMax.nonEmpty) Some(Module(new FuBusyTableRead(i, true, false))) else None}
-  val vfWbBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => if (x.vfLatencyValMax.nonEmpty) Some(Module(new FuBusyTableRead(i, true, true))) else None}
+  val fuBusyTableWrite = params.exuBlockParams.zipWithIndex.map { case (x, i) => OptionWrapper(x.latencyValMax > 0, () => Module(new FuBusyTableWrite(i))) }
+  val fuBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => OptionWrapper(x.latencyValMax > 0, () => Module(new FuBusyTableRead(params.exuBlockParams(i).fuLatencyMap))) }
+  val intWbBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => OptionWrapper(x.intLatencyCertain, () => Module(new FuBusyTableRead(params.exuBlockParams(i).intFuLatencyMap))) }
+  val vfWbBusyTableRead = params.exuBlockParams.zipWithIndex.map { case (x, i) => OptionWrapper(x.vfLatencyCertain, () => Module(new FuBusyTableRead(params.exuBlockParams(i).vfFuLatencyMap))) }
 
   val intWbBusyTable = io.wbBusyTableRead.map(_.intWbBusyTable)
   val vfWbBusyTable = io.wbBusyTableRead.map(_.vfWbBusyTable)
@@ -393,7 +394,6 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
     pcArrayIO.write.zipWithIndex.foreach { case (w, i) =>
       w.en := s0_doEnqSelValidVec(i)
       w.addr := s0_enqSelOHVec(i)
-//      w.data := io.enqJmp.get(i).pc
       w.data := io.enq(i).bits.pc
     }
   }

@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig.WbConfig
@@ -12,7 +13,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Category, Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle, IssueQueueDeqRespBundle}
+import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
@@ -336,25 +337,21 @@ object Bundles {
   }
 
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
-    val intWbBusyTable = params.intLatencyValMax match {
-      case Some(latency) => Some(UInt((latency + 1).W))
-      case None => None
-    }
-    val vfWbBusyTable = params.vfLatencyValMax match {
-      case Some(latency) => Some(UInt((latency + 1).W))
-      case None => None
-    }
+    private val intCertainLat = params.intLatencyCertain
+    private val vfCertainLat = params.vfLatencyCertain
+    private val intLat = params.intLatencyValMax
+    private val vfLat = params.vfLatencyValMax
+
+    val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
   }
 
   class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
-    val intConflict = params.intLatencyValMax match {
-      case Some(latency) => Some(Bool())
-      case None => None
-    }
-    val vfConflict = params.vfLatencyValMax match {
-      case Some(latency) => Some(Bool())
-      case None => None
-    }
+    private val intCertainLat = params.intLatencyCertain
+    private val vfCertainLat = params.vfLatencyCertain
+
+    val intConflict = OptionWrapper(intCertainLat, Bool())
+    val vfConflict = OptionWrapper(vfCertainLat, Bool())
   }
 
   // DataPath --[ExuInput]--> Exu

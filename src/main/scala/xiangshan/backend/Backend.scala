@@ -26,11 +26,13 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     val fuConfigs = exuCfg.fuConfigs
     val wbPortConfigs = exuCfg.wbPortConfigs
     val immType = exuCfg.immType
+
     println("[Backend]   " +
       s"${exuCfg.name}: " +
       s"${ fuConfigs.map(_.name).mkString("fu(s): {", ",", "}") }, " +
       s"${ wbPortConfigs.mkString("wb: {", ",", "}") }, " +
-      s"${ immType.map(SelImm.mkString(_)).mkString("imm: {", "," , "}") }")
+      s"${ immType.map(SelImm.mkString(_)).mkString("imm: {", "," , "}") }, " +
+      s"latMax(${exuCfg.latencyValMax}), ${exuCfg.fuLatancySet.mkString("lat: {",",","}")}, ")
     require(wbPortConfigs.collectFirst { case x: IntWB => x }.nonEmpty ==
       fuConfigs.map(_.writeIntRf).reduce(_ || _),
       "int wb port has no priority" )
