@@ -127,10 +127,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       uop(enqIndex) := enq.bits.uop
       released(enqIndex) :=
         enq.bits.datavalid &&
-        release2Cycle.valid &&
+        (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
     }
   }
 
@@ -188,13 +188,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     //  Load-to-Load violation check result
     val ldLdViolationMask = WireInit(matchMask & RegNext(released.asUInt))
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.replayFromFetch := ldLdViolationMask.orR || RegNext(ldLdViolation(w))
+    query.resp.bits.replayFromFetch := ldLdViolationMask.orR
   }
 
-  (0 until LoadPipelineWidth).map(w => {
-    ldLdViolation(w) := (release1Cycle.valid && io.query(w).req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)) ||
-                        (release2Cycle.valid && io.query(w).req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
-  })
 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
