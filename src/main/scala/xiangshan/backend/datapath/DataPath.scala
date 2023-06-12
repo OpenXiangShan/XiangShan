@@ -465,15 +465,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           val og0resp = toIU.og0resp
           og0resp.valid := fromIQ(iqIdx)(iuIdx).valid && (!fromIQFire(iqIdx)(iuIdx))
           og0resp.bits.respType := RSFeedbackType.rfArbitFail
-          og0resp.bits.success := false.B
           og0resp.bits.addrOH := fromIQ(iqIdx)(iuIdx).bits.addrOH
           og0resp.bits.rfWen := fromIQ(iqIdx)(iuIdx).bits.common.rfWen.getOrElse(false.B)
           og0resp.bits.fuType := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
           val og1resp = toIU.og1resp
           og1resp.valid := s1_toExuValid(iqIdx)(iuIdx)
-          og1resp.bits.respType := Mux(toExuFire(iqIdx)(iuIdx), RSFeedbackType.fuIdle, RSFeedbackType.fuBusy)
-          og1resp.bits.success := false.B
+          og1resp.bits.respType := Mux(toExuFire(iqIdx)(iuIdx),
+            if (toIU.issueQueueParams.isMemAddrIQ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
+            RSFeedbackType.fuBusy)
           og1resp.bits.addrOH := s1_addrOHs(iqIdx)(iuIdx)
           og1resp.bits.rfWen := s1_toExuData(iqIdx)(iuIdx).rfWen.getOrElse(false.B)
           og1resp.bits.fuType := s1_toExuData(iqIdx)(iuIdx).fuType

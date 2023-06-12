@@ -318,6 +318,7 @@ object Bundles {
   }
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
+    val issueQueueParams = this.params
     val og0resp = Valid(new StatusArrayDeqRespBundle)
     val og1resp = Valid(new StatusArrayDeqRespBundle)
   }

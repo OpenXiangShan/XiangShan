@@ -147,7 +147,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
       deqResp.valid      := io.deqResp(i).valid
       deqResp.bits.addrOH := io.deqResp(i).bits.addrOH
-      deqResp.bits.success := io.deqResp(i).bits.success
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
       deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
@@ -156,7 +155,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp.valid := io.og0Resp(i).valid
       og0Resp.bits.addrOH := io.og0Resp(i).bits.addrOH
-      og0Resp.bits.success := io.og0Resp(i).bits.success
       og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
       og0Resp.bits.respType := io.og0Resp(i).bits.respType
       og0Resp.bits.rfWen := io.og0Resp(i).bits.rfWen
@@ -165,7 +163,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     statusArrayIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp.valid := io.og1Resp(i).valid
       og1Resp.bits.addrOH := io.og1Resp(i).bits.addrOH
-      og1Resp.bits.success := io.og1Resp(i).bits.success
       og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
       og1Resp.bits.respType := io.og1Resp(i).bits.respType
       og1Resp.bits.rfWen := io.og1Resp(i).bits.rfWen
@@ -557,40 +554,10 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       enqData.mem.get.sqIdx := s0_enqBits(i).sqIdx
     }
 
-    statusArray.io.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
-      deqResp.valid        := io.deqResp(i).valid
-      deqResp.bits.addrOH  := io.deqResp(i).bits.addrOH
-      deqResp.bits.success := io.deqResp(i).bits.success
-      deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
-      deqResp.bits.respType := io.deqResp(i).bits.respType
-      deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
-      deqResp.bits.fuType := io.deqResp(i).bits.fuType
-    }
-
-    statusArray.io.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
-      og0Resp.valid := io.og0Resp(i).valid
-      og0Resp.bits.addrOH := io.og0Resp(i).bits.addrOH
-      og0Resp.bits.success := io.og0Resp(i).bits.success
-      og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
-      og0Resp.bits.respType := io.og0Resp(i).bits.respType
-      og0Resp.bits.rfWen := io.og0Resp(i).bits.rfWen
-      og0Resp.bits.fuType := io.og0Resp(i).bits.fuType
-    }
-    statusArray.io.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
-      og1Resp.valid := io.og1Resp(i).valid
-      og1Resp.bits.addrOH := io.og1Resp(i).bits.addrOH
-      og1Resp.bits.success := io.og1Resp(i).bits.success
-      og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
-      og1Resp.bits.respType := io.og1Resp(i).bits.respType
-      og1Resp.bits.rfWen := io.og1Resp(i).bits.rfWen
-      og1Resp.bits.fuType := io.og1Resp(i).bits.fuType
-    }
-
     statusArray.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
       slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
       slowResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackSlow.bits.rsIdx)
-      slowResp.bits.success          := memIO.feedbackIO(i).feedbackSlow.bits.hit
-      slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, 0.U, RSFeedbackType.feedbackInvalid)
+      slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RSFeedbackType.fuIdle, RSFeedbackType.feedbackInvalid)
       slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
       slowResp.bits.rfWen := DontCare
       slowResp.bits.fuType := DontCare
@@ -599,7 +566,6 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     statusArray.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
       fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
       fastResp.bits.addrOH           := UIntToOH(memIO.feedbackIO(i).feedbackFast.bits.rsIdx)
-      fastResp.bits.success          := memIO.feedbackIO(i).feedbackFast.bits.hit
       fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
       fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
       fastResp.bits.rfWen := DontCare

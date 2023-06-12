@@ -177,7 +177,6 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.wakeup := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
-      deqResp.bits.success := false.B
       deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
       deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
@@ -195,7 +194,6 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.success := false.B // Todo: remove it
       og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
       og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
       og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
@@ -213,7 +211,6 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.success := false.B
       og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
       og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
       og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
@@ -262,7 +259,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
       deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
-      deqResp.bits.success := false.B
       deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
       deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
@@ -275,7 +271,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.success := false.B // Todo: remove it
       og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
       og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
       og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
@@ -288,7 +283,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.success := false.B
       og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
       og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
       og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
