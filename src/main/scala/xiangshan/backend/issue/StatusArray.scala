@@ -48,7 +48,6 @@ class StatusArrayEnqBundle(implicit p:Parameters, params: IssueBlockParams) exte
 
 class StatusArrayDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val addrOH = UInt(params.numEntries.W)
-  val success = Bool()
   val respType = RSFeedbackType()   // update credit if needs replay
   val dataInvalidSqIdx = new SqPtr
   val rfWen = Bool()
@@ -169,7 +168,8 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  val resps = io.deqResp ++ io.og0Resp ++ io.og1Resp
+  val publicResps = io.deqResp ++ io.og0Resp ++ io.og1Resp
+  def resps: IndexedSeq[ValidIO[StatusArrayDeqRespBundle]] = publicResps
 
   deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
     val deqRespValidVec = VecInit(resps.map(x => x.valid && x.bits.addrOH(i)))
@@ -209,35 +209,9 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
 class StatusArrayMem()(implicit p: Parameters, params: IssueBlockParams) extends StatusArray
   with HasCircularQueuePtrHelper {
 
-  private val needMemFeedback = params.StaCnt > 0 || params.LduCnt > 0
-
   val fromMem = io.fromMem.get
 
-  var memResps = resps
-  if (needMemFeedback) {
-    memResps ++= io.fromMem.get.slowResp
-    memResps ++= io.fromMem.get.fastResp
-  }
-  deqRespVec.zipWithIndex.foreach { case (deqResp, i) =>
-    val deqRespValidVec = VecInit(memResps.map(x => x.valid && x.bits.addrOH(i)))
-    XSError(PopCount(deqRespValidVec) > 1.U, p"mem status deq resp ${Binary(deqRespValidVec.asUInt)} should be one-hot)\n")
-    deqResp.valid := deqRespValidVec.asUInt.orR
-    deqResp.bits := Mux1H(deqRespValidVec, memResps.map(_.bits))
-  }
-
-  clearVec.zipWithIndex.foreach { case (clear, i) =>
-    val clearByFlush = (enqStatusVec(i).valid || validVec(i)) && flushedVec(i)
-    val clearByResp = deqRespVec(i).valid && (
-      //do: special mem success
-      if(!needMemFeedback) {
-        deqRespVec(i).bits.respType === RSFeedbackType.fuIdle
-      }
-      else{
-        deqRespVec(i).bits.success
-      }
-    )
-    clear := clearByFlush || clearByResp
-  }
+  override def resps: IndexedSeq[ValidIO[StatusArrayDeqRespBundle]] = super.resps ++ io.fromMem.get.slowResp ++ io.fromMem.get.fastResp
 
   statusNextVec.zip(statusVec).zipWithIndex.foreach { case ((statusNext, status), i) =>
     val memStatus = status.mem.get

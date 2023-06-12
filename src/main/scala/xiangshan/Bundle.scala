@@ -74,6 +74,7 @@ object RSFeedbackType {
   val rfArbitFail     = 9.U(4.W)
   val fuIdle          = 10.U(4.W)
   val fuBusy          = 11.U(4.W)
+  val fuUncertain     = 12.U(4.W)
 
   val allTypes = 16
   def apply() = UInt(4.W)
