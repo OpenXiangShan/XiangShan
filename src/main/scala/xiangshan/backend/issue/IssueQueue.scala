@@ -88,9 +88,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val s0_enqNotFlush = !io.flush.valid
   val s0_enqBits = WireInit(VecInit(io.enq.map(_.bits)))
   val s0_doEnqSelValidVec = s0_enqSelValidVec.map(_ && s0_enqNotFlush)
-  val s0_doEnqOH: IndexedSeq[UInt] = (s0_doEnqSelValidVec zip s0_enqSelOHVec).map { case (valid, oh) =>
+  val s0_doEnqOH: Vec[UInt] = VecInit((s0_doEnqSelValidVec zip s0_enqSelOHVec).map { case (valid, oh) =>
     Mux(valid, oh, 0.U)
-  }
+  })
 
   val s0_enqImmValidVec = io.enq.map(enq => enq.valid)
   val s0_enqImmVec = VecInit(io.enq.map(_.bits.imm))
@@ -237,16 +237,43 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
 
-  finalDeqSelValidVec(0) := subDeqSelValidVec(0).getOrElse(Seq(0.U)).head
-  finalDeqSelOHVec(0)    := subDeqSelOHVec(0).getOrElse(Seq(0.U)).head
-  if(params.numDeq == 2){
-    val isSame = subDeqSelOHVec(0).getOrElse(Seq(0.U)).head === subDeqSelOHVec(1).getOrElse(Seq(0.U)).head
-    finalDeqSelValidVec(1) := Mux(isSame,
-                                  subDeqSelValidVec(1).getOrElse(Seq(0.U)).last,
-                                  subDeqSelValidVec(1).getOrElse(Seq(0.U)).head)
-    finalDeqSelOHVec(1)    := Mux(isSame,
-                                  subDeqSelOHVec(1).getOrElse(Seq(0.U)).last,
-                                  subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
+  protected val enqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+    io.enq.map(_.bits.fuType).map(fuType =>
+      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR) // C+E0    C+E1
+  }
+
+  val ageDetectorEnqVec: Vec[Vec[UInt]] = WireInit(VecInit(Seq.fill(params.numDeq)(VecInit(Seq.fill(params.numEnq)(0.U(params.numEntries.W))))))
+
+  ageDetectorEnqVec.zip(enqCanAcceptVec) foreach {
+    case (ageDetectorEnq, enqCanAccept) =>
+      ageDetectorEnq := enqCanAccept.zip(s0_doEnqOH).map {
+        case (enqCanAccept, s0_doEnqOH) => Mux(enqCanAccept, s0_doEnqOH, 0.U)
+      }
+  }
+
+  val oldestSelVec = (0 until params.numDeq).map {
+    case deqIdx =>
+      AgeDetector(numEntries = params.numEntries,
+        enq = ageDetectorEnqVec(deqIdx),
+        deq = clearVec.asUInt,
+        canIssue = canIssueVec.asUInt & (~fuBusyTableMask(deqIdx)).asUInt)
+  }
+
+  finalDeqSelValidVec.head := oldestSelVec.head.valid || subDeqSelValidVec.head.getOrElse(Seq(false.B)).head
+  finalDeqSelOHVec.head := Mux(oldestSelVec.head.valid, oldestSelVec.head.bits, subDeqSelOHVec.head.getOrElse(Seq(0.U)).head)
+
+  if (params.numDeq == 2) {
+    val chooseOldest = oldestSelVec(1).valid && oldestSelVec(1).bits =/= finalDeqSelOHVec.head
+    val choose1stSub = subDeqSelOHVec(1).getOrElse(Seq(0.U)).head =/= finalDeqSelOHVec.head
+
+    finalDeqSelValidVec(1) := MuxCase(subDeqSelValidVec(1).getOrElse(Seq(false.B)).last, Seq(
+      (chooseOldest) -> oldestSelVec(1).valid,
+      (choose1stSub) -> subDeqSelValidVec(1).getOrElse(Seq(false.B)).head)
+    )
+    finalDeqSelOHVec(1) := MuxCase(subDeqSelOHVec(1).getOrElse(Seq(0.U)).last, Seq(
+      (chooseOldest) -> oldestSelVec(1).bits,
+      (choose1stSub) -> subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
+    )
   }
 
   // fuBusyTable write
