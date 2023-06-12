@@ -94,18 +94,16 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // Allocate logic 
   val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-  val enqOffset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    enqOffset(w) := PopCount(needEnqueue.take(w)) 
     freeList.io.allocateReq(w) := needEnqueue(w)
 
     //  Allocate ready 
-    enqValidVec(w) := freeList.io.canAllocate(enqOffset(w))
-    enqIndexVec(w) := freeList.io.allocateSlot(enqOffset(w))
+    enqValidVec(w) := freeList.io.canAllocate(w)
+    enqIndexVec(w) := freeList.io.allocateSlot(w)
     enq.ready := Mux(needEnqueue(w), enqValidVec(w), true.B)
 
     val enqIndex = enqIndexVec(w)

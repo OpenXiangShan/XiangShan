@@ -539,7 +539,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // Allocate logic 
   val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-  val enqOffset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   val newEnqueue = (0 until LoadPipelineWidth).map(i => {
     needEnqueue(i) && !io.enq(i).bits.isLoadReplay
@@ -549,12 +548,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    enqOffset(w) := PopCount(newEnqueue.take(w))
     freeList.io.allocateReq(w) := newEnqueue(w)
 
     //  Allocated ready
-    enqValidVec(w) := freeList.io.canAllocate(enqOffset(w)) 
-    enqIndexVec(w) := Mux(enq.bits.isLoadReplay, enq.bits.sleepIndex, freeList.io.allocateSlot(enqOffset(w)))
+    enqValidVec(w) := freeList.io.canAllocate(w)
+    enqIndexVec(w) := Mux(enq.bits.isLoadReplay, enq.bits.sleepIndex, freeList.io.allocateSlot(w))
     selectIndexOH(w) := UIntToOH(enqIndexVec(w))
     enq.ready := Mux(enq.bits.isLoadReplay, true.B, enqValidVec(w))
 

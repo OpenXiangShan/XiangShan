@@ -314,7 +314,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   //
   val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-  val enqOffset = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadPipelineWidth + 1).W)))
 
   for (w <- 0 until LoadPipelineWidth) {
     freeList.io.allocateReq(w) := s2_enqueue(w)
@@ -326,9 +325,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   }
 
   for (w <- 0 until LoadPipelineWidth) {
-    enqOffset(w) := PopCount(s2_enqueue.take(w))
-    enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(enqOffset(w))
-    enqIndexVec(w) := freeList.io.allocateSlot(enqOffset(w))
+    enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(w)
+    enqIndexVec(w) := freeList.io.allocateSlot(w)
   }
 
   // 
