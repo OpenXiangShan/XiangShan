@@ -304,7 +304,7 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 2)), Seq(IntRD(1, 2)))),
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 1)), Seq(Seq(IntRD(0, 1)), Seq(IntRD(1, 1)))),
+        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 1)), Seq(Seq(IntRD(0, 1)), Seq(IntRD(1, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0)))),
@@ -315,7 +315,10 @@ case class XSCoreParameters
         ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(4, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(I2fCfg, VSetRiWiCfg, VSetRiWvfCfg), Seq(VecWB(port = 6, Int.MaxValue), IntWB(port = 7, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+        ExeUnitParams(Seq(I2fCfg, VSetRiWiCfg), Seq(VfWB(port = 3, Int.MaxValue), IntWB(port = 1, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams(Seq(VSetRiWvfCfg), Seq(VfWB(port = 3, Int.MaxValue)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
     ),
       numPregs = intPreg.numEntries,
@@ -333,12 +336,12 @@ case class XSCoreParameters
     val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VialuCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-        ExeUnitParams(Seq(VimacCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams(Seq(VialuCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams(Seq(VimacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
-        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetRvfWvfCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+        ExeUnitParams(Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetRvfWvfCfg), Seq(VfWB(port = 2, 0), IntWB(port = 0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
@@ -368,8 +371,8 @@ case class XSCoreParameters
         ExeUnitParams(Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 0), VfRD(13, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(VlduCfg), Seq(VecWB(6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
-        ExeUnitParams(Seq(VlduCfg), Seq(VecWB(7, 0)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams(Seq(VlduCfg), Seq(VfWB(6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
+        ExeUnitParams(Seq(VlduCfg), Seq(VfWB(7, 0)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
