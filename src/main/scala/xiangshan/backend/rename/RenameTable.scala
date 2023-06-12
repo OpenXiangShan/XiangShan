@@ -77,9 +77,6 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   val arch_table = RegInit(rename_table_init)
   val arch_table_next = WireDefault(arch_table)
 
-  val difftest_table = RegInit(rename_table_init)
-  val difftest_table_next = WireDefault(difftest_table)
-
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
   // (2) Reading is synchronous now.
@@ -116,23 +113,35 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule {
   }
   arch_table := arch_table_next
 
-  for (w <- io.diffWritePorts) {
-    when(w.wen) {
-      difftest_table_next(w.addr) := w.data
-    }
-  }
-  difftest_table := difftest_table_next
-
-  io.debug_rdata := difftest_table.take(32)
-  io.debug_vconfig match {
-    case None => Unit
-    case x    => x.get := difftest_table.last
-  }
-
   io.debug_rdata2 := arch_table.take(32)
   io.debug_vconfig2 match {
     case None => Unit
     case x => x.get := arch_table.last
+  }
+
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val difftest_table = RegInit(rename_table_init)
+    val difftest_table_next = WireDefault(difftest_table)
+
+    for (w <- io.diffWritePorts) {
+      when(w.wen) {
+        difftest_table_next(w.addr) := w.data
+      }
+    }
+    difftest_table := difftest_table_next
+
+    io.debug_rdata := difftest_table.take(32)
+    io.debug_vconfig match {
+      case None => Unit
+      case x => x.get := difftest_table.last
+    }
+  }
+  else{
+    io.debug_rdata := 0.U.asTypeOf(io.debug_rdata)
+    io.debug_vconfig match {
+      case None => Unit
+      case x => x.get := 0.U
+    }
   }
 }
 
@@ -225,8 +234,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   io.debug_vec_rat := vecRat.io.debug_rdata
   vecRat.io.readPorts <> io.vecReadPorts.flatten
   vecRat.io.redirect := io.redirect
-  //TODO: RM the donTouch
-  dontTouch(vecRat.io)
+
   for ((arch, i) <- vecRat.io.archWritePorts.zipWithIndex) {
     arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && io.robCommits.info(i).vecWen
     arch.addr := io.robCommits.info(i).ldest
