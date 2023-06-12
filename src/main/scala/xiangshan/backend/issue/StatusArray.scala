@@ -222,7 +222,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       p"instructions $i with credit ${status.credit} must not be scheduled\n")
 
     // srcState: indicate whether the operand is ready for issue
-    val (stateWakeupEn, dataWakeupEnVec) = statusArrayValidNext.zip(statusNext.psrc.zip(statusNext.srcType)).map(wakeupMatch).unzip
+    val (stateWakeupEn, dataWakeupEnVec) = Seq.fill(statusNext.psrc.size)(statusNextValid).zip(statusNext.psrc.zip(statusNext.srcType)).map(wakeupMatch).unzip
     io.wakeupMatch(i) := dataWakeupEnVec.map(en => Mux(updateValid(i) || statusValid, en, 0.U))
     // For best timing of srcState, we don't care whether the instruction is valid or not.
     // We also don't care whether the instruction can really enqueue.

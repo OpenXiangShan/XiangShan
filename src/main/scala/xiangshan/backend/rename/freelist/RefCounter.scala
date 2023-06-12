@@ -125,7 +125,7 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
             p"archRefCounter_$i: ${archRefCounter(i)} =/= archRefCounterFromRAT_$i: ${archRefCounterFromRAT(i)}\n")
   )
 
-  for (i <- 0 until RobSize) {
+  for (i <- 0 until RabSize) {
     val numCounters = PopCount(refCounter.map(_ === i.U))
     XSPerfAccumulate(s"ref_counter_$i", numCounters)
   }
