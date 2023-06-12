@@ -585,7 +585,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).raw_data
-    eccReadResult(bank_index) := read_result(cacheOpDivAddr)(bank_index)(RegNext(cacheOpWayNum)).ecc
+    eccReadResult(bank_index) := read_result(RegNext(cacheOpDivAddr))(bank_index)(RegNext(cacheOpWayNum)).ecc
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
@@ -723,6 +723,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   XSPerfAccumulate("data_array_write", io.write.valid)
 
   val bank_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, new L1BankedDataReadResult())))
+  val ecc_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, UInt(eccBits.W)))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Bool())))
   dontTouch(bank_result)
   dontTouch(read_bank_error_delayed)
@@ -754,6 +755,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         io.readline.bits.way_en,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> way_en(i)))
       )
+      // it is too long of bank_way_en's caculation, so bank_way_en_reg can not be caculated by RegNext(bank_way_en)
+      val bank_way_en_reg = Mux(RegNext(readline_match),
+        RegNext(io.readline.bits.way_en),
+        PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => RegNext(bank_addr_matchs(i)) -> RegNext(way_en(i))))
+      )
       val bank_set_addr = Mux(readline_match,
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
@@ -772,7 +778,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       val ecc_bank = ecc_banks(div_index)(bank_index)
       ecc_bank.io.r.req.valid := read_enable
       ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
-      bank_result(div_index)(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
+      ecc_result(div_index)(bank_index) := ecc_bank.io.r.resp.data
+      bank_result(div_index)(bank_index).ecc := Mux1H(bank_way_en_reg, ecc_bank.io.r.resp.data)
 
       // use ECC to check error
       val ecc_data = bank_result(div_index)(bank_index).asECCData()
@@ -896,7 +903,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(RegNext(cacheOpDivAddr))(bank_index).raw_data
-    eccReadResult(bank_index) := bank_result(RegNext(cacheOpDivAddr))(bank_index).ecc
+    eccReadResult(bank_index) := Mux1H(RegNext(cacheOpWayMask), ecc_result(RegNext(cacheOpDivAddr))(bank_index))
   }
 
   io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid,
