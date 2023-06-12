@@ -502,7 +502,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val wbSizeSeq = io.commits.commitValid.zip(io.commits.walkValid).zip(realDestSizeCandidates).map { case ((commitValid, walkValid), realDestSize) =>
     Mux(io.commits.isCommit, Mux(commitValid, realDestSize, 0.U), Mux(walkValid, realDestSize, 0.U))
   }
-  val wbSizeSum = wbSizeSeq.reduce(_ + _)
+  val wbSizeSum = wbSizeSeq.reduce(_ +& _)
   rab.io.commitSize := wbSizeSum
   rab.io.walkSize := wbSizeSum
 
@@ -873,7 +873,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect
-  enqPtrGenModule.io.allowEnqueue := allowEnqueue
+  enqPtrGenModule.io.allowEnqueue := allowEnqueue && rab.io.canEnq
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
   enqPtrGenModule.io.enq := VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop))
   enqPtrVec := enqPtrGenModule.io.out
@@ -1019,7 +1019,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map{ case(canWb, blockWb) => canWb && !blockWb }
     val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U))
     val wbCnt = PopCount(canWbNoBlockSeq)
-    when (exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U) {
+
+    val exceptionHas = RegInit(false.B)
+    val exceptionHasWire = Wire(Bool())
+    exceptionHasWire := MuxCase(exceptionHas, Seq(
+      (valid(i) && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U) -> true.B,
+      !valid(i) -> false.B
+    ))
+    exceptionHas := exceptionHasWire
+
+    when (exceptionHas || exceptionHasWire) {
       // exception flush
       uopNumVec(i) := 0.U
       stdWritebacked(i) := true.B
@@ -1094,6 +1103,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.pc := req.pc
     wdata.vtype := req.vpu.vtype
     wdata.isVset := req.isVset
+    wdata.instrSize := req.instrSize
   }
   dispatchData.io.raddr := commitReadAddr_next
 
@@ -1176,7 +1186,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
-  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
+  XSPerfAccumulate("commitInstr", ifCommitReg(retireCounter))
   val commitIsMove = commitDebugUop.map(_.isMove)
   XSPerfAccumulate("commitInstrMove", ifCommit(PopCount(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m })))
   val commitMoveElim = commitDebugUop.map(_.debugInfo.eliminatedMove)
@@ -1204,6 +1214,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
   XSPerfAccumulate("waitStoreCycle", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
   XSPerfAccumulate("robHeadPC", io.commits.info(0).pc)
+  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize > 1.U}))
+  XSPerfAccumulate("commitCompressCnt2", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 2.U}))
+  XSPerfAccumulate("commitCompressCnt3", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 3.U}))
+  XSPerfAccumulate("commitCompressCnt4", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 4.U}))
+  XSPerfAccumulate("commitCompressCnt5", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 5.U}))
+  XSPerfAccumulate("commitCompressCnt6", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 6.U}))
+  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => Mux(io.commits.isCommit && valid && info.instrSize > 1.U, info.instrSize, 0.U) }.reduce(_ +& _))
   val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
   val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
   val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)
@@ -1276,6 +1293,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.io.fpwen    := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).fpWen)))
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
+      difftest.io.instrSize:= RegNext(RegNext(RegNext(io.commits.info(i).instrSize)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock

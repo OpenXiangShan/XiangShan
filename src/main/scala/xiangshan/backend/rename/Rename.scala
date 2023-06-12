@@ -22,13 +22,12 @@ import chisel3.util._
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -65,6 +64,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val debug_vec_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
+  val compressUnit = Module(new CompressUnit())
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
   val intRefCounter = Module(new RefCounter(NRPhyRegs))
@@ -113,9 +113,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk
 
+  compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits
+  }
+  val needRobFlags = compressUnit.io.out.needRobFlags
+  val instrSizesVec = compressUnit.io.out.instrSizes
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.map(in => in.valid && in.bits.lastUop)) // number of instructions waiting to enter rob (from decode)
+  val validCount = PopCount(io.in.zip(needRobFlags).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
@@ -192,7 +198,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
 
-    uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(in => in.valid && in.bits.lastUop))
+    uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
+    uops(i).instrSize := instrSizesVec(i)
+    if (i > 0) {
+      when(!needRobFlags(i - 1)) {
+        uops(i).firstUop := false.B
+        uops(i).ftqPtr := uops(i - 1).ftqPtr
+        uops(i).ftqOffset := uops(i - 1).ftqOffset
+      }
+    }
+    when(!needRobFlags(i)) {
+      uops(i).lastUop := false.B
+    }
 
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))

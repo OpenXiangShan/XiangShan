@@ -197,9 +197,10 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
+  val noExecException = Bool()
 
   private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, uopSplitType, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, noExecException, uopSplitType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
@@ -253,6 +254,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
+  val instrSize = UInt(log2Up(MaxCompressWidth).W)
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
@@ -382,6 +384,8 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+
+  val instrSize = UInt(log2Up(MaxCompressWidth).W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {

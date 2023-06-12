@@ -476,7 +476,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   allowToIfu := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
 
   def copyNum = 5
-  val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
+  val bpuPtr, ifuPtr, ifuWbPtr, commPtr, robCommPtr = RegInit(FtqPtr(false.B, 0.U))
   val ifuPtrPlus1 = RegInit(FtqPtr(false.B, 1.U))
   val ifuPtrPlus2 = RegInit(FtqPtr(false.B, 2.U))
   val commPtrPlus1 = RegInit(FtqPtr(false.B, 1.U))
@@ -489,6 +489,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifuWbPtr_write     = WireInit(ifuWbPtr)
   val commPtr_write      = WireInit(commPtr)
   val commPtrPlus1_write = WireInit(commPtrPlus1)
+  val robCommPtr_write   = WireInit(robCommPtr)
   ifuPtr       := ifuPtr_write
   ifuPtrPlus1  := ifuPtrPlus1_write
   ifuPtrPlus2  := ifuPtrPlus2_write
@@ -499,6 +500,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ptr := ifuPtr_write
     dontTouch(ptr)
   }
+  robCommPtr   := robCommPtr_write
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit = Wire(Bool())
 
@@ -1028,6 +1030,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
+  robCommPtr_write := Mux(io.fromBackend.rob_commits.map(_.valid).reduce(_ | _), ParallelPriorityMux(io.fromBackend.rob_commits.map(_.valid).reverse, io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse), robCommPtr)
+
   // ****************************************************************
   // **************************** to bpu ****************************
   // ****************************************************************
@@ -1039,10 +1043,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
+  val notInvalidSeq = commitStateQueue(commPtr.value).map(s => s =/= c_invalid).reverse
   canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
-    Cat(commitStateQueue(commPtr.value).map(s => {
-      s === c_invalid || s === c_commited
-    })).andR()
+    (isAfter(robCommPtr, commPtr) || PriorityMuxDefault(notInvalidSeq.zip(commitStateQueue(commPtr.value).reverse), c_invalid) === c_commited)
 
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
   val mmioLastCommit = isBefore(commPtr, mmioReadPtr) && (isAfter(ifuPtr,mmioReadPtr)  ||  mmioReadPtr ===   ifuPtr) &&

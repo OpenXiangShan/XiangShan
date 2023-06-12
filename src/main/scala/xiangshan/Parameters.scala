@@ -142,6 +142,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   MaxUopSize: Int = 65,
+  MaxCompressWidth: Int = 6,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
@@ -518,6 +519,7 @@ trait HasXSParameter {
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
   val MaxUopSize = coreParams.MaxUopSize
+  val MaxCompressWidth = coreParams.MaxCompressWidth
   val FtqSize = coreParams.FtqSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   val IntLogicRegs = coreParams.IntLogicRegs
