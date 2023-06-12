@@ -511,7 +511,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val wbSizeSeq = io.commits.commitValid.zip(io.commits.walkValid).zip(realDestSizeCandidates).map{ case((commitValid, walkValid), realDestSize) =>
     Mux(io.commits.isCommit, Mux(commitValid, realDestSize, 0.U), Mux(walkValid, realDestSize, 0.U))
   }
-  val wbSizeSum = wbSizeSeq.reduce(_ + _)
+  val wbSizeSum = wbSizeSeq.reduce(_ +& _)
   rab.io.commitSize := wbSizeSum
   rab.io.walkSize := wbSizeSum
 
@@ -869,7 +869,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect
-  enqPtrGenModule.io.allowEnqueue := allowEnqueue
+  enqPtrGenModule.io.allowEnqueue := allowEnqueue && rab.io.canEnq
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
   enqPtrGenModule.io.enq := VecInit(io.enq.req.map(req => req.valid && req.bits.ctrl.firstUop))
   enqPtrVec := enqPtrGenModule.io.out
@@ -1018,13 +1018,16 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map{ case(canWb, blockWb) => canWb && !blockWb }
     val canStuWbSeq = stdWriteback.map(writeback => writeback.valid && writeback.bits.uop.robIdx.value === i.U)
     val wbCnt = PopCount(canWbNoBlockSeq ++ canStuWbSeq)
+    val exceptionHas = RegInit(false.B)
+    val exceptionHasWire = Wire(Bool())
 
-    writebackedCounter(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), 
-                              Mux(exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U, 
-                                0.U, 
-                                writebackedCounter(i) + enqCnt - wbCnt), 
-                              0.U)
-
+    exceptionHasWire := MuxCase(exceptionHas, Seq(
+      (valid(i) && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U) -> true.B,
+      !valid(i) -> false.B
+    ))
+    exceptionHas := exceptionHasWire
+    writebackedCounter(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), Mux(exceptionHas || exceptionHasWire, 0.U, writebackedCounter(i) + enqCnt - wbCnt), 0.U)
+    
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.uop.robIdx.value === i.U)
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map{ case(canWb, wb) => Mux(canWb, wb.bits.fflags, 0.U)}.reduce(_ | _)
     fflagsDataModule(i) := Mux(!valid(i) && instCanEnqFlag, 0.U, fflagsDataModule(i) | fflagsRes)
@@ -1083,6 +1086,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.pc := req.cf.pc
     wdata.uopIdx := req.ctrl.uopIdx
     wdata.vconfig := req.ctrl.vconfig
+    wdata.instrSize := req.instrSize
   }
   dispatchData.io.raddr := commitReadAddr_next
 
@@ -1128,8 +1132,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
-  val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
-  val retireCounter = Mux(RegNext(io.commits.isCommit), trueCommitCnt, 0.U)
+  val trueCommitCnt = io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _)
+  val retireCounter = Mux(RegNext(io.commits.isCommit), RegNext(trueCommitCnt), 0.U)
   val instrCnt = instrCntReg + retireCounter
   instrCntReg := instrCnt
   io.csr.perfinfo.retiredInstr := retireCounter
@@ -1165,7 +1169,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
-  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
+  XSPerfAccumulate("commitInstr", ifCommitReg(retireCounter))
   val commitIsMove = commitDebugUop.map(_.ctrl.isMove)
   XSPerfAccumulate("commitInstrMove", ifCommit(PopCount(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m })))
   val commitMoveElim = commitDebugUop.map(_.debugInfo.eliminatedMove)
@@ -1193,6 +1197,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   XSPerfAccumulate("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
   XSPerfAccumulate("waitStoreCycle", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
   XSPerfAccumulate("robHeadPC", io.commits.info(0).pc)
+  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize > 1.U}))
+  XSPerfAccumulate("commitCompressCnt2", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 2.U}))
+  XSPerfAccumulate("commitCompressCnt3", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 3.U}))
+  XSPerfAccumulate("commitCompressCnt4", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 4.U}))
+  XSPerfAccumulate("commitCompressCnt5", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 5.U}))
+  XSPerfAccumulate("commitCompressCnt6", PopCount(io.commits.commitValid.zip(io.commits.info).map{case(valid, info) => io.commits.isCommit && valid && info.instrSize === 6.U}))
+  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => Mux(io.commits.isCommit && valid && info.instrSize > 1.U, info.instrSize, 0.U) }.reduce(_ +& _))
   val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
   val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
   val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)
@@ -1307,6 +1318,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.io.vecwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).vecWen)))
       difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
       difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
+      difftest.io.instrSize:= RegNext(RegNext(RegNext(io.commits.info(i).instrSize)))
       // // runahead commit hint
       // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       // runahead_commit.io.clock := clock
