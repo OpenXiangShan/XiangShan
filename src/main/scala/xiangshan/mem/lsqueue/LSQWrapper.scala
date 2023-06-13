@@ -94,6 +94,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val sqCanAccept = Output(Bool())
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+    val lqEmpty = Output(Bool())
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -153,6 +154,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.trigger <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.lqCancelCnt <> io.lqCancelCnt
+  io.lqEmpty := loadQueue.io.lqEmpty
 
   // store queue wiring
   // storeQueue.io <> DontCare

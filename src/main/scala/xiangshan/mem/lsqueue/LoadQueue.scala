@@ -121,6 +121,7 @@ class LoadQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val storeDataValidVec = Vec(StoreQueueSize, Input(Bool()))
 
   val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
+  val lqEmpty = Output(Bool())
 }
 
 // Load Queue
@@ -251,6 +252,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val release1cycle = io.release
   val release2cycle = RegNext(io.release)
   val release2cycle_dup_lsu = RegNext(io.release)
+
+  io.lqEmpty := RegNext(validCount === 0.U)
 
   /**
     * Enqueue at dispatch

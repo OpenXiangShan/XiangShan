@@ -682,6 +682,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     // Give paddr out when Release a entry
     val entry_release_info = Valid(new MissEntryReleaseInfo)
     val memSetPattenDetected = Output(Bool())
+    val lqEmpty = Input(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -717,8 +718,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       }
     }
   }
-  val Threshold = 16
-  val memSetPattenDetected = source_except_load_cnt >= Threshold.U
+  val Threshold = 8
+  val memSetPattenDetected = RegNext((source_except_load_cnt >= Threshold.U) && io.lqEmpty)
 
   io.memSetPattenDetected := memSetPattenDetected
 

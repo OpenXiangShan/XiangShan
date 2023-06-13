@@ -229,6 +229,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.hartId := io.hartId
   atomicsUnit.io.hartId := io.hartId
 
+  dcache.io.lqEmpty := lsq.io.lqEmpty
+
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(pf => {
     val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)

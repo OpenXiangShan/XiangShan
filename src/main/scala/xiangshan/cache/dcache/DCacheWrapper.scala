@@ -687,6 +687,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
+  val lqEmpty = Input(Bool())
 }
 
 
@@ -747,6 +748,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
 
+  missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
