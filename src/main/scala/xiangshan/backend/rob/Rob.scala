@@ -39,8 +39,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
     val isBankConflict = Bool() // in s1
     val isLoadToLoadForward = Bool()
     val isReplayFast = Bool()
-    val vaddr_valid = Bool()
-    val vaddr_bits = UInt(VAddrBits.W)
   }
   val s2 = new Bundle{
     val isDcacheFirstMiss = Bool() // in s2 (predicted result is in s1 when using WPU, real result is in s2)
@@ -48,8 +46,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
     val isReplaySlow = Bool()
     val isLoadReplayTLBMiss = Bool()
     val isLoadReplayCacheMiss = Bool()
-    val paddr_valid = Bool()
-    val paddr_bits = UInt(PAddrBits.W)
   }
   val replayCnt = UInt(XLEN.W)
 
@@ -60,10 +56,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
     when(ena.s1.isReplayFast) {
       s1.isReplayFast := true.B
       replayCnt := replayCnt + 1.U
-    }
-    when(ena.s1.vaddr_valid) {
-      s1.vaddr_valid := true.B
-      s1.vaddr_bits := ena.s1.vaddr_bits
     }
   }
 
@@ -76,10 +68,6 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
       s2.isReplaySlow := true.B
       replayCnt := replayCnt + 1.U
     }
-    when(ena.s2.paddr_valid) {
-      s2.paddr_valid := true.B
-      s2.paddr_bits := ena.s2.paddr_bits
-    }
   }
 
 }
@@ -90,15 +78,11 @@ object DebugLsInfo {
     lsInfo.s1.isBankConflict := false.B
     lsInfo.s1.isLoadToLoadForward := false.B
     lsInfo.s1.isReplayFast := false.B
-    lsInfo.s1.vaddr_valid := false.B
-    lsInfo.s1.vaddr_bits := 0.U
     lsInfo.s2.isDcacheFirstMiss := false.B
     lsInfo.s2.isForwardFail := false.B
     lsInfo.s2.isReplaySlow := false.B
     lsInfo.s2.isLoadReplayTLBMiss := false.B
     lsInfo.s2.isLoadReplayCacheMiss := false.B
-    lsInfo.s2.paddr_valid := false.B
-    lsInfo.s2.paddr_bits := 0.U
     lsInfo.replayCnt := 0.U
     lsInfo
   }

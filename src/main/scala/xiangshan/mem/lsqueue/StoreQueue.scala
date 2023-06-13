@@ -341,7 +341,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
     }
     // dcache miss info (one cycle later than storeIn)
-    // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer
+    // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer (if EnableAtCommitMissTrigger)
     when (storeAddrInFireReg) {
       prefetch(stWbIndexReg) := io.storeAddrInRe(i).miss
     }
@@ -705,9 +705,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
-    io.sbuffer(i).bits.id    := DontCare
-    io.sbuffer(i).bits.instrtype    := DontCare
-    io.sbuffer(i).bits.replayCarry := DontCare
     io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.

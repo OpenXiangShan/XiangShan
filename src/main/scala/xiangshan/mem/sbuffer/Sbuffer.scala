@@ -491,7 +491,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
-  // for now, when enq, trigger a prefetch
+  // for now, when enq, trigger a prefetch (if EnableAtCommitMissTrigger)
   require(EnsbufferWidth == StorePipelineWidth)
 
   // ---------------------- Send Dcache Req ---------------------

@@ -296,6 +296,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     itlbMissStage(i) := itlbMissStage(i - 1)
   }
   
+  
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
@@ -451,7 +452,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val icacheMissStage = RegInit(VecInit(Seq.fill(numOfStage - 2)(0.B)))
   icacheMissStage(0) := !s2_hit
-  
+
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */

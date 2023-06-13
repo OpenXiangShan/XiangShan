@@ -446,6 +446,7 @@ trait HasXSParameter {
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
   val EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  val EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
   val asidLen = coreParams.MMUAsidLen
