@@ -828,6 +828,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_hit = Wire(Bool())
   val s1_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s1_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
+  val s2_valid = Wire(Bool())
+  val s2_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
+  val s2_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
 
   // s0: entries lookup
   val s0_gen_req = io.gen_req.bits
@@ -842,7 +845,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val is_evicted = s1_valid && s1_replace_vec(i)
-    tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
+    tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
     tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     tlb_req_arb.io.in(i).bits.size := 3.U
@@ -899,12 +902,22 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+
+  // s2: tlb req will latch one cycle after tlb_arb
+  val s2_valid_r = RegNext(s1_valid, false.B)
+  val s2_replace_vec_r = RegNext(s1_replace_vec, 0.U.asTypeOf((s1_replace_vec)))
+  val s2_tlb_fire_vec_r = RegNext(s1_tlb_fire_vec, 0.U.asTypeOf(s1_tlb_fire_vec))
+  s2_valid := s2_valid_r
+  s2_replace_vec := s2_replace_vec_r
+  s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
+
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val alloc = s1_valid && !s1_hit && s1_replace_vec(i)
     val update = s1_valid && s1_hit && s1_update_vec(i)
     // for pf: use s0 data
     val pf_fired = s0_pf_fire_vec(i)
-    val tlb_fired = s1_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss
+    val is_evicted = s2_valid && s2_replace_vec(i)
+    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && !is_evicted
     when(tlb_fired){
       ent.paddr_valid := !io.tlb_req.resp.bits.miss
       ent.region_addr := region_addr(io.tlb_req.resp.bits.paddr.head)

@@ -27,7 +27,7 @@ import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{DebugLSIO, Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
@@ -213,10 +213,12 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
     val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Input(Bool()))
     val enqLsq = Flipped(new LsqEnqIO)
-    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
     val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val sqCanAccept = Input(Bool())
+    val lqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     val st_pc_read = Vec(exuParameters.StuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
@@ -233,6 +235,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val lsq = new RobLsqIO
       // debug
       val debug_ls = Flipped(new DebugLSIO)
+      val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
     }
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val perfInfo = Output(new Bundle{
@@ -397,11 +400,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
   // LFST lookup and update
-  val lfst = Module(new LFST)
-  lfst.io.redirect <> RegNext(io.redirect)
-  lfst.io.storeIssue <> RegNext(io.stIn)
-  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
-  lfst.io.dispatch <> dispatch.io.lfst
+  dispatch.io.lfst := DontCare
+  if (LFSTEnable) {
+    val lfst = Module(new LFST)
+    lfst.io.redirect <> RegNext(io.redirect)
+    lfst.io.storeIssue <> RegNext(io.stIn)
+    lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+    lfst.io.dispatch <> dispatch.io.lfst
+  }
+
 
   rat.io.redirect := stage2Redirect.valid
   rat.io.robCommits := rob.io.commits
@@ -476,8 +483,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.allocPregs <> io.allocPregs
   dispatch.io.robHead := rob.io.debugRobHead
   dispatch.io.stallReason <> rename.io.stallReason.out
+  dispatch.io.lqCanAccept := io.lqCanAccept
   dispatch.io.sqCanAccept := io.sqCanAccept
   dispatch.io.robHeadNotReady := rob.io.headNotReady
+  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.redirect <> redirectForExu
@@ -499,7 +508,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val lsqCtrl = Module(new LsqEnqCtrl)
       lsqCtrl.io.redirect <> redirectForExu
       lsqCtrl.io.enq <> dp2.enqLsq.get
-      lsqCtrl.io.lcommit := rob.io.lsq.lcommit
+      lsqCtrl.io.lcommit := io.lqDeq
       lsqCtrl.io.scommit := io.sqDeq
       lsqCtrl.io.lqCancelCnt := io.lqCancelCnt
       lsqCtrl.io.sqCancelCnt := io.sqCancelCnt
@@ -563,6 +572,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robHeadLsIssue
+  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robDeqPtr := rob.io.robDeqPtr
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)

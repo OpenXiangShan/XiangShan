@@ -87,6 +87,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
 
+  XSPerfHistogram("slots_fire", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth+1, 1)
+  XSPerfHistogram("slots_valid_pure", PopCount(io.in.map(_.valid)), io.out(0).fire, 0, DecodeWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.in.map(_.valid)), true.B, 0, DecodeWidth+1, 1)
+
   val fusionValid = RegNext(io.fusion)
   val inFire = io.in.map(in => RegNext(in.valid && !in.ready))
   val perfEvents = Seq(

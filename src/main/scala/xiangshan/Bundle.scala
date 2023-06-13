@@ -31,6 +31,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
+import xiangshan.cache.HasDCacheParameters
 import utils._
 import utility._
 
@@ -57,14 +58,15 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(3.W)
-  val mshrFull = 1.U(3.W)
-  val dataInvalid = 2.U(3.W)
-  val bankConflict = 3.U(3.W)
-  val ldVioCheckRedo = 4.U(3.W)
-
+  val lrqFull = 0.U(3.W)
+  val tlbMiss = 1.U(3.W)
+  val mshrFull = 2.U(3.W)
+  val dataInvalid = 3.U(3.W)
+  val bankConflict = 4.U(3.W)
+  val ldVioCheckRedo = 5.U(3.W)
   val feedbackInvalid = 7.U(3.W)
 
+  val allTypes = 8
   def apply() = UInt(3.W)
 }
 
@@ -668,4 +670,9 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
 class StallReasonIO(width: Int) extends Bundle {
   val reason = Output(Vec(width, UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
   val backReason = Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+}
+
+// custom l2 - l1 interface
+class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+  val sourceId = UInt(log2Up(cfg.nMissEntries).W)    // tilelink sourceID -> mshr id
 }

@@ -790,12 +790,15 @@ package object xiangshan {
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
   // indicates where the memory access request comes from
-  // a dupliacte of this is in HuanCun.common
+  // a dupliacte of this is in HuanCun.common and CoupledL2.common
+  // TODO: consider moving it to Utility, so that they could share the same definition
   object MemReqSource extends Enumeration {
     val NoWhere = Value("NoWhere")
 
     val CPUInst = Value("CPUInst")
-    val CPUData = Value("CPUData")
+    val CPULoadData = Value("CPULoadData")
+    val CPUStoreData = Value("CPUStoreData")
+    val CPUAtomicData = Value("CPUAtomicData")
     val L1InstPrefetch = Value("L1InstPrefetch")
     val L1DataPrefetch = Value("L1DataPrefetch")
     val PTW = Value("PTW")
@@ -830,6 +833,13 @@ package object xiangshan {
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
     val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    // freelist full
+    val IntFlStall = Value("IntFlStall")
+    val FpFlStall = Value("FpFlStall")
+    // dispatch queue full
+    val IntDqStall = Value("IntDqStall")
+    val FpDqStall = Value("FpDqStall")
+    val LsDqStall = Value("LsDqStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")

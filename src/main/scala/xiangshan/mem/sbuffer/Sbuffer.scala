@@ -248,8 +248,13 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val plru = new PseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(EnsbufferWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
-  val replaceIdx = plru.way
-  val replaceIdxOH = UIntToOH(plru.way)
+  val candidateVec = VecInit(stateVec.map(s => s.isDcacheReqCandidate()))
+  val candidateIdx = PriorityEncoder(candidateVec)
+
+  val replaceAlgoIdx = plru.way
+  val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
+
+  val replaceIdx = Mux(replaceAlgoNotDcacheCandidate, candidateIdx, replaceAlgoIdx)
   plru.access(accessIdx)
 
   //-------------------------cohCount-----------------------------
@@ -801,6 +806,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
       forward.forwardMaskFast(j) := selectedInflightMaskFast(j) || selectedValidMaskFast(j)
     }
+    forward.addrInvalid := DontCare
   }
 
   for (i <- 0 until StoreBufferSize) {

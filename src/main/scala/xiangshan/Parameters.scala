@@ -30,6 +30,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import coupledL2._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
@@ -66,6 +67,7 @@ case class XSCoreParameters
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
+  EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
@@ -129,10 +131,16 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  LoadQueueNWriteBanks: Int = 8,
+  VirtualLoadQueueSize: Int = 80,
+  LoadQueueRARSize: Int = 80,
+  LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  RollbackGroupSize: Int = 8,
+  LoadQueueReplaySize: Int = 80,
+  LoadUncacheBufferSize: Int = 20,
+  LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
-  StoreQueueNWriteBanks: Int = 8,
+  StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
+  StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
@@ -187,6 +195,8 @@ case class XSCoreParameters
     superNWays = 4,
     superReplacer = Some("plru")
   ),
+  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     normalNSets = 64,
@@ -241,7 +251,8 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2,
     nProbeEntries = 2,
-    nPrefetchEntries = 2,
+    nPrefetchEntries = 12,
+    nPrefBufferEntries = 64,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
@@ -253,12 +264,11 @@ case class XSCoreParameters
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
   )),
-  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
+  L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
-    level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
+    prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
@@ -291,7 +301,10 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
-  UseDRAMSim: Boolean = false
+  UseDRAMSim: Boolean = false,
+  EnableConstantin: Boolean = false,
+  EnableChiselDB: Boolean = false,
+  AlwaysBasicDB: Boolean = true,
 )
 
 trait HasXSParameter {
@@ -333,6 +346,7 @@ trait HasXSParameter {
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
+  val EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
   val EnableFauFTB = coreParams.EnableFauFTB
@@ -394,10 +408,16 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val LoadQueueSize = coreParams.LoadQueueSize
+  val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
+  val LoadQueueRARSize = coreParams.LoadQueueRARSize
+  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  val RollbackGroupSize = coreParams.RollbackGroupSize
+  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
+  val LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
@@ -471,7 +491,7 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
-
+  val LFSTEnable = false
   val loadExuConfigs = coreParams.loadExuConfigs
   val storeExuConfigs = coreParams.storeExuConfigs
 

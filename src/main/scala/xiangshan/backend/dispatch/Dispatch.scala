@@ -73,8 +73,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // perf only
     val robHead = Input(new MicroOp)
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
+    val lqCanAccept = Input(Bool())
     val sqCanAccept = Input(Bool())
     val robHeadNotReady = Input(Bool())
+    val robFull = Input(Bool())
   })
 
   /**
@@ -110,7 +112,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
+  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire()
   ))
 
@@ -156,7 +158,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       if(i == 0){
         debug_runahead_checkpoint_id := checkpoint_id
       } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
           io.fromRename(i).fire()
         ))
       }
@@ -209,6 +211,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // (1) resources are ready
   // (2) previous instructions are ready
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ, Dispatch Queue
@@ -293,17 +296,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   ExcitingUtils.addSink(l2Miss, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(l3Miss, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
 
-  // val ldReason = MuxCase(TopDownCounters.LoadMemStall.id.U, Seq(
-  //   notIssue   -> TopDownCounters.MemNotReadyStall.id.U,
-  //   tlbReplay  -> TopDownCounters.LoadTLBStall.id.U,
-  //   tlbMiss    -> TopDownCounters.LoadTLBStall.id.U,
-  //   vioReplay  -> TopDownCounters.LoadVioReplayStall.id.U,
-  //   mshrReplay -> TopDownCounters.LoadMSHRReplayStall.id.U,
-  //   !l1Miss    -> TopDownCounters.LoadL1Stall.id.U,
-  //   !l2Miss    -> TopDownCounters.LoadL2Stall.id.U,
-  //   !l3Miss    -> TopDownCounters.LoadL3Stall.id.U
-  // ))
-
   val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
   Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
   Mux(l1Miss, TopDownCounters.LoadL2Stall.id.U,
@@ -320,22 +312,41 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).map { case (((update, in), recv), fire) =>
     import FuType._
+    val headIsInt = isIntExu(io.robHead.ctrl.fuType)  && io.robHeadNotReady
+    val headIsFp  = isFpExu(io.robHead.ctrl.fuType)   && io.robHeadNotReady
+    val headIsDiv = isDivSqrt(io.robHead.ctrl.fuType) && io.robHeadNotReady
+    val headIsLd  = io.robHead.ctrl.fuType === ldu && io.robHeadNotReady || !io.lqCanAccept
+    val headIsSt  = io.robHead.ctrl.fuType === stu && io.robHeadNotReady || !io.sqCanAccept
+    val headIsAmo = io.robHead.ctrl.fuType === mou && io.robHeadNotReady
+    val headIsLs  = headIsLd || headIsSt
+    val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
+
     import TopDownCounters._
-    val fuType = io.robHead.ctrl.fuType
-    val notRdy = io.robHeadNotReady
     update := MuxCase(OtherCoreStall.id.U, Seq(
-      (fire                                       ) -> NoStall.id.U          ,
-      (in =/= OtherCoreStall.id.U                 ) -> in                    ,
-      (fuType === mou                    && notRdy) -> AtomicStall.id.U      ,
-      (!io.sqCanAccept || fuType === stu && notRdy) -> StoreStall.id.U       ,
-      (fuType === ldu                    && notRdy) -> ldReason              ,
-      (isDivSqrt(fuType)                 && notRdy) -> DivStall.id.U         ,
-      (isIntExu(fuType)                  && notRdy) -> IntNotReadyStall.id.U ,
-      (isFpExu(fuType)                   && notRdy) -> FPNotReadyStall.id.U  ,
+      // fire
+      (fire                                              ) -> NoStall.id.U          ,
+      // dispatch not stall / core stall from rename
+      (in =/= OtherCoreStall.id.U                        ) -> in                    ,
+      // dispatch queue stall
+      (!io.toIntDq.canAccept && !headIsInt && !io.robFull) -> IntDqStall.id.U       ,
+      (!io.toFpDq.canAccept  && !headIsFp  && !io.robFull) -> FpDqStall.id.U        ,
+      (!io.toLsDq.canAccept  && !headIsLs  && !robLsFull ) -> LsDqStall.id.U        ,
+      // rob stall
+      (headIsAmo                                         ) -> AtomicStall.id.U      ,
+      (headIsSt                                          ) -> StoreStall.id.U       ,
+      (headIsLd                                          ) -> ldReason              ,
+      (headIsDiv                                         ) -> DivStall.id.U         ,
+      (headIsInt                                         ) -> IntNotReadyStall.id.U ,
+      (headIsFp                                          ) -> FPNotReadyStall.id.U  ,
     ))
   }
 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+
+  XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
+  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
+  XSPerfHistogram("slots_valid_pure", PopCount(io.enqRob.req.map(_.valid)), thisActualOut(0), 0, RenameWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
     ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),
