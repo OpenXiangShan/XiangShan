@@ -55,8 +55,6 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
   val use_flow_fromPrefetch = !use_flow_fromRS && io.prefetch_req.valid
 
   val prefetch_vaddr = io.prefetch_req.bits.vaddr
-  val fake_prefetch_exinput = WireInit(0.U.asTypeOf(new ExuInput))
-  val fake_prefetch_exinput_uop = fake_prefetch_exinput.uop
 
   // request to tlb
   io.dtlbReq.bits.vaddr := Mux(use_flow_fromRS, saddr, prefetch_vaddr)
@@ -92,7 +90,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParame
   // Now data use its own io
   // io.out.bits.data := genWdata(io.in.bits.src(1), io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.data := io.in.bits.src(1) // FIXME: remove data from pipeline
-  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, fake_prefetch_exinput_uop)
+  io.out.bits.uop := Mux(use_flow_fromRS, io.in.bits.uop, DontCare)
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := Mux(use_flow_fromRS, io.rsIdx, DontCare)
   io.out.bits.mask := Mux(use_flow_fromRS, genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0)), 3.U)
