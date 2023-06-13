@@ -285,9 +285,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
   val PCMEMIDX_LD = 5
   val PCMEMIDX_ST = PCMEMIDX_LD + exuParameters.LduCnt
+  val PCMEM_READ_PORT_COUNT = if(EnableStorePrefetchSMS) 6 + exuParameters.LduCnt + exuParameters.StuCnt else 6 + exuParameters.LduCnt
   val pcMem = Module(new SyncDataModuleTemplate(
     new Ftq_RF_Components, FtqSize,
-    6 + exuParameters.LduCnt + exuParameters.StuCnt, 1, "CtrlPcMem")
+    PCMEM_READ_PORT_COUNT, 1, "CtrlPcMem")
   )
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
@@ -545,10 +546,16 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     pcMem.io.raddr(i + PCMEMIDX_LD) := io.ld_pc_read(i).ptr.value
     io.ld_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_LD).getPc(RegNext(io.ld_pc_read(i).offset))
   }
-  for(i <- 0 until exuParameters.StuCnt){
-    // store s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
-    pcMem.io.raddr(i + PCMEMIDX_ST) := io.st_pc_read(i).ptr.value
-    io.st_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset))
+  if(EnableStorePrefetchSMS) {
+    for(i <- 0 until exuParameters.StuCnt){
+      // store s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
+      pcMem.io.raddr(i + PCMEMIDX_ST) := io.st_pc_read(i).ptr.value
+      io.st_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset))
+    }
+  }else {
+    for(i <- 0 until exuParameters.StuCnt){
+      io.st_pc_read(i).data := 0.U
+    }
   }
 
   rob.io.hartId := io.hartId

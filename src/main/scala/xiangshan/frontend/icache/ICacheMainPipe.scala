@@ -296,7 +296,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     itlbMissStage(i) := itlbMissStage(i - 1)
   }
   
-  
+
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
