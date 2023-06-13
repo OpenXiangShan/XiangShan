@@ -87,7 +87,6 @@ class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends 
   })
 
   require(StorePipelineWidth == 2)
-  // TODO: according to missqueue size, busrt some prefetch req and wait for a while
 
   val SIZE = BURST_ENGINE_SIZE
 
@@ -263,33 +262,18 @@ class StorePfWrapper()(implicit p: Parameters) extends DCacheModule with HasStor
     val memSetPattenDetected = Input(Bool())
   })
 
-  val enableStorePrefetchAtIssueValue = WireInit(0.U(64.W))
-  val enableStorePrefetchAtCommitValue = WireInit(0.U(64.W))
-  val enableStorePrefetchSMSValue = WireInit(0.U(64.W))
-  val enableStorePrefetchSPBValue = WireInit(0.U(64.W))
-
-  val enableStorePrefetchAtIssue = enableStorePrefetchAtIssueValue =/= 0.U
-  val enableStorePrefetchAtCommit = enableStorePrefetchAtCommitValue =/= 0.U
-  val enableStorePrefetchSMS = enableStorePrefetchSMSValue =/= 0.U
-  val enableStorePrefetchSPB = enableStorePrefetchSPBValue =/= 0.U
-
-  ExcitingUtils.addSink(enableStorePrefetchAtIssueValue, s"enableStorePrefetchAtIssue_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchAtCommitValue, s"enableStorePrefetchAtCommit_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchSMSValue, s"enableStorePrefetchSMS_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchSPBValue, s"enableStorePrefetchSPB_${coreParams.HartId}", ExcitingUtils.Perf)
-
   // TODO: remove serializer, use a ptr in sq
   val serializer = Module(new Serializer())
   val spb = Module(new StorePrefetchBursts())
 
   // give mutiple reqs to serializer, serializer will give out one req per cycle
   for(i <- 0 until EnsbufferWidth) {
-    serializer.io.sbuffer_enq(i).valid := io.sbuffer_enq(i).valid && enableStorePrefetchSPB
+    serializer.io.sbuffer_enq(i).valid := io.sbuffer_enq(i).valid && ENABLE_SPB.B
     serializer.io.sbuffer_enq(i).bits := io.sbuffer_enq(i).bits
   }
 
   // train spb
-  spb.io.enable := enableStorePrefetchSPB
+  spb.io.enable := ENABLE_SPB.B
   spb.io.memSetPattenDetected := io.memSetPattenDetected
   spb.io.sbuffer_enq.valid := serializer.io.prefetch_train.valid
   spb.io.sbuffer_enq.bits  := serializer.io.prefetch_train.bits

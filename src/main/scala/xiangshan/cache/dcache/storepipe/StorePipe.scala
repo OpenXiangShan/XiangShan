@@ -169,28 +169,14 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   // TODO: consider tag error
   io.lsu.resp.bits.tag_error := false.B
 
-  val enableStorePrefetchAtIssueValue = WireInit(0.U(64.W))
-  val enableStorePrefetchAtCommitValue = WireInit(0.U(64.W))
-  val enableStorePrefetchSMSValue = WireInit(0.U(64.W))
-  val enableStorePrefetchSPBValue = WireInit(0.U(64.W))
-
-  val enableStorePrefetchAtIssue = enableStorePrefetchAtIssueValue =/= 0.U
-  val enableStorePrefetchAtCommit = enableStorePrefetchAtCommitValue =/= 0.U
-  val enableStorePrefetchSMS = enableStorePrefetchSMSValue =/= 0.U
-  val enableStorePrefetchSPB = enableStorePrefetchSPBValue =/= 0.U
-
-  ExcitingUtils.addSink(enableStorePrefetchAtIssueValue, s"enableStorePrefetchAtIssue_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchAtCommitValue, s"enableStorePrefetchAtCommit_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchSMSValue, s"enableStorePrefetchSMS_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(enableStorePrefetchSPBValue, s"enableStorePrefetchSPB_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /** 
     * send req to Dcache MissQueue
     */
-  when(enableStorePrefetchAtIssue) {
+  if(EnableStorePrefetchAtIssue) {
     // all miss stores, whether prefetched or normal, send requests directly to mshr
     io.miss_req.valid := s2_valid && !s2_hit
-  }.otherwise {
+  }else {
     // only prefetched miss stores will send requests directly to mshr
     io.miss_req.valid := s2_valid && !s2_hit && s2_is_prefetch
   }
