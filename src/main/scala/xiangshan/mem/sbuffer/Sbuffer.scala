@@ -380,7 +380,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
     // prefetch req
     if(EnableStorePrefetchAtCommit) {
-      io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
+      if(EnableAtCommitMissTrigger) {
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
+      }else {
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || io.in(i).fire
+      }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
       prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready

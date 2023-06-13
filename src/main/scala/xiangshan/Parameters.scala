@@ -182,6 +182,7 @@ case class XSCoreParameters
   EnableUncacheWriteOutstanding: Boolean = false,
   EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = true,
+  EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = true,
   EnableStorePrefetchSPB: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
