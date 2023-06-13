@@ -362,24 +362,39 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
+  val enableStorePrefetchAtIssueValue = WireInit(0.U(64.W))
+  val enableStorePrefetchAtCommitValue = WireInit(0.U(64.W))
+  val enableStorePrefetchSMSValue = WireInit(0.U(64.W))
+  val enableStorePrefetchSPBValue = WireInit(0.U(64.W))
+
+  val enableStorePrefetchAtIssue = enableStorePrefetchAtIssueValue =/= 0.U
+  val enableStorePrefetchAtCommit = enableStorePrefetchAtCommitValue =/= 0.U
+  val enableStorePrefetchSMS = enableStorePrefetchSMSValue =/= 0.U
+  val enableStorePrefetchSPB = enableStorePrefetchSPBValue =/= 0.U
+
+  ExcitingUtils.addSink(enableStorePrefetchAtIssueValue, s"enableStorePrefetchAtIssue_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchAtCommitValue, s"enableStorePrefetchAtCommit_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchSMSValue, s"enableStorePrefetchSMS_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchSPBValue, s"enableStorePrefetchSPB_${coreParams.HartId}", ExcitingUtils.Perf)
+
   for(i <- 0 until EnsbufferWidth) {
     // train
-    if(EnableStorePrefetchSPB) {
+    when(enableStorePrefetchSPB) {
       prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-    }else {
+    }.otherwise {
       prefetcher.io.sbuffer_enq(i).valid := false.B
       prefetcher.io.sbuffer_enq(i).bits := DontCare
     }
 
     // prefetch req
-    if(EnableStorePrefetchAtCommit) {
+    when(enableStorePrefetchAtCommit) {
       io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
       prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
-    }else {
+    }.otherwise {
       io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
     }
   }

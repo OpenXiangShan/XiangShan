@@ -216,6 +216,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     fuzzer.io.req.ready := l1_pf_req.ready
   }
 
+  val enableStorePrefetchAtIssue = WireInit(Constantin.createRecord("enableStorePrefetchAtIssue" + p(XSCoreParamsKey).HartId.toString))
+  val enableStorePrefetchAtCommit = WireInit(Constantin.createRecord("enableStorePrefetchAtCommit" + p(XSCoreParamsKey).HartId.toString))
+  val enableStorePrefetchSMS = WireInit(Constantin.createRecord("enableStorePrefetchSMS" + p(XSCoreParamsKey).HartId.toString))
+  val enableStorePrefetchSPB = WireInit(Constantin.createRecord("enableStorePrefetchSPB" + p(XSCoreParamsKey).HartId.toString))
+
+  ExcitingUtils.addSource(enableStorePrefetchAtIssue, s"enableStorePrefetchAtIssue_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(enableStorePrefetchAtCommit, s"enableStorePrefetchAtCommit_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(enableStorePrefetchSMS, s"enableStorePrefetchSMS_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSource(enableStorePrefetchSPB, s"enableStorePrefetchSPB_${coreParams.HartId}", ExcitingUtils.Perf)
+
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrappper)
   val vlsq    = Module(new DummyVectorLsq)

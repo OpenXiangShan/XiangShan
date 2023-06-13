@@ -947,8 +947,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // missReqArb port:
   // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 2; disable: main pipe * 1 + load pipe * 2
   // higher priority is given to lower indices
-  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
-  val MissReqPortCount = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+
+  val MissReqPortCount = LoadPipelineWidth + 1 + StorePipelineWidth
   val MainPipeMissReqPort = 0
 
   // Request
@@ -960,11 +960,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp
 
-  if(StorePrefetchL1Enabled) {
-    for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
-  }else {
-    for (w <- 0 until StorePipelineWidth) { stu(w).io.miss_req.ready := false.B }
-  }
+  for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr

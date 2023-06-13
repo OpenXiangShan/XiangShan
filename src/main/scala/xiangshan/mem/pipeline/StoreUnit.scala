@@ -319,6 +319,21 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
+  val enableStorePrefetchAtIssueValue = WireInit(0.U(64.W))
+  val enableStorePrefetchAtCommitValue = WireInit(0.U(64.W))
+  val enableStorePrefetchSMSValue = WireInit(0.U(64.W))
+  val enableStorePrefetchSPBValue = WireInit(0.U(64.W))
+
+  val enableStorePrefetchAtIssue = enableStorePrefetchAtIssueValue =/= 0.U
+  val enableStorePrefetchAtCommit = enableStorePrefetchAtCommitValue =/= 0.U
+  val enableStorePrefetchSMS = enableStorePrefetchSMSValue =/= 0.U
+  val enableStorePrefetchSPB = enableStorePrefetchSPBValue =/= 0.U
+
+  ExcitingUtils.addSink(enableStorePrefetchAtIssueValue, s"enableStorePrefetchAtIssue_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchAtCommitValue, s"enableStorePrefetchAtCommit_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchSMSValue, s"enableStorePrefetchSMS_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(enableStorePrefetchSPBValue, s"enableStorePrefetchSPB_${coreParams.HartId}", ExcitingUtils.Perf)
+
   // feedback tlb miss to RS in store_s2
   io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
   io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
@@ -334,9 +349,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
-  if(EnableStorePrefetchSMS) {
+  when(enableStorePrefetchSMS) {
     io.prefetch_train.valid := store_s2.io.in.fire && io.dcache.resp.fire && !store_s2.io.out.bits.mmio && !store_s2.io.in.bits.tlbMiss && !store_s2.io.in.bits.isHWPrefetch
-  }else {
+  }.otherwise {
     io.prefetch_train.valid := false.B
   }
 
