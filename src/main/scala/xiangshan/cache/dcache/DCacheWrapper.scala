@@ -757,14 +757,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
   println("  DcacheMaxPrefetchEntry: " + MaxPrefetchEntry)
 
+  // Enable L1 Store prefetch
+  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
+  val MetaReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+  val TagReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+
   //----------------------------------------
   // core data structures
   val bankedDataArray = if(EnableDCacheWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
-  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1 + StorePipelineWidth, writePorts = 2))
+  val metaArray = Module(new L1CohMetaArray(readPorts = MetaReadPort, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array
   val accessArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = LoadPipelineWidth + 2))
-  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1 + StorePipelineWidth))
+  val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   bankedDataArray.dump()
 
   //----------------------------------------
@@ -802,11 +807,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     mainPipe.io.meta_write,
     refillPipe.io.meta_write
   )
-  meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
-  meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
+  if(StorePrefetchL1Enabled) {
+    meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
+    meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
+  }else {
+    meta_read_ports.take(LoadPipelineWidth + 1).zip(metaArray.io.read).foreach { case (p, r) => r <> p }
+    meta_resp_ports.take(LoadPipelineWidth + 1).zip(metaArray.io.resp).foreach { case (p, r) => p := r }
+
+    meta_read_ports.drop(LoadPipelineWidth + 1).foreach { case p => p.ready := false.B }
+    meta_resp_ports.drop(LoadPipelineWidth + 1).foreach { case p => p := 0.U.asTypeOf(p) }
+  }
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
-  // read extra meta
+  // read extra meta (exclude stu)
   meta_read_ports.take(LoadPipelineWidth + 1).zip(errorArray.io.read).foreach { case (p, r) => r <> p }
   meta_read_ports.take(LoadPipelineWidth + 1).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
   meta_read_ports.take(LoadPipelineWidth + 1).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
@@ -843,7 +856,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // tag array
-  require(tagArray.io.read.size == (ldu.size + stu.size + 1))
+  if(StorePrefetchL1Enabled) {
+    require(tagArray.io.read.size == (ldu.size + stu.size + 1))
+  }else {
+    require(tagArray.io.read.size == (ldu.size + 1))
+  }
   val tag_write_intend = missQueue.io.refill_pipe_req.valid || mainPipe.io.tag_write_intend
   assert(!RegNext(!tag_write_intend && tagArray.io.write.valid))
   ldu.zipWithIndex.foreach {
@@ -852,11 +869,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       ld.io.tag_resp := tagArray.io.resp(i)
       ld.io.tag_read.ready := !tag_write_intend
   }
-  stu.zipWithIndex.foreach {
-    case (st, i) =>
-      tagArray.io.read(ldu.size + i) <> st.io.tag_read
-      st.io.tag_resp := tagArray.io.resp(ldu.size + i)
-      st.io.tag_read.ready := !tag_write_intend
+  if(StorePrefetchL1Enabled) {
+    stu.zipWithIndex.foreach {
+      case (st, i) =>
+        tagArray.io.read(ldu.size + i) <> st.io.tag_read
+        st.io.tag_resp := tagArray.io.resp(ldu.size + i)
+        st.io.tag_read.ready := !tag_write_intend
+    }
+  }else {
+    stu.foreach {
+      case st =>
+        st.io.tag_read.ready := false.B
+        st.io.tag_resp := 0.U.asTypeOf(st.io.tag_resp)
+    }
   }
   tagArray.io.read.last <> mainPipe.io.tag_read
   mainPipe.io.tag_resp := tagArray.io.resp.last
@@ -977,7 +1002,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // missReqArb port:
   // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 2; disable: main pipe * 1 + load pipe * 2
   // higher priority is given to lower indices
-  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   val MissReqPortCount = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
   val MainPipeMissReqPort = 0
 
