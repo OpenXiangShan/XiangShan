@@ -27,6 +27,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.mem.prefetch.PrefetchReqBundle
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -127,6 +128,15 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isLoadReplay := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
+  }
+
+  def asPrefetchReqBundle(): PrefetchReqBundle = {
+    val res = Wire(new PrefetchReqBundle)
+    res.vaddr := this.vaddr
+    res.paddr := this.paddr
+    res.pc    := this.uop.cf.pc
+
+    res
   }
 }
 

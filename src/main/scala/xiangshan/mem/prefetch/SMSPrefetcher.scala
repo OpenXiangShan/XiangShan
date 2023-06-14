@@ -982,7 +982,7 @@ class PrefetchTrainFilter()(implicit p: Parameters) extends XSModule with HasSMS
 
   require(smsParams.train_filter_size >= enqLen)
 
-  val reqs_ls = io.ld_in.map(_.bits) ++ io.st_in.map(_.bits.asTypeOf(io.ld_in(0).bits.cloneType))
+  val reqs_ls = io.ld_in.map(_.bits.asPrefetchReqBundle()) ++ io.st_in.map(_.bits.asPrefetchReqBundle())
   val reqs_vls = io.ld_in.map(_.valid) ++ io.st_in.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
@@ -1004,9 +1004,7 @@ class PrefetchTrainFilter()(implicit p: Parameters) extends XSModule with HasSMS
 
     when(canAlloc(i)) {
       valids(allocPtr.value) := true.B
-      entries(allocPtr.value).pc := req.uop.cf.pc
-      entries(allocPtr.value).vaddr := req.vaddr
-      entries(allocPtr.value).paddr := req.paddr
+      entries(allocPtr.value) := req
     }
   }
   val allocNum = PopCount(canAlloc)
