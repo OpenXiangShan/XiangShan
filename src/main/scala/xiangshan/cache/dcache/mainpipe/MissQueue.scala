@@ -70,6 +70,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   def isFromAMO = source === AMO_SOURCE.U
   def isFromPrefetch = source >= DCACHE_PREFETCH_SOURCE.U
   def isPrefetchWrite = source === DCACHE_PREFETCH_SOURCE.U && cmd === MemoryOpConstants.M_PFW
+  def isPrefetchRead = source === DCACHE_PREFETCH_SOURCE.U && cmd === MemoryOpConstants.M_PFR
   def hit = req_coh.isValid()
 }
 
@@ -153,7 +154,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def reject_req(new_req: MissReq): Bool = {
     val set_match = addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
     val way_match = req.way_en === new_req.way_en
-    reg_valid() && set_match && way_match
+    // atomic miss in pipeline reg will not merge any request
+    Mux(alloc, (req.isFromAMO) || (set_match && way_match), false.B)
   }
 
   def merge_req(new_req: MissReq): Bool = {
@@ -161,13 +163,14 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     val merge_load = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
     // store merge to a store is disabled, sbuffer should avoid this situation, as store to same address should preserver their program order to match memory model
     val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
-    Mux(alloc, block_match && (merge_load || merge_store), false.B)
+    val merge_prefetch = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromPrefetch
+    Mux(alloc, block_match && (merge_load || merge_store || merge_prefetch), false.B)
   }
   
   // send out acquire as soon as possible
-  // if a new store miss req is about to merge into this pipe reg, don't send acquire now
+  // if a new store miss/store prefetch req is about to merge into this pipe reg, don't send acquire now
   def can_send_acquire(valid: Bool, new_req: MissReq): Bool = {
-    alloc && (!valid || !merge_req(new_req) || !new_req.isFromStore)
+    alloc && (!valid || !merge_req(new_req) || !new_req.isFromStore || !new_req.isPrefetchWrite)
   }
 
   def get_acquire(l2_pf_store_only: Bool): TLBundleA = {
@@ -407,6 +410,16 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     // use the most uptodate meta
     req.req_coh := miss_req_pipe_reg_bits.req_coh
 
+    // store prefetch will update cmd, mainly change read or read intent to write intent
+    when (miss_req_pipe_reg_bits.isPrefetchWrite) {
+      req.cmd := MuxLookup(categorize(req.cmd), req.cmd, Seq(
+        // cmd -> next cmd
+        rd  -> M_PFW,
+        wi  -> M_PFW,
+        wr  -> M_XWR
+      ))
+    }
+
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
@@ -582,9 +595,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.refill_to_ldq.bits.id := io.id
 
   // if the entry has a pending merge req, wait for it
-  // Note: now, only wait for store, because store may acquire T
+  // Note: now, only wait for store/store prefetch, because store may acquire T
   // TODO: support prefetch
-  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
+  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && (miss_req_pipe_reg_bits.isFromStore || miss_req_pipe_reg_bits.isPrefetchWrite))
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
     fromSource = io.id,
@@ -722,6 +735,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("penalty_from_grant_to_refill", !w_refill_resp && w_grantlast)
   XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
   XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
+  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
+  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store_prefetch", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isPrefetchWrite)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(RegNext(primary_fire)), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
