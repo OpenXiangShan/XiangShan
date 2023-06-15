@@ -296,7 +296,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_sqIdx := io.replay.bits.uop.sqIdx
     s0_rsIdx := io.replay.bits.rsIdx
     s0_replayCarry := io.replay.bits.replayCarry
-    s0_mshrid := io.replay.bits.replayInfo.missMSHRId
+    s0_mshrid := io.replay.bits.mshrid
     s0_isLoadReplay := true.B
     s0_sleepIndex := io.replay.bits.sleepIndex
     val replayUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.replay.bits.uop.ctrl.fuOpType))
