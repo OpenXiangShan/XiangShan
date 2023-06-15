@@ -170,7 +170,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   // send out acquire as soon as possible
   // if a new store miss/store prefetch req is about to merge into this pipe reg, don't send acquire now
   def can_send_acquire(valid: Bool, new_req: MissReq): Bool = {
-    alloc && (!valid || !merge_req(new_req) || !new_req.isFromStore || !new_req.isPrefetchWrite)
+    alloc && (!valid || !merge_req(new_req) || !(new_req.isFromStore || new_req.isPrefetchWrite))
   }
 
   def get_acquire(l2_pf_store_only: Bool): TLBundleA = {
