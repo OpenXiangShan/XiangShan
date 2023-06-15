@@ -26,6 +26,7 @@ import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
+import xiangshan.frontend.BranchConf
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new Bundle() {
@@ -38,6 +39,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
     // waittable read result
     val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
+    // confidence read result
+    val confidence = Vec(RenameWidth, Vec(numBr, Input(UInt(BranchConf.sTag.getWidth.W))))
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
@@ -54,6 +57,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val out = new StallReasonIO(RenameWidth)
     }
   })
+
+  dontTouch(io.confidence) // TODO: remove me
 
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))

@@ -349,7 +349,7 @@ trait HasXSParameter {
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
 
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
+  def getBPDComponents(resp_in: BranchPredictionResp)(implicit p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)
   }
   val numBr = coreParams.numBr

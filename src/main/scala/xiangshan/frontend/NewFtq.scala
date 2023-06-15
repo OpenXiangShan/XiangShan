@@ -210,6 +210,11 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   // newest target
   val newest_entry_target = Output(UInt(VAddrBits.W))
   val newest_entry_ptr = Output(new FtqPtr)
+  // last stage meta
+  val branchConf = Valid(new Bundle {
+    val addr = UInt(log2Ceil(FtqSize).W)
+    val data = Vec(numBr, UInt(BranchConf.sTag.getWidth.W))
+  })
 }
 
 
@@ -565,6 +570,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
 
+  io.toBackend.branchConf.valid     := RegNext(io.fromBpu.resp.bits.lastStage.valid)
+  io.toBackend.branchConf.bits.addr := RegNext(io.fromBpu.resp.bits.lastStage.ftq_idx.value)
+  io.toBackend.branchConf.bits.data := RegNext(io.fromBpu.confidence)
 
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
@@ -1381,10 +1389,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_len_map
   }
   val s3_entry_len_map = in_entry_len_map_gen(from_bpu)("s3")
-
-  val to_ifu = io.toIfu.req.bits
-
-
 
   val commit_num_inst_recording_vec = (1 to PredictWidth).map(i => PopCount(commit_inst_mask) === i.U)
   val commit_num_inst_map = (1 to PredictWidth).map(i =>

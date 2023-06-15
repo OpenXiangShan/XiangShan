@@ -413,6 +413,11 @@ trait BasicPrediction extends HasXSParameter {
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
 }
+
+object BranchConf {
+  val lowConfBim :: medConfBim :: highConfBim :: wTag :: nwTag :: nsTag :: sTag :: Nil = Enum(7)
+}
+
 @chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
@@ -580,6 +585,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new SpeculativeInfo
   val last_stage_ftb_entry = new FTBEntry
+  val last_stage_conf = Vec(numBr, UInt(BranchConf.sTag.getWidth.W))
 
   val topdown_info = new FrontendTopDownBundle
 

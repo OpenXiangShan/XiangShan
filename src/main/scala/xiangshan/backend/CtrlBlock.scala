@@ -28,7 +28,7 @@ import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.{BranchConf, FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
@@ -280,6 +280,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
   val rob = outer.rob.module
+
+  val confidence = Module(new SyncDataModuleTemplate(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)), FtqSize, DecodeWidth, 1))
+  confidence.io.wen.head   := io.frontend.fromFtq.branchConf.fire
+  confidence.io.waddr.head := io.frontend.fromFtq.branchConf.bits.addr
+  confidence.io.wdata.head := io.frontend.fromFtq.branchConf.bits.data
+  confidence.io.raddr.zip(io.frontend.cfVec).foreach { case (raddr, cf) =>
+    raddr := cf.bits.ftqPtr.value
+  }
+  confidence.io.rdata zip io.frontend.cfVec zip rename.io.confidence foreach { case ((rdata, cf), conf) =>
+    conf := HoldUnless(rdata, RegNext(cf.fire))
+  }
 
   // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
   val PCMEMIDX_LD = 5

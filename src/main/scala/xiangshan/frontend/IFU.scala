@@ -426,6 +426,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
 
+  val f2_pd_with_idx = WireDefault(f2_pd)
+  f2_pd_with_idx(0).brIdx := 0.U
+  for (i <- 1 until f2_pd.length) {
+    f2_pd_with_idx(i).brIdx := VecInit(f2_pd.take(i).map(_.brType)).asUInt.orR.asUInt
+  }
+
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
@@ -465,7 +471,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     expander.io.out.bits
   })
 
-  val f3_pd             = RegEnable(next = f2_pd,          enable = f2_fire)
+  val f3_pd             = RegEnable(next = f2_pd_with_idx, enable = f2_fire)
   val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
   val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
   val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)

@@ -229,6 +229,7 @@ class FakePredictor(implicit p: Parameters) extends BasePredictor {
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   val resp = DecoupledIO(new BpuToFtqBundle())
+  val confidence = Output(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)))
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
@@ -425,6 +426,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.lastBrNumOH := s3_last_br_num_oh
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.afhob       := s3_ahead_fh_oldest_bits
+  io.bpu_to_ftq.confidence := predictors.io.out.last_stage_conf
 
   npcGen.register(true.B, s0_pc_reg, Some("stallPC"), 0)
   foldedGhGen.register(true.B, s0_folded_gh_reg, Some("stallFGH"), 0)

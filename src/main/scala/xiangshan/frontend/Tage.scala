@@ -126,6 +126,7 @@ class TageMeta(implicit p: Parameters)
   val basecnts = Vec(numBr, UInt(2.W))
   val allocates = Vec(numBr, UInt(TageNTables.W))
   val takens = Vec(numBr, Bool())
+  val confidence = Vec(numBr, UInt(BranchConf.sTag.getWidth.W))
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
@@ -578,6 +579,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_finalAltPreds    = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
+  val s1_confidence       = Wire(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)))
   val s1_useAltOnNa       = Wire(Vec(numBr, Bool()))
 
   val s2_provideds        = RegEnable(s1_provideds, io.s1_fire)
@@ -590,6 +592,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_tageTakens       = RegEnable(s1_tageTakens, io.s1_fire)
   val s2_finalAltPreds    = RegEnable(s1_finalAltPreds, io.s1_fire)
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire)
+  val s2_confidence       = RegEnable(s1_confidence, io.s1_fire)
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire)
 
   io.out := io.in.bits.resp_in(0)
@@ -676,20 +679,29 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
     val s1_bimCtr = bt.io.s1_cnt(i)
+    val s1_tagCtr = providerInfo.resp.ctr
+    val bim_conf = Mux1H(Seq(
+      (s1_bimCtr === "b10".U || s1_bimCtr === "b01".U) -> BranchConf.lowConfBim,
+      (s1_bimCtr === "b11".U || s1_bimCtr === "b00".U) -> BranchConf.highConfBim
+    ))
+    val tag_conf = Mux1H(Seq(
+      (s1_tagCtr === "b100".U || s1_tagCtr === "b011".U) -> BranchConf.wTag,
+      (s1_tagCtr === "b101".U || s1_tagCtr === "b010".U) -> BranchConf.nwTag,
+      (s1_tagCtr === "b110".U || s1_tagCtr === "b001".U) -> BranchConf.nsTag,
+      (s1_tagCtr === "b111".U || s1_tagCtr === "b000".U) -> BranchConf.sTag
+    ))
     s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
-    s1_tageTakens(i) := 
-      Mux(s1_altUsed(i),
-        s1_bimCtr(1),
-        providerInfo.resp.ctr(TageCtrBits-1)
-      )
+    s1_tageTakens(i)    := Mux(s1_altUsed(i), s1_bimCtr(1), s1_tagCtr(TageCtrBits-1))
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
+    s1_confidence(i)    := Mux(provided && !s1_altUsed(i), tag_conf, bim_conf)
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire)
     resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens(i), io.s2_fire)
     resp_meta.takens(i)     := RegEnable(s2_tageTakens(i), io.s2_fire)
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire)
+    resp_meta.confidence(i) := RegEnable(s2_confidence(i), io.s2_fire)
 
     when (io.ctrl.tage_enable) {
       resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
