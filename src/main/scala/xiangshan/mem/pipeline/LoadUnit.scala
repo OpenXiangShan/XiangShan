@@ -274,7 +274,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.fastReplay.bits.uop
     s0_isFirstIssue := false.B
     s0_sqIdx := io.fastReplay.bits.uop.sqIdx
-    s0_replayCarry := io.fastReplay.bits.replayCarry
+    s0_replayCarry := io.fastReplay.bits.replayInfo.replayCarry
     s0_rsIdx := io.fastReplay.bits.rsIdx
     s0_isLoadReplay := io.fastReplay.bits.isLoadReplay
     s0_sleepIndex := io.fastReplay.bits.sleepIndex
