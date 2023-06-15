@@ -276,7 +276,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.fastReplay.bits.uop
     s0_isFirstIssue := false.B
     s0_sqIdx := io.fastReplay.bits.uop.sqIdx
-    s0_replayCarry := io.fastReplay.bits.replayCarry
+    s0_replayCarry := io.fastReplay.bits.replayInfo.replayCarry
     s0_rsIdx := io.fastReplay.bits.rsIdx
     s0_isLoadReplay := io.fastReplay.bits.isLoadReplay
     s0_sleepIndex := io.fastReplay.bits.sleepIndex
@@ -624,7 +624,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                       !s2_is_prefetch 
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
   val s2_fullForward = WireInit(false.B)
-
+  val s2_bank_conflict = io.bankConflict && !forward_D_or_mshr_valid
 
   io.s2_forward_fail := s2_forward_fail
   io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
@@ -648,7 +648,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                        (!s2_wait_store &&
                        !s2_tlb_miss &&
                        s2_cache_replay) || 
-                      (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId))) &&
+                      (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId)) || 
+                      s2_bank_conflict) &&
                        !s2_exception &&
                        !s2_mmio &&
                        !s2_is_prefetch
@@ -819,7 +820,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.out.bits.replayInfo.cause(LoadReplayCauses.waitStore) := s2_wait_store && !s2_mmio && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
   io.out.bits.replayInfo.cause(LoadReplayCauses.schedError) := (io.in.bits.replayInfo.cause(LoadReplayCauses.schedError) || s2_schedError) && !s2_mmio && !s2_is_prefetch
-  io.out.bits.replayInfo.cause(LoadReplayCauses.bankConflict) := io.dcacheBankConflict && !s2_mmio && !s2_is_prefetch
+  io.out.bits.replayInfo.cause(LoadReplayCauses.bankConflict) := s2_bank_conflict && !s2_mmio && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss 
   if (EnableFastForward) {
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := s2_cache_replay && !s2_is_prefetch && !s2_mmio && !s2_exception && !fullForward
