@@ -624,7 +624,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                       !s2_is_prefetch 
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
   val s2_fullForward = WireInit(false.B)
-  val s2_bank_conflict = io.bankConflict && !forward_D_or_mshr_valid
+  val s2_bank_conflict = io.dcacheBankConflict && !forward_D_or_mshr_valid
 
   io.s2_forward_fail := s2_forward_fail
   io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
