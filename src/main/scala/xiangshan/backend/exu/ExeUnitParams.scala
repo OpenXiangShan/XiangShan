@@ -7,11 +7,13 @@ import xiangshan.HasXSParameter
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, WbConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
 
 case class ExeUnitParams(
+  name          : String,
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[WbConfig],
   rfrPortConfigs: Seq[Seq[RdConfig]],
@@ -19,6 +21,10 @@ case class ExeUnitParams(
   implicit
   val schdType: SchedulerType,
 ) {
+  // calculated configs
+  var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
+  var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
+
   val numIntSrc: Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc: Int = fuConfigs.map(_.numFpSrc).max
   val numVecSrc: Int = fuConfigs.map(_.numVecSrc).max
@@ -53,18 +59,62 @@ case class ExeUnitParams(
   val writeIntFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
   val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf || x.writeVecRf)
 
-  val latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_&&_)
-  val intLatencyCertain = if (writeIntFuConfigs.nonEmpty) writeIntFuConfigs.map(x => x.latency.latencyVal.nonEmpty).fold(true)(_ && _) else false
-  val vfLatencyCertain = if (writeVfFuConfigs.nonEmpty) writeVfFuConfigs.map(x => x.latency.latencyVal.nonEmpty).fold(true)(_ && _) else false
+  /**
+    * Check if this exu has certain latency
+    */
+  def latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _)
+  def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
+  def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
 
-  val fuLatencyMap: Option[Seq[(Int, Int)]] = if (latencyCertain) Some(fuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
-  val latencyValMax: Option[Int] = fuLatencyMap.map(x => x.map(_._2).max)
+  /**
+    * Get mapping from FuType to Latency value.
+    * If [[latencyCertain]] is false, get empty [[Map]]
+    *
+    * @return Map[FuType, Latency]
+    */
+  def fuLatencyMap: Map[Int, Int] = {
+    if (latencyCertain)
+      fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
 
-  val intFuLatencyMap = if (intLatencyCertain) Some(writeIntFuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
-  val intLatencyValMax = intFuLatencyMap.map(x => x.map(_._2).max)
+  /**
+    * Get set of latency of function units.
+    * If [[latencyCertain]] is false, get empty [[Set]]
+    *
+    * @return Set[Latency]
+    */
+  def fuLatancySet: Set[Int] = fuLatencyMap.values.toSet
 
-  val vfFuLatencyMap = if (vfLatencyCertain) Some(writeVfFuConfigs.map(y => (y.fuType, y.latency.latencyVal.get))) else None
-  val vfLatencyValMax = vfFuLatencyMap.map(x => x.map(_._2).max)
+  def latencyValMax: Int = fuLatancySet.fold(0)(_ max _)
+
+  def intFuLatencyMap: Map[Int, Int] = {
+    if (intLatencyCertain)
+      writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
+
+  def intLatencyValMax: Int = intFuLatencyMap.values.fold(0)(_ max _)
+
+  def vfFuLatencyMap: Map[Int, Int] = {
+    if (vfLatencyCertain)
+      writeVfFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
+
+  def vfLatencyValMax: Int = vfFuLatencyMap.values.fold(0)(_ max _)
+
+  /**
+    * Check if this exu has fixed latency
+    */
+  def isFixedLatency: Boolean = {
+    if (latencyCertain)
+      return fuConfigs.map(x => x.latency.latencyVal.get == fuConfigs.head.latency.latencyVal.get).reduce(_ && _)
+    false
+  }
 
   def hasCSR: Boolean = fuConfigs.map(_.isCsr).reduce(_ || _)
 
@@ -109,6 +159,16 @@ case class ExeUnitParams(
   }
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
+
+  def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
+    this.iqWakeUpSourcePairs = cfgs.filter(_.source == this.name)
+    this.iqWakeUpSinkPairs = cfgs.filter(_.sink == this.name)
+    require(this.isIQWakeUpSource && !this.hasUncertainLatency)
+  }
+
+  def isIQWakeUpSource = this.iqWakeUpSourcePairs.nonEmpty
+
+  def isIQWakeUpSink = this.iqWakeUpSinkPairs.nonEmpty
 
   def getIntWBPort = {
     wbPortConfigs.collectFirst {

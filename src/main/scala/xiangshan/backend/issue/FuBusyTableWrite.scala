@@ -3,63 +3,71 @@ package xiangshan.backend.issue
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.HasCircularQueuePtrHelper
+import utils.MapUtils
 import xiangshan._
-import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, IssueQueueIssueBundle, IssueQueueWakeUpBundle}
-import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Utils
 
-class FuBusyTableWrite(val idx: Int) (implicit  p: Parameters, iqParams: IssueBlockParams) extends XSModule {
+class FuBusyTableWrite(val idx: Int) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
+  private val latencyValMax: Int = iqParams.exuBlockParams(idx).latencyValMax
+  private val tableSize = latencyValMax + 1
+  private val fuLatencyMap: Map[Int, Int] = iqParams.exuBlockParams(idx).fuLatencyMap
   val io = IO(new FuBusyTableWriteIO(idx))
 
-  val fuLatencyMap: Option[Seq[(Int, Int)]] = iqParams.exuBlockParams(idx).fuLatencyMap
-  val latencyValMax: Option[Int] = iqParams.exuBlockParams(idx).latencyValMax
+  val deqResp = io.in.deqResp(idx)
+  val og0Resp = io.in.og0Resp(idx)
+  val og1Resp = io.in.og1Resp(idx)
+  val fuTypeVec = io.in.fuTypeRegVec
 
-  val deqResp = io.in.deqResp
-  val og0Resp = io.in.og0Resp
-  val og1Resp = io.in.og1Resp
-  val fuTypeRegVec = io.in.fuTypeRegVec
+  // instance of FuBusyTable insists only when latencyValMax > 0
+  private val fuBusyTable = RegInit(0.U(tableSize.W))
 
-  val fuBusyTable = Reg(UInt(latencyValMax.get.W)) //instance of FuBusyTable insists only when latencyValMax > 0
+  private val fuBusyTableNext = Wire(UInt(tableSize.W))
 
-  // fuBusyTable write
-  val isLatencyNumVecDeq = Mux(deqResp(idx).valid && deqResp(idx).bits.respType === RSFeedbackType.issueSuccess,
-    Cat((0 until latencyValMax.get).map { case num =>
-      val latencyNumFuType = fuLatencyMap.get.filter(_._2 == num + 1).map(_._1) // futype with latency equal to num+1
-      val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(deqResp(idx).bits.addrOH)) === futype.U)).asUInt.orR // The latency of the deq inst is Num
-      isLatencyNum
-    }),
-    0.U
-  ) // |  when N cycle is 2 latency, N+1 cycle could not 1 latency
-  val isLatencyNumVecOg0 = WireInit(~(0.U.asTypeOf(isLatencyNumVecDeq)))
-  isLatencyNumVecOg0 := Mux(og0Resp(idx).valid && (og0Resp(idx).bits.respType === RSFeedbackType.rfArbitFail || og0Resp(idx).bits.respType === RSFeedbackType.fuBusy),
-    ~(Cat(Cat((0 until latencyValMax.get).map { case num =>
-      val latencyNumFuType = fuLatencyMap.get.filter(_._2 == num + 1).map(_._1) // futype with latency equal to num+1
-      val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(og0Resp(idx).bits.addrOH)) === futype.U)).asUInt.orR // The latency of the deq inst is Num
-      isLatencyNum
-    }), 0.U(1.W))),
-    ~(0.U.asTypeOf(isLatencyNumVecDeq))
-  )
-  val isLatencyNumVecOg1 = WireInit(~(0.U.asTypeOf(isLatencyNumVecDeq)))
-  isLatencyNumVecOg1 := Mux(og1Resp(idx).valid && og1Resp(idx).bits.respType === RSFeedbackType.fuBusy,
-    ~(Cat(Cat((0 until latencyValMax.get).map { case num =>
-      val latencyNumFuType = fuLatencyMap.get.filter(_._2 == num + 1).map(_._1) // futype with latency equal to num+1
-      val isLatencyNum = Cat(latencyNumFuType.map(futype => fuTypeRegVec(OHToUInt(og1Resp(idx).bits.addrOH)) === futype.U)).asUInt.orR // The latency of the deq inst is Num
-      isLatencyNum
-    }), 0.U(2.W))),
-    ~(0.U.asTypeOf(isLatencyNumVecDeq))
-  )
+  fuBusyTable := fuBusyTableNext
 
-  fuBusyTable := ((fuBusyTable << 1.U).asUInt & isLatencyNumVecOg0.asUInt & isLatencyNumVecOg1.asUInt) | isLatencyNumVecDeq
+  /**
+    * Map[latency, Set[fuType]]
+    */
+  private val latMappedFuTypeSet: Map[Int, Set[Int]] = MapUtils.groupByValueUnique(fuLatencyMap)
+
+  private val deqRespSuccess = deqResp.valid && deqResp.bits.respType === RSFeedbackType.issueSuccess
+  private val og0RespFail = og0Resp.valid && og0Resp.bits.respType === RSFeedbackType.rfArbitFail
+  private val og1RespFail = og1Resp.valid && og1Resp.bits.respType === RSFeedbackType.fuBusy
+
+  private val deqRespMatchVec = getMatchVecFromResp(deqResp)
+  private val og0RespMatchVec = getMatchVecFromResp(og0Resp)
+  private val og1RespMatchVec = getMatchVecFromResp(og1Resp)
+
+  def getMatchVecFromResp(resp: Valid[IssueQueueDeqRespBundle]) : Vec[Bool] = {
+    VecInit((0 until tableSize).map {
+      lat =>
+        Cat(
+          latMappedFuTypeSet.getOrElse(lat, Set()).map(
+            fuType => Mux1H(resp.bits.addrOH, fuTypeVec) === fuType.U
+          ).toSeq
+        ).orR
+    })
+  }
+
+  private val fuBusyTableShift = (fuBusyTable >> 1).asUInt
+  private val deqRespSet = Mux(deqRespSuccess, deqRespMatchVec.asUInt >> 1, Utils.NZeros(tableSize))
+  private val og0RespClear = Mux(og0RespFail, og0RespMatchVec.asUInt >> 2, Utils.NZeros(tableSize))
+  private val og1RespClear = Mux(og1RespFail, og1RespMatchVec.asUInt >> 3, Utils.NZeros(tableSize))
+
+  // Just for more readable verilog
+  dontTouch(fuBusyTableShift)
+  dontTouch(deqRespSet)
+  dontTouch(og0RespClear)
+  dontTouch(og1RespClear)
+
+  fuBusyTableNext := fuBusyTableShift & (~og0RespClear).asUInt & (~og1RespClear).asUInt | deqRespSet.asUInt
 
   io.out.fuBusyTable := fuBusyTable
-
 }
 
 class FuBusyTableWriteIO(val idx: Int)(implicit p: Parameters, iqParams: IssueBlockParams) extends XSBundle {
+  private val tableSize = iqParams.exuBlockParams(idx).latencyValMax + 1
   val in = new Bundle {
     val deqResp = Vec(iqParams.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
     val og0Resp = Vec(iqParams.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
@@ -67,6 +75,6 @@ class FuBusyTableWriteIO(val idx: Int)(implicit p: Parameters, iqParams: IssueBl
     val fuTypeRegVec = Input(Vec(iqParams.numEntries, FuType()))
   }
   val out = new Bundle {
-    val fuBusyTable = Output(UInt(iqParams.exuBlockParams(idx).latencyValMax.get.W))
+    val fuBusyTable = Output(UInt(tableSize.W))
   }
 }

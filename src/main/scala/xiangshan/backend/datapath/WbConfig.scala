@@ -15,6 +15,17 @@ object WbConfig {
     def writeInt = dataCfg == IntData()
     def writeFp = dataCfg == FpData()
     def writeVec = dataCfg == VecData()
+
+    override def toString: String = {
+      var res = dataCfg match {
+        case IntData() => "I"
+        case FpData() => "F"
+        case VecData() => "V"
+        case _ => "?"
+      }
+      res += s"($port)"
+      res
+    }
   }
 
   sealed abstract class ExuWB extends WbConfig

@@ -566,6 +566,24 @@ package object xiangshan {
     def X      = BitPat("b0000")
 
     def apply() = UInt(4.W)
+
+    def mkString(immType: UInt) : String = {
+      val strMap = Map(
+        IMM_S.litValue         -> "S",
+        IMM_SB.litValue        -> "SB",
+        IMM_U.litValue         -> "U",
+        IMM_UJ.litValue        -> "UJ",
+        IMM_I.litValue         -> "I",
+        IMM_Z.litValue         -> "Z",
+        IMM_B6.litValue        -> "B6",
+        IMM_OPIVIS.litValue    -> "VIS",
+        IMM_OPIVIU.litValue    -> "VIU",
+        IMM_VSETVLI.litValue   -> "VSETVLI",
+        IMM_VSETIVLI.litValue  -> "VSETIVLI",
+        INVALID_INSTR.litValue -> "INVALID",
+      )
+      strMap(immType.litValue)
+    }
   }
 
   object UopSplitType {
