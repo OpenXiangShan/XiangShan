@@ -797,11 +797,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
-  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(XLEN.W))))
-  for (bank_index <- 0 until DCacheBanks) {
-    data_read_oh(bank_index) := PopCount(Fill(DCacheWays, data_banks(bank_index).io.r.en.asUInt))
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheSetDiv)(0.U(XLEN.W))))
+  for (div_index <- 0 until DCacheSetDiv){
+    val temp = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(XLEN.W))))
+    for (bank_index <- 0 until DCacheBanks) {
+      temp(bank_index) := PopCount(Fill(DCacheWays, data_banks(div_index)(bank_index).io.r.en.asUInt))
+    }
+    data_read_oh(div_index) := temp.foldLeft(0.U)(_ + _)
   }
-  XSPerfAccumulate("data_read_counter", data_read_oh.reduce(_ + _))
+  XSPerfAccumulate("data_read_counter", data_read_oh.foldLeft(0.U)(_ + _))
 
   // read result: expose banked read result
   io.readline_resp := bank_result
