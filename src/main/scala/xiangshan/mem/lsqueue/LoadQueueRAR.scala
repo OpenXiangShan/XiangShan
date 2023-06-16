@@ -94,18 +94,16 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // Allocate logic 
   val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-  val enqOffset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    enqOffset(w) := PopCount(needEnqueue.take(w)) 
     freeList.io.allocateReq(w) := needEnqueue(w)
 
     //  Allocate ready 
-    enqValidVec(w) := freeList.io.canAllocate(enqOffset(w))
-    enqIndexVec(w) := freeList.io.allocateSlot(enqOffset(w))
+    enqValidVec(w) := freeList.io.canAllocate(w)
+    enqIndexVec(w) := freeList.io.allocateSlot(w)
     enq.ready := Mux(needEnqueue(w), enqValidVec(w), true.B)
 
     val enqIndex = enqIndexVec(w)
@@ -127,10 +125,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       uop(enqIndex) := enq.bits.uop
       released(enqIndex) :=
         enq.bits.datavalid &&
-        release2Cycle.valid &&
+        (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
     }
   }
 
@@ -188,13 +186,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     //  Load-to-Load violation check result
     val ldLdViolationMask = WireInit(matchMask & RegNext(released.asUInt))
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.replayFromFetch := ldLdViolationMask.orR || RegNext(ldLdViolation(w))
+    query.resp.bits.replayFromFetch := ldLdViolationMask.orR
   }
 
-  (0 until LoadPipelineWidth).map(w => {
-    ldLdViolation(w) := (release1Cycle.valid && io.query(w).req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)) ||
-                        (release2Cycle.valid && io.query(w).req.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
-  })
 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle

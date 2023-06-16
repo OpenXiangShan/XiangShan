@@ -128,6 +128,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val releaseIdBase = cfg.nMissEntries
 
   // banked dcache support
+  val DCacheSetDiv = 1
   val DCacheSets = cacheParams.nSets
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8 // hardcoded
@@ -137,6 +138,8 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheWordBytes = DCacheWordBits / 8
   require(DCacheSRAMRowBits == 64)
 
+  val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
+  val DCacheSetBits = log2Ceil(DCacheSets)
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
   val DCacheSizeBytes = DCacheSizeBits / 8
   val DCacheSizeWords = DCacheSizeBits / 64 // TODO
@@ -182,9 +185,29 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val errWritePort = tagWritePort + 1
   val wbPort = errWritePort + 1
 
+  def set_to_dcache_div(set: UInt) = {
+    require(set.getWidth >= DCacheSetBits)
+    if (DCacheSetDivBits == 0) 0.U else set(DCacheSetDivBits-1, 0)
+  }
+
+  def set_to_dcache_div_set(set: UInt) = {
+    require(set.getWidth >= DCacheSetBits)
+    set(DCacheSetBits - 1, DCacheSetDivBits)
+  }
+
   def addr_to_dcache_bank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)
     addr(DCacheSetOffset-1, DCacheBankOffset)
+  }
+
+  def addr_to_dcache_div(addr: UInt) = {
+    require(addr.getWidth >= DCacheAboveIndexOffset)
+    if(DCacheSetDivBits == 0) 0.U else addr(DCacheSetOffset + DCacheSetDivBits - 1, DCacheSetOffset)
+  }
+
+  def addr_to_dcache_div_set(addr: UInt) = {
+    require(addr.getWidth >= DCacheAboveIndexOffset)
+    addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
   }
 
   def addr_to_dcache_set(addr: UInt) = {
@@ -702,6 +725,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   println("DCache:")
   println("  DCacheSets: " + DCacheSets)
+  println("  DCacheSetDiv: " + DCacheSetDiv)
   println("  DCacheWays: " + DCacheWays)
   println("  DCacheBanks: " + DCacheBanks)
   println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits)
@@ -979,6 +1003,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
   XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)
+  
+  XSPerfAccumulate("miss_queue_has_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) >= 1.U)
+  XSPerfAccumulate("miss_queue_has_muti_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U)
+  XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
 
   // forward missqueue
   (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
