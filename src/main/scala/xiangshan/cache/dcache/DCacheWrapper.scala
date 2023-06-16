@@ -227,6 +227,16 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
+  def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
+    require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
+    if(blockOffBits + idxBits > pgIdxBits) {
+      vaddr0(blockOffBits + idxBits - 1, pgIdxBits) === vaddr1(blockOffBits + idxBits - 1, pgIdxBits)
+    }else {
+      // no alias problem
+      true.B
+    }
+  }
+
   def arbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],

@@ -180,7 +180,7 @@ case class XSCoreParameters
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
-  EnableStorePrefetchAtIssue: Boolean = false,
+  EnableStorePrefetchAtIssue: Boolean = true,
   EnableStorePrefetchAtCommit: Boolean = false,
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = true,
