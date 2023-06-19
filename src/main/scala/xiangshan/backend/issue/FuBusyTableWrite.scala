@@ -8,16 +8,14 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils
 
-class FuBusyTableWrite(val idx: Int) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
-  private val latencyValMax: Int = iqParams.exuBlockParams(idx).latencyValMax
+class FuBusyTableWrite(fuLatencyMap: Map[Int, Int]) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
+  private val latencyValMax: Int = fuLatencyMap.values.fold(0)(_ max _)
   private val tableSize = latencyValMax + 1
-  private val fuLatencyMap: Map[Int, Int] = iqParams.exuBlockParams(idx).fuLatencyMap
-  val io = IO(new FuBusyTableWriteIO(idx))
+  val io = IO(new FuBusyTableWriteIO(latencyValMax))
 
-  val deqResp = io.in.deqResp(idx)
-  val og0Resp = io.in.og0Resp(idx)
-  val og1Resp = io.in.og1Resp(idx)
-  val fuTypeVec = io.in.fuTypeRegVec
+  val deqResp = io.in.deqResp
+  val og0Resp = io.in.og0Resp
+  val og1Resp = io.in.og1Resp
 
   // instance of FuBusyTable insists only when latencyValMax > 0
   private val fuBusyTable = RegInit(0.U(tableSize.W))
@@ -44,7 +42,7 @@ class FuBusyTableWrite(val idx: Int) (implicit p: Parameters, iqParams: IssueBlo
       lat =>
         Cat(
           latMappedFuTypeSet.getOrElse(lat, Set()).map(
-            fuType => Mux1H(resp.bits.addrOH, fuTypeVec) === fuType.U
+            fuType => resp.bits.fuType === fuType.U
           ).toSeq
         ).orR
     })
@@ -64,17 +62,18 @@ class FuBusyTableWrite(val idx: Int) (implicit p: Parameters, iqParams: IssueBlo
   fuBusyTableNext := fuBusyTableShift & (~og0RespClear).asUInt & (~og1RespClear).asUInt | deqRespSet.asUInt
 
   io.out.fuBusyTable := fuBusyTable
+  io.out.deqRespSet := deqRespSet.asUInt
 }
 
-class FuBusyTableWriteIO(val idx: Int)(implicit p: Parameters, iqParams: IssueBlockParams) extends XSBundle {
-  private val tableSize = iqParams.exuBlockParams(idx).latencyValMax + 1
+class FuBusyTableWriteIO(latencyValMax: Int)(implicit p: Parameters, iqParams: IssueBlockParams) extends XSBundle {
+  private val tableSize = latencyValMax + 1
   val in = new Bundle {
-    val deqResp = Vec(iqParams.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-    val og0Resp = Vec(iqParams.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-    val og1Resp = Vec(iqParams.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-    val fuTypeRegVec = Input(Vec(iqParams.numEntries, FuType()))
+    val deqResp =  Flipped(ValidIO(new IssueQueueDeqRespBundle))
+    val og0Resp = Flipped(ValidIO(new IssueQueueDeqRespBundle))
+    val og1Resp = Flipped(ValidIO(new IssueQueueDeqRespBundle))
   }
   val out = new Bundle {
     val fuBusyTable = Output(UInt(tableSize.W))
+    val deqRespSet = Output(UInt(tableSize.W))
   }
 }
