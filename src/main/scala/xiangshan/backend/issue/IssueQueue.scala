@@ -86,7 +86,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val vfWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableWrite(x.vfFuLatencyMap))) }
   val vfWbBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableRead(x.vfFuLatencyMap))) }
 
-  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, ValidIO[Redirect]]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, () => Module(
+  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, ValidIO[Redirect]]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
     new MultiWakeupQueue(
       new ExuInput(x),
       ValidIO(new Redirect) ,
