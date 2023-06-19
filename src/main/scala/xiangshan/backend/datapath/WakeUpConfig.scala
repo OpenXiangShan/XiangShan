@@ -3,6 +3,7 @@ package xiangshan.backend.datapath
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.IssueQueueWakeUpBundle
 import xiangshan.backend.exu.ExeUnitParams
 
@@ -20,8 +21,8 @@ trait WakeUpPoint {
 }
 
 class WakeUpSource(val name: String) extends WakeUpPoint {
-  def genIQWakeUpValidBundle(implicit p: Parameters): ValidIO[IssueQueueWakeUpBundle] = {
-    ValidIO(new IssueQueueWakeUpBundle(name))
+  def genIQWakeUpValidBundle(backendParam: BackendParams): ValidIO[IssueQueueWakeUpBundle] = {
+    ValidIO(new IssueQueueWakeUpBundle(name, backendParam))
   }
 }
 

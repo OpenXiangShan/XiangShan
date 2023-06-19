@@ -43,7 +43,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
-  val wakeupFromWB = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle("WB"))))
+  val wakeupFromWB = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle("WB", params.backendParam))))
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueWakeUpBundle]] = Flipped(params.genWakeUpSinkValidBundle)
 
   // Outputs

@@ -3,6 +3,7 @@ package xiangshan.backend.issue
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import utils.SeqUtils
+import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueWakeUpBundle}
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.WbConfig
@@ -16,6 +17,8 @@ case class SchdBlockParams(
   rfDataWidth     : Int,
   numUopIn        : Int,
 ) {
+  var backendParam: BackendParams = null
+
   def isMemSchd: Boolean = schdType == MemScheduler()
 
   def isIntSchd: Boolean = schdType == IntScheduler()
@@ -104,6 +107,10 @@ case class SchdBlockParams(
   // Todo: 14R8W
   def numIntRfRead: Int = numIntRfReadByExu
 
+  def bindBackendParam(param: BackendParams): Unit = {
+    backendParam = param
+  }
+
   def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
   }
@@ -131,11 +138,11 @@ case class SchdBlockParams(
   }
 
   def genWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name))))
+    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
   }
 
   def genWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpOutExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name))))
+    MixedVec(this.wakeUpOutExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
   }
 
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)
