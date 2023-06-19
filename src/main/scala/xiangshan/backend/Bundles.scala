@@ -209,7 +209,7 @@ object Bundles {
     var idx = 0
   }
 
-  class IssueQueueWakeUpBundle(pregIdxWidth: Int, wakeupSourceStr: String) extends Bundle with BundleSource {
+  class IssueQueueWakeUpBundle(pregIdxWidth: Int, wakeupSourceStr: String, val exuIdx: Int) extends Bundle with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
@@ -217,16 +217,12 @@ object Bundles {
 
     this.wakeupSource = wakeupSourceStr
 
-    var exuIdx = -1
-
     def this(pregIdxWidth: Int) = {
-      this(pregIdxWidth, "undefined")
+      this(pregIdxWidth, "undefined", -1)
     }
 
-    def this(wakeupSource: String)(implicit p: Parameters) = {
-      this(p(XSCoreParamsKey).PregIdxWidthMax, wakeupSource)
-      val exuParams = p(XSCoreParamsKey).backendParams.allExuParams
-      this.exuIdx = exuParams.find(_.name == wakeupSource).get.exuIdx
+    def this(wakeupSource: String, backendParam: BackendParams) = {
+      this(backendParam.pregParams.map(_.addrWidth).max, wakeupSource, backendParam.getExuIdx(wakeupSource))
     }
 
     /**
@@ -323,7 +319,7 @@ object Bundles {
     ))
 
     val bypass = new Bundle {
-      val exuOH = ExuOH()
+      val exuOH = Vec(exuParams.numRegSrc, ExuOH())
     }
 
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data

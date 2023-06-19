@@ -109,6 +109,14 @@ case class BackendParams(
     datapath.WbArbiterParams(vfWbCfgs, vfPregParams)
   }
 
+  def getExuIdx(name: String): Int = {
+    val exuParams = allExuParams
+    if (name != "WB")
+      exuParams.find(_.name == name).get.exuIdx
+    else
+      -1
+  }
+
   def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
   def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
