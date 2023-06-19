@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
-import utils.XSError
+import utils.{OptionWrapper, XSError}
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
@@ -30,7 +30,7 @@ class StatusEntry(implicit p:Parameters, params: IssueBlockParams) extends Bundl
   val firstIssue = Bool()
   val blocked = Bool()          // for some block reason
   // if waked up by iq, set when waked up by iq last cycle
-  val srcWakeUpIQOH = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
+  val srcWakeUpIQOH = OptionWrapper(params.numWakeupFromIQ > 0, (Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
   // mem only
   val mem = if (params.isMemAddrIQ) Some(new StatusEntryMemPart) else None
 
@@ -67,7 +67,7 @@ class StatusArrayIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val valid = Output(UInt(params.numEntries.W))
   val canIssue = Output(UInt(params.numEntries.W))
   val clear = Output(UInt(params.numEntries.W))
-  val srcWakeUpIQOH = Output(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+  val srcWakeUpIQOH = OptionWrapper(params.numWakeupFromIQ > 0, Output(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))))
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
   // wakeup
@@ -141,14 +141,17 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
       statusNext.srcState.zip(status.srcState).zip(srcWakeUpVec(i)).foreach { case ((stateNext, state), wakeup) =>
         stateNext := wakeup | state
       }
-      statusNext.srcWakeUpIQOH.zip(status.srcState).zip(srcWakeUpByIQMatrix(i)).foreach {
-        case ((srcBypassExuOH: Vec[Bool], srcReady), wakeUpByIQOH: Vec[Bool]) =>
-          // only set one cycle
-          srcBypassExuOH := Mux(
-            !srcReady.asBool,
-            wakeUpByIQOH,
-            0.U.asTypeOf(srcBypassExuOH)
-          )
+      statusNext.srcWakeUpIQOH.foreach {
+        srcWakeUpIQOH =>
+          srcWakeUpIQOH.zip(status.srcState).zip(srcWakeUpByIQMatrix(i)).foreach {
+            case ((srcBypassExuOH: Vec[Bool], srcReady), wakeUpByIQOH: Vec[Bool]) =>
+              // only set one cycle
+              srcBypassExuOH := Mux(
+                !srcReady.asBool,
+                wakeUpByIQOH,
+                0.U.asTypeOf(srcBypassExuOH)
+              )
+          }
       }
       statusNext.blocked := false.B // Todo
       statusNext.ready := statusNext.srcReady || status.ready
@@ -175,10 +178,14 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   srcWakeUpByIQMatrix.zipWithIndex.foreach { case (wakeups: Vec[Vec[Bool]], i) =>
-    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueWakeUpBundle]) =>
-      bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType, bundle.valid)
-    ).transpose
-    wakeups := wakeupVec.map(VecInit(_))
+    if (io.wakeUpFromIQ.isEmpty) {
+      wakeups := 0.U.asTypeOf(wakeups)
+    } else {
+      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueWakeUpBundle]) =>
+        bundle.bits.wakeUp(statusVec(i).psrc zip statusVec(i).srcType, bundle.valid)
+      ).transpose
+      wakeups := wakeupVec.map(x => VecInit(x))
+    }
   }
 
   deqSelVec.zipWithIndex.foreach { case (deqSel: Bool, i) =>
@@ -222,7 +229,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   io.valid := validVec.asUInt
   io.canIssue := canIssueVec.asUInt
   io.clear := clearVec.asUInt
-  io.srcWakeUpIQOH := statusVec.map(_.srcWakeUpIQOH)
+  io.srcWakeUpIQOH.foreach(_ := statusVec.map(_.srcWakeUpIQOH.get))
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback)
   io.deq.zip(deqSelVec2).foreach { case (deqSingle, deqSelVecSingle) =>
     deqSingle.isFirstIssue := Mux1H(deqSelVecSingle, statusVec.map(!_.firstIssue))
