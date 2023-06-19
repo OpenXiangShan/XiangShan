@@ -177,9 +177,9 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))
   }
 
-  def genWbFuBusyTableWriteBundle(implicit p: Parameters) = {
+  def genWbFuBusyTableWriteBundle()(implicit p: Parameters) = {
     implicit val issueBlockParams = this
-    MixedVec(exuBlockParams.map(_ => new WbFuBusyTableWriteBundle()))
+    MixedVec(exuBlockParams.map(x => new WbFuBusyTableWriteBundle(x)))
   }
 
   def genWbFuBusyTableReadBundle()(implicit p: Parameters) = {

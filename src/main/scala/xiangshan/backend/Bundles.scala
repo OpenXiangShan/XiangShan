@@ -330,10 +330,16 @@ object Bundles {
     val fuType = FuType()
   }
 
-  class WbFuBusyTableWriteBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
-    val deqResp = Valid(new fuBusyRespBundle)
-    val og0Resp = Valid(new fuBusyRespBundle)
-    val og1Resp = Valid(new fuBusyRespBundle)
+  class WbFuBusyTableWriteBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    private val intCertainLat = params.intLatencyCertain
+    private val vfCertainLat = params.vfLatencyCertain
+    private val intLat = params.intLatencyValMax
+    private val vfLat = params.vfLatencyValMax
+
+    val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
+    val intDeqRespSet = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val vfDeqRespSet = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
   }
 
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
