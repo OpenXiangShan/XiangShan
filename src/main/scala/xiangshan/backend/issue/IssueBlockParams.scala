@@ -9,6 +9,7 @@ import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import utils.SeqUtils
+import xiangshan.backend.BackendParams
 
 case class IssueBlockParams(
   // top down
@@ -28,6 +29,8 @@ case class IssueBlockParams(
   implicit
   val schdType: SchedulerType,
 ) {
+  var backendParam: BackendParams = null
+
   def updateIdx(idx: Int): Unit = {
     this.idxInSchBlk = idx
   }
@@ -193,6 +196,10 @@ case class IssueBlockParams(
     Cat(getFuCfgs.map(_.fuType.U === fuType)).orR
   }
 
+  def bindBackendParam(param: BackendParams): Unit = {
+    backendParam = param
+  }
+
   def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
   }
@@ -210,11 +217,11 @@ case class IssueBlockParams(
   }
 
   def genWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name))))
+    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
   }
 
   def genWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name))))
+    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
   }
 
   def genOGRespBundle(implicit p: Parameters) = {

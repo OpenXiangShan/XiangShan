@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
+import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
@@ -26,6 +27,7 @@ case class ExeUnitParams(
   var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
   // used in bypass to select data of exu output
   var exuIdx: Int = -1
+  var backendParam: BackendParams = null
 
   val numIntSrc: Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc: Int = fuConfigs.map(_.numFpSrc).max
@@ -161,6 +163,10 @@ case class ExeUnitParams(
   }
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
+
+  def bindBackendParam(param: BackendParams): Unit = {
+    backendParam = param
+  }
 
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)

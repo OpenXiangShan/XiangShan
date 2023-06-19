@@ -71,7 +71,7 @@ class StatusArrayIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
   // wakeup
-  val wakeUpFromWB = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle("WB"))))
+  val wakeUpFromWB = Vec(params.numWakeupFromWB, Flipped(ValidIO(new IssueQueueWakeUpBundle("WB", params.backendParam))))
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueWakeUpBundle]] = Flipped(params.genWakeUpSinkValidBundle)
   // deq
   val deq = Vec(params.numDeq, new StatusArrayDeqBundle)

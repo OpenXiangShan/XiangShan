@@ -33,9 +33,18 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   println(params.iqWakeUpParams)
 
+  for ((schdCfg, i) <- params.allSchdParams.zipWithIndex) {
+    schdCfg.bindBackendParam(params)
+  }
+
+  for ((iqCfg, i) <- params.allIssueParams.zipWithIndex) {
+    iqCfg.bindBackendParam(params)
+  }
+
   for ((exuCfg, i) <- params.allExuParams.zipWithIndex) {
     exuCfg.updateIQWakeUpConfigs(params.iqWakeUpParams)
     exuCfg.updateExuIdx(i)
+    exuCfg.bindBackendParam(params)
   }
 
   println("[Backend] ExuConfigs:")
