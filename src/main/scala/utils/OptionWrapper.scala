@@ -5,5 +5,4 @@ object OptionWrapper {
     case true => Some(x)
     case false => None
   }
-
 }
