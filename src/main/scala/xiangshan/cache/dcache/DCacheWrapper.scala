@@ -685,6 +685,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
+  val force_write = Input(Bool())
 }
 
 
@@ -868,6 +869,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       io.lsu.forward_D(i).dontCare()
     }
   })
+  mainPipe.io.force_write <> io.force_write
 
   //----------------------------------------
   // load pipe

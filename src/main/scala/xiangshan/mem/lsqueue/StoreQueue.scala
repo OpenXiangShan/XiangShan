@@ -88,6 +88,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val force_write = Output(Bool())
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -781,6 +782,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // If redirect at T0, sqCancelCnt is at T2
   io.sqCancelCnt := redirectCancelCount
+  val ForceWriteUpper = Wire(UInt(log2Up(StoreQueueSize + 1).W))
+  ForceWriteUpper := Constantin.createRecord("ForceWriteUpper_"+p(XSCoreParamsKey).HartId.toString(), initValue = 60.U)
+  val ForceWriteLower = Wire(UInt(log2Up(StoreQueueSize + 1).W))
+  ForceWriteLower := Constantin.createRecord("ForceWriteLower_"+p(XSCoreParamsKey).HartId.toString(), initValue = 55.U)
+
+  val valid_cnt = PopCount(allocated)
+  io.force_write := RegNext(Mux(valid_cnt >= ForceWriteUpper, true.B, valid_cnt >= ForceWriteLower && io.force_write), init = false.B)
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing

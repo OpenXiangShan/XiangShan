@@ -97,6 +97,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2Hint = Input(Valid(new L2ToL1Hint()))
+    val force_write = Output(Bool())
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -149,7 +150,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqEmpty <> io.sqEmpty
   storeQueue.io.sqFull <> io.sqFull
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
-
+  storeQueue.io.force_write <> io.force_write
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   //  load queue wiring
