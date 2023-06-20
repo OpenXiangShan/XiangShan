@@ -410,16 +410,25 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ageOldest = AgeDetector(LoadQueueReplaySize / LoadPipelineWidth, s0_remEnqSelVec(rport), s0_remFreeSelVec(rport), s0_remPriorityReplaySelVec(rport))
     assert(!(ageOldest.valid && PopCount(ageOldest.bits) > 1.U), "oldest index must be one-hot!")
     val ageOldestValid = ageOldest.valid
-    val ageOldestIndex = OHToUInt(ageOldest.bits)
+    val ageOldestIndexOH = ageOldest.bits
 
     // select program order oldest
     val l2HintFirst = io.l2Hint.valid && s0_remOldestHintSelVec(rport).orR
     val issOldestValid = l2HintFirst || s0_remOldestSelVec(rport).orR
-    val issOldestIndex = Mux(l2HintFirst, OHToUInt(PriorityEncoderOH(s0_remOldestHintSelVec(rport))), OHToUInt(PriorityEncoderOH(s0_remOldestSelVec(rport))))
+    val issOldestIndexOH = Mux(l2HintFirst, PriorityEncoderOH(s0_remOldestHintSelVec(rport)), PriorityEncoderOH(s0_remOldestSelVec(rport)))
 
     val oldest = Wire(Valid(UInt()))
+    val oldestSel = Mux(issOldestValid, issOldestIndexOH, ageOldestIndexOH)
+    val oldestBitsVec = Wire(Vec(LoadQueueReplaySize, Bool()))
+
+    require((LoadQueueReplaySize % LoadPipelineWidth) == 0)
+    oldestBitsVec.foreach(e => e := false.B)
+    for (i <- 0 until LoadQueueReplaySize / LoadPipelineWidth) {
+      oldestBitsVec(i * LoadPipelineWidth + rport) := oldestSel(i)
+    }
+
     oldest.valid := ageOldest.valid || issOldestValid
-    oldest.bits := Cat(Mux(issOldestValid, issOldestIndex, ageOldestIndex), rport.U(log2Ceil(LoadPipelineWidth).W))
+    oldest.bits := OHToUInt(oldestBitsVec.asUInt)
     oldest
   }))
 

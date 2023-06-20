@@ -531,17 +531,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Prefetcher
   val StreamDTLBPortIndex = exuParameters.LduCnt
   val PrefetcherDTLBPortIndex = exuParameters.LduCnt + exuParameters.StuCnt + 1
-  dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
-  dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
-  dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
-  prefetcherOpt.foreach(pf => {
-    dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
-  })
-  // dtlb_reqs(StreamDTLBPortIndex) := DontCare
-  // dtlb_reqs(StreamDTLBPortIndex).req.valid := false.B
-  // dtlb_reqs(StreamDTLBPortIndex).resp.ready := true.B
+  prefetcherOpt match {
+  case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
+  case None =>
+    dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
+    dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
+    dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
+  }
+
   l1PrefetcherOpt.foreach(pf => {
-    // dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
     pf.io.tlb_req.resp.valid := dtlb_reqs(StreamDTLBPortIndex).resp.valid
     pf.io.tlb_req.resp.bits := dtlb_reqs(StreamDTLBPortIndex).resp.bits
     dtlb_reqs(StreamDTLBPortIndex).resp.ready := pf.io.tlb_req.resp.ready
