@@ -318,10 +318,6 @@ object Bundles {
       )
     ))
 
-    val bypass = new Bundle {
-      val exuOH = Vec(exuParams.numRegSrc, ExuOH())
-    }
-
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
