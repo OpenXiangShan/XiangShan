@@ -778,6 +778,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
       forward.forwardMaskFast(j) := selectedInflightMaskFast(j) || selectedValidMaskFast(j)
     }
+    forward.addrInvalid := DontCare
   }
 
   for (i <- 0 until StoreBufferSize) {

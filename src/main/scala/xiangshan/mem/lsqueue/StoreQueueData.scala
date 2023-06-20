@@ -40,15 +40,18 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(dataWidth.W))) // wdata: store addr
+    val wmask = Input(Vec(numWrite, UInt(8.W)))
     val wlineflag = Input(Vec(numWrite, Bool())) // wdata: line op flag
     // forward addr cam
     val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W))) // addr
+    val forwardDataMask = Input(Vec(numForward, UInt(8.W))) // forward mask
     val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool()))) // cam result mask
     // debug
     val debug_data = Output(Vec(numEntries, UInt(dataWidth.W)))
   })
 
   val data = Reg(Vec(numEntries, UInt(dataWidth.W)))
+  val mask = Reg(Vec(numEntries, UInt(8.W)))
   val lineflag = Reg(Vec(numEntries, Bool())) // cache line match flag
   // if lineflag == true, this address points to a whole cacheline
   io.debug_data := data
@@ -63,6 +66,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
   for (i <- 0 until numWrite) {
     when (io.wen(i)) {
       data(io.waddr(i)) := io.wdata(i)
+      mask(io.waddr(i)) := io.wmask(i)
       lineflag(io.waddr(i)) := io.wlineflag(i)
     }
   }
@@ -72,7 +76,8 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     for (j <- 0 until numEntries) {
       // io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
       val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
-      val wordhit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
+      val wordhit = (io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)) && 
+                    (!StoreQueueForwardWithMask.B || (mask(j) & io.forwardDataMask(i)).orR)
       io.forwardMmask(i)(j) := linehit && (wordhit || lineflag(j))
     }
   }
@@ -202,8 +207,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   // forwarding
   // Compare ringBufferTail (deqPtr) and forward.sqIdx, we have two cases:
   // (1) if they have the same flag, we need to check range(tail, sqIdx)
-  // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
-  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
+  // (2) if they have different flags, we need to check range(tail, VirtualLoadQueueSize) and range(0, sqIdx)
+  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, VirtualLoadQueueSize))
   // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
   // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
@@ -249,7 +254,6 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
     io.forwardValid(i) := parallelFwdResult.valid
     // data is generated 1 cycle after query request
     io.forwardData(i) := parallelFwdResult.data
-
   })
 }
 

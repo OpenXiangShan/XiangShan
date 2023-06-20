@@ -99,7 +99,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
     val memWaitUpdateReq = if (params.checkWaitBit) Flipped(new MemWaitUpdateReq) else null
 
-    val rsFeedback = Output(Vec(5, Bool()))
+    val rsFeedback = Output(Vec(RSFeedbackType.allTypes, Bool()))
   })
 
   val statusArrayValid = RegInit(VecInit(Seq.fill(params.numEntries)(false.B)))
@@ -112,7 +112,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   val replayArrayNext = WireInit(replayArray)
   replayArray := replayArrayNext
   (statusArrayValid zip replayArrayNext).foreach { case (valid, replay) => when(valid === 0.B) { replay := RSFeedbackType.feedbackInvalid } }
-  io.rsFeedback := VecInit((0 until 5).map(index => statusArrayValid.zip(replayArray).map {
+  io.rsFeedback := VecInit((0 until RSFeedbackType.allTypes).map(index => statusArrayValid.zip(replayArray).map {
     case (valid, replay) => valid && replay === index.U
   }.reduce(_ || _)))
 
