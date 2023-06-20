@@ -77,7 +77,10 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
 
   toExus.zipWithIndex.foreach { case (exuInput, exuIdx) =>
     exuInput.bits.src.zipWithIndex.foreach { case (src, srcIdx) =>
-      src := Mux1H(bypassVec3(exuIdx)(srcIdx), bypassDataVec)
+      when (bypassVec3(exuIdx)(srcIdx).asUInt.orR) {
+        src := Mux1H(bypassVec3(exuIdx)(srcIdx), bypassDataVec)
+      }
+      // otherwise has been assigned
     }
   }
 }
