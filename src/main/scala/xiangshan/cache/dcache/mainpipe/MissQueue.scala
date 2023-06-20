@@ -304,6 +304,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val amo_miss_refilling   = Output(Bool())
       val pf_miss_refilling    = Output(Bool())
     }
+
+    val nMaxPrefetchEntry = Input(UInt(64.W))
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -568,7 +570,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
-  when(io.id >= ((cfg.nMissEntries).U - cacheParams.nMaxPrefetchEntry.U)) {
+  when(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry)) {
     // can accept prefetch req
     io.primary_ready := !req_valid && !RegNext(primary_fire)
   }.otherwise {
@@ -884,6 +886,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
+  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 12.U))
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)
@@ -923,6 +926,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
+      e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
 
       io.debug_early_replace(i) := e.io.debug_early_replace
   }

@@ -180,10 +180,10 @@ case class XSCoreParameters
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
-  EnableStorePrefetchAtIssue: Boolean = true,
+  EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = false,
   EnableAtCommitMissTrigger: Boolean = true,
-  EnableStorePrefetchSMS: Boolean = true,
+  EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
