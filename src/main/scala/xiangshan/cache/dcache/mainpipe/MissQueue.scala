@@ -154,9 +154,9 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def reject_req(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
-    val merge_load = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
+    val merge_load = (req.isFromLoad || req.isFromStore) && new_req.isFromLoad
     // store merge to a store is disabled, sbuffer should avoid this situation, as store to same address should preserver their program order to match memory model
-    val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
+    val merge_store = (req.isFromLoad) && new_req.isFromStore
 
     val set_match = addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
     val way_match = req.way_en === new_req.way_en
@@ -174,9 +174,9 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def merge_req(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
-    val merge_load = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
+    val merge_load = (req.isFromLoad || req.isFromStore) && new_req.isFromLoad
     // store merge to a store is disabled, sbuffer should avoid this situation, as store to same address should preserver their program order to match memory model
-    val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
+    val merge_store = (req.isFromLoad) && new_req.isFromStore
     Mux(
         alloc,
         block_match && alias_match && (merge_load || merge_store),
@@ -424,6 +424,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
+    assert(!req.isFromPrefetch, "prefetch will not merge any req. for debug use")
     // use the most uptodate meta
     req.req_coh := miss_req_pipe_reg_bits.req_coh
 
@@ -529,11 +530,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
-    acquire_not_sent && (req.isFromLoad || req.isFromPrefetch) && (new_req.isFromLoad || new_req.isFromStore)
+    acquire_not_sent && (req.isFromLoad) && (new_req.isFromLoad || new_req.isFromStore)
   }
   
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
-    data_not_refilled && (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
+    data_not_refilled && (req.isFromLoad || req.isFromStore) && new_req.isFromLoad
   }
   
   // Note that late prefetch will be ignored
