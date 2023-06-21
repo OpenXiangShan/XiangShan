@@ -327,7 +327,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
   assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
   assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && RegNext(s0_valid) && replacement.way === RegNext(replacement.way)), "replacement error")
+  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegNext(s0_hit) && replacement.way === RegNext(replacement.way)), "replacement error")
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
@@ -510,7 +510,7 @@ class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefet
   }
 
   assert(!s0_valid || PopCount(VecInit(s0_match_vec)) <= 1.U, "req region should match no more than 1 entry")
-  assert(!(s0_valid && RegNext(s0_valid) && replacement.way === RegNext(replacement.way)), "replacement error")
+  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegNext(s0_hit) && replacement.way === RegNext(replacement.way)), "replacement error")
 
   XSPerfAccumulate("s0_enq_valid", s0_valid)
 
