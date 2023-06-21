@@ -131,7 +131,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val s1_hit_coh = s1_hit_meta.coh
 
   val (s1_has_permission, _, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
-  val s1_hit = s1_has_permission && s1_new_hit_coh === s1_hit_coh && s1_tag_match.orR
+  val s1_hit = s1_tag_match.orR
 
   /** 
     * query replacer to choose a way to replace
