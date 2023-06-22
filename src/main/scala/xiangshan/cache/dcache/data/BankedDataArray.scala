@@ -250,7 +250,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
-    val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     // customized cache op port 
     val cacheOp = Flipped(new L1CacheInnerOpIO)
@@ -386,10 +385,11 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.read.zipWithIndex.map { case (x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard) }
 
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
+  val bank_conflict_fast = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach(i => {
-    io.bank_conflict_fast(i) := wr_bank_conflict(i) || rrl_bank_conflict(i) ||
+    bank_conflict_fast(i) := wr_bank_conflict(i) || rrl_bank_conflict(i) ||
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
-    io.bank_conflict_slow(i) := RegNext(io.bank_conflict_fast(i))
+    io.bank_conflict_slow(i) := RegNext(bank_conflict_fast(i))
     io.disable_ld_fast_wakeup(i) := wr_bank_conflict(i) || rrl_bank_conflict_intend(i) ||
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
   })
@@ -606,7 +606,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   when(rr_bank_conflict(0)(1)) {
     bankConflictData.bank_index := bank_addrs(0)
     bankConflictData.way_index  := OHToUInt(way_en(0))
-    bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1)
+    bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1) && div_addrs(0) === div_addrs(1)
   }.otherwise {
     bankConflictData.bank_index := 0.U
     bankConflictData.way_index := 0.U
@@ -652,6 +652,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val set_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val bank_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
+  val way_en_reg = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
+  val set_addrs_reg = Wire(Vec(LoadPipelineWidth, UInt()))
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
@@ -671,12 +673,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     div_addrs(rport_index) := addr_to_dcache_div(io.read(rport_index).bits.addr)
-    set_addrs(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr)
     bank_addrs(rport_index) := addr_to_dcache_bank(io.read(rport_index).bits.addr)
+    set_addrs(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr)
+    set_addrs_reg(rport_index) := RegNext(addr_to_dcache_div_set(io.read(rport_index).bits.addr))
 
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en(rport_index) := io.read(rport_index).bits.way_en
+    way_en_reg(rport_index) := RegNext(io.read(rport_index).bits.way_en)  
   })
 
   // read each bank, get bank result
@@ -703,9 +707,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
   (0 until LoadPipelineWidth).foreach(i => {
-    io.bank_conflict_fast(i) := wr_bank_conflict(i) || rrl_bank_conflict(i) ||
-      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
-    io.bank_conflict_slow(i) := RegNext(io.bank_conflict_fast(i))
+    // remove fake rr_bank_conflict situation in s2
+    val real_other_bank_conflict_reg = RegNext(wr_bank_conflict(i) || rrl_bank_conflict(i))
+    val real_rr_bank_conflict_reg = (if (i == 0) 0.B else (0 until i).map{ j => 
+      RegNext(rr_bank_conflict(j)(i)) && 
+      (way_en_reg(j) =/= way_en_reg(i) || set_addrs_reg(j) =/= set_addrs_reg(i))
+    }.reduce(_ || _))
+    io.bank_conflict_slow(i) := real_other_bank_conflict_reg || real_rr_bank_conflict_reg
+    
+    // get result in s1
     io.disable_ld_fast_wakeup(i) := wr_bank_conflict(i) || rrl_bank_conflict_intend(i) ||
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
   })
@@ -924,7 +934,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   when(rr_bank_conflict(0)(1)) {
     bankConflictData.bank_index := bank_addrs(0)
     bankConflictData.way_index := OHToUInt(way_en(0))
-    bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1)
+    bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1) && div_addrs(0) === div_addrs(1)
   }.otherwise {
     bankConflictData.bank_index := 0.U
     bankConflictData.way_index := 0.U
