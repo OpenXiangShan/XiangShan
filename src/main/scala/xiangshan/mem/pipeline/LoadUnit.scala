@@ -127,9 +127,11 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_replayCarry = Wire(new ReplayCarry) // way info for way predict related logic
   val s0_isLoadReplay = WireInit(false.B)
   val s0_sleepIndex = Wire(UInt())
+  val s0_mshrid = Wire(UInt())
   // default value
   s0_replayCarry.valid := false.B
   s0_replayCarry.real_way_en := 0.U
+  s0_mshrid := DontCare
   s0_sleepIndex := DontCare
   s0_rsIdx := DontCare
   io.s0_sqIdx := s0_sqIdx
@@ -276,7 +278,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.fastReplay.bits.uop
     s0_isFirstIssue := false.B
     s0_sqIdx := io.fastReplay.bits.uop.sqIdx
-    s0_replayCarry := io.fastReplay.bits.replayCarry
+    s0_replayCarry := io.fastReplay.bits.replayInfo.replayCarry
+    s0_mshrid := io.fastReplay.bits.replayInfo.missMSHRId
     s0_rsIdx := io.fastReplay.bits.rsIdx
     s0_isLoadReplay := io.fastReplay.bits.isLoadReplay
     s0_sleepIndex := io.fastReplay.bits.sleepIndex
@@ -293,6 +296,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_sqIdx := io.replay.bits.uop.sqIdx
     s0_rsIdx := io.replay.bits.rsIdx
     s0_replayCarry := io.replay.bits.replayCarry
+    s0_mshrid := io.replay.bits.mshrid
     s0_isLoadReplay := true.B
     s0_sleepIndex := io.replay.bits.sleepIndex
     val replayUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.replay.bits.uop.ctrl.fuOpType))
@@ -308,6 +312,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_rsIdx := DontCare
     s0_sqIdx := DontCare
     s0_replayCarry := DontCare
+    s0_mshrid := DontCare
     s0_isLoadReplay := DontCare
     // ctrl signal
     isPrefetch := true.B
@@ -323,6 +328,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_rsIdx := io.rsIdx
     s0_sqIdx := io.in.bits.uop.sqIdx
     s0_isLoadReplay := false.B
+    s0_mshrid := DontCare
     val issueUopIsPrefetch = WireInit(LSUOpType.isPrefetch(io.in.bits.uop.ctrl.fuOpType))
     when (issueUopIsPrefetch) {
       isPrefetch := true.B
@@ -341,6 +347,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_rsIdx := DontCare
       s0_sqIdx := DontCare
       s0_isLoadReplay := DontCare
+      s0_mshrid := DontCare
     }
   }
 
@@ -367,7 +374,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.out.bits.isPrefetch := isPrefetch
   io.out.bits.isHWPrefetch := isHWPrefetch
   io.out.bits.isLoadReplay := s0_isLoadReplay
-  io.out.bits.mshrid := io.replay.bits.mshrid
+  io.out.bits.mshrid := s0_mshrid
   io.out.bits.forward_tlDchannel := io.replay.valid && io.replay.bits.forward_tlDchannel
   when(io.dtlbReq.valid && s0_isFirstIssue) {
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -624,7 +631,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                       !s2_is_prefetch 
   val s2_data_invalid = io.lsq.dataInvalid && !s2_exception
   val s2_fullForward = WireInit(false.B)
-
+  val s2_bank_conflict = io.dcacheBankConflict && !forward_D_or_mshr_valid
 
   io.s2_forward_fail := s2_forward_fail
   io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
@@ -648,7 +655,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
                        (!s2_wait_store &&
                        !s2_tlb_miss &&
                        s2_cache_replay) || 
-                      (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId))) &&
+                      (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId)) || 
+                      s2_bank_conflict) &&
                        !s2_exception &&
                        !s2_mmio &&
                        !s2_is_prefetch
@@ -819,7 +827,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.out.bits.replayInfo.cause(LoadReplayCauses.waitStore) := s2_wait_store && !s2_mmio && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.tlbMiss) := s2_tlb_miss
   io.out.bits.replayInfo.cause(LoadReplayCauses.schedError) := (io.in.bits.replayInfo.cause(LoadReplayCauses.schedError) || s2_schedError) && !s2_mmio && !s2_is_prefetch
-  io.out.bits.replayInfo.cause(LoadReplayCauses.bankConflict) := io.dcacheBankConflict && !s2_mmio && !s2_is_prefetch
+  io.out.bits.replayInfo.cause(LoadReplayCauses.bankConflict) := s2_bank_conflict && !s2_mmio && !s2_is_prefetch
   io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheMiss) := io.out.bits.miss 
   if (EnableFastForward) {
     io.out.bits.replayInfo.cause(LoadReplayCauses.dcacheReplay) := s2_cache_replay && !s2_is_prefetch && !s2_mmio && !s2_exception && !fullForward
