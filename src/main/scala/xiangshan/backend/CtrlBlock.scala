@@ -281,14 +281,25 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val redirectGen = Module(new RedirectGenerator)
   val rob = outer.rob.module
 
-  val confidence = Module(new SyncDataModuleTemplate(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)), FtqSize, DecodeWidth, 1))
+  val confidence = Module(new SyncDataModuleTemplate(Vec(numBr, UInt(3.W)), FtqSize, DecodeWidth, 1))
   confidence.io.wen.head   := io.frontend.fromFtq.branchConf.fire
   confidence.io.waddr.head := io.frontend.fromFtq.branchConf.bits.addr
-  confidence.io.wdata.head := io.frontend.fromFtq.branchConf.bits.data
+  confidence.io.wdata.head := io.frontend.fromFtq.branchConf.bits.data.map(x => BranchConf.confMap(x))
   confidence.io.raddr.zip(io.frontend.cfVec).foreach { case (raddr, cf) =>
     raddr := cf.bits.ftqPtr.value
   }
   confidence.io.rdata zip io.frontend.cfVec zip rename.io.confidence foreach { case ((rdata, cf), conf) =>
+    conf := HoldUnless(rdata, RegNext(cf.fire))
+  }
+
+  val debugConfidence = Module(new SyncDataModuleTemplate(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)), FtqSize, DecodeWidth, 1))
+  debugConfidence.io.wen.head   := io.frontend.fromFtq.branchConf.fire
+  debugConfidence.io.waddr.head := io.frontend.fromFtq.branchConf.bits.addr
+  debugConfidence.io.wdata.head := io.frontend.fromFtq.branchConf.bits.data
+  debugConfidence.io.raddr.zip(io.frontend.cfVec).foreach { case (raddr, cf) =>
+    raddr := cf.bits.ftqPtr.value
+  }
+  debugConfidence.io.rdata zip io.frontend.cfVec zip rename.io.debugConfidence foreach { case ((rdata, cf), conf) =>
     conf := HoldUnless(rdata, RegNext(cf.fire))
   }
 

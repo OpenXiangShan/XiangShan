@@ -40,7 +40,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // waittable read result
     val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
     // confidence read result
-    val confidence = Vec(RenameWidth, Vec(numBr, Input(UInt(BranchConf.sTag.getWidth.W))))
+    val confidence = Vec(RenameWidth, Vec(numBr, Input(UInt(3.W))))
+    val debugConfidence = Vec(RenameWidth, Vec(numBr, Input(UInt(BranchConf.sTag.getWidth.W))))
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
