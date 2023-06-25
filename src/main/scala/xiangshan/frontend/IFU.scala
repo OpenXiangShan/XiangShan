@@ -133,6 +133,74 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   def isLastInCacheline(addr: UInt): Bool = addr(blockOffBits - 1, 1) === 0.U
 
+  def numOfStage = 3
+  require(numOfStage > 1, "BPU numOfStage must be greater than 1")
+  val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
+  dontTouch(topdown_stages)
+  // bubble events in IFU, only happen in stage 1
+  val icacheMissBubble = Wire(Bool())
+  val itlbMissBubble =Wire(Bool())
+
+  // only driven by clock, not valid-ready
+  topdown_stages(0) := fromFtq.req.bits.topdown_info
+  for (i <- 1 until numOfStage) {
+    topdown_stages(i) := topdown_stages(i - 1)
+  }
+  when (icacheMissBubble) {
+    topdown_stages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
+  }
+  when (itlbMissBubble) {
+    topdown_stages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
+  }
+  io.toIbuffer.bits.topdown_info := topdown_stages(numOfStage - 1)
+  when (fromFtq.topdown_redirect.valid) {
+    // only redirect from backend, IFU redirect itself is handled elsewhere
+    when (fromFtq.topdown_redirect.bits.debugIsCtrl) {
+      /*
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      */
+      when (fromFtq.topdown_redirect.bits.ControlBTBMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.TAGEMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.SCMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.ITTAGEMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+      } .elsewhen (fromFtq.topdown_redirect.bits.RASMissBubble) {
+        for (i <- 0 until numOfStage) {
+          topdown_stages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
+        }
+        io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+      }
+    } .elsewhen (fromFtq.topdown_redirect.bits.debugIsMemVio) {
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    } .otherwise {
+      for (i <- 0 until numOfStage) {
+        topdown_stages(i).reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      }
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+    }
+  }
+  
   class TlbExept(implicit p: Parameters) extends XSBundle{
     val pageFault = Bool()
     val accessFault = Bool()
@@ -179,6 +247,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
   fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
+
+
+  when (wb_redirect) {
+    when (f3_wb_not_flush) {
+      topdown_stages(2).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    }
+    for (i <- 0 until numOfStage - 1) {
+      topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+    }
+  }
 
   /** <PERF> f0 fetch bubble */
 
@@ -246,6 +324,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_icache_all_resp_reg        = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
+
+  icacheMissBubble := io.icacheInter.topdownIcacheMiss
+  itlbMissBubble   := io.icacheInter.topdownItlbMiss
 
   io.icacheStop := !f3_ready
 
@@ -345,6 +426,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
 
+  val f2_pd_with_idx = WireDefault(f2_pd)
+  f2_pd_with_idx(0).brIdx := 0.U
+  for (i <- 1 until f2_pd.length) {
+    f2_pd_with_idx(i).brIdx := VecInit(f2_pd.take(i).map(_.brType)).asUInt.orR.asUInt
+  }
+
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
@@ -384,7 +471,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     expander.io.out.bits
   })
 
-  val f3_pd             = RegEnable(next = f2_pd,          enable = f2_fire)
+  val f3_pd             = RegEnable(next = f2_pd_with_idx, enable = f2_fire)
   val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
   val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
   val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)

@@ -126,6 +126,7 @@ class TageMeta(implicit p: Parameters)
   val basecnts = Vec(numBr, UInt(2.W))
   val allocates = Vec(numBr, UInt(TageNTables.W))
   val takens = Vec(numBr, Bool())
+  val confidence = Vec(numBr, UInt(BranchConf.sTag.getWidth.W))
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
@@ -420,7 +421,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, 1, tagWidth=tagLen))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(bankSize)))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
@@ -456,7 +457,6 @@ class TageTable
       val br_pidx = get_phy_br_idx(update_unhashed_idx, li)
       wrbypass.io.wen := io.update.mask(li) && update_req_bank_1h(b)
       wrbypass.io.write_idx := get_bank_idx(update_idx)
-      wrbypass.io.write_tag.map(_ := update_tag)
       wrbypass.io.write_data(0) := Mux1H(UIntToOH(br_pidx, numBr), per_bank_update_wdata(b)).ctr
     }
   }
@@ -579,6 +579,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_finalAltPreds    = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
+  val s1_brNum            = Mux(bt.io.s1_cnt(0)(1), 1.U, 2.U)
+  val s1_confidence       = Wire(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)))
   val s1_useAltOnNa       = Wire(Vec(numBr, Bool()))
 
   val s2_provideds        = RegEnable(s1_provideds, io.s1_fire)
@@ -591,6 +593,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_tageTakens       = RegEnable(s1_tageTakens, io.s1_fire)
   val s2_finalAltPreds    = RegEnable(s1_finalAltPreds, io.s1_fire)
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire)
+  val s2_confidence       = RegEnable(s1_confidence, io.s1_fire)
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire)
 
   io.out := io.in.bits.resp_in(0)
@@ -613,7 +616,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateResetU  = WireInit(0.U.asTypeOf(Vec(numBr, Bool()))) // per predictor
   val updateTakens  = Wire(Vec(numBr, Vec(TageNTables, Bool())))
   val updateAlloc   = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val updateOldCtrs  = Wire(Vec(numBr, Vec(TageNTables, UInt(TageCtrBits.W))))
+  val updateOldCtrs = Wire(Vec(numBr, Vec(TageNTables, UInt(TageCtrBits.W))))
   val updateU       = Wire(Vec(numBr, Vec(TageNTables, Bool())))
   val updatebcnt    = Wire(Vec(TageBanks, UInt(2.W)))
   val baseupdate    = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
@@ -631,6 +634,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
   // access tag tables and output meta info
 
+  val bimConfCtr = RegInit(7.U)
+  val bimConfCtrRst = updateValids.zip(updateMeta.altUsed).map(x => x._1 && x._2).reduce(_ || _)
+  bimConfCtr := Mux(bimConfCtrRst, 7.U,
+                Mux(io.s1_fire,
+                  Mux(bimConfCtr === 0.U, 0.U,
+                  Mux(bimConfCtr === 1.U, 0.U, bimConfCtr - s1_brNum)),
+                bimConfCtr))
   for (i <- 0 until numBr) {
     val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
@@ -677,20 +687,29 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
     val s1_bimCtr = bt.io.s1_cnt(i)
-    s1_tageTakens(i) := 
-      Mux(!provided || providerInfo.use_alt_on_unconf,
-        s1_bimCtr(1),
-        providerInfo.resp.ctr(TageCtrBits-1)
-      )
+    val s1_tagCtr = providerInfo.resp.ctr
+    val bim_conf = Mux1H(Seq(
+      (s1_bimCtr === "b10".U || s1_bimCtr === "b01".U) -> BranchConf.lowConfBim,
+      (s1_bimCtr === "b11".U || s1_bimCtr === "b00".U) -> Mux(bimConfCtr === 0.U, BranchConf.highConfBim, BranchConf.medConfBim)
+    ))
+    val tag_conf = Mux1H(Seq(
+      (s1_tagCtr === "b100".U || s1_tagCtr === "b011".U) -> BranchConf.wTag,
+      (s1_tagCtr === "b101".U || s1_tagCtr === "b010".U) -> BranchConf.nwTag,
+      (s1_tagCtr === "b110".U || s1_tagCtr === "b001".U) -> BranchConf.nsTag,
+      (s1_tagCtr === "b111".U || s1_tagCtr === "b000".U) -> BranchConf.sTag
+    ))
     s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
+    s1_tageTakens(i)    := Mux(s1_altUsed(i), s1_bimCtr(1), s1_tagCtr(TageCtrBits-1))
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
+    s1_confidence(i)    := Mux(provided && !s1_altUsed(i), tag_conf, bim_conf)
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire)
     resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens(i), io.s2_fire)
     resp_meta.takens(i)     := RegEnable(s2_tageTakens(i), io.s2_fire)
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire)
+    resp_meta.confidence(i) := RegEnable(s2_confidence(i), io.s2_fire)
 
     when (io.ctrl.tage_enable) {
       resp_s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)

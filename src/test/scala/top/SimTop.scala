@@ -112,8 +112,10 @@ object SimTop extends App {
 
     // tools: init to close dpi-c when in fpga
     val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-    Constantin.init(envInFPGA)
-    ChiselDB.init(envInFPGA)
+    val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
+    val enableConstantin = config(DebugOptionsKey).EnableConstantin
+    Constantin.init(enableConstantin && !envInFPGA)
+    ChiselDB.init(enableChiselDB && !envInFPGA)
 
     Generator.execute(
       firrtlOpts,

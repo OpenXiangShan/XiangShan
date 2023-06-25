@@ -72,6 +72,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
           }), tail)
+        case "--with-constantin" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableConstantin = true)
+          }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
@@ -87,10 +91,6 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
-          }), tail)
-        case "--enable-topdown" :: tail =>
-          nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableTopDown = true)
           }), tail)
         case "--mfc" :: tail =>
           firrtlCompiler = MFC

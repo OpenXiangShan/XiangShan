@@ -24,6 +24,12 @@ import xiangshan.frontend.icache._
 import utils._
 import utility._
 import scala.math._
+import java.util.ResourceBundle.Control
+
+class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
+  val reasons = Vec(TopDownCounters.NumStallReasons.id, Bool())
+  val stallWidth = UInt(log2Ceil(PredictWidth).W)
+}
 
 @chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -35,6 +41,8 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   //slow path
   val ftqIdx          = new FtqPtr
   val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+
+  val topdown_info    = new FrontendTopDownBundle
 
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
 
@@ -74,6 +82,8 @@ class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParame
 class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val icacheReady       = Output(Bool())
   val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+  val topdownIcacheMiss = Output(Bool())
+  val topdownItlbMiss = Output(Bool())
 }
 
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
@@ -121,6 +131,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val acf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
+
+  val topdown_info = new FrontendTopDownBundle
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {
@@ -401,6 +413,11 @@ trait BasicPrediction extends HasXSParameter {
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
 }
+
+object BranchConf {
+  val lowConfBim :: medConfBim :: highConfBim :: wTag :: nwTag :: nsTag :: sTag :: Nil = Enum(7)
+}
+
 @chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
@@ -568,6 +585,9 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new SpeculativeInfo
   val last_stage_ftb_entry = new FTBEntry
+  val last_stage_conf = Vec(numBr, UInt(BranchConf.sTag.getWidth.W))
+
+  val topdown_info = new FrontendTopDownBundle
 
   def selectedResp ={
     val res =
@@ -596,6 +616,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
 
   val cfi_idx = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val br_taken_mask = Vec(numBr, Bool())
+  val br_committed = Vec(numBr, Bool()) // High only when br valid && br committed
   val jmp_taken = Bool()
   val mispred_mask = Vec(numBr+1, Bool())
   val pred_hit = Bool()
@@ -637,6 +658,28 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   //     p"\n"
 
   // }
+
+  // TODO: backend should pass topdown signals here
+  // must not change its parent since BPU has used asTypeOf(this type) from its parent class
+  require(isInstanceOf[Redirect])
+  val BTBMissBubble = Bool()
+  def ControlRedirectBubble = debugIsCtrl
+  // if mispred br not in ftb, count as BTB miss
+  def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
+  def TAGEMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
+  def SCMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
+  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
+  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
+  def MemVioRedirectBubble = debugIsMemVio
+  def OtherRedirectBubble = !debugIsCtrl && !debugIsMemVio
+
+  def connectRedirect(source: Redirect): Unit = {
+    for ((name, data) <- this.elements) {
+      if (source.elements.contains(name)) {
+        data := source.elements(name)
+      }
+    }
+  }
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"-----------BranchPredictionRedirect----------- \n")

@@ -16,6 +16,7 @@
 
 package xiangshan.frontend
 
+import scala.reflect.runtime.universe._
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -26,7 +27,7 @@ import utility._
 
 @chiselName
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0))
   io.out := resp
   // shorter path for s1 pred
   val all_fast_pred = components.filter(_.is_fast_pred)
@@ -72,6 +73,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   require(meta_sz < MaxMetaLength)
   io.out.last_stage_meta := metas
+  io.out.last_stage_conf := getMetaByType[Tage_SC].asTypeOf(new TageMeta).confidence
 
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {
@@ -88,6 +90,13 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
       update_meta = update_meta >> c.meta_size
     }
     metas(idx)
+  }
+
+  def getMetaByType[T: TypeTag] = {
+    components.filter(t => typeOf[T].toString() == t.getClass().getName()).headOption match {
+      case Some(pred) => pred.io.out.last_stage_meta(pred.meta_size-1,0)
+      case None => throw new IllegalArgumentException(s"predictor ${typeOf[T]} not found\n")
+    }
   }
 
   override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_++_))

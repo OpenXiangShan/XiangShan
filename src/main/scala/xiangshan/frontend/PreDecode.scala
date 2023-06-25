@@ -66,12 +66,13 @@ object ExcType {  //TODO:add exctype
   def apply() = UInt(3.W)
 }
 
-class PreDecodeInfo extends Bundle {  // 8 bit
+class PreDecodeInfo(implicit p: Parameters) extends XSBundle {  // 8 bit
   val valid   = Bool()
   val isRVC   = Bool()
   val brType  = UInt(2.W)
   val isCall  = Bool()
   val isRet   = Bool()
+  val brIdx   = UInt(log2Ceil(numBr).W)
   //val excType = UInt(3.W)
   def isBr    = brType === BrType.branch
   def isJal   = brType === BrType.jal
@@ -135,6 +136,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pd(i).brType        := brType
     io.out.pd(i).isCall        := isCall
     io.out.pd(i).isRet         := isRet
+    io.out.pd(i).brIdx         := DontCare
 
     //io.out.expInstr(i)         := expander.io.out.bits
     io.out.instr(i)              :=inst

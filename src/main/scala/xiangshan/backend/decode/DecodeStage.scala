@@ -37,6 +37,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // perf only
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+    val stallReason = new Bundle {
+      val in = Flipped(new StallReasonIO(DecodeWidth))
+      val out = new StallReasonIO(DecodeWidth)
+    }
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
@@ -72,16 +76,20 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
 
+  io.stallReason.in.backReason := io.stallReason.out.backReason
+  io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
+    out := Mux(io.stallReason.out.backReason.valid,
+               io.stallReason.out.backReason.bits,
+               Mux(valid, TopDownCounters.NoStall.id.U, in))
+  }
+
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
 
-  if (env.EnableTopDown) {
-    XSPerfAccumulate("slots_issued", PopCount(io.out.map(_.fire)))
-    XSPerfAccumulate("decode_bubbles", PopCount(io.out.map(x => !x.valid && x.ready))) // Unutilized issue-pipeline slots while there is no backend-stall
-    XSPerfAccumulate("fetch_bubbles", PopCount((0 until DecodeWidth).map(i => !io.in(i).valid && io.in(i).ready))) //slots
-    XSPerfAccumulate("ifu2id_allNO_cycle", VecInit((0 until DecodeWidth).map(i => !io.in(i).valid && io.in(i).ready)).asUInt.andR)
-  }
+  XSPerfHistogram("slots_fire", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth+1, 1)
+  XSPerfHistogram("slots_valid_pure", PopCount(io.in.map(_.valid)), io.out(0).fire, 0, DecodeWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.in.map(_.valid)), true.B, 0, DecodeWidth+1, 1)
 
   val fusionValid = RegNext(io.fusion)
   val inFire = io.in.map(in => RegNext(in.valid && !in.ready))
