@@ -579,6 +579,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
   val s1_finalAltPreds    = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
+  val s1_brNum            = Mux(bt.io.s1_cnt(0)(1), 1.U, 2.U)
   val s1_confidence       = Wire(Vec(numBr, UInt(BranchConf.sTag.getWidth.W)))
   val s1_useAltOnNa       = Wire(Vec(numBr, Bool()))
 
@@ -615,7 +616,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateResetU  = WireInit(0.U.asTypeOf(Vec(numBr, Bool()))) // per predictor
   val updateTakens  = Wire(Vec(numBr, Vec(TageNTables, Bool())))
   val updateAlloc   = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
-  val updateOldCtrs  = Wire(Vec(numBr, Vec(TageNTables, UInt(TageCtrBits.W))))
+  val updateOldCtrs = Wire(Vec(numBr, Vec(TageNTables, UInt(TageCtrBits.W))))
   val updateU       = Wire(Vec(numBr, Vec(TageNTables, Bool())))
   val updatebcnt    = Wire(Vec(TageBanks, UInt(2.W)))
   val baseupdate    = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
@@ -633,6 +634,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
   // access tag tables and output meta info
 
+  val bimConfCtr = RegInit(7.U)
+  val bimConfCtrRst = updateValids.zip(updateMeta.altUsed).map(x => x._1 && x._2).reduce(_ || _)
+  bimConfCtr := Mux(bimConfCtrRst, 7.U,
+                Mux(io.s1_fire,
+                  Mux(bimConfCtr === 0.U, 0.U,
+                  Mux(bimConfCtr === 1.U, 0.U, bimConfCtr - s1_brNum)),
+                bimConfCtr))
   for (i <- 0 until numBr) {
     val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
@@ -682,7 +690,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val s1_tagCtr = providerInfo.resp.ctr
     val bim_conf = Mux1H(Seq(
       (s1_bimCtr === "b10".U || s1_bimCtr === "b01".U) -> BranchConf.lowConfBim,
-      (s1_bimCtr === "b11".U || s1_bimCtr === "b00".U) -> BranchConf.highConfBim
+      (s1_bimCtr === "b11".U || s1_bimCtr === "b00".U) -> Mux(bimConfCtr === 0.U, BranchConf.highConfBim, BranchConf.medConfBim)
     ))
     val tag_conf = Mux1H(Seq(
       (s1_tagCtr === "b100".U || s1_tagCtr === "b011".U) -> BranchConf.wTag,
