@@ -719,10 +719,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.ldest := inst.RD
 
   // fill in exception vector
-  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR
+  val vecException = Module(new VecExceptionGen)
+  vecException.io.inst := io.enq.ctrlFlow.instr
+  vecException.io.decodedInst := decodedInst
+  vecException.io.vtype := io.enq.vtype
+
+  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
   when (!io.csrCtrl.svinval_enable) {
-    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR
+    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
     val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
     val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
     val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
