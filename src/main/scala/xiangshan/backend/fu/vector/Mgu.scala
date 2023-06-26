@@ -40,6 +40,11 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   val in = io.in
   val out = io.out
   val info = in.info
+  val vd = in.vd
+  val oldVd = in.oldVd
+  val narrow = io.in.info.narrow
+
+  private val vdIdx = Mux(narrow, info.vdIdx(2, 1), info.vdIdx)
 
   private val maskTailGen = Module(new ByteMaskTailGen(vlen))
 
@@ -49,17 +54,17 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val vlMapVdIdx = elemIdxMapVdIdx(info.vl)(3, 0)         // 4bits 0~8
   private val uvlMax = numBytes.U >> info.eew
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
-  private val maskUsed = maskDataVec(info.vdIdx)
+  private val maskUsed = maskDataVec(vdIdx)
 
   maskTailGen.io.in.begin := Mux1H(Seq(
-    (vstartMapVdIdx < info.vdIdx) -> 0.U,
-    (vstartMapVdIdx === info.vdIdx) -> elemIdxMapUElemIdx(info.vstart),
-    (vstartMapVdIdx > info.vdIdx) -> uvlMax,
+    (vstartMapVdIdx < vdIdx) -> 0.U,
+    (vstartMapVdIdx === vdIdx) -> elemIdxMapUElemIdx(info.vstart),
+    (vstartMapVdIdx > vdIdx) -> uvlMax,
   ))
   maskTailGen.io.in.end := Mux1H(Seq(
-    (vlMapVdIdx < info.vdIdx) -> 0.U,
-    (vlMapVdIdx === info.vdIdx) -> elemIdxMapUElemIdx(info.vl),
-    (vlMapVdIdx > info.vdIdx) -> uvlMax,
+    (vlMapVdIdx < vdIdx) -> 0.U,
+    (vlMapVdIdx === vdIdx) -> elemIdxMapUElemIdx(info.vl),
+    (vlMapVdIdx > vdIdx) -> uvlMax,
   ))
   maskTailGen.io.in.vma := info.ma
   maskTailGen.io.in.vta := info.ta
@@ -69,20 +74,51 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val keepEn = maskTailGen.io.out.keepEn
   private val agnosticEn = maskTailGen.io.out.agnosticEn
 
+  // the result of normal inst and narrow inst which does not need concat
   private val byte1s: UInt = (~0.U(8.W)).asUInt
 
-  private val resVec = Wire(Vec(numBytes, UInt(8.W)))
-  private val vdVec = io.in.vd.asTypeOf(resVec)
-  private val oldVdVec = io.in.oldVd.asTypeOf(resVec)
+  private val resVecByte = Wire(Vec(numBytes, UInt(8.W)))
+  private val vdVecByte = vd.asTypeOf(resVecByte)
+  private val oldVdVecByte = oldVd.asTypeOf(resVecByte)
 
   for (i <- 0 until numBytes) {
-    resVec(i) := MuxCase(oldVdVec(i), Seq(
-      keepEn(i) -> vdVec(i),
+    resVecByte(i) := MuxCase(oldVdVecByte(i), Seq(
+      keepEn(i) -> vdVecByte(i),
       agnosticEn(i) -> byte1s,
     ))
   }
 
-  io.out.vd := resVec.asUInt
+  // the result of narrow inst which needs concat
+  private val narrowNeedCat = info.vdIdx(0).asBool & narrow
+  private val narrowResCat = Cat(resVecByte.asUInt(vlen / 2 - 1, 0), oldVd(vlen / 2 - 1, 0))
+
+  // the result of mask-generating inst
+  private val maxVdIdx = 8
+  private val meaningfulBitsSeq = Seq(16, 8, 4, 2)
+  private val allPossibleResBit = Wire(Vec(4, Vec(maxVdIdx, UInt(vlen.W))))
+  private val catData = Mux(info.ta, ~0.U(vlen.W), oldVd)
+
+  for (sew <- 0 to 3) {
+    if (sew == 0) {
+      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(vd(meaningfulBitsSeq(sew) - 1, 0),
+        oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
+    } else {
+      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew) * maxVdIdx),
+        vd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
+    }
+    for (i <- 1 until maxVdIdx - 1) {
+      allPossibleResBit(sew)(i) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew) * (i + 1)),
+        vd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * i - 1, 0))
+    }
+    allPossibleResBit(sew)(0) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew)), vd(meaningfulBitsSeq(sew) - 1, 0))
+  }
+
+  private val resVecBit = allPossibleResBit(info.eew)(vdIdx)
+
+  io.out.vd := MuxCase(resVecByte.asUInt, Seq(
+    info.dstMask -> resVecBit.asUInt,
+    narrowNeedCat -> narrowResCat,
+  ))
 
   io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
   io.debugOnly.vlMapVdIdx := vlMapVdIdx
@@ -129,6 +165,8 @@ class VecInfo(implicit p: Parameters) extends Bundle {
   val vstart = Vl()
   val eew = VSew()
   val vdIdx = UInt(3.W) // 0~7
+  val narrow = Bool()
+  val dstMask = Bool()
 }
 
 object VerilogMgu extends App {
@@ -136,7 +174,7 @@ object VerilogMgu extends App {
   val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
   val p = config.alterPartial({case XSCoreParamsKey => config(XSTileKey).head})
 
-  emitVerilog(new Mgu(128)(p), Array("--target-dir", "build/vifu"))
+  emitVerilog(new Mgu(128)(p), Array("--target-dir", "build/vifu", "--full-stacktrace"))
 }
 
 class MguTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
