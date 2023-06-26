@@ -65,8 +65,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   })
 
-  dontTouch(io.confidence) // TODO: remove me
-
   // create free list and rat
   val intFreeList = Module(new MEFreeList(NRPhyRegs))
   val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
@@ -293,13 +291,28 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val hasCFI = VecInit(io.in.map(in => (!in.bits.cf.pd.notCFI || FuType.isJumpExu(in.bits.ctrl.fuType)) && in.fire)).asUInt.orR
+  val maskedConf = io.in.zip(io.confidence).map { case (in, conf) =>
+    conf(in.bits.cf.pd.brIdx) & Cat(Seq.fill(3)(!in.bits.cf.pd.notCFI & in.fire))
+  }.reduce(_ | _)
   val snapshotCtr = RegInit((4 * CommitWidth).U)
-  val allowSnpt = !snapshotCtr.orR
+  val allowSnpt = MuxCase(snapshotCtr <= (2 * CommitWidth).U, Seq(
+    BranchConf.isLow(maskedConf)  -> (snapshotCtr <= (2 * CommitWidth).U),
+    BranchConf.isMed(maskedConf)  -> (snapshotCtr <= CommitWidth.U),
+    BranchConf.isHigh(maskedConf) -> !snapshotCtr.orR
+  ))
   io.out.head.bits.snapshot := hasCFI && allowSnpt
   when(io.out.head.fire && io.out.head.bits.snapshot) {
     snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
   }.elsewhen(io.out.head.fire) {
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
+  }
+
+  import BranchConf._
+  Seq("lowConfBim", "medConfBim", "highConfBim", "wTag", "nwTag", "nsTag", "sTag") zip
+  Seq(lowConfBim, medConfBim, highConfBim, wTag, nwTag, nsTag, sTag) map { case (confName, confType) =>
+    XSPerfAccumulate(confName + "Num", PopCount(io.in.zip(io.debugConfidence).map { case (in, conf) =>
+      confType === conf(in.bits.cf.pd.brIdx) && !in.bits.cf.pd.notCFI && in.fire
+    }))
   }
 
   intFreeList.io.snpt := io.snpt
