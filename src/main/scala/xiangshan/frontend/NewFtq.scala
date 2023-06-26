@@ -570,6 +570,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
 
+  val debugBranchConf = Reg(Vec(FtqSize, chiselTypeOf(io.fromBpu.confidence)))
+  when(io.fromBpu.resp.bits.lastStage.valid) {
+    debugBranchConf(io.fromBpu.resp.bits.lastStage.ftq_idx.value) := io.fromBpu.confidence
+  }
   io.toBackend.branchConf.valid     := RegNext(io.fromBpu.resp.bits.lastStage.valid)
   io.toBackend.branchConf.bits.addr := RegNext(io.fromBpu.resp.bits.lastStage.ftq_idx.value)
   io.toBackend.branchConf.bits.data := RegNext(io.fromBpu.confidence)
@@ -817,6 +821,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pd_mem.io.wen(0) := ifu_wb_valid
   ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
   ftq_pd_mem.io.wdata(0).fromPdWb(pdWb.bits)
+  val debugFtqPdBrIdx = Reg(Vec(FtqSize, Vec(PredictWidth, UInt(log2Ceil(numBr).W))))
+  when(ifu_wb_valid) {
+    debugFtqPdBrIdx(pdWb.bits.ftqIdx.value).zip(pdWb.bits.pd).foreach { case (brIdx, pd) =>
+      brIdx := pd.brIdx
+    }
+  }
 
   val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit && ifu_wb_valid
   val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
@@ -1319,6 +1329,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
+
+  BranchConf.confWithName.map { case (name, conf) =>
+    val confMask = VecInit(debugFtqPdBrIdx(commPtr.value).map(i => RegNext(debugBranchConf(commPtr.value)(i)) === conf)).asUInt
+    confMask.suggestName(s"confMask_${name}")
+    XSPerfAccumulate(s"${name}Right", PopCount(confMask & mbpRights))
+    XSPerfAccumulate(s"${name}Wrong", PopCount(confMask & mbpWrongs))
+  }
 
   val isWriteFTQTable = WireInit(Constantin.createRecord("isWriteFTQTable" + p(XSCoreParamsKey).HartId.toString))
   val ftqBranchTraceDB = ChiselDB.createTable("FTQTable" + p(XSCoreParamsKey).HartId.toString, new FtqDebugBundle)
