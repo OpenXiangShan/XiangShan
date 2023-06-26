@@ -119,6 +119,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
     info.dstMask -> resVecBit.asUInt,
     narrowNeedCat -> narrowResCat,
   ))
+  io.out.keep := keepEn
 
   io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
   io.debugOnly.vlMapVdIdx := vlMapVdIdx
@@ -147,6 +148,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   }
   val out = new Bundle {
     val vd = Output(UInt(vlen.W))
+    val keep = Output(UInt((vlen / 8).W))
   }
   val debugOnly = Output(new Bundle {
     val vstartMapVdIdx = UInt()
