@@ -114,7 +114,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
 
     if (enablePreAlloc) {
       val deqPtr = headPtr + numAllocate + offset
-      io.canAllocate(i) := RegNext(isBefore(deqPtr, tailPtrNext))
+      io.canAllocate(i) := RegNext(isBefore(deqPtr, tailPtr))
       io.allocateSlot(i) := RegNext(freeList(deqPtr.value))
     } else {
       val deqPtr = headPtr + offset

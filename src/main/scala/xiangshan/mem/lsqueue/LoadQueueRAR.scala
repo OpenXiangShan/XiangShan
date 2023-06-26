@@ -72,6 +72,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     size = LoadQueueRARSize, 
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
+    enablePreAlloc = true,
     moduleName = "LoadQueueRAR freelist"
   ))
   freeList.io := DontCare
@@ -92,22 +93,26 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
 
   // Allocate logic 
-  val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
+  val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-
+  // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
+    acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    freeList.io.allocateReq(w) := needEnqueue(w)
+    freeList.io.allocateReq(w) := true.B
 
     //  Allocate ready 
-    enqValidVec(w) := freeList.io.canAllocate(w)
-    enqIndexVec(w) := freeList.io.allocateSlot(w)
-    enq.ready := Mux(needEnqueue(w), enqValidVec(w), true.B)
+    val offset = PopCount(needEnqueue.take(w))
+    val canAccept = freeList.io.canAllocate(offset)
+    val enqIndex = freeList.io.allocateSlot(offset)
 
-    val enqIndex = enqIndexVec(w)
+    enqIndexVec(w) := enqIndex
+    enq.ready := Mux(needEnqueue(w), canAccept, true.B)
     when (needEnqueue(w) && enq.ready) {
+      acceptedVec(w) := true.B
+
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
@@ -151,7 +156,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   // if need replay release entry
-  val lastCanAccept = RegNext(VecInit(needEnqueue.zip(enqValidVec).map(x => x._1 && x._2)))
+  val lastCanAccept = RegNext(acceptedVec)
   val lastAllocIndex = RegNext(enqIndexVec)
 
   for ((release, w) <- io.query.map(_.release).zipWithIndex) {
