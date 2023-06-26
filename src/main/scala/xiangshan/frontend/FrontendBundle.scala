@@ -416,6 +416,8 @@ trait BasicPrediction extends HasXSParameter {
 
 object BranchConf {
   val lowConfBim :: medConfBim :: highConfBim :: wTag :: nwTag :: nsTag :: sTag :: Nil = Enum(7)
+  val confWithName = Seq("lowConfBim", "medConfBim", "highConfBim", "wTag", "nwTag", "nsTag", "sTag") zip
+                     Seq(lowConfBim, medConfBim, highConfBim, wTag, nwTag, nsTag, sTag)
   val (lowConf, medConf, highConf) = ("b001".U, "b010".U, "b100".U)
   def confMap(confType: UInt): UInt = Mux1H(Seq(
     (confType === lowConfBim ) -> lowConf,

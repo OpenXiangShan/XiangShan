@@ -307,10 +307,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
   }
 
-  import BranchConf._
-  Seq("lowConfBim", "medConfBim", "highConfBim", "wTag", "nwTag", "nsTag", "sTag") zip
-  Seq(lowConfBim, medConfBim, highConfBim, wTag, nwTag, nsTag, sTag) map { case (confName, confType) =>
-    XSPerfAccumulate(confName + "Num", PopCount(io.in.zip(io.debugConfidence).map { case (in, conf) =>
+  BranchConf.confWithName.map { case (name, confType) =>
+    XSPerfAccumulate(s"${name}Num", PopCount(io.in.zip(io.debugConfidence).map { case (in, conf) =>
       confType === conf(in.bits.cf.pd.brIdx) && !in.bits.cf.pd.notCFI && in.fire
     }))
   }
