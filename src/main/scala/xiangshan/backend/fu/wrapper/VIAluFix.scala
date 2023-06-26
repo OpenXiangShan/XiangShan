@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.{VecInit, _}
 import chisel3.util._
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
+import utility.DelayN
 import utils.XSError
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew, ma}
@@ -208,7 +209,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   // mask
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(srcMask, vsew)
   private val maskIdx = Mux(isNarrow, (vuopIdx >> 1.U).asUInt, vuopIdx)
-  private val eewVd_is_1b = vdType === 15.U
+  private val eewVd_is_1b = vdType === VdType.mask
   private val maskUsed = splitMask(maskDataVec(maskIdx), Mux(eewVd_is_1b, eewVs1, eewVd))
 
   private val oldVdUsed = splitMask(VecDataToMaskDataVec(oldVd, vs1Type(1, 0))(vuopIdx), eewVs1)
@@ -244,10 +245,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   /**
    * [[mgu]]'s in connection
    */
-  private val eewVs1S1 = RegNext(eewVs1)
+  private val outEewVs1 = DelayN(eewVs1, latency)
 
   private val outVd = Cat(vIntFixpAlus.reverse.map(_.io.vd))
-  private val outCmp = Mux1H(eewVs1S1.oneHot, Seq(8, 4, 2, 1).map(
+  private val outCmp = Mux1H(outEewVs1.oneHot, Seq(8, 4, 2, 1).map(
     k => Cat(vIntFixpAlus.reverse.map(_.io.cmpOut(k - 1, 0)))))
   private val outNarrow = Cat(vIntFixpAlus.reverse.map(_.io.narrowVd))
 
@@ -281,7 +282,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgu.io.in.info.dstMask := dstMask
 
   io.out.bits.res.data := mgu.io.out.vd
-  io.out.bits.res.vxsat.get := Cat(vIntFixpAlus.map(_.io.vxsat)).orR
+  io.out.bits.res.vxsat.get := (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR
 
   // util function
   def splitMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {
@@ -290,9 +291,9 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
     for ((resultData, i) <- result.zipWithIndex) {
       resultData := Mux1H(Seq(
         sew.is8 -> maskIn(i * 8 + 7, i * 8),
-        sew.is16 -> Cat(0.U(4.W), maskIn(i * 4 + 3, i * 4)),
-        sew.is32 -> Cat(0.U(6.W), maskIn(i * 2 + 1, i * 2)),
-        sew.is64 -> Cat(0.U(7.W), maskIn(i)),
+        sew.is16 -> Cat(0.U((8 - 4).W), maskIn(i * 4 + 3, i * 4)),
+        sew.is32 -> Cat(0.U((8 - 2).W), maskIn(i * 2 + 1, i * 2)),
+        sew.is64 -> Cat(0.U((8 - 1).W), maskIn(i)),
       ))
     }
     result
