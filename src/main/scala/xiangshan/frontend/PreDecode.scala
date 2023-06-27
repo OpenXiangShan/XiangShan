@@ -243,7 +243,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   notCFITaken  := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken })
   invalidTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && !instrValid(i)  && i.U === takenIdx  && predTaken })
 
-  val jumpTargets          = VecInit(pds.zipWithIndex.map{case(pd,i) => pc(i) + jumpOffset(i)})
+  val jumpTargets          = VecInit(pds.zipWithIndex.map{case(pd,i) => (pc(i) + jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))})
   val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U ) ))
 
   //Stage 2: detect target fault
