@@ -209,17 +209,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   /**
    * used for re-select control
    */
-  val credit = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(ReSelectLen.W))))
-  val selBlocked = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))  
-  //  Ptrs to control which cycle to choose
-  val blockPtrTlb = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(2.W))))
-  val blockPtrCache = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(2.W))))
-  val blockPtrOthers = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(2.W))))
-  //  Specific cycles to block
-  val blockCyclesTlb = Reg(Vec(4, UInt(ReSelectLen.W)))
-  blockCyclesTlb := io.tlbReplayDelayCycleCtrl
-  val blockCyclesCache = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
-  val blockCyclesOthers = RegInit(VecInit(Seq(0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   val blockSqIdx = Reg(Vec(LoadQueueReplaySize, new SqPtr))
   // block causes
   val blockByTlbMiss = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))  
@@ -228,17 +217,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val blockByCacheMiss = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val blockByRARReject = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val blockByRAWReject = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
-  val blockByOthers = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   // DCache miss block
   val missMSHRId = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U((log2Up(cfg.nMissEntries).W)))))
   // Has this load already updated dcache replacement?
   val replacementUpdated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val trueCacheMissReplay = WireInit(VecInit(cause.map(_(LoadReplayCauses.dcacheMiss))))
-  val creditUpdate = WireInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(ReSelectLen.W))))
-  (0 until LoadQueueReplaySize).map(i => {
-    creditUpdate(i) := Mux(credit(i) > 0.U(ReSelectLen.W), credit(i)-1.U(ReSelectLen.W), credit(i))
-    selBlocked(i) := creditUpdate(i) =/= 0.U(ReSelectLen.W) || credit(i) =/= 0.U(ReSelectLen.W)
-  })
   val replayCarryReg = RegInit(VecInit(List.fill(LoadQueueReplaySize)(ReplayCarry(0.U, false.B))))
   val dataInLastBeatReg = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
 
@@ -306,13 +289,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   (0 until LoadQueueReplaySize).map(i => {
     blockByForwardFail(i) := Mux(blockByForwardFail(i) && stDataDeqVec(i), false.B, blockByForwardFail(i))
     blockByWaitStore(i) := Mux(blockByWaitStore(i) && stAddrDeqVec(i), false.B, blockByWaitStore(i))
-    blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
-
-    when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
-    when (blockByRARReject(i) && (!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr))) { blockByRARReject(i) := false.B }
-    when (blockByRAWReject(i) && (!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr))) { blockByRAWReject(i) := false.B }
-    when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
-    when (blockByOthers(i) && creditUpdate(i) === 0.U) { blockByOthers(i) := false.B }
+    blockByRARReject(i) := Mux(blockByRARReject(i) && (!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blockByRARReject(i))
+    blockByRAWReject(i) := Mux(blockByRAWReject(i) && (!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr)), false.B, blockByRAWReject(i))
   })  
 
   //  Replay is splitted into 3 stages
@@ -368,12 +346,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // 2. higher priority load
   // 3. lower priority load
   val s0_loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     val hasHigherPriority = cause(i)(LoadReplayCauses.dcacheMiss) || cause(i)(LoadReplayCauses.forwardFail)
     allocated(i) && !scheduled(i) && !blocked && hasHigherPriority && !uop(i).robIdx.needFlush(io.redirect)
   })).asUInt // use uint instead vec to reduce verilog lines
   val s0_loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     val hasLowerPriority = !cause(i)(LoadReplayCauses.dcacheMiss) && !cause(i)(LoadReplayCauses.forwardFail)
     allocated(i) && !scheduled(i) && !blocked && hasLowerPriority && !uop(i).robIdx.needFlush(io.redirect)
   })).asUInt // use uint instead vec to reduce verilog lines
@@ -596,12 +574,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       cause(enqIndex) := replayInfo.cause.asUInt
 
       // update credit
-      val blockCyclesTlbPtr = blockPtrTlb(enqIndex)
-      val blockCyclesCachePtr = blockPtrCache(enqIndex)
-      val blockCyclesOtherPtr = blockPtrOthers(enqIndex)
-      creditUpdate(enqIndex) := Mux(replayInfo.cause(LoadReplayCauses.tlbMiss), blockCyclesTlb(blockCyclesTlbPtr), 
-                                Mux(replayInfo.cause(LoadReplayCauses.dcacheMiss), blockCyclesCache(blockCyclesCachePtr) + dataInLastBeat, blockCyclesOthers(blockCyclesOtherPtr)))
-
       // init
       blockByTlbMiss(enqIndex) := false.B
       blockByWaitStore(enqIndex) := false.B
@@ -609,58 +581,33 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       blockByCacheMiss(enqIndex) := false.B
       blockByRARReject(enqIndex) := false.B
       blockByRAWReject(enqIndex) := false.B
-      blockByOthers(enqIndex) := false.B
-
-      // update block pointer
-      when (replayInfo.cause(LoadReplayCauses.dcacheReplay)) {
-        // normal case: dcache replay
-        blockByOthers(enqIndex) := true.B
-        blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.bankConflict) || replayInfo.cause(LoadReplayCauses.schedError)) {
-        // normal case: bank conflict or schedule error
-        // can replay next cycle
-        creditUpdate(enqIndex) := 0.U
-        blockByOthers(enqIndex) := false.B
-      }
-
-      // special case: tlb miss
-      when (replayInfo.cause(LoadReplayCauses.tlbMiss)) {
-        blockByTlbMiss(enqIndex) := true.B
-        blockPtrTlb(enqIndex) := Mux(blockPtrTlb(enqIndex) === 3.U(2.W), blockPtrTlb(enqIndex), blockPtrTlb(enqIndex) + 1.U(2.W))
-      }
 
       // special case: dcache miss
       when (replayInfo.cause(LoadReplayCauses.dcacheMiss) && enq.bits.handledByMSHR) {
         blockByCacheMiss(enqIndex) := !replayInfo.canForwardFullData && //  dcache miss
                                   !(io.refill.valid && io.refill.bits.id === replayInfo.missMSHRId) // no refill in this cycle
-                                  
-        blockPtrCache(enqIndex) := Mux(blockPtrCache(enqIndex) === 3.U(2.W), blockPtrCache(enqIndex), blockPtrCache(enqIndex) + 1.U(2.W))
       }
 
       // special case: st-ld violation
       when (replayInfo.cause(LoadReplayCauses.waitStore)) {
         blockByWaitStore(enqIndex) := true.B
         blockSqIdx(enqIndex) := replayInfo.addrInvalidSqIdx
-        blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
       }
 
       // special case: data forward fail
       when (replayInfo.cause(LoadReplayCauses.forwardFail)) {
         blockByForwardFail(enqIndex) := true.B
         blockSqIdx(enqIndex) := replayInfo.dataInvalidSqIdx
-        blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
       }
 
       // special case: rar reject
       when (replayInfo.cause(LoadReplayCauses.rarReject)) {
         blockByRARReject(enqIndex) := true.B
-        blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W))
       }
 
       // special case: raw reject
       when (replayInfo.cause(LoadReplayCauses.rawReject)) {
         blockByRAWReject(enqIndex) := true.B
-        blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W))
       }
 
       // extra info

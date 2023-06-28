@@ -797,7 +797,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val rr_way_addr = RegNext(RegNext(OHToUInt(way_en(i))))
     io.read_resp_delayed(i) := bank_result_delayed(rr_div_addr)(rr_bank_addr)
     // error detection
-    io.read_error_delayed(i) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr) && !RegNext(io.bank_conflict_slow(i))
+    // fake disable
+    io.read_error_delayed(i) := RegNext(rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr) && !RegNext(io.bank_conflict_slow(i)))
 
   })
 

@@ -126,7 +126,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
 
   headPtrNext := headPtr + numAllocate
   headPtr := Mux(doAllocate, headPtrNext, headPtr)
-  freeSlotCnt := distanceBetween(tailPtrNext, headPtrNext)
+  freeSlotCnt := distanceBetween(tailPtr, headPtr)
 
   io.empty := freeSlotCnt === 0.U
   io.validCount := size.U - freeSlotCnt

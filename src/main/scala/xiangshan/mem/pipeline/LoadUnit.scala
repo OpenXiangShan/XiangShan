@@ -662,8 +662,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_allocValid = !s2_tlb_miss &&
                       !s2_is_prefetch && 
                       !s2_exception && 
-                      !s2_mmio && 
-                      !s2_fast_replay
+                      !s2_mmio
 
   // ld-ld violation require
   io.loadLoadViolationQueryReq.valid := io.in.valid && s2_allocValid
