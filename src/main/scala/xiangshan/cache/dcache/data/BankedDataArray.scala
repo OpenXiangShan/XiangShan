@@ -474,6 +474,13 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     io.read_error_delayed(i) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr)(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
   })
 
+  (0 until LoadPipelineWidth).map(i => {
+    val rr_div_addr = RegNext(div_addrs(i))
+    val rr_bank_addr = RegNext(bank_addrs(i))
+    val rr_way_addr = RegNext(OHToUInt(way_en(i)))
+    io.read_resp_delayed(i).raw_data := RegNext(read_result(rr_div_addr)(rr_bank_addr)(rr_way_addr).raw_data)
+  })
+
   // readline port
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(RegNext(line_div_addr))(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
@@ -800,6 +807,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     // fake disable
     io.read_error_delayed(i) := RegNext(rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr) && !RegNext(io.bank_conflict_slow(i)))
 
+  })
+
+  (0 until LoadPipelineWidth).map(i => {
+    val rr_read_fire = RegNext(io.read(i).fire)
+    val rr_div_addr = RegNext(div_addrs(i))
+    val rr_bank_addr = RegNext(bank_addrs(i))
+    val rr_way_addr = RegNext(OHToUInt(way_en(i)))
+    io.read_resp_delayed(i).raw_data := RegNext(bank_result(rr_div_addr)(rr_bank_addr).raw_data)
   })
 
   // read result: expose banked read result
