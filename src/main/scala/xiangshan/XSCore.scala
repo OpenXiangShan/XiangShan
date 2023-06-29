@@ -248,6 +248,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
+    val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -302,7 +303,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.ooo_to_mem.enqLsq
   exuBlocks.foreach(b => {
-    b.io.scheExtra.lcommit := ctrlBlock.io.robio.lsq.lcommit
+    b.io.scheExtra.lcommit := memBlock.io.mem_to_ooo.lqDeq
     b.io.scheExtra.scommit := memBlock.io.mem_to_ooo.sqDeq
     b.io.scheExtra.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
     b.io.scheExtra.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
@@ -321,9 +322,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
   ctrlBlock.io.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
+  ctrlBlock.io.lqDeq := memBlock.io.mem_to_ooo.lqDeq
   ctrlBlock.io.sqDeq := memBlock.io.mem_to_ooo.sqDeq
+  ctrlBlock.io.lqCanAccept := memBlock.io.ooo_to_mem.lsqio.lqCanAccept
+  ctrlBlock.io.sqCanAccept := memBlock.io.ooo_to_mem.lsqio.sqCanAccept
   ctrlBlock.io.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
+  ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
   exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get
@@ -334,7 +339,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     c.offset := e.bits.uop.cf.ftqOffset
   }
   // return load pc at load s2
-  memBlock.io.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
+  memBlock.io.ooo_to_mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
   memBlock.io.fetch_to_mem.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.fetch_to_mem.issue.map(_.bits.uop.clearExceptions())
@@ -349,11 +354,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.fastUopIn <> allFastUop1
     exu.scheExtra.jumpPc <> ctrlBlock.io.jumpPc
     exu.scheExtra.jalr_target <> ctrlBlock.io.jalr_target
-    exu.scheExtra.stIssuePtr <> memBlock.io.ooo_to_mem.stIssuePtr
+    exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
-    exu.scheExtra.lqFull := memBlock.io.lqFull
-    exu.scheExtra.sqFull := memBlock.io.sqFull
+    exu.scheExtra.robDeqPtr := ctrlBlock.io.robDeqPtr
     exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.mem_to_ooo.stIn).foreach{case (sink, src) => {
       sink.bits := src.bits
       sink.valid := src.valid
@@ -420,6 +424,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
   memBlock.io.ooo_to_mem.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.ooo_to_mem.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
+  memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
+  memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
+  memBlock.io.l2Hint.valid := io.l2Hint.valid
+  memBlock.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
@@ -428,6 +436,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.sfence <> fenceio.sfence
   ptw.io.csr.tlb <> csrioIn.tlb
   ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
+
+  ExcitingUtils.addSource(dtlbRepeater1.io.rob_head_miss_in_tlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
