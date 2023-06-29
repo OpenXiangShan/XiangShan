@@ -420,7 +420,7 @@ class TageTable
   }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
-    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, 1, tagWidth=tagLen))
+    Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(bankSize)))
   )) // let it corresponds to logical brIdx
 
   for (b <- 0 until nBanks) {
@@ -456,7 +456,6 @@ class TageTable
       val br_pidx = get_phy_br_idx(update_unhashed_idx, li)
       wrbypass.io.wen := io.update.mask(li) && update_req_bank_1h(b)
       wrbypass.io.write_idx := get_bank_idx(update_idx)
-      wrbypass.io.write_tag.map(_ := update_tag)
       wrbypass.io.write_data(0) := Mux1H(UIntToOH(br_pidx, numBr), per_bank_update_wdata(b)).ctr
     }
   }
@@ -677,12 +676,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire)
 
     val s1_bimCtr = bt.io.s1_cnt(i)
+    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_tageTakens(i) := 
-      Mux(!provided || providerInfo.use_alt_on_unconf,
+      Mux(s1_altUsed(i),
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
-    s1_altUsed(i)       := !provided || providerInfo.use_alt_on_unconf
     s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf

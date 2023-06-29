@@ -30,6 +30,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.ReservationStationWrapper
 import xiangshan.backend.regfile.{Regfile, RfReadPort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 import chisel3.ExcitingUtils
 
@@ -263,16 +264,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
     // from lsq
-    val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
+    val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     // perf
-    val sqFull = Input(Bool())
-    val lqFull = Input(Bool())
-
+    val robDeqPtr = Input(new RobPtr)
+    val robHeadLsIssue = Output(Bool())
   }
 
   val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
@@ -525,6 +525,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
+  val lsRsDeqPorts = outer.reservationStations.filter(_.params.lsqFeedback).map(_.module.io.deq).flatten
+  io.extra.robHeadLsIssue := lsRsDeqPorts.map(deq => deq.fire && deq.bits.uop.robIdx === io.extra.robDeqPtr).reduceOption(_ || _).getOrElse(false.B)
+
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
@@ -542,24 +545,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire)))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
-
-  if (env.EnableTopDown && rs_all.exists(_.params.isLoad)) {
-    val stall_ls_blame = WireDefault(0.B)
-    ExcitingUtils.addSink(stall_ls_blame, "stall_ls_blame", ExcitingUtils.Perf)
-    val ld_rs_full = !rs_all.filter(_.params.isLoad).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val st_rs_full = !rs_all.filter(rs => rs.params.isStore || rs.params.isStoreData).map(_.module.io.fromDispatch.map(_.ready).reduce(_ && _)).reduce(_ && _)
-    val rob_first_load = WireDefault(false.B)
-    val rob_first_store = WireDefault(false.B)
-    ExcitingUtils.addSink(rob_first_load, "rob_first_load", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(rob_first_store, "rob_first_store", ExcitingUtils.Perf)
-    val stall_stores_bound = stall_ls_blame && (st_rs_full || io.extra.sqFull || rob_first_store)
-    val stall_loads_bound = stall_ls_blame && (ld_rs_full || io.extra.lqFull || rob_first_load)
-    val stall_ls_bandwidth_bound = stall_ls_blame && !(st_rs_full || io.extra.sqFull || rob_first_store) && !(ld_rs_full || io.extra.lqFull || rob_first_load)
-    ExcitingUtils.addSource(stall_loads_bound, "stall_loads_bound", ExcitingUtils.Perf)
-    XSPerfAccumulate("stall_loads_bound", stall_loads_bound)
-    XSPerfAccumulate("stall_stores_bound", stall_stores_bound)
-    XSPerfAccumulate("stall_ls_bandwidth_bound", stall_ls_bandwidth_bound)
-  }
 
   val lastCycleAllocate = RegNext(VecInit(allocate.map(_.fire)))
   val lastCycleIssue = RegNext(VecInit(io.issue.map(_.fire)))

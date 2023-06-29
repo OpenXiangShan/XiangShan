@@ -24,14 +24,13 @@ import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams,
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utility.{BinaryArbiter, TLEdgeBuffer}
+import utility.{BinaryArbiter, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
 import top.BusPerfMonitor
 import xiangshan.backend.fu.PMAConst
 import huancun._
-import huancun.debug.TLLogger
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -42,7 +41,7 @@ case class SoCParameters
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
-    name = "l3",
+    name = "L3",
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank
@@ -148,10 +147,13 @@ trait HaveAXI4MemPort {
   ))
 
   val mem_xbar = TLXbar()
+  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform, stat_latency = true, add_reqkey = true)
   mem_xbar :=*
+    TLBuffer.chainNode(2) :=
+    TLCacheCork() :=
+    l3_mem_pmu :=
+    TLClientsMerger() :=
     TLXbar() :=*
-    TLBuffer.chainNode(2) :=*
-    TLCacheCork() :=*
     bankedNode
 
   mem_xbar :=
@@ -232,10 +234,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val l3_in = TLTempNode()
   val l3_out = TLTempNode()
-  val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
   l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar
-  bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
+  bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
     l3_out :*= l3_in
@@ -247,7 +248,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=*
-      TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
+      TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :=*
       TLBuffer() :=
       core_out
   }

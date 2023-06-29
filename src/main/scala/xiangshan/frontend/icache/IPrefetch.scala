@@ -24,8 +24,11 @@ import freechips.rocketchip.tilelink._
 import utils._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import huancun.PreferCacheKey
+import utility.ReqSourceKey
+import xiangshan.{MemReqSource, XSCoreParamsKey}
 import utility._
-import xiangshan.XSCoreParamsKey
 
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
@@ -134,6 +137,7 @@ class IPFWritePtrQueue(implicit p: Parameters) extends IPrefetchModule with HasC
 class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 {
   val io = IO(new Bundle{
+    val hartId = Input(UInt(8.W))
     val read  = new IPFBufferRead
     val filter_read = Vec(prefetchPipeNum, new IPFBufferFilterRead)
     val write = Flipped(ValidIO(new IPFBufferWrite))
@@ -416,7 +420,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := io.hartId
     difftest.io.cacheid := 6.U
     difftest.io.valid := io.move.meta_write.fire
     difftest.io.addr := s3_move_meta.paddr
@@ -460,7 +464,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
       b.confidence := 0.U
       b.has_been_hit := false.B
     }
-    (0 until PortNumber).foreach(i => r_buffer_hit_s2(i) := 0.U)
+    (0 until PortNumber).foreach(i => r_buffer_hit_s2(i) := 0.U )
     r_rvalid_s2 := 0.U
     curr_move_ptr := 0.U
     curr_hit_ptr := 0.U
@@ -762,8 +766,7 @@ class PIQEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends IPrefet
     fromSource      = io.id,
     toAddress       = Cat(req.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
+  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
+  io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1InstPrefetch.id.U)
 
-
-
-  XSError(blockCounter(io.req.fire, io.piq_write_ipbuffer.fire, 10000), "PIQEntry"+ io.id +"_block_10000_cycle,may_has_error\n")
 }

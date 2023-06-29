@@ -52,6 +52,8 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
 {
   val req  = Flipped(Decoupled(new FtqToICacheRequestBundle))
   val resp = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+  val topdownIcacheMiss = Output(Bool())
+  val topdownItlbMiss = Output(Bool())
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle{
@@ -93,6 +95,7 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
 }
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
+  val hartId = Input(UInt(8.W))
   /*** internal interface ***/
   val metaArray   = Vec(ICacheMainPipeReadPortNum, new ICacheMetaReqBundle)
   val dataArray   = Vec(ICacheMainPipeReadPortNum, new ICacheDataReqBundle)
@@ -316,6 +319,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_ready := s2_ready && tlbRespAllValid && !s1_wait && s1_resend_can_go  || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait && s1_resend_can_go
 
+  def numOfStage = 3
+  val itlbMissStage = RegInit(VecInit(Seq.fill(numOfStage - 1)(0.B)))
+  itlbMissStage(0) := !tlbRespAllValid
+  for (i <- 1 until numOfStage - 1) {
+    itlbMissStage(i) := itlbMissStage(i - 1)
+  }
+  
+
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
@@ -359,13 +370,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   })
 
   when(s1_fire){
-    when (!(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line))) {
-      printf("Multiple hit in main pipe\n")
-    }
-//    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line),
-//      "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
-//      PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
-//      PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
+//    when (!(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line))) {
+//      printf("Multiple hit in main pipe\n")
+//    }
+    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line),
+      "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
+      PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
+      PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
   }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
@@ -419,7 +430,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     (0 until PortNumber).foreach { i =>
       val diffPIQ = Module(new DifftestRefillEvent)
       diffPIQ.io.clock := clock
-      diffPIQ.io.coreid := 0.U
+      diffPIQ.io.coreid := io.hartId
       diffPIQ.io.cacheid := (i + 7).U
       if (i == 0) diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && !tlbExcp(0)
       else diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
@@ -489,6 +500,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_way_pred_hit = RegEnable(s1_way_pred_hit, s1_fire)
   val s2_use_resend_data = RegEnable(s1_need_resend, s1_fire)
   val s2_resend_way_en = RegEnable(s1_real_way_en, s1_fire)
+
+  val icacheMissStage = RegInit(VecInit(Seq.fill(numOfStage - 2)(0.B)))
+  icacheMissStage(0) := !s2_hit
 
   assert(RegNext(!s2_valid || s2_req_paddr(0)(11,0) === s2_req_vaddr(0)(11,0), true.B))
 
@@ -864,6 +878,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       io.errors(i).source.l2        := true.B
     }
   }
+  io.fetch.topdownIcacheMiss := !s2_hit
+  io.fetch.topdownItlbMiss := itlbMissStage(0)
+
   (0 until 2).map {i =>
     XSPerfAccumulate("port_" + i + "_only_hit_in_ipf", !s2_port_hit(i) && s2_prefetch_hit(i) && s2_fire)
   }
@@ -897,20 +914,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlb_has_miss = tlb_miss_vec.reduce(_ || _)
   XSPerfAccumulate("icache_bubble_s0_tlb_miss",    s0_valid && tlb_has_miss )
 
-  /** way pred pref */
-  val s2_req_valid = VecInit(Seq(s2_valid, s2_valid && s2_double_line))
-  (0 until PortNumber).foreach(i => {
-    XSPerfAccumulate("icache_port_" + i + "_way_pred_hit", s2_fire && s2_way_pred_hit(i) && s2_req_valid(i))
-    XSPerfAccumulate("icache_port_" + i + "_way_pred_resend", s2_fire && s2_use_resend_data(i) && s2_req_valid(i))
-    XSPerfAccumulate("icache_port_" + i + "_s1_resend_miss",
-      s2_fire && s2_use_resend_data(i) && !s2_resend_hit(i) && s2_req_valid(i))
-  })
-
-
-  XSError(blockCounter(s0_valid, s0_fire, 10000), "mainPipe_stage0_block_10000_cycle,may_has_error\n")
-  XSError(blockCounter(s1_valid, s1_fire, 10000), "mainPipe_stage1_block_10000_cycle,may_has_error\n")
-  XSError(blockCounter(s2_valid, s2_fire, 10000), "mainPipe_stage2_block_10000_cycle,may_has_error\n")
-
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
       val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio
@@ -919,7 +922,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     (0 until PortNumber).map { i =>
       val diffMainPipeOut = Module(new DifftestRefillEvent)
       diffMainPipeOut.io.clock := clock
-      diffMainPipeOut.io.coreid := 0.U
+      diffMainPipeOut.io.coreid := io.hartId
       diffMainPipeOut.io.cacheid := (4 + i).U
       if (i == 0) diffMainPipeOut.io.valid := s2_fire && !discards(0)
       else        diffMainPipeOut.io.valid := s2_fire && s2_double_line && !discards(0) && !discards(1)
@@ -934,7 +937,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
         .elsewhen(s2_prefetch_hit(i)) {
           when (s2_prefetch_hit_in_ipf(i)) { diffMainPipeOut.io.idtfr := 2.U  }
             .elsewhen(s2_prefetch_hit_in_piq(i)) { diffMainPipeOut.io.idtfr := 3.U }
-            .otherwise { XSError(true.B, "should not in this situation\n")}
+            .otherwise { XSWarn(true.B, "should not in this situation\n")}
         }
         .otherwise { diffMainPipeOut.io.idtfr := 4.U }
       diffMainPipeOut

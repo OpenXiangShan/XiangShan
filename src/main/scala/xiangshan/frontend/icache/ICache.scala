@@ -22,7 +22,7 @@ import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
+import coupledL2.{AliasField, DirtyField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
@@ -55,9 +55,9 @@ case class ICacheParameters(
   val aliasBitsOpt = DCacheParameters().aliasBitsOpt //if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
-    PreferCacheField()
+    ReqSourceField()
   ) ++ aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
+  val echoFields: Seq[BundleFieldBase] = Nil
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
@@ -224,13 +224,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       valid_metas(i)(way) := valid_array(way)(read_set_idx_next(i))
     ))
   io.readResp.entryValid := valid_metas
-//  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire)
-//  val validArray = RegInit(0.U((nSets * nWays).W))
-//  val validMetas = VecInit((0 until 2).map{ bank =>
-//    val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
-//    validMeta
-//  })
-//  io.readResp.entryValid := validMetas.asTypeOf(Vec(2, Vec(nWays, Bool())))
 
   io.read.ready := !io.write.valid && !io.fencei && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
@@ -249,11 +242,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag).asUInt)
 
-//  val wayNum   = OHToUInt(io.write.bits.waymask)
-//  val validPtr = Cat(io.write.bits.virIdx, wayNum)
-//  when (io.write.valid) {
-//    validArray := validArray.bitSet(validPtr, true.B)
-//  }
   // valid write
   val way_num = OHToUInt(io.write.bits.waymask)
   when (io.write.valid) {
@@ -524,8 +512,6 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     Seq(TLMasterParameters.v1(
       name = "icache",
       sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nPrefetchEntries),
-      supportsProbe = TransferSizes(blockBytes),
-      supportsHint = TransferSizes(blockBytes)
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields
@@ -563,6 +549,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
   val prefetch_req_arb = Module(new Arbiter(new PIQReq, prefetchPipeNum))
 
+  mainPipe.io.hartId := io.hartId
+  ipfBuffer.io.hartId := io.hartId
   mainPipe.io.PIQ <> missUnit.io.to_main_pipe
   ipfBuffer.io.read <> mainPipe.io.iprefetchBuf
   meta_write_arb.io.in(1) <> ipfBuffer.io.move.meta_write
@@ -640,6 +628,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
 
   io.fetch.resp     <>    mainPipe.io.fetch.resp
+  io.fetch.topdownIcacheMiss := mainPipe.io.fetch.topdownIcacheMiss
+  io.fetch.topdownItlbMiss   := mainPipe.io.fetch.topdownItlbMiss
 
   for(i <- 0 until PortNumber){
     missUnit.io.req(i)           <>   mainPipe.io.mshr(i).toMSHR
@@ -704,68 +694,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
   cacheOpDecoder.io.error := io.error
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
-
-  if (env.EnableDifftest) {
-    val metaRefill = Module(new DifftestICacheMetaWrite)
-    metaRefill.io.index := 0.U
-    metaRefill.io.coreid := 0.U
-    metaRefill.io.clock := clock
-    metaRefill.io.valid := bankedMetaArray.io.write.valid
-    metaRefill.io.phyTag := bankedMetaArray.io.write.bits.phyTag
-    metaRefill.io.virIdx := bankedMetaArray.io.write.bits.virIdx
-    metaRefill.io.wayNum := OHToUInt(bankedMetaArray.io.write.bits.waymask)
-    metaRefill.io.timer := GTimer()
-
-    (0 until prefetchPipeNum + 1).map {i =>
-      val bankedMetaDiff = Module(new DifftestICacheBankedMetaRead)
-      bankedMetaDiff.io.coreid := 0.U
-      bankedMetaDiff.io.clock := clock
-      bankedMetaDiff.io.index := i.U
-      bankedMetaDiff.io.valid := RegNext(bankedMetaArray.io.read(i).fire)
-      bankedMetaDiff.io.idx := RegNext(bankedMetaArray.io.read(i).bits.idx)
-      bankedMetaDiff.io.entryValid := bankedMetaArray.io.readResp(i).entryValid
-      bankedMetaDiff.io.metaData := bankedMetaArray.io.readResp(i).metaData.map(_.tag)
-      bankedMetaDiff.io.timer := GTimer()
-      bankedMetaDiff
-    }
-
-    (0 until ICacheMainPipeReadPortNum).map { i =>
-      val metaArrayDiff = Module(new DifftestICacheBankedMetaRead)
-      metaArrayDiff.io.coreid := 0.U
-      metaArrayDiff.io.clock := clock
-      metaArrayDiff.io.index := (i + prefetchPipeNum + 1).U
-      metaArrayDiff.io.valid := RegNext(metaArray.io.read(i).fire)
-      metaArrayDiff.io.idx := RegNext(metaArray.io.read(i).bits.idx)
-      metaArrayDiff.io.entryValid := metaArray.io.readResp(i).entryValid
-      metaArrayDiff.io.metaData := metaArray.io.readResp(i).metaData.map(_.tag)
-      metaArrayDiff.io.timer := GTimer()
-      metaArrayDiff
-    }
-
-    val dataRefill = Module(new DifftestICacheBankedDataWrite)
-    dataRefill.io.index := 0.U
-    dataRefill.io.coreid := 0.U
-    dataRefill.io.clock := clock
-    dataRefill.io.valid := dataArray.io.write.valid
-    dataRefill.io.idx := dataArray.io.write.bits.virIdx
-    dataRefill.io.wayNum := OHToUInt(dataArray.io.write.bits.waymask)
-    dataRefill.io.data := dataArray.io.write.bits.data.asTypeOf(Vec(8, UInt(64.W)))
-    dataRefill.io.timer := GTimer()
-
-    (0 until ICacheMainPipeReadPortNum).map { i =>
-      val dataArrayDiff = Module(new DifftestICacheBankedDataRead)
-      dataArrayDiff.io.coreid := 0.U
-      dataArrayDiff.io.clock := clock
-      dataArrayDiff.io.index := i.U
-      dataArrayDiff.io.valid := RegNext(dataArray.io.read(i).fire)
-      dataArrayDiff.io.idx := RegNext(dataArray.io.read(i).bits.idx)
-      dataArrayDiff.io.wayNum := RegNext(OHToUInt(dataArray.io.read(i).bits.way_en))
-      dataArrayDiff.io.entryValid := metaArray.io.readResp(i).entryValid(dataArrayDiff.io.wayNum)
-      dataArrayDiff.io.data := dataArray.io.readResp(i).data.asTypeOf(Vec(8, UInt(64.W)))
-      dataArrayDiff.io.timer := GTimer()
-      dataArrayDiff
-    }
-  }
 
 }
 

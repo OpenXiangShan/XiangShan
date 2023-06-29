@@ -24,7 +24,6 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-import huancun.{AliasKey, DirtyKey}
 import xiangshan.cache._
 import utils._
 import utility._
@@ -175,6 +174,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   )._2
 
   io.mem_acquire.bits := getBlock // getBlock
+  // req source
+  io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUInst.id.U)
   require(nSets <= 256) // icache size should not be more than 128KB
 
   //resp to ifu
@@ -198,7 +199,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
       startHighPriority = true)
   )
   XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire())
-  XSError(blockCounter(io.req.fire, io.resp.fire, 5000), "missEntry"+ io.id +"_block_5000_cycle,may_has_error\n")
 }
 
 

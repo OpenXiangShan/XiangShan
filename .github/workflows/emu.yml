@@ -13,7 +13,7 @@ jobs:
     continue-on-error: false
     name: Generate Verilog
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Basics
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Performance
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
@@ -169,7 +169,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - MC
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
@@ -203,7 +203,7 @@ jobs:
   #   timeout-minutes: 900
   #   name: SIMV - Basics
   #   steps:
-  #     - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v2
   #       with:
   #         submodules: 'recursive'
   #     - name: set env
