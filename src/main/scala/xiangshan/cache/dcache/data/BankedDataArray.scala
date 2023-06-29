@@ -377,7 +377,8 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val wr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x =>
     io.read(x).valid && write_valid_reg &&
     div_addrs(x) === write_div_addr_dup_reg.head &&
-    way_en(x) === write_wayen_dup_reg.head
+    way_en(x) === write_wayen_dup_reg.head && 
+    write_bank_mask_reg(bank_addrs(x))
   )
   val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head && line_way_en === write_wayen_dup_reg.head
   // ready
@@ -698,7 +699,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
   val wr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x =>
-    io.read(x).valid && write_valid_reg && div_addrs(x) === write_div_addr_dup_reg.head
+    io.read(x).valid && write_valid_reg && div_addrs(x) === write_div_addr_dup_reg.head && write_bank_mask_reg(bank_addrs(x))
   )
   val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head
   // ready
