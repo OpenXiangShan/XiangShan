@@ -49,20 +49,20 @@ class FuBusyTableWrite(fuLatencyMap: Map[Int, Int]) (implicit p: Parameters, iqP
   }
 
   private val fuBusyTableShift = (fuBusyTable >> 1).asUInt
-  private val deqRespSet = Mux(deqRespSuccess, deqRespMatchVec.asUInt >> 1, Utils.NZeros(tableSize))
-  private val og0RespClear = Mux(og0RespFail, og0RespMatchVec.asUInt >> 2, Utils.NZeros(tableSize))
-  private val og1RespClear = Mux(og1RespFail, og1RespMatchVec.asUInt >> 3, Utils.NZeros(tableSize))
+  private val deqRespSetShift = Mux(deqRespSuccess, deqRespMatchVec.asUInt >> 1, Utils.NZeros(tableSize))
+  private val og0RespClearShift = Mux(og0RespFail, og0RespMatchVec.asUInt >> 2, Utils.NZeros(tableSize))
+  private val og1RespClearShift = Mux(og1RespFail, og1RespMatchVec.asUInt >> 3, Utils.NZeros(tableSize))
 
   // Just for more readable verilog
   dontTouch(fuBusyTableShift)
-  dontTouch(deqRespSet)
-  dontTouch(og0RespClear)
-  dontTouch(og1RespClear)
+  dontTouch(deqRespSetShift)
+  dontTouch(og0RespClearShift)
+  dontTouch(og1RespClearShift)
 
-  fuBusyTableNext := fuBusyTableShift & (~og0RespClear).asUInt & (~og1RespClear).asUInt | deqRespSet.asUInt
+  fuBusyTableNext := fuBusyTableShift & (~og0RespClearShift).asUInt & (~og1RespClearShift).asUInt | deqRespSetShift.asUInt
 
   io.out.fuBusyTable := fuBusyTable
-  io.out.deqRespSet := deqRespSet.asUInt
+  io.out.deqRespSet := Mux(deqRespSuccess, deqRespMatchVec.asUInt, Utils.NZeros(tableSize)).asUInt
 }
 
 class FuBusyTableWriteIO(latencyValMax: Int)(implicit p: Parameters, iqParams: IssueBlockParams) extends XSBundle {
