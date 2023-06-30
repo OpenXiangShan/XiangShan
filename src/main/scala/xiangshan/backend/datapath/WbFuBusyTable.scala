@@ -3,13 +3,20 @@ package xiangshan.backend.datapath
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utility._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 
-class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSModule {
+class WbFuBusyTable(bp: BackendParams)(implicit  p: Parameters) extends LazyModule {
+  implicit val params: BackendParams = bp
+  lazy val module = new WbFuBusyTableImp(this)
+}
+
+class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper) {
   val io = IO(new WbFuBusyTableIO)
 
   private val intSchdBusyTable = io.in.intSchdBusyTable
@@ -36,46 +43,68 @@ class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSMo
 
   private val intWbLatencyMax = params.getIntWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.intLatencyValMax).max, seq.forall(_.intLatencyCertain)) }
   private val vfWbLatencyMax = params.getVfWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.vfLatencyValMax).max, seq.forall(_.vfLatencyCertain)) }
-  private val intWbBundle = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W))), OptionWrapper(latCertain, Reg(Bool()))) }.toSeq
-  private val vfWbBundle = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W))), OptionWrapper(latCertain, Reg(Bool()))) }.toSeq
+  private val intWbBusyTable: Map[Int, Option[UInt]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+  private val vfWbBusyTable = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+  private val intConflict: Map[Int, Option[Bool]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
+  private val vfConflict = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
 
-  def hitWbPort(source: Option[UInt], p: ExeUnitParams, portId: Int) = {
-    p.wbPortConfigs.collectFirst { case x => x.port }.getOrElse(-1) == portId && source.nonEmpty
+  def hitWbPort[T <: Data](source: Option[T], p: ExeUnitParams, portId: Int, isInt: Boolean) = {
+    if(isInt){
+      p.wbPortConfigs.collectFirst { case x : IntWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+    } else {
+      p.wbPortConfigs.collectFirst { case x : VfWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+    }
   }
 
-  def writeWbBundle(wbBundle: Seq[(Int, Option[UInt], Option[Bool])], busyTableWithParams: IndexedSeq[(Option[UInt], ExeUnitParams)], deqRespSetWithParams: IndexedSeq[(Option[UInt], ExeUnitParams)]) = {
-    wbBundle.map { case (portId, busyTable, conflict) =>
+  def writeBusyTable(wtBusyTable: Map[Int, Option[UInt]], busyTableWithParams: IndexedSeq[(Option[UInt], ExeUnitParams)], isInt: Boolean) = {
+    wtBusyTable.foreach { case (portId, busyTable) =>
       if (busyTable.nonEmpty) {
-        busyTable.get := busyTableWithParams.filter { case (busyTable, p) => hitWbPort(busyTable, p, portId) }.map(_._1.get).reduce(_ | _)
-        conflict.get := deqRespSetWithParams.filter { case (deqRespSet, p) => hitWbPort(deqRespSet, p, portId) }.map(_._1.get).reduce(_ & _).orR
+        busyTable.get := busyTableWithParams.filter { case (busyTable, p) => hitWbPort(busyTable, p, portId, isInt) }.map(_._1.get).reduce(_ | _)
       }
     }
   }
 
-  def readWbBundle[T <: Data](sink: IndexedSeq[Option[T]], wbBundle: Seq[(Int, Option[UInt], Option[Bool])]) = {
-    for (i <- 0 until sink.size) {
+  def writeConflict(wtConflict: Map[Int, Option[Bool]], deqRespSetWithParams: IndexedSeq[(Option[UInt], ExeUnitParams)], isInt: Boolean) = {
+    wtConflict.foreach { case (portId, conflict) =>
+      if (conflict.nonEmpty) {
+        val deqRespSel = deqRespSetWithParams.filter { case (deqRespSet, p) => hitWbPort(deqRespSet, p, portId, isInt) }.map(_._1.get)
+        val width = deqRespSel.map(x => x.getWidth).max
+        val deqRespSelUnify = deqRespSel.map(x => x.asTypeOf(UInt(width.W)))
+        conflict.get := (0 until width).map{ case i =>
+          OnesMoreThan(deqRespSelUnify.map(x => x(i)), 2)
+        }.reduce(_ | _)
+      }
+    }
+  }
+
+  def readRes[T <: Data](sink: IndexedSeq[Option[T]], source: Map[Int, Option[T]], isInt: Boolean) = {
+    for(i <- 0 until sink.size) {
       if(sink(i).nonEmpty) {
-        sink(i).get := wbBundle.map { case (portId, busyTable, conflictFlag) =>
-          val src = if (sink(i).get.isInstanceOf[UInt]) busyTable else conflictFlag
-          if (hitWbPort(src, allExuParams(i), portId)) {
+        sink(i).get := source.map { case (portId, src) =>
+          if(hitWbPort(src, allExuParams(i), portId, isInt)) {
             src.get.asTypeOf(sink(i).get).asUInt
           } else {
             0.U.asTypeOf(sink(i).get).asUInt
           }
-        }.reduce(_.asUInt | _.asUInt)
+        }.reduce(_ | _)
       }
     }
   }
 
-  //per wbPort fuBusyTable and conflict gen
-  writeWbBundle(intWbBundle, intAllBusyTableWithParms, intAllDeqRespSetWithParms)
-  writeWbBundle(vfWbBundle, vfAllBusyTableWithParms, vfAllDeqRespSetWithParms)
+
+
+  //per wbPort fuBusyTable
+  writeBusyTable(intWbBusyTable, intAllBusyTableWithParms, true)
+  writeBusyTable(vfWbBusyTable, vfAllBusyTableWithParms, false)
+  //per wbPort conflict
+  writeConflict(intConflict, intAllDeqRespSetWithParms, true)
+  writeConflict(vfConflict, vfAllDeqRespSetWithParms, false)
   //read wbPort fuBusyTable to per exe
-  readWbBundle(intAllRespRead, intWbBundle)
-  readWbBundle(vfAllRespRead, vfWbBundle)
+  readRes(intAllRespRead, intWbBusyTable, true)
+  readRes(vfAllRespRead, vfWbBusyTable, false)
   //read wbPort conflict to dataPath
-  readWbBundle(intAllWbConflictFlag, intWbBundle)
-  readWbBundle(vfAllWbConflictFlag, vfWbBundle)
+  readRes(intAllWbConflictFlag, intConflict, true)
+  readRes(vfAllWbConflictFlag, vfConflict, false)
 
 }
 
