@@ -47,15 +47,15 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
   val stIssuePtr = Output(new SqPtr())
   val sfence = Input(new SfenceBundle)
-  val lsqio = new Bundle {
-    val exceptionAddr = new ExceptionAddrIO // to csr
-    val rob = Flipped(new RobLsqIO) // rob to lsq
-    val lqCanAccept = Output(Bool())
-    val sqCanAccept = Output(Bool())
-  }
+//  val lsqio = new Bundle {
+//    val exceptionAddr = new ExceptionAddrIO // to csr
+//    val rob = Flipped(new RobLsqIO) // rob to lsq
+//    val lqCanAccept = Output(Bool())
+//    val sqCanAccept = Output(Bool())
+//  }
 //  val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val tlbCsr = Input(new TlbCsrBundle)
-  val enqLsq = new LsqEnqIO
+//  val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
   val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 }
@@ -134,7 +134,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
-
+    val enqLsq = new LsqEnqIO
+    val lsqio = new Bundle {
+      val exceptionAddr = new ExceptionAddrIO // to csr
+      val rob = Flipped(new RobLsqIO) // rob to lsq
+      val lqCanAccept = Output(Bool())
+      val sqCanAccept = Output(Bool())
+    }
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
@@ -624,12 +630,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
-  lsq.io.rob            <> io.ooo_to_mem.lsqio.rob
-  lsq.io.enq            <> io.ooo_to_mem.enqLsq
+  lsq.io.rob            <> io.lsqio.rob
+  lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
-  io.ooo_to_mem.lsqio.lqCanAccept  := lsq.io.lqCanAccept
-  io.ooo_to_mem.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+  io.lsqio.lqCanAccept  := lsq.io.lqCanAccept
+  io.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   // lsq.io.uncache        <> uncache.io.lsq
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)

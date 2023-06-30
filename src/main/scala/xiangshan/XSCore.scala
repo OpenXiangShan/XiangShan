@@ -301,7 +301,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
   ctrlBlock.io.stIn <> memBlock.io.mem_to_ooo.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
-  exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.ooo_to_mem.enqLsq
+  exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   exuBlocks.foreach(b => {
     b.io.scheExtra.lcommit := memBlock.io.lqDeq
     b.io.scheExtra.scommit := memBlock.io.sqDeq
@@ -321,11 +321,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
-  ctrlBlock.io.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
+  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
   ctrlBlock.io.lqDeq := memBlock.io.lqDeq
   ctrlBlock.io.sqDeq := memBlock.io.sqDeq
-  ctrlBlock.io.lqCanAccept := memBlock.io.ooo_to_mem.lsqio.lqCanAccept
-  ctrlBlock.io.sqCanAccept := memBlock.io.ooo_to_mem.lsqio.sqCanAccept
+  ctrlBlock.io.lqCanAccept := memBlock.io.lsqio.lqCanAccept
+  ctrlBlock.io.sqCanAccept := memBlock.io.lsqio.sqCanAccept
   ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
   ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
@@ -400,7 +400,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
-  csrioIn.memExceptionVAddr <> memBlock.io.ooo_to_mem.lsqio.exceptionAddr.vaddr
+  csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
   csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
@@ -422,8 +422,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
-  memBlock.io.ooo_to_mem.lsqio.rob <> ctrlBlock.io.robio.lsq
-  memBlock.io.ooo_to_mem.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
+  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
+  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
   memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2Hint.valid := io.l2Hint.valid
