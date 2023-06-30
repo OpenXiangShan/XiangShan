@@ -340,9 +340,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
   // return load pc at load s2
   memBlock.io.ooo_to_mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
-  memBlock.io.fetch_to_mem.issue <> exuBlocks(0).io.issue.get
+  memBlock.io.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.fetch_to_mem.issue.map(_.bits.uop.clearExceptions())
+  memBlock.io.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.ooo_to_mem.loadFastMatch
   exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.ooo_to_mem.loadFastImm
 
@@ -414,9 +414,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
   fenceio.sfence <> memBlock.io.ooo_to_mem.sfence
-
-  memBlock.io.ooo_to_mem.flushSb := fenceio.sbuffer.flushSb
-  fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
+  fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+//  memBlock.io.ooo_to_mem.flushSb := fenceio.sbuffer.flushSb
+//  fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.ooo_to_mem.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
