@@ -53,7 +53,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
-  val csrCtrl = Flipped(new CustomCSRCtrlIO)
+//  val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val tlbCsr = Input(new TlbCsrBundle)
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
@@ -62,14 +62,15 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 
 class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
-  val csrUpdate = new DistributedCSRUpdateReq
-  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+//  val csrUpdate = new DistributedCSRUpdateReq
+//  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
+//  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+//  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+//  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val memoryViolation = ValidIO(new Redirect)
   val sbIsEmpty = Output(Bool())
-  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
+
   val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
 
 }
@@ -134,8 +135,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
 
-
-
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
@@ -143,6 +144,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
+    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
+    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
     val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
@@ -156,10 +161,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
-  val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
+  val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
-  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
-  io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
+  dcache.io.l2_pf_store_only := RegNext(io.csrCtrl.l2_pf_store_only, false.B)
+  io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
   when(!csrCtrl.cache_error_enable){
     io.error.report_to_beu := false.B
@@ -175,19 +180,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
-      sms.io_stride_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
+      sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := RegNextN(io.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
+      sms.io_stride_en := RegNextN(io.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
       sms
   }
   prefetcherOpt.foreach(pf => {
     val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)
     outer.pf_sender_opt.get.out.head._1.addr_valid := pf_to_l2.valid
     outer.pf_sender_opt.get.out.head._1.addr := pf_to_l2.bits
-    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
-    pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
+    pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
   })
   prefetcherOpt match {
     case Some(pf) => l1_pf_req <> pf.io.l1_req
@@ -195,7 +200,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
   }
-  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
+  val pf_train_on_hit = RegNextN(io.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -614,9 +619,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // Uncahce
-  uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
+  uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
-  lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
+  lsq.io.uncacheOutstanding := io.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   lsq.io.rob            <> io.ooo_to_mem.lsqio.rob
@@ -631,10 +636,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // delay dcache refill for 1 cycle for better timing
   lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
-  lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
-  lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
-  lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
-  lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
+  lsq.io.lqCancelCnt <> io.lqCancelCnt
+  lsq.io.sqCancelCnt <> io.sqCancelCnt
+  lsq.io.lqDeq <> io.lqDeq
+  lsq.io.sqDeq <> io.sqDeq
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
   lsq.io.sqEmpty        <> sbuffer.io.sqempty

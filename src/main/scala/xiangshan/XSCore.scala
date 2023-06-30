@@ -303,10 +303,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.ooo_to_mem.enqLsq
   exuBlocks.foreach(b => {
-    b.io.scheExtra.lcommit := memBlock.io.mem_to_ooo.lqDeq
-    b.io.scheExtra.scommit := memBlock.io.mem_to_ooo.sqDeq
-    b.io.scheExtra.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
-    b.io.scheExtra.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
+    b.io.scheExtra.lcommit := memBlock.io.lqDeq
+    b.io.scheExtra.scommit := memBlock.io.sqDeq
+    b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
+    b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
   })
   val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
   outer.ctrlBlock.generateWritebackIO()
@@ -322,12 +322,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
   ctrlBlock.io.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
-  ctrlBlock.io.lqDeq := memBlock.io.mem_to_ooo.lqDeq
-  ctrlBlock.io.sqDeq := memBlock.io.mem_to_ooo.sqDeq
+  ctrlBlock.io.lqDeq := memBlock.io.lqDeq
+  ctrlBlock.io.sqDeq := memBlock.io.sqDeq
   ctrlBlock.io.lqCanAccept := memBlock.io.ooo_to_mem.lsqio.lqCanAccept
   ctrlBlock.io.sqCanAccept := memBlock.io.ooo_to_mem.lsqio.sqCanAccept
-  ctrlBlock.io.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
-  ctrlBlock.io.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
+  ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
+  ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
   ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
@@ -408,8 +408,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
   csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
-  csrioIn.distributedUpdate(0).w.valid := memBlock.io.mem_to_ooo.csrUpdate.w.valid
-  csrioIn.distributedUpdate(0).w.bits := memBlock.io.mem_to_ooo.csrUpdate.w.bits
+  csrioIn.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
+  csrioIn.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
   csrioIn.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
   csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
@@ -420,7 +420,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.ooo_to_mem.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
-  memBlock.io.ooo_to_mem.csrCtrl <> csrioIn.customCtrl
+  memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
   memBlock.io.ooo_to_mem.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.ooo_to_mem.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
