@@ -744,7 +744,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!storeUnits(i).io.feedbackSlow.valid)
   }
 
-  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.lsqio.exceptionAddr.isStore
+  lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   // Exception address is used several cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
@@ -754,7 +754,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
-  io.ooo_to_mem.lsqio.exceptionAddr.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
+  io.lsqio.exceptionAddr.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
