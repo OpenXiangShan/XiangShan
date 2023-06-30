@@ -316,11 +316,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     RegNext(s0_fire),
-    Mux(
-      s1_have_invalid_way,
-      s1_invalid_way_en,
-      UIntToOH(io.replace_way.way)
-      ),
+    UIntToOH(io.replace_way.way),
     RegNext(s1_repl_way_en)
   )
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
