@@ -512,14 +512,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(addrInvalidMask2Reg))))
     val addrInvalidSqIdx = Mux(addrInvalidMask2Reg.orR, addrInvalidSqIdx2, addrInvalidSqIdx1)
 
-    when (addrInvalidFlag && !RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+    when (addrInvalidFlag) {
       io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).addrInvalidSqIdx.value := addrInvalidSqIdx
     } .otherwise {
       // may be store inst has been written to sbuffer already.
       io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
     }
-    io.forward(i).addrInvalid := Mux(RegNext(io.forward(i).uop.cf.loadWaitStrict), RegNext(hasInvalidAddr), addrInvalidFlag)
+    io.forward(i).addrInvalid := addrInvalidFlag
 
     // data invalid sq index
     // make chisel happy
