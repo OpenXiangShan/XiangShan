@@ -61,7 +61,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 }
 
 class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
-  val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
+//    val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
 //  val csrUpdate = new DistributedCSRUpdateReq
 //  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
 //  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -127,6 +127,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // out
 
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
+    val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
@@ -233,8 +234,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val ldExeWbReqs = loadOut0 +: loadUnits.tail.map(_.io.loadOut)
   io.mem_to_fetch.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
-  io.mem_to_ooo.otherFastWakeup := DontCare
-  io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
+  io.otherFastWakeup := DontCare
+  io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
   val stOut = io.mem_to_fetch.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // prefetch to l1 req
