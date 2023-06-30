@@ -53,6 +53,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   val dataPath = LazyModule(new DataPath(params))
   val intExuBlock = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
   val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
+  val wbFuBusyTable = LazyModule(new WbFuBusyTable(params))
 
   lazy val module = new BackendImp(this)
 }
@@ -70,7 +71,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
   private val wbDataPath = Module(new WbDataPath(params))
-  private val wbFuBusyTable = Module(new WbFuBusyTable)
+  private val wbFuBusyTable = wrapper.wbFuBusyTable.module
 
   wbFuBusyTable.io.in.intSchdBusyTable := intScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.vfSchdBusyTable := vfScheduler.io.wbFuBusyTable
