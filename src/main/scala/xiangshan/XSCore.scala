@@ -299,7 +299,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
   val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
   ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
-  ctrlBlock.io.stIn <> memBlock.io.mem_to_ooo.stIn
+  ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   exuBlocks.foreach(b => {
@@ -358,7 +358,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
     exu.scheExtra.robDeqPtr := ctrlBlock.io.robDeqPtr
-    exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.mem_to_ooo.stIn).foreach{case (sink, src) => {
+    exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
       sink.bits := src.bits
       sink.valid := src.valid
     }}

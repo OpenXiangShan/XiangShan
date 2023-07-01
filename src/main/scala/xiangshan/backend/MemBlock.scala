@@ -67,7 +67,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
 //  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
 //  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
 //  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
-  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+//  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 //  val memoryViolation = ValidIO(new Redirect)
 //  val sbIsEmpty = Output(Bool())
 
@@ -134,6 +134,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // prefetch to l1 req
     val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
+    val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
@@ -577,8 +578,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     // io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
     // io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
-    io.mem_to_ooo.stIn(i).valid := stu.io.issue.valid
-    io.mem_to_ooo.stIn(i).bits := stu.io.issue.bits
+    io.stIn(i).valid := stu.io.issue.valid
+    io.stIn(i).bits := stu.io.issue.bits
 
     stu.io.stout.ready := true.B
 
