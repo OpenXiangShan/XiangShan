@@ -42,8 +42,8 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 }
 
 class ooo_to_mem(implicit p: Parameters) extends XSBundle{
-//  val loadFastMatch  = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-//  val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+  val loadFastMatch  = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+  val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
 //  val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 //  val stIssuePtr = Output(new SqPtr())
 //  val sfence = Input(new SfenceBundle)
@@ -120,8 +120,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
 
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
-    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
+//    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+//    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 
     val stIssuePtr = Output(new SqPtr())
@@ -486,12 +486,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
     val fastDataVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.data)
-    val fastMatchVec = fastPriority.map(j => io.loadFastMatch(i)(j))
+    val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
     loadUnits(i).io.fastpathIn.valid := VecInit(fastValidVec).asUInt.orR
     loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
-    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
+    loadUnits(i).io.loadFastImm := io.ooo_to_mem.loadFastImm(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     loadUnits(i).io.l2Hint <> io.l2Hint
