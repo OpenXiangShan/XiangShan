@@ -156,10 +156,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 //    val fenceToSbuffer = Flipped(new FenceToSbuffer)
 //    val enqLsq = new LsqEnqIO
     val lsqio = new Bundle {
-      //val exceptionAddr = new ExceptionAddrIO // to csr
+//      val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
-      // val lqCanAccept = Output(Bool())
-      // val sqCanAccept = Output(Bool())
+       val lqCanAccept = Output(Bool())
+       val sqCanAccept = Output(Bool())
     }
 //    val csrCtrl = Flipped(new CustomCSRCtrlIO)
 //    val csrUpdate = new DistributedCSRUpdateReq
