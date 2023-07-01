@@ -54,7 +54,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 //    val sqCanAccept = Output(Bool())
 //  }
 //  val csrCtrl = Flipped(new CustomCSRCtrlIO)
-  val tlbCsr = Input(new TlbCsrBundle)
+//  val tlbCsr = Input(new TlbCsrBundle)
 //  val enqLsq = new LsqEnqIO
 //  val flushSb = Input(Bool())
   val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
@@ -68,7 +68,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
 //  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
 //  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-  val memoryViolation = ValidIO(new Redirect)
+//  val memoryViolation = ValidIO(new Redirect)
 //  val sbIsEmpty = Output(Bool())
 
   val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
@@ -134,10 +134,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // prefetch to l1 req
     val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
+    val memoryViolation = ValidIO(new Redirect)
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
+    val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
-
     val enqLsq = new LsqEnqIO
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
@@ -281,7 +282,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
-  val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
+  val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
@@ -637,7 +638,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> redirect
-  io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
+  io.memoryViolation    <> lsq.io.rollback
   io.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   // lsq.io.uncache        <> uncache.io.lsq
