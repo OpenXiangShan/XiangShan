@@ -271,7 +271,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
-  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_fetch.writeback
+  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out

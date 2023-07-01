@@ -80,9 +80,9 @@ class fetch_to_mem(implicit p: Parameters ) extends XSBundle{
 
 }
 
-class mem_to_fetch(implicit p: Parameters ) extends XSBundle{
-  val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
-}
+//class mem_to_fetch(implicit p: Parameters ) extends XSBundle{
+//  val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
+//}
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
@@ -115,7 +115,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val redirect = Flipped(ValidIO(new Redirect))
 
     val fetch_to_mem = new fetch_to_mem
-    val mem_to_fetch = new mem_to_fetch
+//    val mem_to_fetch = new mem_to_fetch
     val ooo_to_mem = new ooo_to_mem
     val mem_to_ooo = new mem_to_ooo
 
@@ -126,7 +126,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
     // out
-
+    val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     val vlsu2vec = new VLSU2VecIO
@@ -166,7 +166,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
 
-  override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.mem_to_fetch.writeback))
+  override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
   val redirect = RegNextWithEnable(io.redirect)
 
@@ -237,10 +237,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val ldExeWbReqs = loadOut0 +: loadUnits.tail.map(_.io.loadOut)
-  io.mem_to_fetch.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
-  val stOut = io.mem_to_fetch.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
+  val stOut = io.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // prefetch to l1 req
   loadUnits.foreach(load_unit => {
@@ -519,20 +519,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
       hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
-      io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
+      io.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
 //      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
       //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
     }
     when(tdata(2).chain) {
-      io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(3) := hit(0) && hit(1)
+      io.writeback(i).bits.uop.cf.trigger.backendHit(2) := hit(0) && hit(1)
+      io.writeback(i).bits.uop.cf.trigger.backendHit(3) := hit(0) && hit(1)
     }
-    when(!io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
-      io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(5) := false.B
+    when(!io.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
+      io.writeback(i).bits.uop.cf.trigger.backendHit(5) := false.B
     }
 
-    XSDebug(io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.getHitBackend && io.mem_to_fetch.writeback(i).valid, p"Debug Mode: Load Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit}\n")
+    XSDebug(io.writeback(i).bits.uop.cf.trigger.getHitBackend && io.writeback(i).valid, p"Debug Mode: Load Inst No.${i}" +
+    p"has trigger hit vec ${io.writeback(i).bits.uop.cf.trigger.backendHit}\n")
 
   }
   // Prefetcher
@@ -601,8 +601,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
      }
 
      when(tdata(0).chain) {
-       io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
-       io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
+       io.writeback(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
+       io.writeback(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
      }
 
      when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
@@ -628,7 +628,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // when atom inst writeback, surpress normal load trigger
     (0 until exuParameters.LduCnt).map(i => {
-      io.mem_to_fetch.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+      io.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
 
