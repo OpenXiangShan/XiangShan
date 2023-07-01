@@ -44,9 +44,9 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val loadFastMatch  = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
   val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-  val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
+//  val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 //  val stIssuePtr = Output(new SqPtr())
-  val sfence = Input(new SfenceBundle)
+//  val sfence = Input(new SfenceBundle)
 //  val lsqio = new Bundle {
 //    val exceptionAddr = new ExceptionAddrIO // to csr
 //    val rob = Flipped(new RobLsqIO) // rob to lsq
@@ -120,6 +120,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
 
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
+    val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
@@ -138,6 +139,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val memoryViolation = ValidIO(new Redirect)
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
+    val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
@@ -282,7 +284,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   // dtlb
-  val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
+  val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, 2, ldtlbParams))
@@ -427,9 +429,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   
     // get input form dispatch
     loadUnits(i).io.loadIn <> io.issue(i)
-    loadUnits(i).io.feedbackSlow <> io.ooo_to_mem.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast <> io.ooo_to_mem.rsfeedback(i).feedbackFast
-    loadUnits(i).io.rsIdx := io.ooo_to_mem.rsfeedback(i).rsIdx
+    loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
+    loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
    
     // fast replay
     loadUnits(i).io.fastReplayIn.valid := balanceFastReplaySel(i).valid 
@@ -553,10 +555,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.out := DontCare
 
     stu.io.redirect     <> redirect
-    stu.io.feedbackSlow <> io.ooo_to_mem.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
-    stu.io.rsIdx        <> io.ooo_to_mem.rsfeedback(exuParameters.LduCnt + i).rsIdx
+    stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
+    stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
-    stu.io.isFirstIssue <> io.ooo_to_mem.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
+    stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
@@ -565,7 +567,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
 
     // store unit does not need fast feedback
-    io.ooo_to_mem.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
+    io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.storeMaskOut
@@ -714,7 +716,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
     st_data_atomics(i) -> stData(i).bits))
   atomicsUnit.io.rsIdx    := Mux1H(Seq.tabulate(exuParameters.StuCnt)(i =>
-    st_atomics(i) -> io.ooo_to_mem.rsfeedback(atomic_rs(i)).rsIdx))
+    st_atomics(i) -> io.rsfeedback(atomic_rs(i)).rsIdx))
   atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support
@@ -745,7 +747,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   for (i <- 0 until exuParameters.StuCnt) when (state === s_atomics(i)) {
-    atomicsUnit.io.feedbackSlow <> io.ooo_to_mem.rsfeedback(atomic_rs(i)).feedbackSlow
+    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs(i)).feedbackSlow
 
     assert(!storeUnits(i).io.feedbackSlow.valid)
   }
