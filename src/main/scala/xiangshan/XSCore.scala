@@ -303,10 +303,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   exuBlocks.foreach(b => {
-    b.io.scheExtra.lcommit := memBlock.io.lqDeq
-    b.io.scheExtra.scommit := memBlock.io.sqDeq
-    b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
-    b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
+    b.io.scheExtra.lcommit := memBlock.io.mem_to_ooo.lqDeq
+    b.io.scheExtra.scommit := memBlock.io.mem_to_ooo.sqDeq
+    b.io.scheExtra.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
+    b.io.scheExtra.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   })
   val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
   outer.ctrlBlock.generateWritebackIO()
@@ -343,8 +343,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
-  exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.ooo_to_mem.loadFastMatch
-  exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.ooo_to_mem.loadFastImm
+  exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
+  exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
 
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>

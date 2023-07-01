@@ -63,10 +63,10 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
 //  val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
 //  val csrUpdate = new DistributedCSRUpdateReq
-//  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-//  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-//  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
-//  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
+  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
+  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
 //  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 //  val memoryViolation = ValidIO(new Redirect)
 //  val sbIsEmpty = Output(Bool())
@@ -120,8 +120,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
 
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
-//    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-//    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
+    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 
     val stIssuePtr = Output(new SqPtr())
@@ -160,10 +160,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
-    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
+//    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
+//    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
+//    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+//    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
     val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
@@ -486,12 +486,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
     val fastDataVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.data)
-    val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
+    val fastMatchVec = fastPriority.map(j => io.loadFastMatch(i)(j))
     loadUnits(i).io.fastpathIn.valid := VecInit(fastValidVec).asUInt.orR
     loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.loadFastMatch := fastMatch
-    loadUnits(i).io.loadFastImm := io.ooo_to_mem.loadFastImm(i)
+    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     loadUnits(i).io.l2Hint <> io.l2Hint
@@ -652,10 +652,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // delay dcache refill for 1 cycle for better timing
   lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
-  lsq.io.lqCancelCnt <> io.lqCancelCnt
-  lsq.io.sqCancelCnt <> io.sqCancelCnt
-  lsq.io.lqDeq <> io.lqDeq
-  lsq.io.sqDeq <> io.sqDeq
+  lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
+  lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
+  lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
+  lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
