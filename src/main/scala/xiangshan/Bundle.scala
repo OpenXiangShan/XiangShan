@@ -477,7 +477,7 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
 
   // wait table update
-  val waddr = UInt(MemPredPCWidth.W)
+  val waddcsrCtrlr = UInt(MemPredPCWidth.W)
   val wdata = Bool() // true.B by default
 
   // store set update

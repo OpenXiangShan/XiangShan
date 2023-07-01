@@ -324,8 +324,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
   ctrlBlock.io.lqDeq := memBlock.io.mem_to_ooo.lqDeq
   ctrlBlock.io.sqDeq := memBlock.io.mem_to_ooo.sqDeq
-  ctrlBlock.io.lqCanAccept := memBlock.io.lsqio.lqCanAccept
-  ctrlBlock.io.sqCanAccept := memBlock.io.lsqio.sqCanAccept
+  ctrlBlock.io.lqCanAccept := memBlock.io.mem_to_ooo.lqCanAccept
+  ctrlBlock.io.sqCanAccept := memBlock.io.mem_to_ooo.sqCanAccept
   ctrlBlock.io.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
@@ -420,7 +420,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
-  memBlock.io.csrCtrl <> csrioIn.customCtrl
+  memBlock.io.ooo_to_mem.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
