@@ -54,7 +54,8 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 //    val lqCanAccept = Output(Bool())
 //    val sqCanAccept = Output(Bool())
 //  }
-//  val csrCtrl = Flipped(new CustomCSRCtrlIO)
+  val isStore = Input(Bool())
+  val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
   val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
@@ -73,6 +74,14 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   val sbIsEmpty = Output(Bool())
 
   val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
+
+  val lsqio = new Bundle {
+    // val exceptionAddr = new ExceptionAddrIO // to csra
+    val vaddr = Output(UInt(VAddrBits.W))
+//    val rob = Flipped(new RobLsqIO) // rob to lsq
+    val lqCanAccept = Output(Bool())
+    val sqCanAccept = Output(Bool())
+  }
 
 }
 
@@ -147,12 +156,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 //    val fenceToSbuffer = Flipped(new FenceToSbuffer)
 //    val enqLsq = new LsqEnqIO
     val lsqio = new Bundle {
-      val exceptionAddr = new ExceptionAddrIO // to csr
+      //val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
-      val lqCanAccept = Output(Bool())
-      val sqCanAccept = Output(Bool())
+      // val lqCanAccept = Output(Bool())
+      // val sqCanAccept = Output(Bool())
     }
-    val csrCtrl = Flipped(new CustomCSRCtrlIO)
+//    val csrCtrl = Flipped(new CustomCSRCtrlIO)
 //    val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
@@ -178,9 +187,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
-  val csrCtrl = DelayN(io.csrCtrl, 2)
+  val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
-  dcache.io.l2_pf_store_only := RegNext(io.csrCtrl.l2_pf_store_only, false.B)
+  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
   io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
   when(!csrCtrl.cache_error_enable){
@@ -197,19 +206,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := RegNextN(io.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
-      sms.io_stride_en := RegNextN(io.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
+      sms.io_agt_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
+      sms.io_stride_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
       sms
   }
   prefetcherOpt.foreach(pf => {
     val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)
     outer.pf_sender_opt.get.out.head._1.addr_valid := pf_to_l2.valid
     outer.pf_sender_opt.get.out.head._1.addr := pf_to_l2.bits
-    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
-    pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
+    pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
   })
   prefetcherOpt match {
     case Some(pf) => l1_pf_req <> pf.io.l1_req
@@ -217,7 +226,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
   }
-  val pf_train_on_hit = RegNextN(io.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
+  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -636,17 +645,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // Uncahce
-  uncache.io.enableOutstanding := io.csrCtrl.uncache_write_outstanding_enable
+  uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
-  lsq.io.uncacheOutstanding := io.csrCtrl.uncache_write_outstanding_enable
+  lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
-  io.lsqio.lqCanAccept  := lsq.io.lqCanAccept
-  io.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+  io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
+  io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   // lsq.io.uncache        <> uncache.io.lsq
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
@@ -755,7 +764,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!storeUnits(i).io.feedbackSlow.valid)
   }
 
-  lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
+  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStore
   // Exception address is used several cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
@@ -765,7 +774,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
-  io.lsqio.exceptionAddr.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
+  io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)

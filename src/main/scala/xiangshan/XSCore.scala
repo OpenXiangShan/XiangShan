@@ -324,8 +324,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
   ctrlBlock.io.lqDeq := memBlock.io.mem_to_ooo.lqDeq
   ctrlBlock.io.sqDeq := memBlock.io.mem_to_ooo.sqDeq
-  ctrlBlock.io.lqCanAccept := memBlock.io.mem_to_ooo.lqCanAccept
-  ctrlBlock.io.sqCanAccept := memBlock.io.mem_to_ooo.sqCanAccept
+  ctrlBlock.io.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
+  ctrlBlock.io.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   ctrlBlock.io.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   ctrlBlock.io.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
@@ -400,7 +400,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
-  csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
+  csrioIn.memExceptionVAddr <> memBlock.io.mem_to_ooo.lsqio.vaddr
 
   csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
@@ -423,7 +423,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
+  memBlock.io.ooo_to_mem.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
   memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2Hint.valid := io.l2Hint.valid
