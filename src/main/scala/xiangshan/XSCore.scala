@@ -322,12 +322,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
   ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
-  ctrlBlock.io.lqDeq := memBlock.io.lqDeq
-  ctrlBlock.io.sqDeq := memBlock.io.sqDeq
+  ctrlBlock.io.lqDeq := memBlock.io.mem_to_ooo.lqDeq
+  ctrlBlock.io.sqDeq := memBlock.io.mem_to_ooo.sqDeq
   ctrlBlock.io.lqCanAccept := memBlock.io.lsqio.lqCanAccept
   ctrlBlock.io.sqCanAccept := memBlock.io.lsqio.sqCanAccept
-  ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
-  ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
+  ctrlBlock.io.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
+  ctrlBlock.io.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
