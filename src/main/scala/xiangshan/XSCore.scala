@@ -414,9 +414,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
   fenceio.sfence <> memBlock.io.sfence
-  fenceio.sbuffer <> memBlock.io.fenceToSbuffer
-//  memBlock.io.ooo_to_mem.flushSb := fenceio.sbuffer.flushSb
-//  fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
+//  fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+  memBlock.io.ooo_to_mem.flushSb := fenceio.sbuffer.flushSb
+  fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get

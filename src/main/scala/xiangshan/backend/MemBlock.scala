@@ -42,8 +42,8 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 }
 
 class ooo_to_mem(implicit p: Parameters) extends XSBundle{
-  val loadFastMatch  = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-  val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+//  val loadFastMatch  = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
+//  val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
 //  val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 //  val stIssuePtr = Output(new SqPtr())
 //  val sfence = Input(new SfenceBundle)
@@ -56,7 +56,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
 //  val csrCtrl = Flipped(new CustomCSRCtrlIO)
 //  val tlbCsr = Input(new TlbCsrBundle)
 //  val enqLsq = new LsqEnqIO
-//  val flushSb = Input(Bool())
+  val flushSb = Input(Bool())
   val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 }
 
@@ -69,7 +69,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
 //  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 //  val memoryViolation = ValidIO(new Redirect)
-//  val sbIsEmpty = Output(Bool())
+  val sbIsEmpty = Output(Bool())
 
   val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
 
@@ -143,7 +143,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
-    val fenceToSbuffer = Flipped(new FenceToSbuffer)
+//    val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
@@ -665,10 +665,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.dcache     <> dcache.io.lsu.store
 
   // flush sbuffer
-  val fenceFlush = io.fenceToSbuffer.flushSb
+  val fenceFlush = io.ooo_to_mem.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
   val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
-  io.fenceToSbuffer.sbIsEmpty := RegNext(stIsEmpty)
+  io.mem_to_ooo.sbIsEmpty := RegNext(stIsEmpty)
 
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
