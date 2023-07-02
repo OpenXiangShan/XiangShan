@@ -422,7 +422,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.ooo_to_mem.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
-  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
+
+  memBlock.io.ooo_to_mem.lsqio.lcommit   := ctrlBlock.io.robio.lsq.lcommit
+  memBlock.io.ooo_to_mem.lsqio.scommit   := ctrlBlock.io.robio.lsq.scommit
+  memBlock.io.ooo_to_mem.lsqio.pendingld := ctrlBlock.io.robio.lsq.pendingld
+  memBlock.io.ooo_to_mem.lsqio.pendingst := ctrlBlock.io.robio.lsq.pendingst
+  memBlock.io.ooo_to_mem.lsqio.commit    := ctrlBlock.io.robio.lsq.commit
+  memBlock.io.ooo_to_mem.lsqio.pendingPtr:= ctrlBlock.io.robio.lsq.pendingPtr
+  ctrlBlock.io.robio.lsq.mmio            := memBlock.io.mem_to_ooo.lsqio.mmio
+  ctrlBlock.io.robio.lsq.uop             := memBlock.io.mem_to_ooo.lsqio.uop
+//  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
   memBlock.io.ooo_to_mem.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
   memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo

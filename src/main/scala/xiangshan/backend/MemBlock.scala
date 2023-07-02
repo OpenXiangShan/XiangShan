@@ -27,7 +27,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO, RobPtr}
 import xiangshan.cache._
 import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
@@ -48,12 +48,15 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val stIssuePtr = Output(new SqPtr())
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
-//  val lsqio = new Bundle {
-//    val exceptionAddr = new ExceptionAddrIO // to csra
-//    val rob = Flipped(new RobLsqIO) // rob to lsq
-//    val lqCanAccept = Output(Bool())
-//    val sqCanAccept = Output(Bool())
-//  }
+  val lsqio = new Bundle {
+   val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+   val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+   val pendingld = Input(Bool())
+   val pendingst = Input(Bool())
+   val commit = Input(Bool())
+   val pendingPtr = Input(new RobPtr)
+  }
+
   val isStore = Input(Bool())
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
@@ -79,6 +82,8 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
     // val exceptionAddr = new ExceptionAddrIO // to csra
     val vaddr = Output(UInt(VAddrBits.W))
 //    val rob = Flipped(new RobLsqIO) // rob to lsq
+    val mmio = Output(Vec(LoadPipelineWidth, Bool()))
+    val uop = Output(Vec(LoadPipelineWidth, new MicroOp))
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
@@ -155,12 +160,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 //    val tlbCsr = Input(new TlbCsrBundle)
 //    val fenceToSbuffer = Flipped(new FenceToSbuffer)
 //    val enqLsq = new LsqEnqIO
-    val lsqio = new Bundle {
-//      val exceptionAddr = new ExceptionAddrIO // to csr
-      val rob = Flipped(new RobLsqIO) // rob to lsq
-       val lqCanAccept = Output(Bool())
-       val sqCanAccept = Output(Bool())
-    }
+//    val lsqio = new Bundle {
+////      val exceptionAddr = new ExceptionAddrIO // to csr
+////      val rob = Flipped(new RobLsqIO) // rob to lsq
+////       val lqCanAccept = Output(Bool())
+////       val sqCanAccept = Output(Bool())
+//    }
 //    val csrCtrl = Flipped(new CustomCSRCtrlIO)
 //    val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
@@ -650,7 +655,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
-  lsq.io.rob            <> io.lsqio.rob
+  lsq.io.rob.mmio       := io.mem_to_ooo.lsqio.mmio
+  lsq.io.rob.uop        := io.mem_to_ooo.lsqio.uop
+  io.ooo_to_mem.lsqio.lcommit   := lsq.io.rob.lcommit
+  io.ooo_to_mem.lsqio.scommit   := lsq.io.rob.scommit
+  io.ooo_to_mem.lsqio.pendingld := lsq.io.rob.pendingld
+  io.ooo_to_mem.lsqio.pendingst := lsq.io.rob.pendingst
+  io.ooo_to_mem.lsqio.commit    := lsq.io.rob.commit
+  io.ooo_to_mem.lsqio.pendingPtr:= lsq.io.rob.pendingPtr
+
+//  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
   lsq.io.brqRedirect    <> redirect
   io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
