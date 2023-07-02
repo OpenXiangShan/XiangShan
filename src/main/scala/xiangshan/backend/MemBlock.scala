@@ -44,7 +44,6 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
   val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
-//  val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
   val stIssuePtr = Output(new SqPtr())
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
@@ -79,9 +78,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
 
   val lsqio = new Bundle {
-    // val exceptionAddr = new ExceptionAddrIO // to csra
     val vaddr = Output(UInt(VAddrBits.W))
-//    val rob = Flipped(new RobLsqIO) // rob to lsq
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new MicroOp))
     val lqCanAccept = Output(Bool())
@@ -134,40 +131,22 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val ooo_to_mem = new ooo_to_mem
     val mem_to_ooo = new mem_to_ooo
 
-//    val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
-//    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-//    val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
     val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
 
 //    val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
     // out
-//    val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
     val s3_delayed_load_error = Vec(exuParameters.LduCnt, Output(Bool()))
-//    val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
     // prefetch to l1 req
     val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
-//    val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-//    val memoryViolation = ValidIO(new Redirect)
+
     val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
-    // val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
-//    val sfence = Input(new SfenceBundle)
-//    val tlbCsr = Input(new TlbCsrBundle)
-//    val fenceToSbuffer = Flipped(new FenceToSbuffer)
-//    val enqLsq = new LsqEnqIO
-//    val lsqio = new Bundle {
-////      val exceptionAddr = new ExceptionAddrIO // to csr
-////      val rob = Flipped(new RobLsqIO) // rob to lsq
-////       val lqCanAccept = Output(Bool())
-////       val sqCanAccept = Output(Bool())
-//    }
-//    val csrCtrl = Flipped(new CustomCSRCtrlIO)
-//    val csrUpdate = new DistributedCSRUpdateReq
+
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
@@ -175,10 +154,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val perfEventsPTW = Input(Vec(19, new PerfEvent))
-//    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-//    val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-//    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
-//    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
     val l2Hint = Input(Valid(new L2ToL1Hint()))
   })
@@ -655,14 +630,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
-  lsq.io.rob.mmio       := io.mem_to_ooo.lsqio.mmio
-  lsq.io.rob.uop        := io.mem_to_ooo.lsqio.uop
-  io.ooo_to_mem.lsqio.lcommit   := lsq.io.rob.lcommit
-  io.ooo_to_mem.lsqio.scommit   := lsq.io.rob.scommit
-  io.ooo_to_mem.lsqio.pendingld := lsq.io.rob.pendingld
-  io.ooo_to_mem.lsqio.pendingst := lsq.io.rob.pendingst
-  io.ooo_to_mem.lsqio.commit    := lsq.io.rob.commit
-  io.ooo_to_mem.lsqio.pendingPtr:= lsq.io.rob.pendingPtr
+  io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
+  io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
+  lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit   
+  lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit   
+  lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld 
+  lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst 
+  lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit    
+  lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
 
 //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
