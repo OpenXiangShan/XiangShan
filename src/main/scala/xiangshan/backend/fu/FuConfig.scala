@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VIAluFix, VIMacU, VSetRiWi, VSetRiWvf, VSetRvfWvf}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VSetRiWi, VSetRiWvf, VSetRvfWvf}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -144,7 +144,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Set(vipu, vialuF, vimac, vfpu, vppu).contains(fuType)
+    Set(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
@@ -505,6 +505,54 @@ object FuConfig {
     latency = UncertainLatency(),
   )
 
+  val VfaluCfg = FuConfig (
+    name = "vfalu",
+    fuType = FuType.vfalu,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFAlu(cfg)(p).suggestName("Vfalu")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeFflags = true,
+    latency = CertainLatency(1),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+
+  val VfmaCfg = FuConfig (
+    name = "vfma",
+    fuType = FuType.vfma,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeFflags = true,
+    latency = CertainLatency(3),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+
+  val VfdivCfg = FuConfig(
+    name = "vfdiv",
+    fuType = FuType.vfdiv,
+    fuGen = null, //(p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfdiv")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = false,
+    writeVecRf = true,
+    writeFflags = true,
+    latency = UncertainLatency(),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+
   val VfpuCfg: FuConfig = FuConfig (
     name = "vfpu",
     fuType = FuType.vfpu,
@@ -541,11 +589,12 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg, VlduCfg
+    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg, VlduCfg,
+    VfaluCfg, VfmaCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VipuCfg, VfpuCfg
+    VialuCfg, VimacCfg, VipuCfg, VfpuCfg, VfaluCfg, VfmaCfg
   )
 }
 
