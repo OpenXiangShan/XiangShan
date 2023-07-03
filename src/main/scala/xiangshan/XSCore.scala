@@ -271,7 +271,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
-  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_fetch.writeback
+  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_ooo.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
@@ -340,9 +340,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
   // return load pc at load s2
   memBlock.io.ooo_to_mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
-  memBlock.io.fetch_to_mem.issue <> exuBlocks(0).io.issue.get
+  memBlock.io.ooo_to_mem.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.fetch_to_mem.issue.map(_.bits.uop.clearExceptions())
+  memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.ooo_to_mem.loadFastMatch
   exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.ooo_to_mem.loadFastImm
 
@@ -420,6 +420,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
+
   memBlock.io.ooo_to_mem.csrCtrl <> csrioIn.customCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> csrioIn.tlb
 
