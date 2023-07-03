@@ -263,7 +263,8 @@ object Bundles {
     // vector load/store
     val nf        = Nf()
 
-    val needScalaSrc = Bool()
+    val needScalaSrc       = Bool()
+    val permImmTruncate    = Bool() // opivi
 
     val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()

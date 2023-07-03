@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VSetRiWi, VSetRiWvf, VSetRvfWvf}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VSetRiWi, VSetRiWvf, VSetRvfWvf}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -493,6 +493,23 @@ object FuConfig {
     dataBits = 128,
   )
 
+  val VppuCfg = FuConfig (
+    name = "vppu",
+    fuType = FuType.vppu,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VPPU(cfg)(p).suggestName("Vppu")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeVxsat = true,
+    latency = CertainLatency(1),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
+  )
+
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
@@ -594,7 +611,7 @@ object FuConfig {
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VipuCfg, VfpuCfg, VfaluCfg, VfmaCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfpuCfg, VfaluCfg, VfmaCfg
   )
 }
 
