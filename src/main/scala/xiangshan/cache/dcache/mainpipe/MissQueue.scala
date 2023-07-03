@@ -151,6 +151,11 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     (merge || alloc)
   }
 
+  def matched(new_req: MissReq): Bool = {
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
+    block_match && reg_valid() && !(req.isFromPrefetch)
+  }
+
   def reject_req(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
@@ -306,6 +311,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     val nMaxPrefetchEntry = Input(UInt(64.W))
+    val matched = Output(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -720,6 +726,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
 
+  io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
+
   // refill latency monitor
   io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
   io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
@@ -798,6 +806,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     val memSetPattenDetected = Output(Bool())
     val lqEmpty = Input(Bool())
+    val late_miss_prefetch = Output(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -886,7 +895,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
-  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 12.U))
+  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 16.U))
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)
@@ -966,6 +975,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.probe_block := Cat(probe_block_vec).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
+  io.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)
@@ -1000,6 +1010,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
   XSPerfAccumulate("prefetch_primary_fire", io.req.fire() && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("prefetch_secondary_fire", io.req.fire() && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   when (num_valids > max_inflight) {

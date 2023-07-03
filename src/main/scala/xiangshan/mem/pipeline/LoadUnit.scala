@@ -1055,7 +1055,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.s2IsPointerChasing := RegEnable(s1_tryPointerChasing && !cancelPointerChasing, load_s1.io.out.fire)
   io.prefetch_train.bits.fromLsPipelineBundle(load_s2.io.in.bits)
   // override miss bit
-  io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  io.prefetch_train.bits.miss := io.dcache.resp.bits.real_miss
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access := io.dcache.resp.bits.meta_access
   io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio && !load_s2.io.in.bits.tlbMiss

@@ -150,7 +150,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      // sms.io_agt_en := RegNextN(io.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_agt_en := false.B
       sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
       sms.io_act_stride := RegNextN(io.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
@@ -161,6 +162,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val l1PrefetcherOpt: Option[BasePrefecher] = {
     val stream = Module(new L1StreamPrefetcher())
     stream.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+    stream.pf_ctrl <> dcache.io.pf_ctrl
 
     Some(stream)
   }
@@ -215,7 +217,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       if(i == LowConfPort) {
         loadUnits(i).io.canAcceptLowConfPrefetch
       }else {
-        loadUnits(i).io.canAcceptHighConfPrefetch
+        Mux(l1_pf_req.bits.confidence === 1.U, loadUnits(i).io.canAcceptHighConfPrefetch, loadUnits(i).io.canAcceptLowConfPrefetch)
       }
     }
   }.reduce(_ || _)
@@ -253,16 +255,28 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.lqEmpty := lsq.io.lqEmpty
 
   // load/store prefetch to l2 cache
-  prefetcherOpt.foreach(pf => {
-    val pf_to_l2 = ValidIODelay(pf.io.pf_addr, 2)
+  prefetcherOpt.foreach(sms_pf => {
+    l1PrefetcherOpt.foreach(stream_pf => {
+      val sms_pf_to_l2 = ValidIODelay(sms_pf.io.pf_addr, 2)
+      val stream_pf_to_l2 = ValidIODelay(stream_pf.io.pf_addr, 2)
 
-    outer.pf_sender_opt.get.out.head._1.addr_valid := pf_to_l2.valid
-    outer.pf_sender_opt.get.out.head._1.addr := pf_to_l2.bits
-    outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
+      outer.pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || stream_pf_to_l2.valid
+      outer.pf_sender_opt.get.out.head._1.addr := Mux(stream_pf_to_l2.valid, stream_pf_to_l2.bits, sms_pf_to_l2.bits)
+      outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
 
-    pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+      sms_pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
 
-    XSPerfAccumulate("prefetch_fire_l2", pf_to_l2.valid)
+      val l2_trace = Wire(new LoadPfDbBundle)
+      l2_trace.paddr := outer.pf_sender_opt.get.out.head._1.addr
+      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+      table.log(l2_trace, stream_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
+      table.log(l2_trace, !stream_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
+
+      XSPerfAccumulate("prefetch_fire_l2", outer.pf_sender_opt.get.out.head._1.addr_valid)
+      XSPerfAccumulate("stream_fire_l2", stream_pf_to_l2.valid)
+      XSPerfAccumulate("sms_fire_l2", !stream_pf_to_l2.valid && sms_pf_to_l2.valid)
+      XSPerfAccumulate("sms_block_by_stream", stream_pf_to_l2.valid && sms_pf_to_l2.valid)
+    })
   })
 
   // dtlb
@@ -461,7 +475,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
         loadUnits(i).io.prefetch_train.valid,
         loadUnits(i).io.prefetch_train.valid && loadUnits(i).io.prefetch_train.bits.isFirstIssue && (
-          loadUnits(i).io.prefetch_train.bits.miss || loadUnits(i).io.prefetch_train.bits.meta_prefetch
+          loadUnits(i).io.prefetch_train.bits.miss
           )
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits

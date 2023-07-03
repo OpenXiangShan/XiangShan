@@ -32,6 +32,7 @@ import utility.ReqSourceField
 import utility.FastArbiter
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.mem.prefetch.{PrefetchControlBundle, PrefetcherMonitor}
 
 import scala.math.max
 
@@ -424,6 +425,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
   val meta_access = Bool()
   // s2
   val handled = Bool()
+  val real_miss = Bool()
   // s3: 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
   val replacementUpdated = Bool()
@@ -726,6 +728,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
+  val pf_ctrl = Output(new PrefetchControlBundle)
 }
 
 
@@ -772,14 +775,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MetaReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
   val TagReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
 
+  // Enable L1 Load prefetch
+  val LoadPrefetchL1Enabled = true
+  val AccessArrayReadPort = if(LoadPrefetchL1Enabled) LoadPipelineWidth + 1 + 1 else LoadPipelineWidth + 1
+  val PrefetchArrayReadPort = if(LoadPrefetchL1Enabled) LoadPipelineWidth + 1 + 1 else LoadPipelineWidth + 1
+
   //----------------------------------------
   // core data structures
   val bankedDataArray = if(EnableDCacheWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = MetaReadPort, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
-  val prefetchArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2)) // prefetch flag array
-  val accessArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = LoadPipelineWidth + 2))
+  val prefetchArray = Module(new L1FlagMetaArray(readPorts = PrefetchArrayReadPort, writePorts = 2)) // prefetch flag array
+  val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 2))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
+  val prefetcherMonitor = Module(new PrefetcherMonitor)
   bankedDataArray.dump()
 
   //----------------------------------------
@@ -844,6 +853,25 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   extra_meta_resp_ports.zip(accessArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).access := r(i) })
   }}
+
+  if(LoadPrefetchL1Enabled) {
+    // use last port to read prefetch and access flag
+    prefetchArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
+    prefetchArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
+    prefetchArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+
+    accessArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
+    accessArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
+    accessArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+
+    val extra_flag_valid = RegNext(refillPipe.io.prefetch_flag_write.valid)
+    val extra_flag_way_en = RegEnable(refillPipe.io.prefetch_flag_write.bits.way_en, refillPipe.io.prefetch_flag_write.valid)
+    val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
+    val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
+
+    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && extra_flag_prefetch && extra_flag_access
+    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && extra_flag_prefetch && !extra_flag_access
+  }
 
   // write extra meta
   val error_flag_write_ports = Seq(
@@ -962,6 +990,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
+
+  prefetcherMonitor.io.timely.total_prefetch := ldu.map(_.io.prefetch_info.total_prefetch).reduce(_ || _)
+  prefetcherMonitor.io.timely.late_hit_prefetch := ldu.map(_.io.prefetch_info.late_hit_prefetch).reduce(_ || _)
+  prefetcherMonitor.io.timely.late_miss_prefetch := missQueue.io.late_miss_prefetch
+  io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
+  XSPerfAccumulate("useless_prefetch", ldu.map(_.io.prefetch_info.total_prefetch).reduce(_ || _) && !(ldu.map(_.io.prefetch_info.useful_prefetch).reduce(_ || _)))
+  XSPerfAccumulate("useful_prefetch", ldu.map(_.io.prefetch_info.useful_prefetch).reduce(_ || _))
+  XSPerfAccumulate("late_prefetch_hit", ldu.map(_.io.prefetch_info.late_prefetch_hit).reduce(_ || _))
+  XSPerfAccumulate("late_load_hit", ldu.map(_.io.prefetch_info.late_load_hit).reduce(_ || _))
 
   /** LoadMissDB: record load miss state */
   val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable" + p(XSCoreParamsKey).HartId.toString))
