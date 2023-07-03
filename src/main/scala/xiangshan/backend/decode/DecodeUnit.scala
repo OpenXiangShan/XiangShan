@@ -774,7 +774,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.vlmul := io.enq.vtype.vlmul
   decodedInst.vpu.vm    := inst.VM
   decodedInst.vpu.nf    := inst.NF
-  decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
+  decodedInst.vpu.needScalaSrc       := Category.needScalaSrc(inst.VCATEGORY)
+  decodedInst.vpu.permImmTruncate    := Category.permImmTruncate(inst.VCATEGORY)
   decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.vpu.isExt     := vextInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.vpu.isNarrow  := narrowInsts.map(_ === inst.ALL).reduce(_ || _)

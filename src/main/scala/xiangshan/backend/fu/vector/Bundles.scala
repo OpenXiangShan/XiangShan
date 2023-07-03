@@ -133,5 +133,8 @@ object Bundles {
     def needScalaSrc(category: UInt) : Bool = {
       Seq(OPIVI, OPIVX, OPFVF, OPMVX).map(_ === category).reduce(_ || _)
     }
+    def permImmTruncate(category: UInt) : Bool = {
+      Seq(OPIVI).map(_ === category).reduce(_ || _)
+    }
   }
 }
