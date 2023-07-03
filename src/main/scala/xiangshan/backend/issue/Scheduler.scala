@@ -273,11 +273,15 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case _ =>
   }
 
-  dispatch2Iq.io.out(1).zip(stAddrIQs(0).io.enq).zip(stDataIQs(0).io.enq).foreach{ case((di, staIQ), stdIQ) =>
-    val isAllReady = staIQ.ready && stdIQ.ready
-    di.ready := isAllReady
-    staIQ.valid := di.valid && isAllReady
-    stdIQ.valid := di.valid && isAllReady
+  private val staIdxSeq = issueQueues.filter(iq => iq.params.StaCnt > 0).map(iq => iq.params.idxInSchBlk)
+
+  for ((idxInSchBlk, i) <- staIdxSeq.zipWithIndex) {
+    dispatch2Iq.io.out(idxInSchBlk).zip(stAddrIQs(i).io.enq).zip(stDataIQs(i).io.enq).foreach{ case((di, staIQ), stdIQ) =>
+      val isAllReady = staIQ.ready && stdIQ.ready
+      di.ready := isAllReady
+      staIQ.valid := di.valid && isAllReady
+      stdIQ.valid := di.valid && isAllReady
+    }
   }
 
   require(stAddrIQs.size == stDataIQs.size, s"number of store address IQs(${stAddrIQs.size}) " +
