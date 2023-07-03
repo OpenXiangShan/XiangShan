@@ -20,6 +20,7 @@ case class IssueBlockParams(
   VLEN               : Int = 128,
   vaddrBits          : Int = 39,
   // calculate in scheduler
+  var idxInSchBlk    : Int = 0,
   var numEnq         : Int = 0,
   var numWakeupFromIQ: Int = 0,
 )(
@@ -27,6 +28,10 @@ case class IssueBlockParams(
   // top down
   val schdType: SchedulerType,
 ) {
+  def updateIdx(idx: Int): Unit = {
+    this.idxInSchBlk = idx
+  }
+
   def inMemSchd: Boolean = schdType == MemScheduler()
 
   def inIntSchd: Boolean = schdType == IntScheduler()

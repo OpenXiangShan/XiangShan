@@ -22,6 +22,15 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
 
+  /* Only update the idx in mem-scheduler here
+   * Idx in other schedulers can be updated the same way if needed
+   *
+   * Also note that we filter out the 'stData issue-queues' when counting
+   */
+  for ((ibp, idx) <- params.memSchdParams.get.issueBlockParams.filter(iq => iq.StdCnt == 0).zipWithIndex) {
+    ibp.updateIdx(idx)
+  }
+
   println("[Backend] ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs

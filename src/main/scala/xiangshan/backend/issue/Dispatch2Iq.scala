@@ -59,7 +59,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val in = Flipped(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
     val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
-    val out = Vec(wrapper.issueBlockParams.count(_.StdCnt == 0), Vec(wrapper.numOut, DecoupledIO(new DynInst)))
+    val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
   })
 
