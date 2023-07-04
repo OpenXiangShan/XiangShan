@@ -48,7 +48,7 @@ trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePa
   val L2_WIDTH_BYTES = WIDTH_BYTES * 2
   val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
 
-  val DEPTH_LOOKAHEAD = 6
+  val DEPTH_LOOKAHEAD = 8
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
   // prefetch sink related
@@ -362,8 +362,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s0_req_valid", io.train_req.valid)
   XSPerfAccumulate("s0_req_cannot_accept", io.train_req.valid && !io.train_req.ready)
 
-  val ratio_const = WireInit(Constantin.createRecord("l2DepthRatio" + p(XSCoreParamsKey).HartId.toString, initValue = L2_DEPTH_RATIO.U))
-  val ratio = ratio_const(3, 0)
+  val l2_delta_const = WireInit(Constantin.createRecord("L2DepthDelta" + p(XSCoreParamsKey).HartId.toString))
+  val l2_depth = io.dynamic_depth + l2_delta_const(DEPTH_BITS - 1, 0)
 
   // s1: alloc or update
   val s1_valid = RegNext(s0_valid)
@@ -379,8 +379,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_update = s1_valid && s1_hit
   val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l2_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l2_depth, 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
   val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B)
   s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))

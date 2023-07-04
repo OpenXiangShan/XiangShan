@@ -63,7 +63,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord("depth" + p(XSCoreParamsKey).HartId.toString, initValue = 32.U)
+  depth_const := Constantin.createRecord("depth" + p(XSCoreParamsKey).HartId.toString)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
   val late_hit_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))

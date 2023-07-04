@@ -161,7 +161,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
   val l1PrefetcherOpt: Option[BasePrefecher] = {
     val stream = Module(new L1StreamPrefetcher())
-    stream.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+    stream.io.enable := true.B
     stream.pf_ctrl <> dcache.io.pf_ctrl
 
     Some(stream)
