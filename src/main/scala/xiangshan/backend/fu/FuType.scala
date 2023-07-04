@@ -26,17 +26,20 @@ object FuType {
   val mou = OHInt(15)
   val vipu = OHInt(16)
   val vialuF = OHInt(17)
-  val vfpu = OHInt(18)
+  val vfpu = OHInt(18) // will be delated
   val vldu = OHInt(19)
   val vstu = OHInt(20)
   val vppu = OHInt(21)
   val vsetiwf = OHInt(22) // vset read rs write vconfig
   val vsetfwf = OHInt(23) // vset read old vl write vconfig
   val vimac = OHInt(24)
+  val vfalu = OHInt(25)
+  val vfma  = OHInt(26)
+  val vfdiv = OHInt(27) // Todo
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 25
+  def num = 28
 
   def width = num
 
@@ -44,7 +47,7 @@ object FuType {
 
   def isInt(fuType: UInt): Bool = fuType(9, 0).orR || fuType(22)// from jmp to vset
 
-  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23)
+  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23) || fuType(25) || fuType(26) || fuType(27)
 
   def isJump(fuType: UInt): Bool = fuType(0)
 
