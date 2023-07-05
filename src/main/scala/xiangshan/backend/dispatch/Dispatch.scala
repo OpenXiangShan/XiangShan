@@ -70,6 +70,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val singleStep = Input(Bool())
     // lfst
     val lfst = new DispatchLFSTIO
+    // perf only
+    val robHead = Input(new MicroOp)
+    val stallReason = Flipped(new StallReasonIO(RenameWidth))
+    val lqCanAccept = Input(Bool())
+    val sqCanAccept = Input(Bool())
+    val robHeadNotReady = Input(Bool())
+    val robFull = Input(Bool())
   })
 
   /**
@@ -105,7 +112,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
-  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
+  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire()
   ))
 
@@ -151,7 +158,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       if(i == 0){
         debug_runahead_checkpoint_id := checkpoint_id
       } else {
-        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
           io.fromRename(i).fire()
         ))
       }
@@ -204,6 +211,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // (1) resources are ready
   // (2) previous instructions are ready
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ, Dispatch Queue
@@ -277,21 +285,68 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  if (env.EnableTopDown) {
-    val rob_first_load = WireDefault(false.B)
-    val rob_first_store = WireDefault(false.B)
-    ExcitingUtils.addSink(rob_first_load, "rob_first_load", ExcitingUtils.Perf)
-    ExcitingUtils.addSink(rob_first_store, "rob_first_store", ExcitingUtils.Perf)
-    val rob_first_ls = rob_first_load || rob_first_store
+  val Seq(notIssue, tlbReplay, tlbMiss, vioReplay, mshrReplay, l1Miss, l2Miss, l3Miss) =
+    Seq.fill(8)(WireDefault(false.B))
+  ExcitingUtils.addSink(notIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(tlbReplay, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(tlbMiss, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(vioReplay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(mshrReplay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l1Miss, s"load_l1_miss_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l2Miss, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(l3Miss, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
 
-    XSPerfAccumulate("stall_cycle_rob_blame", stall_rob && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_int_blame", stall_int_dq && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_fp_blame", stall_fp_dq && !rob_first_ls)
-    XSPerfAccumulate("stall_cycle_ls_blame", stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls))
-    val stall_ls_blame = stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls)
-    ExcitingUtils.addSource(stall_ls_blame, "stall_ls_blame", ExcitingUtils.Perf)
-    // TODO: we may need finer counters to count responding slots more precisely, i.e. per-slot granularity.
+  val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
+  Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
+  Mux(l1Miss, TopDownCounters.LoadL2Stall.id.U,
+  Mux(notIssue, TopDownCounters.MemNotReadyStall.id.U,
+  Mux(tlbMiss, TopDownCounters.LoadTLBStall.id.U,
+  Mux(tlbReplay, TopDownCounters.LoadTLBStall.id.U,
+  Mux(mshrReplay, TopDownCounters.LoadMSHRReplayStall.id.U,
+  Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
+  TopDownCounters.LoadL1Stall.id.U))))))))
+
+  val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
+  val realFired = io.recv.zip(io.fromRename.map(_.valid)).map(x => x._1 && x._2)
+  io.stallReason.backReason.valid := !io.recv.head
+  io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
+  stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).map { case (((update, in), recv), fire) =>
+    import FuType._
+    val headIsInt = isIntExu(io.robHead.ctrl.fuType)  && io.robHeadNotReady
+    val headIsFp  = isFpExu(io.robHead.ctrl.fuType)   && io.robHeadNotReady
+    val headIsDiv = isDivSqrt(io.robHead.ctrl.fuType) && io.robHeadNotReady
+    val headIsLd  = io.robHead.ctrl.fuType === ldu && io.robHeadNotReady || !io.lqCanAccept
+    val headIsSt  = io.robHead.ctrl.fuType === stu && io.robHeadNotReady || !io.sqCanAccept
+    val headIsAmo = io.robHead.ctrl.fuType === mou && io.robHeadNotReady
+    val headIsLs  = headIsLd || headIsSt
+    val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
+
+    import TopDownCounters._
+    update := MuxCase(OtherCoreStall.id.U, Seq(
+      // fire
+      (fire                                              ) -> NoStall.id.U          ,
+      // dispatch not stall / core stall from rename
+      (in =/= OtherCoreStall.id.U                        ) -> in                    ,
+      // dispatch queue stall
+      (!io.toIntDq.canAccept && !headIsInt && !io.robFull) -> IntDqStall.id.U       ,
+      (!io.toFpDq.canAccept  && !headIsFp  && !io.robFull) -> FpDqStall.id.U        ,
+      (!io.toLsDq.canAccept  && !headIsLs  && !robLsFull ) -> LsDqStall.id.U        ,
+      // rob stall
+      (headIsAmo                                         ) -> AtomicStall.id.U      ,
+      (headIsSt                                          ) -> StoreStall.id.U       ,
+      (headIsLd                                          ) -> ldReason              ,
+      (headIsDiv                                         ) -> DivStall.id.U         ,
+      (headIsInt                                         ) -> IntNotReadyStall.id.U ,
+      (headIsFp                                          ) -> FPNotReadyStall.id.U  ,
+    ))
   }
+
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+
+  XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
+  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
+  XSPerfHistogram("slots_valid_pure", PopCount(io.enqRob.req.map(_.valid)), thisActualOut(0), 0, RenameWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
     ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),

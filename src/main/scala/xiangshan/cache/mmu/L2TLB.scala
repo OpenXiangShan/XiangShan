@@ -29,7 +29,6 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
-import utility.ChiselDB
 import difftest._
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
@@ -38,7 +37,8 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
+    )),
+    requestFields = Seq(ReqSourceField())
   )))
 
   lazy val module = new L2TLBImp(this)
@@ -136,10 +136,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     prefetch.io.csr := csr_dup(0)
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
 
+    val isWriteL2TlbPrefetchTable = WireInit(Constantin.createRecord("isWriteL2TlbPrefetchTable" + p(XSCoreParamsKey).HartId.toString))
     val L2TlbPrefetchTable = ChiselDB.createTable("L2TlbPrefetch_hart" + p(XSCoreParamsKey).HartId.toString, new L2TlbPrefetchDB)
     val L2TlbPrefetchDB = Wire(new L2TlbPrefetchDB)
     L2TlbPrefetchDB.vpn := prefetch.io.out.bits.vpn
-    L2TlbPrefetchTable.log(L2TlbPrefetchDB, prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
+    L2TlbPrefetchTable.log(L2TlbPrefetchDB, isWriteL2TlbPrefetchTable.orR && prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
   }
   arb2.io.out.ready := cache.io.req.ready
 
@@ -252,6 +253,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   )._2
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
   mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
@@ -443,6 +445,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_sector_resp.af := pte.entry(OHToUInt(pte.pteidx)).af
     ptw_sector_resp.pf := pte.entry(OHToUInt(pte.pteidx)).pf
     ptw_sector_resp.addr_low := OHToUInt(pte.pteidx)
+    ptw_sector_resp.pteidx := pte.pteidx
     for (i <- 0 until tlbcontiguous) {
       val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
       val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
@@ -496,17 +499,19 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
   generatePerfEvent()
 
+  val isWriteL1TlbTable = WireInit(Constantin.createRecord("isWriteL1TlbTable" + p(XSCoreParamsKey).HartId.toString))
   val L1TlbTable = ChiselDB.createTable("L1Tlb_hart" + p(XSCoreParamsKey).HartId.toString, new L1TlbDB)
   val ITlbReqDB, DTlbReqDB, ITlbRespDB, DTlbRespDB = Wire(new L1TlbDB)
   ITlbReqDB.vpn := io.tlb(0).req(0).bits.vpn
   DTlbReqDB.vpn := io.tlb(1).req(0).bits.vpn
   ITlbRespDB.vpn := io.tlb(0).resp.bits.entry.tag
   DTlbRespDB.vpn := io.tlb(1).resp.bits.entry.tag
-  L1TlbTable.log(ITlbReqDB, io.tlb(0).req(0).fire, "ITlbReq", clock, reset)
-  L1TlbTable.log(DTlbReqDB, io.tlb(1).req(0).fire, "DTlbReq", clock, reset)
-  L1TlbTable.log(ITlbRespDB, io.tlb(0).resp.fire, "ITlbResp", clock, reset)
-  L1TlbTable.log(DTlbRespDB, io.tlb(1).resp.fire, "DTlbResp", clock, reset)
+  L1TlbTable.log(ITlbReqDB, isWriteL1TlbTable.orR && io.tlb(0).req(0).fire, "ITlbReq", clock, reset)
+  L1TlbTable.log(DTlbReqDB, isWriteL1TlbTable.orR && io.tlb(1).req(0).fire, "DTlbReq", clock, reset)
+  L1TlbTable.log(ITlbRespDB, isWriteL1TlbTable.orR && io.tlb(0).resp.fire, "ITlbResp", clock, reset)
+  L1TlbTable.log(DTlbRespDB, isWriteL1TlbTable.orR && io.tlb(1).resp.fire, "DTlbResp", clock, reset)
 
+  val isWritePageCacheTable = WireInit(Constantin.createRecord("isWritePageCacheTable" + p(XSCoreParamsKey).HartId.toString))
   val PageCacheTable = ChiselDB.createTable("PageCache_hart" + p(XSCoreParamsKey).HartId.toString, new PageCacheDB)
   val PageCacheDB = Wire(new PageCacheDB)
   PageCacheDB.vpn := Cat(cache.io.resp.bits.toTlb.entry(0).tag, OHToUInt(cache.io.resp.bits.toTlb.pteidx))
@@ -518,8 +523,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   PageCacheDB.l2Hit := cache.io.resp.bits.toFsm.l2Hit
   PageCacheDB.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   PageCacheDB.hit := cache.io.resp.bits.hit
-  PageCacheTable.log(PageCacheDB, cache.io.resp.fire, "PageCache", clock, reset)
+  PageCacheTable.log(PageCacheDB, isWritePageCacheTable.orR && cache.io.resp.fire, "PageCache", clock, reset)
 
+  val isWritePTWTable = WireInit(Constantin.createRecord("isWritePTWTable" + p(XSCoreParamsKey).HartId.toString))
   val PTWTable = ChiselDB.createTable("PTW_hart" + p(XSCoreParamsKey).HartId.toString, new PTWDB)
   val PTWReqDB, PTWRespDB, LLPTWReqDB, LLPTWRespDB = Wire(new PTWDB)
   PTWReqDB.vpn := ptw.io.req.bits.req_info.vpn
@@ -530,17 +536,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   LLPTWReqDB.source := llptw.io.in.bits.req_info.source
   LLPTWRespDB.vpn := llptw.io.mem.refill.vpn
   LLPTWRespDB.source := llptw.io.mem.refill.source
-  PTWTable.log(PTWReqDB, ptw.io.req.fire, "PTWReq", clock, reset)
-  PTWTable.log(PTWRespDB, ptw.io.mem.resp.fire, "PTWResp", clock, reset)
-  PTWTable.log(LLPTWReqDB, llptw.io.in.fire, "LLPTWReq", clock, reset)
-  PTWTable.log(LLPTWRespDB, llptw.io.mem.resp.fire, "LLPTWResp", clock, reset)
+  PTWTable.log(PTWReqDB, isWritePTWTable.orR && ptw.io.req.fire, "PTWReq", clock, reset)
+  PTWTable.log(PTWRespDB, isWritePTWTable.orR && ptw.io.mem.resp.fire, "PTWResp", clock, reset)
+  PTWTable.log(LLPTWReqDB, isWritePTWTable.orR && llptw.io.in.fire, "LLPTWReq", clock, reset)
+  PTWTable.log(LLPTWRespDB, isWritePTWTable.orR && llptw.io.mem.resp.fire, "LLPTWResp", clock, reset)
 
+  val isWriteL2TlbMissQueueTable = WireInit(Constantin.createRecord("isWriteL2TlbMissQueueTable" + p(XSCoreParamsKey).HartId.toString))
   val L2TlbMissQueueTable = ChiselDB.createTable("L2TlbMissQueue_hart" + p(XSCoreParamsKey).HartId.toString, new L2TlbMissQueueDB)
   val L2TlbMissQueueInDB, L2TlbMissQueueOutDB = Wire(new L2TlbMissQueueDB)
   L2TlbMissQueueInDB.vpn := missQueue.io.in.bits.vpn
   L2TlbMissQueueOutDB.vpn := missQueue.io.out.bits.vpn
-  L2TlbMissQueueTable.log(L2TlbMissQueueInDB, missQueue.io.in.fire, "L2TlbMissQueueIn", clock, reset)
-  L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, missQueue.io.out.fire, "L2TlbMissQueueOut", clock, reset)
+  L2TlbMissQueueTable.log(L2TlbMissQueueInDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.in.fire, "L2TlbMissQueueIn", clock, reset)
+  L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.out.fire, "L2TlbMissQueueOut", clock, reset)
 }
 
 /** BlockHelper, block missqueue, not to send too many req to cache

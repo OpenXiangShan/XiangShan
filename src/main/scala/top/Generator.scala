@@ -44,7 +44,7 @@ case object MFC extends FirrtlCompiler
 
 object Generator {
 
-  def execute(args: Array[String], mod: => RawModule, fc: FirrtlCompiler) = {
+  def execute(args: Array[String], mod: => RawModule, fc: FirrtlCompiler, firtoolOpts: Array[String]) = {
     fc match {
       case MFC =>
         val sfcXsTransforms = Seq(
@@ -69,9 +69,8 @@ object Generator {
         })
         (new circt.stage.ChiselStage).execute(mfcArgs, Seq(
           ChiselGeneratorAnnotation(mod _),
-          circt.stage.CIRCTTargetAnnotation(circt.stage.CIRCTTarget.Verilog),
-          circt.stage.CIRCTHandover(circt.stage.CIRCTHandover.CHIRRTL)
-        ))
+          circt.stage.CIRCTTargetAnnotation(circt.stage.CIRCTTarget.Verilog)
+        ) ++ firtoolOpts.map(opt => circt.stage.FirtoolOption(opt)))
       case SFC =>
         (new XiangShanStage).execute(args, Seq(
           ChiselGeneratorAnnotation(mod _),

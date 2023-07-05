@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils.{XSDebug, XSInfo}
 import xiangshan._
-import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants}
+import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants, DCacheWordReqWithVaddr}
 
 // Fake Store buffer for XiangShan Out of Order LSU
 //
@@ -29,7 +29,7 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants}
 // used as extended dcache miss queue for store
 class FakeSbuffer(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
@@ -47,7 +47,7 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
 
   val state = RegInit(s_invalid)
 
-  val req = Reg(new DCacheWordReq)
+  val req = Reg(new DCacheWordReqWithVaddr)
 
   XSDebug("state: %d\n", state)
 

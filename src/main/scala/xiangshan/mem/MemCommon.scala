@@ -75,6 +75,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For debug usage
   val isFirstIssue = Bool()
+  val hasROBEntry = Bool()
 
   // For load replay
   val isLoadReplay = Bool()
@@ -82,8 +83,14 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For dcache miss load
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+  val handledByMSHR = Bool()
+  val replacementUpdated = Bool()
 
   val forward_tlDchannel = Bool()
+  val dcacheRequireReplay = Bool()
+
+  // loadQueueReplay index.
+  val sleepIndex = UInt(log2Up(LoadQueueReplaySize).W)
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -107,6 +114,10 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    hasROBEntry := input.hasROBEntry
+    dcacheRequireReplay := input.dcacheRequireReplay
+    sleepIndex := input.sleepIndex
+
     meta_prefetch := DontCare
     meta_access := DontCare
     forward_tlDchannel := DontCare
@@ -114,13 +125,18 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     replayCarry := DontCare
     atomic := DontCare
     isLoadReplay := DontCare
+    handledByMSHR := DontCare
+    replacementUpdated := DontCare
   }
 }
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  // load inst replay informations
+  val replayInfo = new LoadToLsqReplayIO
   // queue entry data, except flag bits, will be updated if writeQueue is true,
   // valid bit in LqWriteBundle will be ignored
-  val lq_data_wen_dup = Vec(6, Bool()) // dirty reg dup
+  val lqDataWenDup = Vec(6, Bool()) // dirty reg dup
+
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
@@ -140,12 +156,18 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isPrefetch := input.isPrefetch
     isHWPrefetch := input.isHWPrefetch
     isFirstIssue := input.isFirstIssue
+    hasROBEntry := input.hasROBEntry
     isLoadReplay := input.isLoadReplay
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel
     replayCarry := input.replayCarry
+    dcacheRequireReplay := input.dcacheRequireReplay
+    sleepIndex := input.sleepIndex
+    handledByMSHR := input.handledByMSHR
+    replacementUpdated := input.replacementUpdated
 
-    lq_data_wen_dup := DontCare
+    replayInfo := DontCare
+    lqDataWenDup := DontCare
   }
 }
 
@@ -173,6 +195,11 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
   // should be raised to flush SQ and committed sbuffer.
   val matchInvalid = Input(Bool()) // resp to load_s2
+
+  // addrInvalid suggests store to load forward found forward should happen,
+  // but address (SSID) is not available for now. If addrInvalid, load inst should
+  // be replayed from RS. Feedback type should be RSFeedbackType.addrInvalid
+  val addrInvalid = Input(Bool())
 }
 
 // LoadForwardQueryIO used in load pipeline
@@ -187,7 +214,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
-  val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
+  val dataInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
+  val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
 }
 
 // Query load queue for ld-ld violation
@@ -199,16 +227,26 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // If it happens, a replay from rs is needed.
 
 class LoadViolationQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+  // mask: load's data mask.
+  val mask = UInt(8.W)
+
+  // paddr: load's paddr.
   val paddr = UInt(PAddrBits.W)
+
+  // dataInvalid: load data is invalid.
+  val datavalid = Bool()
 }
 
 class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
-  val have_violation = Bool()
+  // replayFromFetch: ld-ld violation check success, replay from fetch.
+  val replayFromFetch = Bool()
 }
 
 class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new LoadViolationQueryReq)
   val resp = Flipped(Valid(new LoadViolationQueryResp))
+  val preReq = Output(Bool())
+  val release = Output(Bool())
 }
 
 class LoadReExecuteQueryIO(implicit p: Parameters) extends XSBundle {

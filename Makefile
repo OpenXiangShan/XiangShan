@@ -21,6 +21,7 @@ TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
+MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
 SIMTOP  = top.SimTop
 IMAGE  ?= temp
@@ -34,8 +35,8 @@ SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-
 # select firrtl compiler
 ifeq ($(MFC),1)
 override FC_ARGS = --mfc
-override FPGA_MEM_ARGS = --infer-rw
-override SIM_MEM_ARGS = --infer-rw
+override FPGA_MEM_ARGS = --infer-rw --firtool-opt -split-verilog --firtool-opt -o --firtool-opt build --firtool-opt -repl-seq-mem --firtool-opt -repl-seq-mem-circuit=$(FPGATOP) --firtool-opt -repl-seq-mem-file=XSTop.v.conf
+override SIM_MEM_ARGS = --infer-rw --firtool-opt -split-verilog --firtool-opt -o --firtool-opt build --firtool-opt -repl-seq-mem --firtool-opt -repl-seq-mem-circuit=$(SIMTOP) --firtool-opt -repl-seq-mem-file=SimTop.v.conf
 endif
 
 
@@ -47,9 +48,11 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
-# top-down
-ifeq ($(ENABLE_TOPDOWN),1)
-override SIM_ARGS += --enable-topdown
+# dynamic switch CONSTANTIN
+ifeq ($(WITH_CONSTANTIN),0)
+$(info disable WITH_CONSTANTIN)
+else
+override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
@@ -66,10 +69,6 @@ TIME_CMD = time -a -o $(TIMELOG)
 
 SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 
-# add comments to 'firrtl_black_box_resource_files'
-AWK_CMD = gawk -i inplace 'BEGIN{f=0} /FILE "firrtl_black_box_resource_files.f"/{f=1} !f{print $$0} f{print "//", $$0}'
-
-
 .DEFAULT_GOAL = verilog
 
 help:
@@ -82,10 +81,12 @@ $(TOP_V): $(SCALA_FILE)
 		$(FPGA_MEM_ARGS)                                          \
 		--num-cores $(NUM_CORES)                                  \
 		$(RELEASE_ARGS) $(FC_ARGS)
-	$(SED_CMD) $@
 ifeq ($(MFC),1)
-	$(AWK_CMD) $@
+	for file in $(BUILD_DIR)/*.sv; do $(SED_CMD) "$${file}"; mv "$${file}" "$${file%.sv}.v"; done
+	mv $(BUILD_DIR)/$(BUILD_DIR)/* $(BUILD_DIR)
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(BUILD_DIR)"
 endif
+	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -107,10 +108,12 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		$(SIM_MEM_ARGS)                                               \
 		--num-cores $(NUM_CORES)                                      \
 		$(SIM_ARGS) $(FC_ARGS)
-	$(SED_CMD) $@
 ifeq ($(MFC),1)
-	$(AWK_CMD) $@
+	for file in $(BUILD_DIR)/*.sv; do $(SED_CMD) "$${file}"; mv "$${file}" "$${file%.sv}.v"; done
+	mv $(BUILD_DIR)/$(BUILD_DIR)/* $(BUILD_DIR)
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(BUILD_DIR)"
 endif
+	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__

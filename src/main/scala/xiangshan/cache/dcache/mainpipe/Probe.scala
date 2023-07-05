@@ -230,6 +230,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   }
+  XSPerfAccumulate("ProbeL1DCache", io.mem_probe.fire)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
