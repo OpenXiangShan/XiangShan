@@ -105,6 +105,20 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     res
   }
 
+  def expendPortSel(map: Map[Seq[Int], Vec[ValidIO[UInt]]]) = {
+    val res : mutable.Map[Int, Seq[ValidIO[UInt]]]= mutable.Map()
+    for((k, v) <- map) {
+      for(i <- 0 until k.size) {
+        if(res.contains(k(i))) {
+          res(k(i)) :+= v(i)
+        } else {
+          res += (k(i) -> Seq(v(i)))
+        }
+      }
+    }
+    res
+  }
+
   def canAccept(acceptVec: Seq[Int], fuType: UInt): Bool = {
     (acceptVec.reduce(_ | _).U & fuType).orR
   }
@@ -129,7 +143,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   private val numEnq = io.in.size
 
-  val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.name).toSet)
+  val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
   println(s"portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
   println(s"fuDeqMap: $fuDeqMap")
@@ -140,53 +154,48 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   // sort by count of port. Port less, priority higher.
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-
-  val issuePortFuType: Seq[Seq[Int]] = params.issueBlockParams.map(_.getFuCfgs.map(_.fuType))
+  println(s"finalFuDeqMap: $finalFuDeqMap")
 
   val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-
-  val numOutPorts = io.out.map(_.size).sum
   val numInPorts = io.in.size
+  val outs = io.out.flatten
+  val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
+  outReadyMatrix.foreach(_.foreach(_ := false.B))
+  val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
+  selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
-  val canAcceptMatrix = Wire(Vec(numOutPorts, Vec(numInPorts, Bool())))
-
-  for (inIdx <- 0 until numInPorts) {
-    var outIdx = 0
-    for (iqIdx <- io.out.indices) {
-      for (portIdx <- io.out(iqIdx).indices) {
-        canAcceptMatrix(outIdx)(inIdx) := canAccept(issuePortFuType(iqIdx), uopsIn(inIdx).bits.fuType)
-        outIdx += 1
+  finalFuDeqMap.zipWithIndex.foreach { case ((fuTypeSeq, deqPortIdSeq), i) =>
+    val selNum = deqPortIdSeq.length
+    val canAcc = uopsIn.map(in => canAccept(fuTypeSeq, in.bits.fuType) && in.valid)
+    val select = SelectOne("naive", canAcc, selNum)
+    for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+      when(selectValid) {
+        selIdxOH(i)(j).valid := selectValid
+        selIdxOH(i)(j).bits := selectIdxOH.asUInt
       }
     }
   }
 
-
-  val outReadyMatrix = Wire(Vec(io.out.size, Vec(numInPorts, Bool())))
-  outReadyMatrix.foreach(_.foreach(_ := false.B))
-
-  uopsIn <> io.in
-  uopsIn.foreach(_.ready := false.B)
-
-  for ((outs, iqIdx) <- io.out.zipWithIndex) {
-
-    val startIdx = io.out.take(iqIdx).map(_.size).sum
-    val canAccept = canAcceptMatrix(startIdx).zip(io.in).map{ case (canAccept, in) => canAccept && in.valid}
-
-    val select = SelectOne("naive", canAccept, outs.size)
-    for (j <- 0 until outs.size) {
-      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      // 1 in uop can only route to one out port
-      outs(j).valid := selectValid
-      outs(j).bits := Mux1H(selectIdxOH, uopsIn.map(_.bits))
-
-      outReadyMatrix(iqIdx).zip(selectIdxOH).foreach { case (inReady, v) =>
-        when(v) {
-          inReady := outs(j).ready
+  val portSelIdxOH = finalFuDeqMap.zip(selIdxOH).map{ case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq)}.toMap
+  println(s"protSelIdxOH: $portSelIdxOH")
+  val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
+  println(s"finalportSelIdxOH: $finalportSelIdxOH")
+  finalportSelIdxOH.foreach{ case (portId, selSeq) =>
+    val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid), selSeq.map(_.bits))
+    outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
+    outs(portId).bits := Mux1H(finalSelIdxOH, uopsIn.map(_.bits))
+    when(outs(portId).valid) {
+      outReadyMatrix(portId).zipWithIndex.foreach { case (inReady, i) =>
+        when(finalSelIdxOH(i)) {
+          inReady := outs(portId).ready
         }
       }
     }
   }
 
+  uopsIn <> io.in
+  uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
 
   private val reqPsrcVec: IndexedSeq[UInt] = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
