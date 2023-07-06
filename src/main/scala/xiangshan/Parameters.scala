@@ -341,14 +341,15 @@ case class XSCoreParameters
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX2", Seq(VppuCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX3", Seq(VipuCfg), Seq(VfWB(port = 7, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VEX3", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
-        ExeUnitParams("VEX4", Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetRvfWvfCfg), Seq(VfWB(port = 2, 0), IntWB(port = 0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+        ExeUnitParams("VEX4", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams("VEX5", Seq(F2fCfg, F2iCfg, FDivSqrtCfg, VSetRvfWvfCfg), Seq(VfWB(port = 2, 0), IntWB(port = 0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VEX4", Seq(VfaluCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-        ExeUnitParams("VEX5", Seq(VfmaCfg) , Seq(VfWB(port = 6, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX6", Seq(VfaluCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX7", Seq(VfmaCfg) , Seq(VfWB(port = 6, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
