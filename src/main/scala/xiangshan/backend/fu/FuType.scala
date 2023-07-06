@@ -47,11 +47,11 @@ object FuType {
 
   def isInt(fuType: UInt): Bool = fuType(9, 0).orR || fuType(22)// from jmp to vset
 
-  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23) || fuType(25) || fuType(26) || fuType(27)
+  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23)
 
   def isJump(fuType: UInt): Bool = fuType(0)
 
-  def isFp(fuType: UInt): Bool = fuType(12, 10).orR
+  def isFp(fuType: UInt): Bool = fuType(12, 10).orR || fuType(25) || fuType(26) || fuType(27)
 
   def isMem(fuType: UInt): Bool = fuType(15, 13).orR
 
