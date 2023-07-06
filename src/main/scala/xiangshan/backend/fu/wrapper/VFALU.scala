@@ -52,6 +52,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   // )
   private val vs2GroupedVec: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
   private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val resultData = Wire(Vec(numVecModule,UInt(dataWidthOfDataModule.W)))
 
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
@@ -69,8 +70,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.opb_widening := opbWiden
       mod.io.res_widening := resWiden
       mod.io.op_code      := opcode
+      resultData(i)       := mod.io.fp_result
   }
-  io.out.bits.res.data := vfalus.map(_.io.fp_result).reduceRight(Cat(_,_))
+  io.out.bits.res.data := resultData.asUInt
   val allFFlagsEn = Wire(Vec(4*numVecModule,Bool()))
   allFFlagsEn.foreach(en => en := true.B) // Todo
   val allFFlags = vfalus.map(_.io.fflags).reduceRight(Cat(_,_)).asTypeOf(Vec(4*numVecModule,UInt(5.W)))

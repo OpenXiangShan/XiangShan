@@ -258,7 +258,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       AgeDetector(numEntries = params.numEntries,
         enq = ageDetectorEnqVec(deqIdx),
         deq = clearVec.asUInt,
-        canIssue = canIssueVec.asUInt & (~fuBusyTableMask(deqIdx)).asUInt)
+        canIssue = canIssueVec.asUInt & (~fuBusyTableMask(deqIdx)).asUInt & (~intWbBusyTableMask(deqIdx)).asUInt & (~vfWbBusyTableMask(deqIdx)).asUInt)
   }
 
   finalDeqSelValidVec.head := oldestSelVec.head.valid || subDeqSelValidVec.head.getOrElse(Seq(false.B)).head
