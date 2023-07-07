@@ -79,6 +79,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
+    UopSplitType.VEC_VFV -> lmul,
     UopSplitType.VEC_EXT2 -> lmul,
     UopSplitType.VEC_EXT4 -> lmul,
     UopSplitType.VEC_EXT8 -> lmul,

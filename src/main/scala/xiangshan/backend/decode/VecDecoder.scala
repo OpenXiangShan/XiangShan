@@ -384,7 +384,7 @@ object VecDecoder extends DecodeConstants {
 
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F),
+    VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.VEC_VVV),
     VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfsub, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
@@ -487,7 +487,7 @@ object VecDecoder extends DecodeConstants {
 
   val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F),
+    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.VEC_VVV),
     VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfpuType.vfsub , F, T, F),
     VFRSUB_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfpuType.vfsub , F, T, F),
 
