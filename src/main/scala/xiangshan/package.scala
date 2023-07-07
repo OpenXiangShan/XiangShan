@@ -621,6 +621,7 @@ package object xiangshan {
     def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
     def VEC_COMPRESS     = "b110000".U // vcompress.vm
     def VEC_US_LD        = "b110001".U // vector unit strided load
+    def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U
