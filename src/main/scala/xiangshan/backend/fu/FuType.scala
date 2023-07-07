@@ -73,6 +73,10 @@ object FuType {
 
   def isVStore(fuType: UInt): Bool = fuType(20)
 
+  def isVfp(fuType: UInt): Bool = fuType(18) || fuType(27, 25).orR
+
+  def isVector(fuType: UInt): Bool = fuType(27, 16).orR
+
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 
   val functionNameMap = Map(
