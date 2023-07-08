@@ -439,9 +439,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.valid)
     val fastDataVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.data)
+    val fastErrorVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.loadFastMatch(i)(j))
     loadUnits(i).io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
     loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
+    loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.ld_fast_match := fastMatch
     loadUnits(i).io.ld_fast_imm := io.loadFastImm(i)
@@ -459,7 +461,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 
     // alter writeback exception info
-    io.s3_delayed_load_error(i) := loadUnits(i).io.s3_delayed_load_error
+    io.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare

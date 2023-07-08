@@ -49,7 +49,7 @@ object LoadReplayCauses {
   // st-ld violation 
   val C_NK  = 1
   // st-ld violation re-execute check
-  val C_WS  = 2
+  val C_MA  = 2
   // store-to-load-forwarding check
   val C_FF  = 3
   // dcache replay check
@@ -637,7 +637,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         // normal case: dcache replay
         blockByOthers(enqIndex) := true.B
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_WS)) {
+      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_MA)) {
         // normal case: bank conflict or schedule error
         // can replay next cycle
         creditUpdate(enqIndex) := 0.U
@@ -659,7 +659,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       }
 
       // special case: st-ld violation
-      when (replayInfo.cause(LoadReplayCauses.C_WS)) {
+      when (replayInfo.cause(LoadReplayCauses.C_MA)) {
         blockByWaitStore(enqIndex) := true.B
         blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
@@ -747,17 +747,17 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val lq_match_idx  = lq_match_bits.lqIdx.value
 
   val rob_head_tlb_miss        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_TM)
-  val rob_head_sched_error     = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_NK)
-  val rob_head_wait_store      = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_WS)
+  val rob_head_nuke            = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_NK)
+  val rob_head_mem_amb         = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_MA)
   val rob_head_confilct_replay = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_BC)
   val rob_head_forward_fail    = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_FF)
   val rob_head_mshrfull_replay = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_DR)
   val rob_head_dcache_miss     = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_DM)
-  val rob_head_rar_reject      = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAR)
-  val rob_head_raw_reject      = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAW)
-  val rob_head_other_replay    = lq_match && (rob_head_rar_reject || rob_head_raw_reject || rob_head_forward_fail)
+  val rob_head_rar_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAR)
+  val rob_head_raw_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAW)
+  val rob_head_other_replay    = lq_match && (rob_head_rar_nack || rob_head_raw_nack || rob_head_forward_fail)
     
-  val rob_head_vio_replay = rob_head_sched_error || rob_head_wait_store
+  val rob_head_vio_replay = rob_head_nuke || rob_head_mem_amb
 
   val rob_head_miss_in_dtlb = WireInit(false.B)
   ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
@@ -774,8 +774,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val deqNumber               = PopCount(io.replay.map(_.fire)) 
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
   val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_TM)))
-  val replayWaitStoreCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
-  val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_WS)))
+  val replayMemAmbCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
+  val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MA)))
   val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAR)))
   val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAW)))
   val replayBankConflictCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_BC)))
@@ -786,10 +786,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("deq", deqNumber)
   XSPerfAccumulate("deq_block", deqBlockCount)
   XSPerfAccumulate("replay_full", io.lqFull)
-  XSPerfAccumulate("replay_rar_reject", replayRARRejectCount)
-  XSPerfAccumulate("replay_raw_reject", replayRAWRejectCount)
+  XSPerfAccumulate("replay_rar_nack", replayRARRejectCount)
+  XSPerfAccumulate("replay_raw_nack", replayRAWRejectCount)
   XSPerfAccumulate("replay_nuke", replayNukeCount)
-  XSPerfAccumulate("replay_wait_store", replayWaitStoreCount)
+  XSPerfAccumulate("replay_mem_amb", replayMemAmbCount)
   XSPerfAccumulate("replay_tlb_miss", replayTlbMissCount)
   XSPerfAccumulate("replay_bank_conflict", replayBankConflictCount)
   XSPerfAccumulate("replay_dcache_replay", replayDCacheReplayCount)
@@ -802,10 +802,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     ("deq", deqNumber),
     ("deq_block", deqBlockCount),
     ("replay_full", io.lqFull),
-    ("replay_rar_reject", replayRARRejectCount),
-    ("replay_raw_reject", replayRAWRejectCount),
+    ("replay_rar_nack", replayRARRejectCount),
+    ("replay_raw_nack", replayRAWRejectCount),
     ("replay_nuke", replayNukeCount),
-    ("replay_wait_store", replayWaitStoreCount),
+    ("replay_mem_amb", replayMemAmbCount),
     ("replay_tlb_miss", replayTlbMissCount),
     ("replay_bank_conflict", replayBankConflictCount),
     ("replay_dcache_replay", replayDCacheReplayCount),

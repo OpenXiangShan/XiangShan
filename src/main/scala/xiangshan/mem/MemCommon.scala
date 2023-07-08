@@ -79,6 +79,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   // For load replay
   val isLoadReplay = Bool()
+  val isFastPath = Bool()
+  val isFastReplay = Bool()
   val replayCarry = new ReplayCarry
 
   // For dcache miss load
@@ -88,6 +90,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
+  val delayedLoadError = Bool()
+  val fastReplayKill = Bool()
 
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
@@ -125,8 +129,12 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     replayCarry := DontCare
     atomic := DontCare
     isLoadReplay := DontCare
+    isFastPath := DontCare
+    isFastReplay := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
+    delayedLoadError := DontCare
+    fastReplayKill := DontCare
   }
 }
 
@@ -158,6 +166,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     isFirstIssue := input.isFirstIssue
     hasROBEntry := input.hasROBEntry
     isLoadReplay := input.isLoadReplay
+    isFastPath := input.isFastPath
+    isFastReplay := input.isFastReplay
     mshrid := input.mshrid
     forward_tlDchannel := input.forward_tlDchannel
     replayCarry := input.replayCarry
@@ -165,6 +175,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     schedIndex := input.schedIndex
     handledByMSHR := input.handledByMSHR
     replacementUpdated := input.replacementUpdated
+    delayedLoadError := input.delayedLoadError
+    fastReplayKill := input.fastReplayKill
 
     rep_info := DontCare
     data_wen_dup := DontCare
