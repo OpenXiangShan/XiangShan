@@ -91,7 +91,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
   val delayedLoadError = Bool()
-  val fastReplayKill = Bool()
+  val lateKill = Bool()
 
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
@@ -134,7 +134,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     handledByMSHR := DontCare
     replacementUpdated := DontCare
     delayedLoadError := DontCare
-    fastReplayKill := DontCare
+    lateKill := DontCare
   }
 }
 
@@ -176,7 +176,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     handledByMSHR := input.handledByMSHR
     replacementUpdated := input.replacementUpdated
     delayedLoadError := input.delayedLoadError
-    fastReplayKill := input.fastReplayKill
+    lateKill := input.lateKill
 
     rep_info := DontCare
     data_wen_dup := DontCare

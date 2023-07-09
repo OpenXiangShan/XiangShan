@@ -236,7 +236,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // block causes
   val blockByTlbMiss = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))  
   val blockByForwardFail = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) 
-  val blockByWaitStore = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val blockByMemAmb = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val blockByCacheMiss = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val blockByRARReject = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val blockByRAWReject = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
@@ -322,7 +322,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // update block condition
   (0 until LoadQueueReplaySize).map(i => {
     blockByForwardFail(i) := Mux(blockByForwardFail(i) && stDataDeqVec(i), false.B, blockByForwardFail(i))
-    blockByWaitStore(i) := Mux(blockByWaitStore(i) && stAddrDeqVec(i), false.B, blockByWaitStore(i))
+    blockByMemAmb(i) := Mux(blockByMemAmb(i) && stAddrDeqVec(i), false.B, blockByMemAmb(i))
     blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
 
     when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
@@ -385,12 +385,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // 2. higher priority load
   // 3. lower priority load
   val s0_loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val blocked = selBlocked(i) || blockByMemAmb(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     val hasHigherPriority = cause(i)(LoadReplayCauses.C_DM) || cause(i)(LoadReplayCauses.C_FF)
     allocated(i) && !scheduled(i) && !blocked && hasHigherPriority
   })).asUInt // use uint instead vec to reduce verilog lines
   val s0_loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    val blocked = selBlocked(i) || blockByWaitStore(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
+    val blocked = selBlocked(i) || blockByMemAmb(i) || blockByRARReject(i) || blockByRAWReject(i) || blockByOthers(i) || blockByForwardFail(i) || blockByCacheMiss(i) || blockByTlbMiss(i)
     val hasLowerPriority = !cause(i)(LoadReplayCauses.C_DM) && !cause(i)(LoadReplayCauses.C_FF)
     allocated(i) && !scheduled(i) && !blocked && hasLowerPriority
   })).asUInt // use uint instead vec to reduce verilog lines
@@ -625,7 +625,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // init
       blockByTlbMiss(enqIndex)     := false.B
-      blockByWaitStore(enqIndex)   := false.B
+      blockByMemAmb(enqIndex)   := false.B
       blockByForwardFail(enqIndex) := false.B
       blockByCacheMiss(enqIndex)   := false.B
       blockByRARReject(enqIndex)   := false.B
@@ -637,7 +637,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         // normal case: dcache replay
         blockByOthers(enqIndex) := true.B
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_MA)) {
+      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_NK)) {
         // normal case: bank conflict or schedule error
         // can replay next cycle
         creditUpdate(enqIndex) := 0.U
@@ -660,7 +660,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // special case: st-ld violation
       when (replayInfo.cause(LoadReplayCauses.C_MA)) {
-        blockByWaitStore(enqIndex) := true.B
+        blockByMemAmb(enqIndex) := true.B
         blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W)) 
       }

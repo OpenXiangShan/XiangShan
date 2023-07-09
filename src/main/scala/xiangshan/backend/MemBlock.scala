@@ -370,10 +370,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val fastReplaySel = loadUnits.zipWithIndex.map { case (ldu, i) => {
     val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid := ldu.io.fast_rep_out.valid 
-    wrapper.bits.req := ldu.io.fast_rep_out.bits
-    wrapper.bits.balance := ldu.io.fast_rep_out.bits.rep_info.cause(LoadReplayCauses.C_BC)
-    wrapper.bits.port := i.U
+    wrapper.valid        := ldu.io.fast_rep_out.valid 
+    wrapper.bits.req     := ldu.io.fast_rep_out.bits
+    wrapper.bits.balance := ldu.io.fast_rep_out.bits.rep_info.bank_conflict
+    wrapper.bits.port    := i.U
     wrapper
   }}
   val balanceFastReplaySel = balanceReOrder(fastReplaySel)
@@ -432,7 +432,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
           )
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
-      pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2_pointer_chasing, io.loadPc(i), RegNext(io.loadPc(i)))
+      pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2_ptr_chasing, io.loadPc(i), RegNext(io.loadPc(i)))
     })
 
     // load to load fast forward: load(i) prefers data(i)
