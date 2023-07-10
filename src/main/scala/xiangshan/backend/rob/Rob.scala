@@ -671,7 +671,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
-  io.flushOut.bits.isRVC := deqDispatchData.cf.pd.isRVC
+  io.flushOut.bits.isRVC := deqDispatchData.isRVC
   io.flushOut.bits.robIdx := deqPtr
   io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
   io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
@@ -1007,7 +1007,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wdata.ftqIdx := req.cf.ftqPtr
     wdata.ftqOffset := req.cf.ftqOffset
     wdata.isMove := req.eliminatedMove
-    wdata.isRVC := req.isRVC
+    wdata.isRVC := req.cf.pd.isRVC
     wdata.pc := req.cf.pc
   }
   dispatchData.io.raddr := commitReadAddr_next
