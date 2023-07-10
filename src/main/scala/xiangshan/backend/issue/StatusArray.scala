@@ -219,13 +219,13 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
               exuVec := status.srcWakeUpL2ExuVec.get(srcIdx)
             }
         }
-        statusNext.srcTimer.get.zip(status.srcTimer.get).foreach {
-          case (srcIssuedTimerNext, srcIssuedTimer) =>
+        statusNext.srcTimer.get.zip(status.srcTimer.get).zip(srcWakeUpByIQMatrix(entryIdx)).zipWithIndex.foreach {
+          case (((srcIssuedTimerNext, srcIssuedTimer), wakeUpByIQOH: Vec[Bool]), srcIdx) =>
             srcIssuedTimerNext := MuxCase(0.U, Seq(
               // T0: waked up by IQ, T1: set timer as 1
-              statusNext.srcWakeUpL1ExuOH.get.asUInt.orR -> 1.U,
-              // T2+: increase if this entry has still been valid
-              (validVec(entryIdx) && status.srcWakeUpL1ExuOH.get.asUInt.orR) -> (srcIssuedTimer + 1.U)
+              wakeUpByIQOH.asUInt.orR -> 1.U,
+              // T2+: increase if this entry has still been valid, and this src has still been ready
+              (validVec(entryIdx) && SrcState.isReady(status.srcState(srcIdx)) && status.srcWakeUpL1ExuOH.get.asUInt.orR) -> (srcIssuedTimer + 1.U)
             ))
         }
       }
