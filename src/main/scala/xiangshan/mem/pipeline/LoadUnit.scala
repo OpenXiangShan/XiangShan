@@ -835,12 +835,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.data                := 0.U // data will be generated in load s3
   s2_out.uop.ctrl.fpWen      := s2_in.uop.ctrl.fpWen && !s2_exception
   s2_out.mmio                := s2_mmio
-  s2_out.uop.ctrl.flushPipe  := io.fast_uop.valid && s2_mmio
+  s2_out.uop.ctrl.flushPipe  := false.B // io.fast_uop.valid && s2_mmio
   s2_out.uop.cf.exceptionVec := s2_exception_vec
   s2_out.forwardMask         := s2_fwd_mask
   s2_out.forwardData         := s2_fwd_data
   s2_out.handledByMSHR       := s2_cache_handled
   s2_out.miss                := s2_cache_miss && !s2_full_fwd && s2_troublem
+  s2_out.feedbacked          := io.feedback_fast.valid
 
   // Generate replay signal caused by:
   // * st-ld violation check
@@ -887,7 +888,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     !s1_fast_rep_kill &&
     !io.tlb.resp.bits.fast_miss && 
     !io.lsq.forward.dataInvalidFast
-  ) && (s2_valid && s2_cache_hit && !s2_out.rep_info.need_rep)
+  ) && (s2_valid && !io.feedback_fast.valid && !s2_out.rep_info.need_rep && !s2_mmio)
   io.fast_uop.bits := RegNext(s1_out.uop)
 
   // 
@@ -941,7 +942,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     } else {
       WireInit(false.B)
     }
-  io.s3_dly_ld_err := s3_dly_ld_err
+  io.s3_dly_ld_err := false.B // s3_dly_ld_err && s3_valid
   io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
   io.lsq.ldin.bits.dcacheRequireReplay  := s3_cache_rep
 
@@ -997,10 +998,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     !s3_in.lateKill &&
                     !s3_rep_frm_fetch &&
                     !s3_exception
-  val s3_fb_no_waiting = !s3_in.isLoadReplay && !(s3_fast_rep && io.fast_rep_out.ready)
+  val s3_fb_no_waiting = !s3_in.isLoadReplay && !(s3_fast_rep && io.fast_rep_out.ready) && !s3_in.feedbacked
 
   //
-  io.feedback_slow.valid                 := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting 
+  io.feedback_slow.valid                 := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting
   io.feedback_slow.bits.hit              := !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
   io.feedback_slow.bits.rsIdx            := s3_in.rsIdx
@@ -1073,7 +1074,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val tEnable   = RegNext(io.trigger(i).tEnable)
 
     hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegNext(s2_out.vaddr), tdata2, matchType, tEnable)
-    io.trigger(i).addrHit       := Mux(s3_out.valid && !s3_in.lateKill, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
+    io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
     io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
