@@ -57,7 +57,7 @@ endif
 
 # top-down
 ifeq ($(CONFIG),DefaultConfig)
-ENABLE_TOPDOWN ?= 1
+ENABLE_TOPDOWN ?= 0
 endif
 ifneq ($(NUM_CORES),1)
 ENABLE_TOPDOWN = 0
