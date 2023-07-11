@@ -75,7 +75,7 @@ object FuType {
 
   def isVfp(fuType: UInt): Bool = fuType(18) || fuType(27, 25).orR
 
-  def isVector(fuType: UInt): Bool = fuType(27, 16).orR
+  def isVector(fuType: UInt): Bool = fuType(27, 24).orR || fuType(21, 16).orR // except vset
 
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 
