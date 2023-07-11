@@ -388,9 +388,9 @@ object VecDecoder extends DecodeConstants {
     VFSUB_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfsub, F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
-    VFWADD_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwadd  , F, T, F),
+    VFWADD_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwadd  , F, T, F, UopSplitType.VEC_VVW),
     VFWSUB_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfsub   , F, T, F),
-    VFWADD_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwadd_w, F, T, F),
+    VFWADD_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwadd_w, F, T, F, UopSplitType.VEC_WVW),
     VFWSUB_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwsub_w, F, T, F),
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
@@ -487,14 +487,14 @@ object VecDecoder extends DecodeConstants {
 
   val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
-    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.VEC_VVV),
+    VFADD_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.VEC_VFV),
     VFSUB_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfpuType.vfsub , F, T, F),
     VFRSUB_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfpuType.vfsub , F, T, F),
 
     // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
-    VFWADD_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwadd, F, T, F),
+    VFWADD_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwadd, F, T, F, UopSplitType.VEC_VFW),
     VFWSUB_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwsub, F, T, F),
-    VFWADD_WF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwadd_w, F, T, F),
+    VFWADD_WF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwadd_w, F, T, F, UopSplitType.VEC_WFW),
     VFWSUB_WF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwsub_w, F, T, F),
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions

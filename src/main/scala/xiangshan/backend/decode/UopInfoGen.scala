@@ -86,6 +86,8 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_VVM -> lmul,
     UopSplitType.VEC_VXM -> (lmul +& 1.U),
     UopSplitType.VEC_VXV -> (lmul +& 1.U),
+    UopSplitType.VEC_VFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
+    UopSplitType.VEC_WFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_VVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_WVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_VXW -> Cat(lmul, 1.U(1.W)), // lmul <= 4
