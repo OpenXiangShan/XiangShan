@@ -14,7 +14,7 @@ import xiangshan.backend.datapath.{BypassNetwork, DataPath, NewPipelineConnect, 
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
-import xiangshan.backend.issue.Scheduler
+import xiangshan.backend.issue.{CancelNetwork, Scheduler}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -80,6 +80,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
   val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
   val memScheduler = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val cancelNetwork = LazyModule(new CancelNetwork(params))
   val dataPath = LazyModule(new DataPath(params))
   val intExuBlock = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
   val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
@@ -97,6 +98,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val intScheduler = wrapper.intScheduler.get.module
   private val vfScheduler = wrapper.vfScheduler.get.module
   private val memScheduler = wrapper.memScheduler.get.module
+  private val cancelNetwork = wrapper.cancelNetwork.module
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
@@ -123,8 +125,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromIntExu.flatten.filter(x => x.bits.params.writeIntRf)
 
   private val vconfig = dataPath.io.vconfigReadPort.data
-  private val og0CancelVec: Vec[Bool] = VecInit(dataPath.io.toIQCancelVec.map(_("OG0")))
   private val og1CancelVec: Vec[Bool] = VecInit(dataPath.io.toIQCancelVec.map(_("OG1")))
+  private val og0CancelVecFromDataPath: Vec[Bool] = VecInit(dataPath.io.toIQCancelVec.map(_("OG0")))
+  private val og0CancelVecFromCancelNet: Vec[Bool] = cancelNetwork.io.out.og0CancelVec
+  private val og0CancelVec: Vec[Bool] = VecInit(og0CancelVecFromDataPath.zip(og0CancelVecFromCancelNet).map(x => x._1 | x._2))
+  dontTouch(og0CancelVecFromDataPath)
+  dontTouch(og0CancelVecFromCancelNet)
   dontTouch(og0CancelVec)
   dontTouch(og1CancelVec)
 
@@ -185,14 +191,20 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   vfScheduler.io.fromDataPath.cancel.foreach(x => x.cancelVec := dataPath.io.toIQCancelVec(x.exuIdx).cancelVec)
 
+  cancelNetwork.io.in.int <> intScheduler.io.toDataPath
+  cancelNetwork.io.in.vf  <> vfScheduler.io.toDataPath
+  cancelNetwork.io.in.mem <> memScheduler.io.toDataPath
+  cancelNetwork.io.in.og0CancelVec := og0CancelVecFromDataPath
+  cancelNetwork.io.in.og1CancelVec := og1CancelVec
+
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
 
   for (i <- 0 until dataPath.io.fromIntIQ.length) {
     for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
       NewPipelineConnect(
-        intScheduler.io.toDataPath(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
-        dontTouch(intScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush) | intScheduler.io.toDataPath(i)(j).bits.common.needCancel(og0CancelVec, og1CancelVec)),
+        cancelNetwork.io.out.int(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
+        cancelNetwork.io.out.int(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
         Option("intScheduler2DataPathPipe")
       )
     }
@@ -201,8 +213,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until dataPath.io.fromVfIQ.length) {
     for (j <- 0 until dataPath.io.fromVfIQ(i).length) {
       NewPipelineConnect(
-        vfScheduler.io.toDataPath(i)(j), dataPath.io.fromVfIQ(i)(j), dataPath.io.fromVfIQ(i)(j).valid,
-        dontTouch(vfScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush) | vfScheduler.io.toDataPath(i)(j).bits.common.needCancel(og0CancelVec, og1CancelVec)),
+        cancelNetwork.io.out.vf(i)(j), dataPath.io.fromVfIQ(i)(j), dataPath.io.fromVfIQ(i)(j).valid,
+        cancelNetwork.io.out.vf(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
         Option("vfScheduler2DataPathPipe")
       )
     }
@@ -211,8 +223,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   for (i <- 0 until dataPath.io.fromMemIQ.length) {
     for (j <- 0 until dataPath.io.fromMemIQ(i).length) {
       NewPipelineConnect(
-        memScheduler.io.toDataPath(i)(j), dataPath.io.fromMemIQ(i)(j), dataPath.io.fromMemIQ(i)(j).valid,
-        dontTouch(memScheduler.io.toDataPath(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush) | memScheduler.io.toDataPath(i)(j).bits.common.needCancel(og0CancelVec, og1CancelVec)),
+        cancelNetwork.io.out.mem(i)(j), dataPath.io.fromMemIQ(i)(j), dataPath.io.fromMemIQ(i)(j).valid,
+        cancelNetwork.io.out.mem(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
         Option("memScheduler2DataPathPipe")
       )
     }
