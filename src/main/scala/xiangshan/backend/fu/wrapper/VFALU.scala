@@ -54,8 +54,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
 
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.io.fp_a         := vs2Split.io.outVec64b(i)
-      mod.io.fp_b         := vs1Split.io.outVec64b(i)
+      mod.io.fp_a         := Mux(opbWiden, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i))  // very dirty TODO
+      mod.io.fp_b         := Mux(opbWiden, vs2Split.io.outVec64b(i), vs1Split.io.outVec64b(i))  // very dirty TODO
       mod.io.widen_a      := Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i))
       mod.io.widen_b      := Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i))
       mod.io.frs1         := 0.U     // already vf -> vv
@@ -64,7 +64,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.uop_idx      := vuopIdx(0)
       mod.io.is_vec       := true.B // Todo
       mod.io.round_mode   := frm
-      mod.io.fp_format    := vsew
+      mod.io.fp_format    := Mux(resWiden, vsew + 1.U, vsew)
       mod.io.opb_widening := opbWiden
       mod.io.res_widening := resWiden
       mod.io.op_code      := opcode
@@ -101,7 +101,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
 
 //  private val needNoMask = VfaluType.needNoMask(outCtrl.fuOpType)
 
-//  private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  private val outEew = Mux(RegNext(resWiden), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   mgu.io.in.vd := resultData.asUInt
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := outSrcMask
@@ -109,7 +109,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   mgu.io.in.info.ma := outVecCtrl.vma
   mgu.io.in.info.vl := outVl
   mgu.io.in.info.vstart := outVecCtrl.vstart
-  mgu.io.in.info.eew := outVecCtrl.vsew
+  mgu.io.in.info.eew := outEew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
