@@ -919,7 +919,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_valid        = RegNext(s2_valid) && !RegNext(s2_out.uop.robIdx.needFlush(io.redirect))
   val s3_in           = RegEnable(s2_out, s2_fire)
   val s3_out          = Wire(Valid(new ExuOutput))
-  val s3_cache_rep    = RegEnable(s2_cache_rep, s2_fire)
+  val s3_cache_rep    = RegEnable(s2_cache_rep && s2_troublem, s2_fire)
   val s3_ld_valid_dup = RegEnable(s2_ld_valid_dup, s2_fire)
   val s3_fast_rep     = Wire(Bool())
   val s3_kill         = s3_in.uop.robIdx.needFlush(io.redirect)
@@ -929,7 +929,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.lateKill
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
