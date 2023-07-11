@@ -10,7 +10,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, IssueQueueCancelBundle, IssueQueueIQWakeUpBundle, IssueQueueWBWakeUpBundle}
+import xiangshan.backend.Bundles.{DynInst, ExuVec, IssueQueueCancelBundle, IssueQueueIQWakeUpBundle, IssueQueueWBWakeUpBundle}
 
 sealed trait SchedulerType
 
@@ -34,9 +34,14 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
   }
 }
 
-class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSBundle {
+class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bundle {
   // params alias
-  private val LoadQueueSize = VirtualLoadQueueSize
+  private val backendParams = params.backendParam
+  private val LoadQueueSize = p(XSCoreParamsKey).VirtualLoadQueueSize
+  private val RenameWidth = p(XSCoreParamsKey).RenameWidth
+  private val CommitWidth = p(XSCoreParamsKey).CommitWidth
+  private val EnsbufferWidth = p(XSCoreParamsKey).EnsbufferWidth
+  private val StoreQueueSize = p(XSCoreParamsKey).StoreQueueSize
 
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
@@ -71,7 +76,9 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val fromDataPath = new Bundle {
     val resp: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
-    val cancel: MixedVec[IssueQueueCancelBundle] = Input(MixedVec(params.genCancelBundle(cancelStages)))
+    val og0Cancel = Input(ExuVec(backendParams.numExu))
+    // Todo: remove this after no cancel signal from og1
+    val og1Cancel = Input(ExuVec(backendParams.numExu))
     // just be compatible to old code
     def apply(i: Int)(j: Int) = resp(i)(j)
   }
@@ -177,9 +184,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.wakeupFromIQ.foreach { wakeUp =>
       wakeUp := iqWakeUpInMap(wakeUp.bits.exuIdx)
     }
-    iq.io.cancelFromDataPath.map (sink => {
-      sink.cancelVec := io.fromDataPath.cancel.find(_.exuIdx == sink.exuIdx).get.cancelVec
-    })
+    iq.io.og0Cancel := io.fromDataPath.og0Cancel
+    iq.io.og1Cancel := io.fromDataPath.og1Cancel
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =

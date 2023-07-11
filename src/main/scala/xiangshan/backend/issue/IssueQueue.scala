@@ -44,7 +44,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val cancelFromDataPath: MixedVec[IssueQueueCancelBundle] = Input(params.genCancelBundle(cancelStages))
+  val og0Cancel = Input(ExuVec(backendParams.numExu))
+  val og1Cancel = Input(ExuVec(backendParams.numExu))
 
   // Outputs
   val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
@@ -140,10 +141,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = statusArray.io.srcWakeUpL1ExuOH
   val wakeUpL2ExuVec: Option[Vec[Vec[Vec[Bool]]]] = statusArray.io.srcWakeUpL2ExuVec
+  val srcTimer: Option[Vec[Vec[UInt]]] = statusArray.io.srcTimer
 
   // (deqIdx)(srcIdx)(exuIdx)
   val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
   val finalWakeUpL2ExuVec: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL2ExuVec.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
+  val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
 
   val wakeupEnqSrcStateBypass = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
   for (i <- io.enq.indices) {
@@ -160,7 +163,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   statusArray.io match { case statusArrayIO: StatusArrayIO =>
     statusArrayIO.flush  <> io.flush
     statusArrayIO.wakeUpFromIQ := io.wakeupFromIQ
-    statusArrayIO.cancelFromDataPath := io.cancelFromDataPath
+    statusArrayIO.og0Cancel := io.og0Cancel
+    statusArrayIO.og1Cancel := io.og1Cancel
     statusArrayIO.wakeUpFromWB := io.wakeupFromWB
     statusArrayIO.enq.zipWithIndex.foreach { case (enq: ValidIO[StatusArrayEnqBundle], i) =>
       enq.valid                 := s0_doEnqSelValidVec(i)
@@ -437,6 +441,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     deq.bits.common.l1ExuVec.foreach(_ := finalWakeUpL1ExuOH.get(i))
     deq.bits.common.l2ExuVec.foreach(_ := finalWakeUpL2ExuVec.get(i))
+    deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
 
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
       rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
