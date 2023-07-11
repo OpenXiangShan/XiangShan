@@ -434,6 +434,7 @@ object Bundles {
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val l2ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
+    val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
 
     def exuIdx = this.params.exuIdx
 
@@ -443,8 +444,15 @@ object Bundles {
           og0CancelVec.size == l1ExuVec.get.head.size && og1CancelVec.size == l2ExuVec.get.head.size,
           s"cancelVecSize: {og0: ${og0CancelVec.size}, og1: ${og1CancelVec.size}}"
         )
-        val l1Cancel: Bool = l1ExuVec.get.map { x: Vec[Bool] => (x.asUInt & og0CancelVec.asUInt).orR }.reduce(_ | _)
-        val l2Cancel: Bool = l2ExuVec.get.map { x: Vec[Bool] => (x.asUInt & og1CancelVec.asUInt).orR }.reduce(_ | _)
+        val l1Cancel: Bool = l1ExuVec.get.zip(srcTimer.get).map {
+          case(exuOH: Vec[Bool], srcTimer: UInt) =>
+            (exuOH.asUInt & og0CancelVec.asUInt).orR && srcTimer === 1.U
+        }.reduce(_ | _)
+        // Todo: remove this
+        val l2Cancel: Bool = l2ExuVec.get.zip(srcTimer.get).map {
+          case(exuOH: Vec[Bool], srcTimer: UInt) =>
+            (exuOH.asUInt & og1CancelVec.asUInt).orR && srcTimer === 2.U
+        }.reduce(_ | _)
         l1Cancel | l2Cancel
       } else {
         false.B
@@ -483,6 +491,7 @@ object Bundles {
       this.sqIdx        .foreach(_ := source.common.sqIdx.get)
       this.l1ExuVec     .foreach(_ := source.common.l1ExuVec.get)
       this.l2ExuVec     .foreach(_ := source.common.l2ExuVec.get)
+      this.srcTimer     .foreach(_ := source.common.srcTimer.get)
     }
   }
 

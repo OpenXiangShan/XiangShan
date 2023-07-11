@@ -157,7 +157,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  intScheduler.io.fromDataPath.cancel.foreach(x => x.cancelVec := dataPath.io.toIQCancelVec(x.exuIdx).cancelVec)
+  intScheduler.io.fromDataPath.og0Cancel := og0CancelVec
+  intScheduler.io.fromDataPath.og1Cancel := og1CancelVec
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -179,7 +180,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  memScheduler.io.fromDataPath.cancel.foreach(x => x.cancelVec := dataPath.io.toIQCancelVec(x.exuIdx).cancelVec)
+  memScheduler.io.fromDataPath.og0Cancel := og0CancelVec
+  memScheduler.io.fromDataPath.og1Cancel := og1CancelVec
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -189,7 +191,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  vfScheduler.io.fromDataPath.cancel.foreach(x => x.cancelVec := dataPath.io.toIQCancelVec(x.exuIdx).cancelVec)
+  vfScheduler.io.fromDataPath.og0Cancel := og0CancelVec
+  vfScheduler.io.fromDataPath.og1Cancel := og1CancelVec
 
   cancelNetwork.io.in.int <> intScheduler.io.toDataPath
   cancelNetwork.io.in.vf  <> vfScheduler.io.toDataPath
