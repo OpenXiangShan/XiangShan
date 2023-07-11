@@ -352,7 +352,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := src.schedIndex
   }
 
-  def fromQueueBasedReplaySource(src: LsPipelineBundle) = {
+  def fromNormalReplaySource(src: LsPipelineBundle) = {
     s0_vaddr         := src.vaddr
     s0_mask          := genWmask(src.vaddr, src.uop.ctrl.fuOpType(1, 0))
     s0_uop           := src.uop
@@ -459,7 +459,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // set default
   s0_uop := DontCare
   when (s0_ld_fast_rep_select)  { fromFastReplaySource(io.fast_rep_in.bits)  } 
-  .elsewhen (s0_ld_rep_select)  { fromQueueBasedReplaySource(io.replay.bits) } 
+  .elsewhen (s0_ld_rep_select)  { fromNormalReplaySource(io.replay.bits) } 
   .elsewhen (s0_hw_prf_select)  { fromPrefetchSource(io.prefetch_req.bits)   } 
   .elsewhen (s0_int_iss_select) { fromIntIssueSource(io.ldin.bits)           } 
   .elsewhen (s0_vec_iss_select) { fromVecIssueSource()                       } 
@@ -629,7 +629,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld
     s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld
   } .otherwise {
-    s0_out.uop.cf.exceptionVec(loadAddrMisaligned) := false.B
+    s1_out.uop.cf.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.cf.exceptionVec(loadAccessFault)    := s1_fast_rep_kill
   }
 
@@ -995,6 +995,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // feedback slow
   s3_fast_rep := (RegNext(s2_fast_rep) || 
                     (s3_in.rep_info.dcache_miss && io.l2_hint.valid && io.l2_hint.bits.sourceId === s3_in.rep_info.mshr_id)) && 
+                    !s3_in.feedbacked &&
                     !s3_in.lateKill &&
                     !s3_rep_frm_fetch &&
                     !s3_exception
