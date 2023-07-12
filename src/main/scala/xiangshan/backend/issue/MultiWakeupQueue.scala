@@ -27,7 +27,7 @@ class MultiWakeupQueue[T <: Data, TFlush <: Data](
 ) extends Module {
   require(latencySet.min >= 0)
 
-  val io = IO(new MultiWakeupQueueIO(gen, flushGen, log2Up(latencySet.max)))
+  val io = IO(new MultiWakeupQueueIO(gen, flushGen, log2Up(latencySet.max) + 1))
 
   val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, flushGen, x, flushFunc))).toSeq
 
@@ -44,5 +44,5 @@ class MultiWakeupQueue[T <: Data, TFlush <: Data](
   io.deq.valid := pipesValidVec.asUInt.orR
   io.deq.bits := Mux1H(pipesValidVec, pipesBitsVec)
 
-  assert(PopCount(pipesValidVec) > 1.U, "PopCount(pipesValidVec) should be no more than 1")
+  assert(PopCount(pipesValidVec) <= 1.U, "PopCount(pipesValidVec) should be no more than 1")
 }

@@ -4,14 +4,14 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{HasCircularQueuePtrHelper, ParallelLookUp}
+import utility.HasCircularQueuePtrHelper
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
+import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   implicit val iqParams = params
@@ -70,6 +70,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
   val fuLatencyMaps : Seq[Map[Int, Int]] = params.exuBlockParams.map(x => x.fuLatencyMap)
+
+  println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${fuLatencyMaps}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
   dontTouch(io.deq)
@@ -484,7 +486,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.enq.foreach(_.ready := !Cat(io.status.leftVec).orR) // Todo: more efficient implementation
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
-    ParallelLookUp(fuType, fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }.toSeq)
+    val fuLatUIntMaps: Map[UInt, UInt] = fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }
+    val lat = Mux1H(fuLatUIntMaps.keys.map(_ === fuType).toSeq, fuLatUIntMaps.values.toSeq)
+    dontTouch(lat)
+    // ParallelLookUp(fuType, fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }.toSeq)
   }
 }
 
