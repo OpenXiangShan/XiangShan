@@ -19,7 +19,7 @@ object BackendMain extends App {
     val backend = LazyModule(new Backend(backendParams)(defaultConfig))
 
     Generator.execute(
-      firrtlOpts,
+      firrtlOpts :+ "--full-stacktrace" :+ "--target-dir" :+ "backend",
       backend.module,
       firrtlComplier,
       firtoolOpts

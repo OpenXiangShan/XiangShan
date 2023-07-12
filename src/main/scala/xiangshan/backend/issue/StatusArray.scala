@@ -9,6 +9,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Utils.NOnes
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
@@ -216,8 +217,10 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
         statusNext.srcTimer.get.zip(status.srcTimer.get).zip(srcWakeUpByIQMatrix(entryIdx)).zipWithIndex.foreach {
           case (((srcIssuedTimerNext, srcIssuedTimer), wakeUpByIQOH: Vec[Bool]), srcIdx) =>
             srcIssuedTimerNext := MuxCase(0.U, Seq(
-              // T0: waked up by IQ, T1: set timer as 1
+              // T0: waked up by IQ, T1: reset timer as 1
               wakeUpByIQOH.asUInt.orR -> 1.U,
+              // do not overflow
+              srcIssuedTimer.andR -> srcIssuedTimer,
               // T2+: increase if this entry has still been valid, and this src has still been ready
               (validVec(entryIdx) && SrcState.isReady(status.srcState(srcIdx)) && status.srcWakeUpL1ExuOH.get.asUInt.orR) -> (srcIssuedTimer + 1.U)
             ))
