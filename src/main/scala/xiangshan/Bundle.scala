@@ -291,6 +291,7 @@ class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
+  val isRVC = Bool()
   val robIdx = new RobPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -376,6 +377,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
+  val isRVC = Bool()
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)

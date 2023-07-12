@@ -531,6 +531,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_hit = Input(Bool()) // hit signal for lsu,
   val s2_first_hit = Input(Bool())
   val s2_bank_conflict = Input(Bool())
+  val s2_wpu_pred_fail = Input(Bool())
+  val s2_mq_nack = Input(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
