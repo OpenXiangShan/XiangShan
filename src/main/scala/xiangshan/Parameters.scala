@@ -174,7 +174,7 @@ case class XSCoreParameters
   EnsbufferWidth: Int = 2,
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
-  EnableFastForward: Boolean = false,
+  EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,

@@ -34,13 +34,22 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
+    // control
     val redirect = Flipped(ValidIO(new Redirect))
-    val query = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
+
+    // violation query
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+
+    // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+
+    // global rollback flush
     val rollback = Output(Valid(new Redirect))
+
+    // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
-    val stIssuePtr = Input(new SqPtr)
-    val lqFull = Output(Bool())
+    val stIssuePtr       = Input(new SqPtr)
+    val lqFull           = Output(Bool())
   })
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
@@ -144,13 +153,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.datavalid
+      datavalid(enqIndex) := enq.bits.data_valid
     }
   }
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
-    query.bits.replayFromFetch := RegNext(false.B)
+    query.bits.rep_frm_fetch := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate
@@ -175,13 +184,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val lastCanAccept = RegNext(VecInit(needEnqueue.zip(enqValidVec).map(x => x._1 && x._2)))
   val lastAllocIndex = RegNext(enqIndexVec)
 
-  for ((release, w) <- io.query.map(_.release).zipWithIndex) {
-    val releaseValid = release && lastCanAccept(w)
-    val releaseIndex = lastAllocIndex(w)
+  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
+    val revokeValid = revoke && lastCanAccept(w)
+    val revokeIndex = lastAllocIndex(w)
 
-    when (allocated(releaseIndex) && releaseValid) {
-      allocated(releaseIndex) := false.B
-      freeMaskVec(releaseIndex) := true.B
+    when (allocated(revokeIndex) && revokeValid) {
+      allocated(revokeIndex) := false.B
+      freeMaskVec(revokeIndex) := true.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -334,8 +343,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
-    rollbackLqWb(w).bits.uop := detectedRollback._2
+    rollbackLqWb(w).valid     := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).bits.uop  := detectedRollback._2
     rollbackLqWb(w).bits.flag := w.U
     stFtqIdx(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqPtr, TotalSelectCycles)
     stFtqOffset(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqOffset, TotalSelectCycles)
@@ -356,15 +365,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackStFtqOffset = stFtqOffset(rollbackUopExt.flag)
 
   // check if rollback request is still valid in parallel
-  io.rollback.bits := DontCare
-  io.rollback.bits.robIdx := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
-  io.rollback.bits.stFtqIdx := rollbackStFtqIdx
-  io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
+  io.rollback.bits             := DontCare
+  io.rollback.bits.robIdx      := rollbackUop.robIdx
+  io.rollback.bits.ftqIdx      := rollbackUop.cf.ftqPtr
+  io.rollback.bits.stFtqIdx    := rollbackStFtqIdx
+  io.rollback.bits.ftqOffset   := rollbackUop.cf.ftqOffset
   io.rollback.bits.stFtqOffset := rollbackStFtqOffset
-  io.rollback.bits.level := RedirectLevel.flush
-  io.rollback.bits.interrupt := DontCare
-  io.rollback.bits.cfiUpdate := DontCare
+  io.rollback.bits.level       := RedirectLevel.flush
+  io.rollback.bits.interrupt   := DontCare
+  io.rollback.bits.cfiUpdate   := DontCare
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
