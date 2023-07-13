@@ -80,6 +80,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       val late_load_hit = Output(Bool())
       val useless_prefetch = Output(Bool())
       val useful_prefetch = Output(Bool())
+      val prefetch_hit = Output(Bool())
     }
   })
 
@@ -376,6 +377,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && s2_hit_prefetch
   val useless_prefetch = io.miss_req.valid && io.miss_req.ready && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
+
+  val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && s2_hit_prefetch && s2_req.isFirstIssue
   
   io.prefetch_info.total_prefetch := total_prefetch
   io.prefetch_info.late_hit_prefetch := late_hit_prefetch
@@ -383,6 +386,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_info.late_prefetch_hit := late_prefetch_hit
   io.prefetch_info.useless_prefetch := useless_prefetch
   io.prefetch_info.useful_prefetch := useful_prefetch
+  io.prefetch_info.prefetch_hit := prefetch_hit
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -445,7 +449,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     //   !s2_nack_no_mshr &&
     //   !s2_miss_merged
     // )
-    io.replace_access.valid := (hit_update_replace_en || (miss_update_replace_en && !s3_miss_merged)) && first_update && !s3_is_prefetch
+    io.replace_access.valid := s3_valid && RegNext(!s2_miss_merged)
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
     io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
   } else {
@@ -457,7 +461,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     //   // replacement is updated on 2nd miss only when this req is firstly issued
     //   (!s2_miss_merged || s2_req.isFirstIssue)
     // )
-    io.replace_access.valid := (hit_update_replace_en || miss_update_replace_en) && first_update && !s3_is_prefetch
+    io.replace_access.valid := s3_valid
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
     io.replace_access.bits.way := RegNext(
       Mux(

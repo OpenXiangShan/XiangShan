@@ -86,6 +86,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val handledByMSHR = Bool()
   val replacementUpdated = Bool()
+  val missDbUpdated = Bool()
 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
@@ -128,6 +129,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isLoadReplay := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
+    missDbUpdated := DontCare
   }
 
   def asPrefetchReqBundle(): PrefetchReqBundle = {
@@ -177,6 +179,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     sleepIndex := input.sleepIndex
     handledByMSHR := input.handledByMSHR
     replacementUpdated := input.replacementUpdated
+    missDbUpdated := input.missDbUpdated
 
     replayInfo := DontCare
     lqDataWenDup := DontCare

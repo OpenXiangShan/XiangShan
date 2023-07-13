@@ -51,6 +51,9 @@ trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePa
   val DEPTH_LOOKAHEAD = 6
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
+  val ENABLE_DECR_MODE = false
+  val ENABLE_STRICT_ACTIVE_DETECTION = true
+
   // prefetch sink related
   val SINK_BITS = 2
   def SINK_L1 = "b00".U
@@ -242,7 +245,11 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     bit_vec := alloc_bit_vec
     active := alloc_active
     cnt := 1.U
-    decr_mode := alloc_decr_mode
+    if(ENABLE_DECR_MODE) {
+      decr_mode := alloc_decr_mode
+    }else {
+      decr_mode := INIT_DEC_MODE.B
+    }
 
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
@@ -371,8 +378,14 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_plus_one_index = RegEnable(s0_plus_one_index, s0_valid)
   val s1_minus_one_index = RegEnable(s0_minus_one_index, s0_valid)
   val s1_hit = RegEnable(s0_hit, s0_valid)
-  val s1_plus_one_hit = RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active
-  val s1_minus_one_hit = RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
+  val s1_plus_one_hit = if(ENABLE_STRICT_ACTIVE_DETECTION)
+                            RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active && (array(s1_plus_one_index).cnt >= ACTIVE_THRESHOLD.U)
+                        else
+                            RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active
+  val s1_minus_one_hit = if(ENABLE_STRICT_ACTIVE_DETECTION)
+                            RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active && (array(s1_minus_one_index).cnt >= ACTIVE_THRESHOLD.U)
+                        else
+                            RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
@@ -767,6 +780,10 @@ class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefet
       array(i).reset(i)
     }
   }
+
+  XSPerfHistogram("filter_active", PopCount(VecInit(array.map(_.can_send_pf())).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
+  XSPerfHistogram("l1_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L1))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
+  XSPerfHistogram("l2_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L2))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
 }
 
 class L1StreamPrefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper {
@@ -776,7 +793,8 @@ class L1StreamPrefetcher(implicit p: Parameters) extends BasePrefecher with HasS
   val bit_vec_array = Module(new StreamBitVectorArray)
   val stream_filter = Module(new StreamFilter)
 
-  val enable = io.enable && pf_ctrl.enable
+  // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
+  val enable = io.enable
   val flush = pf_ctrl.flush
 
   train_filter.io.ld_in.zipWithIndex.foreach {
@@ -794,12 +812,15 @@ class L1StreamPrefetcher(implicit p: Parameters) extends BasePrefecher with HasS
   bit_vec_array.io.train_req <> train_filter.io.train_req
 
   bit_vec_array.io.prefetch_req <> stream_filter.io.prefetch_req
-  io.l1_req <> stream_filter.io.l1_req
+  // io.l1_req <> stream_filter.io.l1_req
+  io.l1_req.valid := stream_filter.io.l1_req.valid && enable && pf_ctrl.enable
+  io.l1_req.bits := stream_filter.io.l1_req.bits
+  stream_filter.io.l1_req.ready := Mux(pf_ctrl.enable, io.l1_req.ready, true.B)
   io.tlb_req <> stream_filter.io.tlb_req
   stream_filter.io.enable := enable
   stream_filter.io.flush := flush
   stream_filter.io.confidence := pf_ctrl.confidence
 
-  io.pf_addr.valid := stream_filter.io.pf_addr.valid && stream_filter.io.pf_addr.bits > 0x80000000L.U && enable
+  io.pf_addr.valid := stream_filter.io.pf_addr.valid && stream_filter.io.pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
   io.pf_addr.bits := stream_filter.io.pf_addr.bits
 }

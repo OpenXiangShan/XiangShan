@@ -18,7 +18,7 @@ trait HasPrefetcherMonitorHelper {
   val LATE_MISS_THRESHOLD = 200
 
   val BACK_OFF_INTERVAL = 100000
-  val LOW_CONF_INTERVAL = 10000
+  val LOW_CONF_INTERVAL = 200000
 
   // val enableDynamicPrefetcher = false
 }
@@ -35,6 +35,7 @@ class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
     val total_prefetch = Input(Bool())
     val late_hit_prefetch = Input(Bool())
     val late_miss_prefetch = Input(Bool())
+    val prefetch_hit = Input(UInt(2.W))
   }
     
   val validity = new XSBundle {
@@ -68,6 +69,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   val total_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
   val late_hit_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
   val late_miss_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
+  val prefetch_hit_cnt = RegInit(0.U(32.W))
 
   val good_prefetch_cnt = RegInit(0.U((log2Up(VALIDITY_CHECK_INTERVAL) + 1).W))
   val bad_prefetch_cnt = RegInit(0.U((log2Up(VALIDITY_CHECK_INTERVAL) + 1).W))
@@ -83,6 +85,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + io.timely.total_prefetch)
   late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + io.timely.late_hit_prefetch)
   late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + io.timely.late_miss_prefetch)
+  prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + io.timely.prefetch_hit)
 
   good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + io.validity.good_prefetch)
   bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + io.validity.bad_prefetch)
@@ -103,6 +106,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     depth := Mux(depth === 1.U, depth, depth >> 1)
   }
   when(trigger_disable) {
+    confidence := 0.U(1.W)
     enable := false.B
     flush := true.B
   }
@@ -110,10 +114,12 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   when(trigger_late_miss) {
     depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
   }.elsewhen(trigger_late_hit) {
+    // for now, late hit will disable the prefether
     confidence := 0.U(1.W)
+    enable := false.B
   }
 
-  val enableDynamicPrefetcher_const = WireInit(Constantin.createRecord("enableDynamicPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U))
+  val enableDynamicPrefetcher_const = WireInit(Constantin.createRecord("enableDynamicPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U))
   val enableDynamicPrefetcher = enableDynamicPrefetcher_const === 1.U
 
   when(!enableDynamicPrefetcher) {
@@ -121,6 +127,10 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     flush := false.B
     enable := true.B
     confidence := 1.U
+  }.otherwise {
+    // for now, only dynamically disable prefetcher, without depth and flush
+    depth := depth_const
+    flush := false.B
   }
 
   when(reset.asBool) {
@@ -138,9 +148,12 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   }
   XSPerfAccumulate("flush", flush)
   XSPerfAccumulate("disable", !enable)
+  XSPerfAccumulate("low_confidence", confidence === 0.U)
   XSPerfAccumulate("trigger_late_hit", trigger_late_hit)
   XSPerfAccumulate("trigger_late_miss", trigger_late_miss)
   XSPerfAccumulate("trigger_bad_prefetch", trigger_bad_prefetch)
+  XSPerfAccumulate("trigger_disable", trigger_disable)
+  XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
 
   assert(depth =/= 0.U, "depth should not be zero")
 }

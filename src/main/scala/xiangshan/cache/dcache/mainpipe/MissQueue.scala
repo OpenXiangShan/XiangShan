@@ -895,7 +895,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
-  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 16.U))
+  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 14.U))
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)

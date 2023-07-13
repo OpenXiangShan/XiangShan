@@ -123,6 +123,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_uop = Wire(new MicroOp)
   val s0_isFirstIssue = Wire(Bool())
   val s0_hasROBEntry = WireDefault(false.B)
+  val s0_missDbUpdated = WireDefault(false.B)
   val s0_rsIdx = Wire(UInt(log2Up(IssQueSize).W))
   val s0_sqIdx = Wire(new SqPtr)
   val s0_tryFastpath = WireInit(false.B)
@@ -280,6 +281,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.fastReplay.bits.uop
     s0_isFirstIssue := false.B
     s0_sqIdx := io.fastReplay.bits.uop.sqIdx
+    s0_hasROBEntry := true.B
     s0_replayCarry := io.fastReplay.bits.replayCarry
     s0_rsIdx := io.fastReplay.bits.rsIdx
     s0_isLoadReplay := io.fastReplay.bits.isLoadReplay
@@ -294,6 +296,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     s0_uop := io.replay.bits.uop
     s0_isFirstIssue := io.replay.bits.isFirstIssue
     s0_hasROBEntry := true.B
+    s0_missDbUpdated := io.replay.bits.missDbUpdated
     s0_sqIdx := io.replay.bits.uop.sqIdx
     s0_rsIdx := io.replay.bits.rsIdx
     s0_replayCarry := io.replay.bits.replayCarry
@@ -336,6 +339,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
       s0_tryFastpath := lfsrc_l2lForward_select
       // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
       s0_vaddr := io.fastpath.data
+      s0_hasROBEntry := true.B
       // Assume the pointer chasing is always ld.
       s0_uop.ctrl.fuOpType := LSUOpType.ld
       s0_mask := genWmask(0.U, LSUOpType.ld)
@@ -651,7 +655,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   val s2_fast_replay = ((s2_schedError || io.in.bits.replayInfo.cause(LoadReplayCauses.schedError)) ||
                        (!s2_wait_store &&
                        !s2_tlb_miss &&
-                       s2_cache_replay) || 
+                       s2_cache_replay && 
+                       io.dcacheBankConflict) || 
                       (io.out.bits.miss && io.l2Hint.valid && (io.out.bits.replayInfo.missMSHRId === io.l2Hint.bits.sourceId))) &&
                        !s2_exception &&
                        !s2_mmio &&
@@ -1170,6 +1175,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.loadIn.bits.lqDataWenDup := s3_loadValidVec.asBools
 
   io.lsq.loadIn.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
+  io.lsq.loadIn.bits.missDbUpdated := RegNext(load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss && !load_s2.io.in.bits.missDbUpdated)
 
   // s2_dcache_require_replay signal will be RegNexted, then used in s3
   val s3_dcacheRequireReplay = RegNext(load_s2.io.s2_dcache_require_replay)
@@ -1242,7 +1248,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // feedback slow
   s3_fast_replay := (RegNext(load_s2.io.s2_dcache_require_fast_replay) || 
                     (s3_loadOutBits.replayInfo.cause(LoadReplayCauses.dcacheMiss) && io.l2Hint.valid && io.l2Hint.bits.sourceId === s3_loadOutBits.replayInfo.missMSHRId)) && 
-                    !s3_exception
+                    !s3_exception && !s3_delayedLoadError && !s3_replayInst
   val s3_need_feedback = !s3_loadOutBits.isLoadReplay && !s3_loadOutBits.isHWPrefetch && !(s3_fast_replay && io.fastReplayOut.ready)
 
   //
@@ -1328,11 +1334,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.debug_ls.s2_robIdx := load_s2.io.in.bits.uop.robIdx.value
 
   io.lsTopdownInfo.s1.robIdx := load_s1.io.in.bits.uop.robIdx.value
-  io.lsTopdownInfo.s1.vaddr_valid := load_s1.io.in.fire && load_s1.io.in.bits.hasROBEntry
+  io.lsTopdownInfo.s1.vaddr_valid := load_s1.io.in.fire && load_s1.io.in.bits.hasROBEntry && !load_s1.io.s1_kill
   io.lsTopdownInfo.s1.vaddr_bits := load_s1.io.in.bits.vaddr
   io.lsTopdownInfo.s2.robIdx := load_s2.io.in.bits.uop.robIdx.value
   io.lsTopdownInfo.s2.paddr_valid := load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss
   io.lsTopdownInfo.s2.paddr_bits := load_s2.io.in.bits.paddr
+  io.lsTopdownInfo.s2.cache_miss_en := load_s2.io.in.fire && load_s2.io.in.bits.hasROBEntry && !load_s2.io.in.bits.tlbMiss && !load_s2.io.in.bits.missDbUpdated
+  io.lsTopdownInfo.s2.first_real_miss := io.dcache.resp.bits.real_miss
 
   // bug lyq: some signals in perfEvents are no longer suitable for the current MemBlock design
   // hardware performance counter

@@ -107,6 +107,8 @@ class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
     val robIdx = UInt(log2Ceil(RobSize).W)
     val paddr_valid = Bool()
     val paddr_bits = UInt(PAddrBits.W)
+    val cache_miss_en = Bool()
+    val first_real_miss = Bool()
   }
 
   def s1SignalEnable(ena: LsTopdownInfo) = {
@@ -120,6 +122,9 @@ class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
     when(ena.s2.paddr_valid) {
       s2.paddr_valid := true.B
       s2.paddr_bits := ena.s2.paddr_bits
+    }
+    when(ena.s2.cache_miss_en) {
+      s2.first_real_miss := ena.s2.first_real_miss
     }
   }
 }
@@ -1210,6 +1215,30 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
           reset = reset
         )
       }
+    }
+
+    // log when committing
+    val load_debug_table = ChiselDB.createTable("LoadDebugTable" + p(XSCoreParamsKey).HartId.toString, new LoadInfoEntry, basicDB = true)
+    for (i <- 0 until CommitWidth) {
+      val log_enable = io.commits.commitValid(i) && io.commits.isCommit && (io.commits.info(i).commitType === CommitType.LOAD)
+      val commit_index = deqPtrVec(i).value
+      val load_debug_data = Wire(new LoadInfoEntry)
+
+      load_debug_data.pc := io.commits.info(i).pc
+      load_debug_data.vaddr := debug_lsTopdownInfo(commit_index).s1.vaddr_bits
+      load_debug_data.paddr := debug_lsTopdownInfo(commit_index).s2.paddr_bits
+      load_debug_data.cacheMiss := debug_lsTopdownInfo(commit_index).s2.first_real_miss
+      load_debug_data.tlbQueryLatency := tlbLatency(i)
+      load_debug_data.exeLatency := executeLatency(i)
+
+
+      load_debug_table.log(
+        data = load_debug_data,
+        en = log_enable,
+        site = "LoadDebugTable",
+        clock = clock,
+        reset = reset
+      )
     }
   }
 

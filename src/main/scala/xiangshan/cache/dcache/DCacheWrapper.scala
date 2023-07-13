@@ -994,6 +994,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   prefetcherMonitor.io.timely.total_prefetch := ldu.map(_.io.prefetch_info.total_prefetch).reduce(_ || _)
   prefetcherMonitor.io.timely.late_hit_prefetch := ldu.map(_.io.prefetch_info.late_hit_prefetch).reduce(_ || _)
   prefetcherMonitor.io.timely.late_miss_prefetch := missQueue.io.late_miss_prefetch
+  prefetcherMonitor.io.timely.prefetch_hit := PopCount(ldu.map(_.io.prefetch_info.prefetch_hit))
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
   XSPerfAccumulate("useless_prefetch", ldu.map(_.io.prefetch_info.total_prefetch).reduce(_ || _) && !(ldu.map(_.io.prefetch_info.useful_prefetch).reduce(_ || _)))
   XSPerfAccumulate("useful_prefetch", ldu.map(_.io.prefetch_info.useful_prefetch).reduce(_ || _))
