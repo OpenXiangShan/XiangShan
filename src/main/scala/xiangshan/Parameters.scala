@@ -44,6 +44,7 @@ case class XSCoreParameters
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
+  VLEN: Int = 128,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -312,6 +313,7 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
+  val VLEN = coreParams.VLEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -328,6 +330,7 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val VDataBytes = VLEN / 8
   val HasFPU = coreParams.HasFPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth

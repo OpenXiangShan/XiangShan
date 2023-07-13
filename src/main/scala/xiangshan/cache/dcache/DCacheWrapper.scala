@@ -136,6 +136,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
+  val DCacheVWordBytes = VLEN / 8
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -148,6 +149,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = log2Up(DCacheWordBytes)
+  val DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
   val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
@@ -327,8 +329,8 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
+  val data   = UInt(VLEN.W)
+  val mask   = UInt((VLEN/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
   val isFirstIssue = Bool()
@@ -365,9 +367,9 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   // read in s2
-  val data = UInt(DataBits.W)
+  val data = UInt(VLEN.W)
   // select in s3
-  val data_delayed = UInt(DataBits.W)
+  val data_delayed = UInt(VLEN.W)
   val id     = UInt(reqIdWidth.W)
   // cache req missed, send it to miss queue
   val miss   = Bool()
@@ -451,12 +453,12 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 }
 
 
-class UncacheWordReq(implicit p: Parameters) extends DCacheBundle 
+class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val data = UInt(DataBits.W)
-  val mask = UInt((DataBits/8).W)
+  val data = UInt(XLEN.W)
+  val mask = UInt((XLEN/8).W)
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
@@ -465,14 +467,14 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 
   def dump() = {
     XSDebug("UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
-      cmd, addr, data, mask, id) 
+      cmd, addr, data, mask, id)
   }
 }
 
-class UncacheWorResp(implicit p: Parameters) extends DCacheBundle 
+class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
-  val data      = UInt(DataBits.W)
-  val data_delayed = UInt(DataBits.W)
+  val data      = UInt(XLEN.W)
+  val data_delayed = UInt(XLEN.W)
   val id        = UInt(uncacheIdxBits.W)
   val miss      = Bool()
   val replay    = Bool()
@@ -484,14 +486,14 @@ class UncacheWorResp(implicit p: Parameters) extends DCacheBundle
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
-      data, id, miss, replay, tag_error, error) 
+      data, id, miss, replay, tag_error, error)
   }
 }
 
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new UncacheWordReq)
-  val resp = Flipped(DecoupledIO(new UncacheWorResp))
+  val resp = Flipped(DecoupledIO(new UncacheWordResp))
 }
 
 class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
@@ -542,7 +544,7 @@ class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
-class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle { 
+class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   // sbuffer will directly send request to dcache main pipe
   val req = Flipped(Decoupled(new DCacheLineReq))
 
@@ -581,17 +583,18 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
                 req_paddr(log2Up(refillBytes)) === last
 
     val forward_D = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
     val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
     val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
     (0 until l1BusDataWidth / 64).map(i => {
       block_data(i) := data(64 * i + 63, 64 * i)
     })
-    val selected_data = block_data(block_idx)
+    val selected_data = Wire(UInt(128.W))
+    selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_D := all_match
-    for (i <- 0 until 8) {
+    for (i <- 0 until VLEN/8) {
       forwardData(i) := selected_data(8 * i + 7, 8 * i)
     }
 
@@ -620,11 +623,11 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   }
 
   def forward(req_valid : Bool, req_paddr : UInt) = {
-    val all_match = (req_paddr(log2Up(refillBytes)) === 0.U && firstbeat_valid) || 
+    val all_match = (req_paddr(log2Up(refillBytes)) === 0.U && firstbeat_valid) ||
                     (req_paddr(log2Up(refillBytes)) === 1.U && lastbeat_valid)
 
     val forward_mshr = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
     val beat_data = raw_data(req_paddr(log2Up(refillBytes)))
     val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
@@ -632,10 +635,11 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     (0 until l1BusDataWidth / 64).map(i => {
       block_data(i) := beat_data(64 * i + 63, 64 * i)
     })
-    val selected_data = block_data(block_idx)
+    val selected_data = Wire(UInt(128.W))
+    selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_mshr := all_match
-    for (i <- 0 until 8) {
+    for (i <- 0 until VLEN/8) {
       forwardData(i) := selected_data(8 * i + 7, 8 * i)
     }
 
@@ -651,7 +655,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val paddr = Input(UInt(PAddrBits.W))
   // resp
   val forward_mshr = Output(Bool())
-  val forwardData = Output(Vec(8, UInt(8.W)))
+  val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
 
   def connect(sink: LduToMissqueueForwardIO) = {
@@ -673,7 +677,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
-  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
+  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
   val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
   val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
 }
@@ -709,7 +713,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
 
   val io = IO(new DCacheIO)
-  
+
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
@@ -749,7 +753,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
 
   val errors = ldu.map(_.io.error) ++ // load error
-    Seq(mainPipe.io.error) // store / misc error 
+    Seq(mainPipe.io.error) // store / misc error
   io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
 
   //----------------------------------------
@@ -852,6 +856,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
+    bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp_delayed(i)
@@ -874,6 +879,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // only lsu uses this, replay never kills
   for (w <- 0 until LoadPipelineWidth) {
     ldu(w).io.lsu <> io.lsu.load(w)
+
+    // TODO:when have load128Req
+    ldu(w).io.load128Req := false.B
 
     // replay and nack not needed anymore
     // TODO: remove replay and nack
@@ -947,7 +955,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
   XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)
-  
+
   XSPerfAccumulate("miss_queue_has_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) >= 1.U)
   XSPerfAccumulate("miss_queue_has_muti_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U)
   XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
@@ -1019,7 +1027,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   dontTouch(refillShouldBeBlocked_dup)
 
   refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
-    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits 
+    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits
   }
   refillPipe.io.req_dup_for_meta_w.bits := mq_refill_dup(metaWritePort).bits
   refillPipe.io.req_dup_for_tag_w.bits := mq_refill_dup(tagWritePort).bits

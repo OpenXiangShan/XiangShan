@@ -53,8 +53,8 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
+  val data   = UInt(VLEN.W)
+  val mask   = UInt((VLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
 }
@@ -173,7 +173,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //
   // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
   // Before data write finish, sbuffer is unable to provide store to load
-  // forward data. As an workaround, deqPtrExt and allocated flag update 
+  // forward data. As an workaround, deqPtrExt and allocated flag update
   // is delayed so that load can get the right data from store queue.
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
@@ -251,7 +251,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       deqPtrExtNext(0) // for mmio insts, deqPtr may be ahead of cmtPtr
     )
   }
-  
+
   io.stAddrReadySqPtr := addrReadyPtrExt
 
   // update
@@ -409,7 +409,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => datavalid(i))))
     val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i) && allocated(i))))
 
-    val storeSetHitVec = 
+    val storeSetHitVec =
       if (LFSTEnable) {
         WireInit(VecInit((0 until StoreQueueSize).map(j => io.forward(i).uop.cf.loadWaitBit && uop(j).robIdx === io.forward(i).uop.cf.waitForRobIdx)))
       } else {
@@ -441,7 +441,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
     // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) &
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt)
     ) =/= 0.U
@@ -473,7 +473,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val dataInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
     dataInvalidMask1Reg := RegNext(dataInvalidMask1)
     // make chisel happy
-    val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W)) 
+    val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
     dataInvalidMask2Reg := RegNext(dataInvalidMask2)
     val dataInvalidMaskReg = dataInvalidMask1Reg | dataInvalidMask2Reg
 
@@ -524,17 +524,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // data invalid sq index
     // make chisel happy
     val dataInvalidMaskRegWire = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMaskRegWire := dataInvalidMaskReg 
+    dataInvalidMaskRegWire := dataInvalidMaskReg
     val dataInvalidFlag = dataInvalidMaskRegWire.orR
 
     val dataInvalidSqIdx1 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(dataInvalidMask1Reg))))
     val dataInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(dataInvalidMask2Reg))))
     val dataInvalidSqIdx = Mux(dataInvalidMask2Reg.orR, dataInvalidSqIdx2, dataInvalidSqIdx1)
 
-    when (dataInvalidFlag) { 
+    when (dataInvalidFlag) {
       io.forward(i).dataInvalidSqIdx.flag := Mux(!s2_differentFlag || dataInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).dataInvalidSqIdx.value := dataInvalidSqIdx
-    } .otherwise { 
+    } .otherwise {
       // may be store inst has been written to sbuffer already.
       io.forward(i).dataInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
     }
@@ -589,8 +589,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  io.uncache.req.bits.data := dataModule.io.rdata(0).data
-  io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
+  io.uncache.req.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
+  io.uncache.req.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
@@ -625,7 +625,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
+  io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
@@ -699,7 +699,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
-    // forward data. As an workaround, deqPtrExt and allocated flag update 
+    // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
     when (RegNext(io.sbuffer(i).fire())) {
@@ -716,8 +716,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       fakeRAM.en    := allocated(ptr) && committed(ptr) && !mmio(ptr)
       fakeRAM.rIdx  := 0.U
       fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
-      fakeRAM.wdata := dataModule.io.rdata(i).data
-      fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      fakeRAM.wdata := Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).data(127,64), dataModule.io.rdata(i).data(63,0))
+      fakeRAM.wmask := Mux(paddrModule.io.rdata(i)(3), MaskExpand(dataModule.io.rdata(i).mask(15,8)), MaskExpand(dataModule.io.rdata(i).mask(7,0)))
       fakeRAM.wen   := allocated(ptr) && committed(ptr) && !mmio(ptr)
     }
   }
@@ -726,8 +726,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     for (i <- 0 until EnsbufferWidth) {
       val storeCommit = io.sbuffer(i).fire()
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
-      val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
-      val wmask = io.sbuffer(i).bits.mask
+      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
+      val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
+      val wmask = sbufferMask
+      val wdata = sbufferData & MaskExpand(sbufferMask)
 
       val difftest = Module(new DifftestStoreEvent)
       difftest.io.clock       := clock
@@ -756,14 +758,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
  /**
 * update pointers
 **/
-  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect 
-  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect 
-  val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect  
-  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect 
-  
+  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
+  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
+  val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
+  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect
+
   val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
-  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect 
-  
+  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect
+
   when (lastlastCycleRedirect) {
     // we recover the pointers in 2 cycle after redirect for better timing
     enqPtrExt := VecInit(enqPtrExt.map(_ - redirectCancelCount))
@@ -773,7 +775,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
   assert(!(lastCycleRedirect && enqNumber =/= 0.U))
-  
+
   deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExtNext
 
@@ -787,7 +789,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqEmpty := RegNext(
-    enqPtrExt(0).value === deqPtrExt(0).value && 
+    enqPtrExt(0).value === deqPtrExt(0).value &&
     enqPtrExt(0).flag === deqPtrExt(0).flag
   )
   // perf counter
