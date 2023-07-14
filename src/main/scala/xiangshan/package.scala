@@ -624,6 +624,7 @@ package object xiangshan {
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW
+    def VEC_VFM          = "b111011".U // VEC_VFM
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def dummy     = "b111111".U

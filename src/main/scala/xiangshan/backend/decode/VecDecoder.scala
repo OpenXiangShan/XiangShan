@@ -435,13 +435,13 @@ object VecDecoder extends DecodeConstants {
     VFSGNJX_VV         -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfsgnjx, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.13. Vector Floating-Point Compare Instructions
-    VMFEQ_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfeq, F, T, F),
-    VMFNE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfne, F, T, F),
-    VMFLT_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vflt, F, T, F),
-    VMFLE_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfle, F, T, F),
+    VMFEQ_VV           -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfeq, F, T, F, UopSplitType.VEC_VVM),
+    VMFNE_VV           -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfne, F, T, F, UopSplitType.VEC_VVM),
+    VMFLT_VV           -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vflt, F, T, F, UopSplitType.VEC_VVM),
+    VMFLE_VV           -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfle, F, T, F, UopSplitType.VEC_VVM),
 
     // 13.14. Vector Floating-Point Classify Instruction
-    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfalu, VfaluType.vfclass, F, T, F),
+    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfalu, VfaluType.vfclass, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
     VFCVT_XU_F_V       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -531,15 +531,15 @@ object VecDecoder extends DecodeConstants {
     VFSGNJX_VF         -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfpuType.vfsgnjx, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.13. Vector Floating-Point Compare Instructions
-    VMFEQ_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfeq, F, F, T),
-    VMFNE_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfne, F, F, T),
-    VMFLT_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vflt, F, F, T),
-    VMFLE_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfle, F, F, T),
-    VMFGT_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfgt, F, F, T),
-    VMFGE_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfge, F, F, T),
+    VMFEQ_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfeq, F, F, T, UopSplitType.VEC_VFM),
+    VMFNE_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfne, F, F, T, UopSplitType.VEC_VFM),
+    VMFLT_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vflt, F, F, T, UopSplitType.VEC_VFM),
+    VMFLE_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfle, F, F, T, UopSplitType.VEC_VFM),
+    VMFGT_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfgt, F, F, T, UopSplitType.VEC_VFM),
+    VMFGE_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfge, F, F, T, UopSplitType.VEC_VFM),
 
     // 13.15. Vector Floating-Point Merge Instruction
-    VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfmerge, F, T, F),
+    VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfmerge, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.16. Vector Floating-Point Move Instruction
     VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfmv, F, T, F),// src2=SrcType.X
