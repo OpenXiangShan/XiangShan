@@ -1038,11 +1038,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.reduce(_ | _)
+    val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
     fflagsDataModule(i) := Mux(!valid(i) && instCanEnqFlag, 0.U, fflagsDataModule(i) | fflagsRes)
 
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.reduce(_ | _)
+    val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     vxsatDataModule(i) := Mux(!valid(i) && instCanEnqFlag, 0.U, vxsatDataModule(i) | vxsatRes)
   }
 
