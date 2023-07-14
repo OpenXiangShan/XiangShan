@@ -61,7 +61,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   with HasXSParameter {
 
   println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
-    s"wakeup exu sources(${params.wakeUpInExuSources.size}): ${params.wakeUpInExuSources.map(_.name).mkString("{",",","}")}, " +
+    s"wakeup exu in(${params.wakeUpInExuSources.size}): ${params.wakeUpInExuSources.map(_.name).mkString("{",",","}")}, " +
+    s"wakeup exu out(${params.wakeUpOutExuSources.size}): ${params.wakeUpOutExuSources.map(_.name).mkString("{",",","}")}, " +
     s"numEntries: ${params.numEntries}, numRegSrc: ${params.numRegSrc}")
 
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
@@ -458,9 +459,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
-    if (wakeUpQueues(i).nonEmpty) {
+    if (wakeUpQueues(i).nonEmpty && finalWakeUpL1ExuOH.nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
       wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits, finalWakeUpL1ExuOH.get(i))
+    } else if (wakeUpQueues(i).nonEmpty) {
+      wakeup.valid := wakeUpQueues(i).get.io.deq.valid
+      wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits)
     } else {
       wakeup.valid := false.B
       wakeup.bits := 0.U.asTypeOf(wakeup.bits.cloneType)

@@ -264,6 +264,14 @@ object Bundles {
       this.pdest := exuInput.pdest
       this.l2ExuVec := l2ExuVecs.reduce { (x: Vec[Bool], y: Vec[Bool]) => VecInit((x.asUInt | y.asUInt).asBools) }
     }
+
+    def fromExuInput(exuInput: ExuInput): Unit = {
+      this.rfWen := exuInput.rfWen.getOrElse(false.B)
+      this.fpWen := exuInput.fpWen.getOrElse(false.B)
+      this.vecWen := exuInput.vecWen.getOrElse(false.B)
+      this.pdest := exuInput.pdest
+      this.l2ExuVec.foreach(_ := false.B)
+    }
   }
 
   /**
