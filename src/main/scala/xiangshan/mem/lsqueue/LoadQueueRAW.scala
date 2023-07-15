@@ -299,7 +299,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordBytes) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordBytes))))
+    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
     val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize))
