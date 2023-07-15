@@ -706,11 +706,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // --------------------------------------------------------------------------------
   // s2: DCache resp
   val s2_valid  = RegInit(false.B)
+  val s2_in     = Wire(new LqWriteBundle)
+  val s2_out    = Wire(new LqWriteBundle)
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_in     = Wire(new LqWriteBundle)
-  val s2_out    = Wire(new LqWriteBundle)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -913,7 +913,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_ld_valid_dup = RegInit(0.U(6.W))
   s2_ld_valid_dup := 0x0.U(6.W)
   when (s1_ld_left_fire && !s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x3f.U(6.W) }
-  when (s1_kill || s1_fast_rep_kill) { s2_ld_valid_dup := 0x0.U(6.W) }
+  when (s1_kill || s1_fast_rep_kill || s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x0.U(6.W) }
   assert(RegNext((s2_valid === s2_ld_valid_dup(0)) || RegNext(s1_out.isHWPrefetch)))
 
   // Pipeline
