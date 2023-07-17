@@ -30,6 +30,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     val walk = Input(Bool())
 
     val allocateReq = Input(Vec(RenameWidth, Bool()))
+    val walkReq = Input(Vec(CommitWidth, Bool()))
     val allocatePhyReg = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
     val canAllocate = Output(Bool())
     val doAllocate = Input(Bool())

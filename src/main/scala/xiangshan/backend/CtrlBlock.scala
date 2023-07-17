@@ -358,7 +358,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val pc_from_csr = io.robio.toCSR.isXRet || DelayN(rob.io.exception.valid, 4)
   val rob_flush_pc = RegEnable(Mux(flushRedirect.bits.flushItself(),
     flushPC, // replay inst
-    flushPC + 4.U // flush pipe
+    flushPC + Mux(flushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), flushRedirect.valid)
   val flushTarget = Mux(pc_from_csr, io.robio.toCSR.trapTarget, rob_flush_pc)
   when (frontendFlushValid) {
@@ -463,6 +463,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rename.io.redirect := stage2Redirect
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
+  rename.io.int_need_free := rat.io.int_need_free
+  rename.io.int_old_pdest := rat.io.int_old_pdest
+  rename.io.fp_old_pdest := rat.io.fp_old_pdest
   rename.io.debug_int_rat <> rat.io.debug_int_rat
   rename.io.debug_fp_rat <> rat.io.debug_fp_rat
   rename.io.stallReason.in <> decode.io.stallReason.out

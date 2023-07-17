@@ -230,7 +230,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val srcState = Vec(3, SrcState())
   val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
@@ -292,6 +291,7 @@ class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
+  val isRVC = Bool()
   val robIdx = new RobPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -374,10 +374,10 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
+  val isRVC = Bool()
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
