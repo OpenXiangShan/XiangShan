@@ -43,9 +43,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     val hit_data = Vec(numWays, Valid(gen))
   })
 
-  class WrBypassPtr extends CircularQueuePtr[WrBypassPtr](numEntries){
-  }
-
   class Idx_Tag extends Bundle {
     val idx = UInt(idxWidth.W)
     val tag = if (hasTag) Some(UInt(tagWidth.W)) else None
@@ -60,8 +57,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val valids = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
   val ever_written = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
 
-  val enq_ptr = RegInit(0.U.asTypeOf(new WrBypassPtr))
-  val enq_idx = enq_ptr.value
 
   idx_tag_cam.io.r.req(0)(io.write_idx, io.write_tag.getOrElse(0.U))
   val hits_oh = idx_tag_cam.io.r.resp(0).zip(ever_written).map {case (h, ew) => h && ew}
@@ -74,6 +69,13 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     io.hit_data(i).bits  := data_mem.read(hit_idx)(i)
   }
 
+  // Replacer
+  // Because data_mem can only write to one index
+  // Implementing a per-way replacer is meaningless
+  // So here use one replacer for all ways
+  val replacer = ReplacementPolicy.fromString("plru", numEntries) // numEntries in total
+  val replacer_touch_ways = Wire(Vec(1, Valid(UInt(log2Ceil(numEntries).W)))) // One index at a time
+  val enq_idx = replacer.way
   val full_mask = Fill(numWays, 1.U(1.W)).asTypeOf(Vec(numWays, Bool()))
   val update_way_mask = io.write_way_mask.getOrElse(full_mask)
 
@@ -82,6 +84,9 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     val data_write_idx = Mux(hit, hit_idx, enq_idx)
     data_mem.write(data_write_idx, io.write_data, update_way_mask)
   }
+  replacer_touch_ways(0).valid := io.wen
+  replacer_touch_ways(0).bits := Mux(hit, hit_idx, enq_idx)
+  replacer.access(replacer_touch_ways)
 
   // update valids
   for (i <- 0 until numWays) {
@@ -104,7 +109,6 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   idx_tag_cam.io.w.valid := enq_en
   idx_tag_cam.io.w.bits.index := enq_idx
   idx_tag_cam.io.w.bits.data(io.write_idx, io.write_tag.getOrElse(0.U))
-  enq_ptr := enq_ptr + enq_en
 
   XSPerfAccumulate("wrbypass_hit",  io.wen &&  hit)
   XSPerfAccumulate("wrbypass_miss", io.wen && !hit)
