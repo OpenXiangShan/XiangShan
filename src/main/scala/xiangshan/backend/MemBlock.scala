@@ -45,7 +45,6 @@ class Std(implicit p: Parameters) extends FunctionUnit {
 class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
   val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
-  val stIssuePtr = Output(new SqPtr())
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
@@ -73,6 +72,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val stIssuePtr = Output(new SqPtr())
 
   val memoryViolation = ValidIO(new Redirect)
   val sbIsEmpty = Output(Bool())
@@ -268,7 +268,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer) // out of date now
-  io.ooo_to_mem.stIssuePtr := lsq.io.issuePtrExt
+  io.mem_to_ooo.stIssuePtr := lsq.io.issuePtrExt
 
   dcache.io.hartId := io.hartId
   lsq.io.hartId := io.hartId

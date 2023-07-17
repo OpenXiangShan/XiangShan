@@ -344,7 +344,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.fastUopIn <> allFastUop1
     exu.scheExtra.jumpPc <> ctrlBlock.io.jumpPc
     exu.scheExtra.jalr_target <> ctrlBlock.io.jalr_target
-    exu.scheExtra.stIssuePtr <> memBlock.io.ooo_to_mem.stIssuePtr
+    exu.scheExtra.stIssuePtr <> memBlock.io.mem_to_ooo.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
     exu.scheExtra.robDeqPtr := ctrlBlock.io.robDeqPtr
