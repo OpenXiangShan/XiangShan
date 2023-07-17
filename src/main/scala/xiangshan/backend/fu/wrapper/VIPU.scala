@@ -104,7 +104,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   
   // modules
   private val decoder = Module(new VIAluDecoder)
-  private val vialu   = Seq.fill(numVecModule)(Module(new VIAlu))
+  private val vialu   = Module(new VIAlu)
   private val mgu     = Module(new Mgu(dataWidth))
   
   /**
@@ -116,33 +116,33 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   /**
   * [[vialu]]'s in connection
   */
-  vialu.zipWithIndex.foreach {
-    case (mod, i) =>
-      mod.io.in.valid            := io.in.valid
-      mod.io.in.bits.opcode.op   := decoder.io.out.opcode
-      mod.io.in.bits.info.vm     := vm
-      mod.io.in.bits.info.ma     := vma
-      mod.io.in.bits.info.ta     := vta
-      mod.io.in.bits.info.vlmul  := vlmul
-      mod.io.in.bits.info.vl     := srcVConfig.vl
-      mod.io.in.bits.info.vstart := vstart
-      mod.io.in.bits.info.uopIdx := vuopIdx
-      mod.io.in.bits.info.vxrm   := vxrm
-      mod.io.in.bits.srcType(0)  := decoder.io.out.srcType2
-      mod.io.in.bits.srcType(1)  := decoder.io.out.srcType1
-      mod.io.in.bits.vdType      := decoder.io.out.vdType
-      mod.io.in.bits.vs1         :=  Mux1H(Seq(needClearVs1 -> 0.U,
-                                            needShiftVs1 -> SignExt(vs1(127,64), 128),
-                                         ((!needClearVs1) && (!needShiftVs1)) -> vs1))
-      mod.io.in.bits.vs2         := vs2
-      mod.io.in.bits.old_vd      := oldVd
-      mod.io.in.bits.mask        := outSrcMask
+  vialu.io match {
+    case subIO =>
+      subIO.in.valid            := io.in.valid
+      subIO.in.bits.opcode.op   := decoder.io.out.opcode
+      subIO.in.bits.info.vm     := vm
+      subIO.in.bits.info.ma     := vma
+      subIO.in.bits.info.ta     := vta
+      subIO.in.bits.info.vlmul  := vlmul
+      subIO.in.bits.info.vl     := srcVConfig.vl
+      subIO.in.bits.info.vstart := vstart
+      subIO.in.bits.info.uopIdx := vuopIdx
+      subIO.in.bits.info.vxrm   := vxrm
+      subIO.in.bits.srcType(0)  := decoder.io.out.srcType2
+      subIO.in.bits.srcType(1)  := decoder.io.out.srcType1
+      subIO.in.bits.vdType      := decoder.io.out.vdType
+      subIO.in.bits.vs1         :=  Mux1H(Seq(needClearVs1 -> 0.U,
+                                              needShiftVs1 -> SignExt(vs1(127,64), 128),
+                                           ((!needClearVs1) && (!needShiftVs1)) -> vs1))
+      subIO.in.bits.vs2         := vs2
+      subIO.in.bits.old_vd      := oldVd
+      subIO.in.bits.mask        := outSrcMask
   }
 
   /**
   * [[mgu]]'s in connection
   */
-  private val outVd = Cat(vialu.reverse.map(_.io.out.bits.vd))
+  private val outVd = vialu.io.out.bits.vd
   private val outWiden = fuOpType === VipuType.vwredsumu_vs || fuOpType === VipuType.vwredsum_vs
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
 
