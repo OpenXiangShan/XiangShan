@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.SnapshotPtr
+import xiangshan.backend.SnapshotGen
 import utils._
 import utility._
 
@@ -68,25 +68,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
 
-  val snapshots = Reg(Vec(RenameSnapshotNum, new FreeListPtr))
-  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
-  when(!isFull(snptEnqPtr, snptDeqPtr) && io.snpt.snptEnq) {
-    snapshots(snptEnqPtr.value) := headPtr
-    snptValids(snptEnqPtr.value) := true.B
-    snptEnqPtr := snptEnqPtr + 1.U
-  }
-  when(io.snpt.snptDeq) {
-    snptValids(snptDeqPtr.value) := false.B
-    snptDeqPtr := snptDeqPtr + 1.U
-    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
-  }
-  when(io.redirect) {
-    snptValids := 0.U.asTypeOf(snptValids)
-    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
-    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
-  }
+  val snapshots = SnapshotGen(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
 
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,

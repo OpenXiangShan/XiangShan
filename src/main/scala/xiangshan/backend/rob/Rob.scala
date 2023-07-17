@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.SnapshotPtr
+import xiangshan.backend.SnapshotGen
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LsqEnqIO, LqPtr}
@@ -480,26 +480,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val isEmpty = enqPtr === deqPtr
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
-  val snapshots = Reg(Vec(RenameSnapshotNum, Vec(CommitWidth, new RobPtr)))
   val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
-  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
-  when(!isFull(snptEnqPtr, snptDeqPtr) && snptEnq) {
-    snapshots(snptEnqPtr.value) := enqPtrVec
-    snptValids(snptEnqPtr.value) := true.B
-    snptEnqPtr := snptEnqPtr + 1.U
-  }
-  when(io.snpt.snptDeq) {
-    snptValids(snptDeqPtr.value) := false.B
-    snptDeqPtr := snptDeqPtr + 1.U
-    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should have not been empty when dequeue!\n")
-  }
-  when(io.redirect.valid) {
-    snptValids := 0.U.asTypeOf(snptValids)
-    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
-    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
-  }
+  val snapshots = SnapshotGen(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
 
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
