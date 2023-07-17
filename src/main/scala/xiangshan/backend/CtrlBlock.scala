@@ -44,6 +44,31 @@ class SnapshotPtr(implicit p: Parameters) extends CircularQueuePtr[SnapshotPtr](
   p => p(XSCoreParamsKey).RenameSnapshotNum
 )
 
+object SnapshotGen extends HasCircularQueuePtrHelper {
+  def apply[T <: Data](enqData: T, enq: Bool, deq: Bool, flush: Bool)(implicit p: Parameters): Vec[T] = {
+    val snapshots = Reg(Vec(p(XSCoreParamsKey).RenameSnapshotNum, chiselTypeOf(enqData)))
+    val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+    val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+    val snptValids = RegInit(VecInit.fill(p(XSCoreParamsKey).RenameSnapshotNum)(false.B))
+    when(!isFull(snptEnqPtr, snptDeqPtr) && enq) {
+      snapshots(snptEnqPtr.value) := enqData
+      snptValids(snptEnqPtr.value) := true.B
+      snptEnqPtr := snptEnqPtr + 1.U
+    }
+    when(deq) {
+      snptValids(snptDeqPtr.value) := false.B
+      snptDeqPtr := snptDeqPtr + 1.U
+      XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
+    }
+    when(flush) {
+      snptValids := 0.U.asTypeOf(snptValids)
+      snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
+      snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
+    }
+    snapshots
+  }
+}
+
 class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 

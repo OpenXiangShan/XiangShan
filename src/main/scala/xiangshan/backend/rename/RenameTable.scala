@@ -23,7 +23,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utils.XSError
 import xiangshan._
-import xiangshan.backend.SnapshotPtr
+import xiangshan.backend.SnapshotGen
 
 class RatReadPort(implicit p: Parameters) extends XSBundle {
   val hold = Input(Bool())
@@ -72,25 +72,7 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule with 
 
   val t1_snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
-  val snapshots = Reg(Vec(RenameSnapshotNum, chiselTypeOf(spec_table)))
-  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
-  when(!isFull(snptEnqPtr, snptDeqPtr) && t1_snpt.snptEnq) {
-    snapshots(snptEnqPtr.value) := spec_table
-    snptValids(snptEnqPtr.value) := true.B
-    snptEnqPtr := snptEnqPtr + 1.U
-  }
-  when(t1_snpt.snptDeq) {
-    snptValids(snptDeqPtr.value) := false.B
-    snptDeqPtr := snptDeqPtr + 1.U
-    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
-  }
-  when(t1_redirect) {
-    snptValids := 0.U.asTypeOf(snptValids)
-    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
-    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
-  }
+  val snapshots = SnapshotGen(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect)
 
   // WRITE: when instruction commits or walking
   val t1_wSpec_addr = t1_wSpec.map(w => Mux(w.wen, UIntToOH(w.addr), 0.U))
