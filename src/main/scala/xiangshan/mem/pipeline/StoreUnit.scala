@@ -87,7 +87,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.tlb.req_kill              := false.B
 
   s0_out              := DontCare
-  s0_out.vaddr        := s0_saddr 
+  s0_out.vaddr        := s0_saddr
   // Now data use its own io
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.ctrl.fuOpType(1,0))
   s0_out.data         := s0_in.src(1) // FIXME: remove data from pipeline
@@ -99,7 +99,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s0_out.wlineflag    := s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
-  }  
+  }
 
   // exception check
   val s0_addr_aligned = LookupTree(s0_in.uop.ctrl.fuOpType(1,0), List(
@@ -111,8 +111,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s0_out.uop.cf.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned
 
   io.st_mask_out.valid       := s0_valid
-  io.st_mask_out.bits.mask   := s0_out.mask 
-  io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx 
+  io.st_mask_out.bits.mask   := s0_out.mask
+  io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
   io.stin.ready := s1_ready
 
@@ -124,7 +124,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s1_valid  = RegInit(false.B)
   val s1_in     = RegEnable(s0_out, s0_fire)
   val s1_out    = Wire(new LsPipelineBundle)
-  val s1_kill   = Wire(Bool()) 
+  val s1_kill   = Wire(Bool())
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
 
@@ -137,10 +137,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, staCfg).asUInt.orR
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
-  
+
   s1_ready := !s1_valid || s1_kill || s2_ready
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
-  when (s0_fire) { s1_valid := true.B } 
+  when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
 
@@ -202,7 +202,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
 
   s2_ready := !s2_valid || s2_kill || s3_ready
-  when (s1_fire) { s2_valid := true.B } 
+  when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
 
@@ -226,7 +226,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   // feedback tlb miss to RS in store_s2
   val s1_feedback = Wire(Valid(new RSFeedback))
-  s1_feedback.valid                 := s1_valid 
+  s1_feedback.valid                 := s1_valid
   s1_feedback.bits.hit              := !s1_tlb_miss
   s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
   s1_feedback.bits.rsIdx            := s1_out.rsIdx
@@ -255,7 +255,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
 
-  when (s2_fire) { s3_valid := !s2_mmio || s2_exception  } 
+  when (s2_fire) { s3_valid := !s2_mmio || s2_exception  }
   .elsewhen (s3_fire) { s3_valid := false.B }
   .elsewhen (s3_kill) { s3_valid := false.B }
 
@@ -330,18 +330,18 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   printPipeLine(s1_out, s1_valid, "S1")
 
   // perf cnt
-  XSPerfAccumulate("in_valid",                s0_valid)
-  XSPerfAccumulate("in_fire",                 s0_fire)
-  XSPerfAccumulate("in_fire_first_issue",     s0_fire && s0_isFirstIssue)
-  XSPerfAccumulate("addr_spec_success",       s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_failed",        s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once",  s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once",   s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue) 
+  XSPerfAccumulate("s0_in_valid",                s0_valid)
+  XSPerfAccumulate("s0_in_fire",                 s0_fire)
+  XSPerfAccumulate("s0_in_fire_first_issue",     s0_fire && s0_isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_success",       s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_failed",        s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_success_once",  s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_failed_once",   s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
 
-  XSPerfAccumulate("in_valid",                s1_valid)
-  XSPerfAccumulate("in_fire",                 s1_fire)
-  XSPerfAccumulate("in_fire_first_issue",     s1_fire && s1_in.isFirstIssue)
-  XSPerfAccumulate("tlb_miss",                s1_fire && s1_tlb_miss)
-  XSPerfAccumulate("tlb_miss_first_issue",    s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_in_valid",                s1_valid)
+  XSPerfAccumulate("s1_in_fire",                 s1_fire)
+  XSPerfAccumulate("s1_in_fire_first_issue",     s1_fire && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_tlb_miss",                s1_fire && s1_tlb_miss)
+  XSPerfAccumulate("s1_tlb_miss_first_issue",    s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
   // end
 }
