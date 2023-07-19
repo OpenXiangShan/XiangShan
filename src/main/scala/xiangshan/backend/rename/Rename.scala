@@ -205,10 +205,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).firstUop := false.B
         uops(i).ftqPtr := uops(i - 1).ftqPtr
         uops(i).ftqOffset := uops(i - 1).ftqOffset
+        uops(i).numUops := instrSizesVec(i)
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
+      uops(i).numUops := instrSizesVec(i)
     }
 
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
