@@ -461,17 +461,12 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
   }
 
-  val snptValidsDeqNext = WireDefault(snptValids)
-  when(snptDeq) {
-    snptValidsDeqNext(snptDeqPtr.value) := false.B
-  }
-
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snptValidsDeqNext(idx) && stage2Redirect.bits.robIdx >= snapshots(idx)).reduceTree(_ || _)
+    snptValids(idx) && stage2Redirect.bits.robIdx >= snapshots(idx)).reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snptEnqPtr - i.U).value).map(idx =>
-      (snptValidsDeqNext(idx) && stage2Redirect.bits.robIdx >= snapshots(idx), idx)
+      (snptValids(idx) && stage2Redirect.bits.robIdx >= snapshots(idx), idx)
   ))
   rob.io.snpt.useSnpt := useSnpt
   rob.io.snpt.snptSelect := snptSelect

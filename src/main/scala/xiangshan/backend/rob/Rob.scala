@@ -737,7 +737,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
+  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -838,10 +838,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // (2) walk: move forwards
   val walkPtrVec_next = Mux(io.redirect.valid,
     Mux(io.snpt.useSnpt, snapshots(io.snpt.snptSelect), deqPtrVec_next),
-    // MuxCase(deqPtrVec_next, (1 to RenameSnapshotNum).map(i => (snptEnqPtr - i.U).value).map(idx =>
-    //   (snptValids(idx) && io.redirect.bits.robIdx >= snapshots(idx)(0), snapshots(idx))
-    // )),
-    // deqPtrVec_next,
     Mux(state === s_walk, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrVec := walkPtrVec_next
