@@ -145,6 +145,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val (fromIntIQ, toIntIQ, toIntExu) = (io.fromIntIQ, io.toIntIQ, io.toIntExu)
   private val (fromMemIQ, toMemIQ, toMemExu) = (io.fromMemIQ, io.toMemIQ, io.toMemExu)
   private val (fromVfIQ , toVfIQ , toVfExu ) = (io.fromVfIQ , io.toVfIQ , io.toFpExu)
+  private val (fromIntExus, fromVfExus) = (io.fromIntExus, io.fromVfExus)
 
   println(s"[DataPath] IntIQ(${fromIntIQ.size}), MemIQ(${fromMemIQ.size})")
   println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
@@ -155,6 +156,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val toIQs = toIntIQ ++ toVfIQ ++ toMemIQ
 
   private val toExu = toIntExu ++ toVfExu ++ toMemExu
+
+  private val fromExus = fromIntExus ++ fromVfExus
 
   private val intWbBusyArbiter = Module(new WbBusyArbiter(true))
   private val vfWbBusyArbiter = Module(new WbBusyArbiter(false))
@@ -177,7 +180,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val intReadPortInSize: IndexedSeq[Int] = issuePortsIn.map(issuePortIn => issuePortIn.bits.getIntRfReadBundle.size).scan(0)(_ + _)
   issuePortsIn.zipWithIndex.foreach{
     case (issuePortIn, idx) =>
-      val wbBusyIn = issuePortIn.bits.getIntWbBusyBundle
+      val wbBusyIn: Seq[Bool] = issuePortIn.bits.getIntWbBusyBundle
       val lw = intWbBusyInSize(idx)
       val rw = intWbBusyInSize(idx + 1)
       val arbiterInW = intWbBusyArbiter.io.in.slice(lw, rw)
@@ -584,6 +587,10 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val fromIntWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genIntWriteBackBundle)
 
   val fromVfWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genVfWriteBackBundle)
+
+  val fromIntExus = Flipped(intSchdParams.genExuOutputValidBundle)
+
+  val fromVfExus = Flipped(intSchdParams.genExuOutputValidBundle)
 
   val debugIntRat = Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))
   val debugFpRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))

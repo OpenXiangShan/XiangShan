@@ -31,6 +31,13 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     ibp.updateIdx(idx)
   }
 
+  println(params.iqWakeUpParams)
+
+  for ((exuCfg, i) <- params.allExuParams.zipWithIndex) {
+    exuCfg.updateIQWakeUpConfigs(params.iqWakeUpParams)
+    exuCfg.updateExuIdx(i)
+  }
+
   println("[Backend] ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs
@@ -82,6 +89,14 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
 
+  private val iqWakeUpMappedBundle: Map[String, ValidIO[Bundles.IssueQueueWakeUpBundle]] = (
+    intScheduler.io.toSchedulers.wakeupVec ++
+    vfScheduler.io.toSchedulers.wakeupVec ++
+    memScheduler.io.toSchedulers.wakeupVec
+  ).map(x => (x.bits.wakeupSource, x)).toMap
+
+  println(s"[Backend] iq wake up keys: ${iqWakeUpMappedBundle.keys}")
+
   wbFuBusyTable.io.in.intSchdBusyTable := intScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.vfSchdBusyTable := vfScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.memSchdBusyTable := memScheduler.io.wbFuBusyTable
@@ -116,6 +131,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
   intScheduler.io.fromDataPath := dataPath.io.toIntIQ
+  intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.wakeupSource) }
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -136,6 +152,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath := dataPath.io.toMemIQ
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
+  memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.wakeupSource) }
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -144,6 +161,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   vfScheduler.io.fromDataPath := dataPath.io.toVfIQ
+  vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.wakeupSource) }
 
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
