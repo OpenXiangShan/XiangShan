@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, WriteBackBundle}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WakeUpConfig
@@ -214,5 +214,9 @@ case class ExeUnitParams(
 
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {
     new ExuOutput(this)
+  }
+
+  def genExuBypassBundle(implicit p: Parameters): ExuBypassBundle = {
+    new ExuBypassBundle(this)
   }
 }

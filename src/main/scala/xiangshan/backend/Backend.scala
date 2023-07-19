@@ -10,11 +10,11 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.datapath.{DataPath, NewPipelineConnect, WbDataPath, WbFuBusyTable}
+import xiangshan.backend.datapath.{BypassNetwork, DataPath, NewPipelineConnect, WbDataPath, WbFuBusyTable}
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
-import xiangshan.backend.issue.{Scheduler, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.issue.{IntScheduler, MemScheduler, Scheduler, VfScheduler}
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -95,6 +95,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
+  private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
 
@@ -205,12 +206,23 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat := ctrlBlock.io.debug_vec_rat
   dataPath.io.debugVconfigRat := ctrlBlock.io.debug_vconfig_rat
 
+  bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
+  bypassNetwork.io.fromDataPath.vf  <> dataPath.io.toFpExu
+  bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
+  bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
+  bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
+  bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits.pdest := source.bits.uop.pdest
+    sink.bits.data := source.bits.data
+  }
+
   intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
-      NewPipelineConnect(dataPath.io.toIntExu(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
-        Mux(dataPath.io.toIntExu(i)(j).fire,
-          dataPath.io.toIntExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
+      NewPipelineConnect(bypassNetwork.io.toExus.int(i)(j), intExuBlock.io.in(i)(j), intExuBlock.io.in(i)(j).fire,
+        Mux(bypassNetwork.io.toExus.int(i)(j).fire,
+          bypassNetwork.io.toExus.int(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
           intExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
     }
   }
@@ -248,9 +260,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
     for (j <- 0 until vfExuBlock.io.in(i).size) {
-      NewPipelineConnect(dataPath.io.toFpExu(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
-        Mux(dataPath.io.toFpExu(i)(j).fire,
-          dataPath.io.toFpExu(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
+      NewPipelineConnect(bypassNetwork.io.toExus.vf(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
+        Mux(bypassNetwork.io.toExus.vf(i)(j).fire,
+          bypassNetwork.io.toExus.vf(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)))
     }
   }
@@ -281,8 +293,22 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   // to mem
+  private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)
+  for (i <- toMem.indices) {
+    for (j <- toMem(i).indices) {
+      NewPipelineConnect(
+        bypassNetwork.io.toExus.mem(i)(j), toMem(i)(j), toMem(i)(j).fire,
+        Mux(
+          bypassNetwork.io.toExus.mem(i)(j).fire,
+          bypassNetwork.io.toExus.mem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
+          toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
+        )
+      )
+    }
+  }
+
   io.mem.redirect := ctrlBlock.io.redirect
-  io.mem.issueUops.zip(dataPath.io.toMemExu.flatten).foreach { case (sink, source) =>
+  io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.iqIdx         := source.bits.iqIdx
