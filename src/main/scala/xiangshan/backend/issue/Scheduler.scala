@@ -10,7 +10,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, IssueQueueWakeUpBundle}
+import xiangshan.backend.Bundles.{DynInst, IssueQueueCancelBundle, IssueQueueIQWakeUpBundle, IssueQueueWBWakeUpBundle}
 
 sealed trait SchedulerType
 
@@ -60,15 +60,22 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPath: MixedVec[MixedVec[DecoupledIO[Bundles.IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
-  val fromDataPath: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
 
   val fromSchedulers = new Bundle {
-    val wakeupVec: MixedVec[ValidIO[IssueQueueWakeUpBundle]] = Flipped(params.genWakeUpInValidBundle)
+    val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
   }
 
   val toSchedulers = new Bundle {
-    val wakeupVec: MixedVec[ValidIO[IssueQueueWakeUpBundle]] = params.genWakeUpOutValidBundle
+    val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpOutValidBundle
   }
+
+  val fromDataPath = new Bundle {
+    val resp: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
+    val cancel: MixedVec[IssueQueueCancelBundle] = Input(MixedVec(params.genCancelBundle(cancelStages)))
+    // just be compatible to old code
+    def apply(i: Int)(j: Int) = resp(i)(j)
+  }
+
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
@@ -96,8 +103,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   val io = IO(new SchedulerIO())
 
   // alias
-  private val iqWakeUpInMap: Map[String, ValidIO[IssueQueueWakeUpBundle]] =
-    io.fromSchedulers.wakeupVec.map(x => (x.bits.wakeupSource, x)).toMap
+  private val iqWakeUpInMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
+    io.fromSchedulers.wakeupVec.map(x => (x.bits.exuIdx, x)).toMap
   private val schdType = params.schdType
   private val (numRfRead, numRfWrite) = params.numRfReadWrite.getOrElse((0, 0))
   private val numPregs = params.numPregs
@@ -150,7 +157,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     case None =>
   }
 
-  val wakeupFromWBVec = Wire(Vec(params.numWakeupFromWB, ValidIO(new IssueQueueWakeUpBundle(params.pregIdxWidth))))
+  val wakeupFromWBVec = Wire(params.genWBWakeUpSinkValidBundle)
   val writeback = params.schdType match {
     case IntScheduler() => io.intWriteBack
     case MemScheduler() => io.intWriteBack ++ io.vfWriteBack
@@ -168,29 +175,32 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   // Connect bundles having the same wakeup source
   issueQueues.foreach { iq =>
     iq.io.wakeupFromIQ.foreach { wakeUp =>
-      wakeUp := iqWakeUpInMap(wakeUp.bits.wakeupSource)
+      wakeUp := iqWakeUpInMap(wakeUp.bits.exuIdx)
     }
+    iq.io.cancelFromDataPath.map (sink => {
+      sink.cancelVec := io.fromDataPath.cancel.find(_.exuIdx == sink.exuIdx).get.cancelVec
+    })
   }
 
-  private val iqWakeUpOutMap: Map[String, ValidIO[IssueQueueWakeUpBundle]] =
+  private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
     issueQueues.flatMap(_.io.wakeupToIQ)
-      .map(x => (x.bits.wakeupSource, x))
+      .map(x => (x.bits.exuIdx, x))
       .toMap
 
   // Connect bundles having the same wakeup source
   io.toSchedulers.wakeupVec.foreach { wakeUp =>
-    wakeUp := iqWakeUpOutMap(wakeUp.bits.wakeupSource)
+    wakeUp := iqWakeUpOutMap(wakeUp.bits.exuIdx)
   }
 
   io.toDataPath.zipWithIndex.foreach { case (toDp, i) =>
     toDp <> issueQueues(i).io.deq
   }
 
-  println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(_.bits.wakeupSource)}")
+  println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
   println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
 
   println(s"[Scheduler] iqWakeUpOutKeys: ${iqWakeUpOutMap.keys}")
-  println(s"[Scheduler] io.toSchedulers.wakeupVec: ${io.toSchedulers.wakeupVec.map(_.bits.wakeupSource)}")
+  println(s"[Scheduler] io.toSchedulers.wakeupVec: ${io.toSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
 }
 
 class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)

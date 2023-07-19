@@ -185,6 +185,8 @@ case class IssueBlockParams(
 
   def numAllWakeUp: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
 
+  def hasIQWakeUp: Boolean = numWakeupFromIQ > 0
+
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   // cfgs(exuIdx)(set of exu's wb)
@@ -220,12 +222,28 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
   }
 
-  def genWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
+  def genWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
+      case IntScheduler() | MemScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    val vfBundle = schdType match {
+      case VfScheduler() | MemScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(intBundle ++ vfBundle)
   }
 
-  def genWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
+  def genIQWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueIQWakeUpBundle(x.exuIdx, backendParam))))
+  }
+
+  def genIQWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
+  }
+
+  def genCancelBundle(cancelStages: Seq[String]): MixedVec[IssueQueueCancelBundle] = {
+    MixedVec(backendParam.allExuParams.map(x => new IssueQueueCancelBundle(x.exuIdx, cancelStages)))
   }
 
   def genOGRespBundle(implicit p: Parameters) = {

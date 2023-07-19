@@ -7,6 +7,7 @@ import chisel3.util._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
@@ -209,44 +210,71 @@ object Bundles {
     var idx = 0
   }
 
-  class IssueQueueWakeUpBundle(pregIdxWidth: Int, wakeupSourceStr: String, val exuIdx: Int) extends Bundle with BundleSource {
+  /**
+    *
+    * @param pregIdxWidth index width of preg
+    * @param exuIndices exu indices of wakeup bundle
+    */
+  sealed abstract class IssueQueueWakeUpBaseBundle(pregIdxWidth: Int, val exuIndices: Seq[Int]) extends Bundle {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
     val pdest = UInt(pregIdxWidth.W)
 
-    this.wakeupSource = wakeupSourceStr
-
-    def this(pregIdxWidth: Int) = {
-      this(pregIdxWidth, "undefined", -1)
-    }
-
-    def this(wakeupSource: String, backendParam: BackendParams) = {
-      this(backendParam.pregParams.map(_.addrWidth).max, wakeupSource, backendParam.getExuIdx(wakeupSource))
-    }
-
     /**
       * @param successor Seq[(psrc, srcType)]
       * @return Seq[if wakeup psrc]
       */
-    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool): Seq[Bool]= {
+    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool): Seq[Bool] = {
       successor.map { case (thatPsrc, srcType) =>
         val pdestMatch = pdest === thatPsrc
         pdestMatch && (
           SrcType.isFp(srcType) && this.fpWen ||
-          SrcType.isXp(srcType) && this.rfWen ||
-          SrcType.isVp(srcType) && this.vecWen
-        ) && valid
+            SrcType.isXp(srcType) && this.rfWen ||
+            SrcType.isVp(srcType) && this.vecWen
+          ) && valid
       }
     }
 
-    def fromExuInput(exuInput: ExuInput): Unit = {
+    def hasOnlyOneSource: Boolean = exuIndices.size == 1
+
+    def hasMultiSources: Boolean = exuIndices.size > 1
+
+    def isWBWakeUp = this.isInstanceOf[IssueQueueWBWakeUpBundle]
+
+    def isIQWakeUp = this.isInstanceOf[IssueQueueIQWakeUpBundle]
+
+    def exuIdx: Int = {
+      require(hasOnlyOneSource)
+      this.exuIndices.head
+    }
+  }
+
+  class IssueQueueWBWakeUpBundle(exuIndices: Seq[Int], backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, exuIndices) {
+
+  }
+
+  class IssueQueueIQWakeUpBundle(exuIdx: Int, backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
+    val l2ExuVec: Vec[Bool] = ExuVec(backendParams.numExu)
+
+    def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
+      this.l2ExuVec := l2ExuVecs.reduce { (x: Vec[Bool], y: Vec[Bool]) => VecInit((x.asUInt | y.asUInt).asBools) }
+    }
+  }
 
-      this.wakeupSource = exuInput.params.name
+  /**
+    * This bundle is used to set srcState as NotReady.
+    * @param cancelSeq cancel stage seq
+    */
+  class IssueQueueCancelBundle(val exuIdx: Int, cancelSeq: Seq[String]) extends Bundle {
+    val cancelVec: Vec[Bool] = Vec(cancelSeq.size, Bool())
+
+    def apply(cancelStage: String): Bool = {
+      this.cancelVec(cancelSeq.indexOf(cancelStage.toUpperCase))
     }
   }
 
@@ -324,6 +352,7 @@ object Bundles {
     val jmp = if (exuParams.needPc) Some(Flipped(new IssueQueueJumpBundle)) else None
     val addrOH = UInt(iqParams.numEntries.W)
 
+    def exuIdx = exuParams.exuIdx
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntWbBusyBundle = common.rfWen.toSeq
     def getVfWbBusyBundle = common.getVfWen.toSeq
@@ -402,7 +431,25 @@ object Bundles {
     }) else None
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
-    val exuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuOH()))
+    val dataSources = Vec(params.numRegSrc, DataSource())
+    val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
+    val l2ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
+
+    def exuIdx = this.params.exuIdx
+
+    def needCancel(og0CancelVec: Vec[Bool], og1CancelVec: Vec[Bool]) : Bool = {
+      if (params.isIQWakeUpSink) {
+        require(
+          og0CancelVec.size == l1ExuVec.get.head.size && og1CancelVec.size == l2ExuVec.get.head.size,
+          s"cancelVecSize: {og0: ${og0CancelVec.size}, og1: ${og1CancelVec.size}}"
+        )
+        val l1Cancel: Bool = l1ExuVec.get.map { x: Vec[Bool] => (x.asUInt & og0CancelVec.asUInt).orR }.reduce(_ | _)
+        val l2Cancel: Bool = l2ExuVec.get.map { x: Vec[Bool] => (x.asUInt & og1CancelVec.asUInt).orR }.reduce(_ | _)
+        l1Cancel | l2Cancel
+      } else {
+        false.B
+      }
+    }
 
     def getVfWen = {
       if (params.writeFpRf) this.fpWen
@@ -419,6 +466,7 @@ object Bundles {
       this.pdest        := source.common.pdest
       this.isFirstIssue := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx        := source.common.iqIdx        // Only used by mem feedback
+      this.dataSources  := source.common.dataSources
       this.rfWen        .foreach(_ := source.common.rfWen.get)
       this.fpWen        .foreach(_ := source.common.fpWen.get)
       this.vecWen       .foreach(_ := source.common.vecWen.get)
@@ -433,7 +481,8 @@ object Bundles {
       this.predictInfo  .foreach(_ := source.common.predictInfo.get)
       this.lqIdx        .foreach(_ := source.common.lqIdx.get)
       this.sqIdx        .foreach(_ := source.common.sqIdx.get)
-      this.exuOH        .foreach(_ := source.common.exuOH.get)
+      this.l1ExuVec     .foreach(_ := source.common.l1ExuVec.get)
+      this.l2ExuVec     .foreach(_ := source.common.l2ExuVec.get)
     }
   }
 
@@ -559,7 +608,7 @@ object Bundles {
     def width = 4 // 0~15 // Todo: assosiate it with FuConfig
   }
 
-  object ExuOH {
+  object ExuVec {
     def apply(exuNum: Int): Vec[Bool] = Vec(exuNum, Bool())
 
     def apply()(implicit p: Parameters): Vec[Bool] = Vec(width, Bool())

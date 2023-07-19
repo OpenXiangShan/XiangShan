@@ -21,7 +21,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig.{DataConfig, FpData, FpRegSrcDataSet, IntData, IntRegSrcDataSet, VecData, VecRegSrcDataSet, VfRegSrcDataSet}
-import xiangshan.backend.Bundles.IssueQueueWakeUpBundle
 
 class RfReadPort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val addr = Input(UInt(addrWidth.W))
@@ -55,16 +54,6 @@ class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) exte
   def writeInt: Boolean = rfWriteDataCfg.isInstanceOf[IntData]
   def writeFp : Boolean = rfWriteDataCfg.isInstanceOf[FpData]
   def writeVec: Boolean = rfWriteDataCfg.isInstanceOf[VecData]
-
-  def toWakeUpBundle: ValidIO[IssueQueueWakeUpBundle] = {
-    val wakeup = Wire(ValidIO(new IssueQueueWakeUpBundle(addrWidth)))
-    wakeup.bits.pdest := this.addr
-    wakeup.bits.rfWen := this.intWen && this.wen
-    wakeup.bits.fpWen := this.fpWen && this.wen
-    wakeup.bits.vecWen := this.vecWen && this.wen
-    wakeup.valid := this.wen
-    wakeup
-  }
 }
 
 class Regfile
