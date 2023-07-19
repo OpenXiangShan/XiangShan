@@ -42,6 +42,7 @@ import system.SoCParamsKey
 import huancun._
 import huancun.debug._
 import coupledL2._
+import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
@@ -319,10 +320,10 @@ case class XSCoreParameters
         ExeUnitParams("BJU1", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(4, 1)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("IMISC0", Seq(I2fCfg, VSetRiWiCfg), Seq(VfWB(port = 3, Int.MaxValue), IntWB(port = 1, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+        ExeUnitParams("IMISC0", Seq(VSetRiWiCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("IMISC1", Seq(VSetRiWvfCfg), Seq(VfWB(port = 3, Int.MaxValue)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+        ExeUnitParams("IMISC1", Seq(I2fCfg, VSetRiWvfCfg), Seq(VfWB(port = 3, Int.MaxValue)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
     ),
       numPregs = intPreg.numEntries,
@@ -396,14 +397,43 @@ case class XSCoreParameters
     )
   }
 
-  def backendParams: BackendParams = backend.BackendParams(Map(
-    IntScheduler() -> intSchdParams,
-    VfScheduler() -> vfSchdParams,
-    MemScheduler() -> memSchdParams,
-  ), Seq(
-    intPreg,
-    vfPreg,
-  ))
+  def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
+
+  def iqWakeUpParams = {
+    Seq(
+      WakeUpConfig("IEX0" -> "IEX0"),
+      WakeUpConfig("IEX0" -> "IEX1"),
+      WakeUpConfig("IEX1" -> "IEX0"),
+      WakeUpConfig("IEX1" -> "IEX1"),
+      WakeUpConfig("IEX0" -> "BJU0"),
+      WakeUpConfig("IEX0" -> "BJU1"),
+      WakeUpConfig("IEX1" -> "BJU0"),
+      WakeUpConfig("IEX1" -> "BJU1"),
+      WakeUpConfig("IEX0" -> "LDU0"),
+      WakeUpConfig("IEX0" -> "LDU1"),
+      WakeUpConfig("IEX1" -> "LDU0"),
+      WakeUpConfig("IEX1" -> "LDU1"),
+      WakeUpConfig("IEX0" -> "STA0"),
+      WakeUpConfig("IEX0" -> "STA1"),
+      WakeUpConfig("IEX1" -> "STA0"),
+      WakeUpConfig("IEX1" -> "STA1"),
+      WakeUpConfig("IMISC1" -> "VEX0"),
+      WakeUpConfig("IMISC1" -> "VEX1"),
+    )
+  }
+
+  def backendParams: BackendParams = backend.BackendParams(
+    Map(
+      IntScheduler() -> intSchdParams,
+      VfScheduler() -> vfSchdParams,
+      MemScheduler() -> memSchdParams,
+    ),
+    Seq(
+      intPreg,
+      vfPreg,
+    ),
+    iqWakeUpParams,
+  )
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]

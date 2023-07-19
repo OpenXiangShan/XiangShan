@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.WbArbiterParams
+import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.exu.ExeUnitParams
@@ -32,6 +32,7 @@ import xiangshan.backend.regfile._
 case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
+  iqWakeUpParams : Seq[WakeUpConfig],
 ) {
 
   configChecks

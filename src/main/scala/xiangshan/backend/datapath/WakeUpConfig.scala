@@ -1,17 +1,48 @@
 package xiangshan.backend.datapath
 
+import chipsalliance.rocketchip.config.Parameters
+import chisel3._
+import chisel3.util._
+import xiangshan.backend.Bundles.IssueQueueWakeUpBundle
 import xiangshan.backend.exu.ExeUnitParams
 
-case class WakeUpConfig (source: String, sink: String) {
-  def getSourceExuParam(exus: Seq[ExeUnitParams]) : ExeUnitParams = {
-    val sourceExus = exus.filter(_.name == source)
-    require(sourceExus.size == 1)
-    sourceExus.head
+import scala.language.higherKinds
+
+trait WakeUpPoint {
+  val name: String
+
+  def getExuParam(exus: Seq[ExeUnitParams]) : ExeUnitParams = {
+    val filteredExus = exus.filter(_.name == this.name)
+    require(filteredExus.isEmpty, s"No exu named $name")
+    require(filteredExus.size > 1, s"Exu $name should be unique")
+    filteredExus.head
+  }
+}
+
+class WakeUpSource(val name: String) extends WakeUpPoint {
+  def genIQWakeUpValidBundle(implicit p: Parameters): ValidIO[IssueQueueWakeUpBundle] = {
+    ValidIO(new IssueQueueWakeUpBundle(name))
+  }
+}
+
+class WakeUpSink(val name: String) extends WakeUpPoint
+
+class WakeUpConfig (val source: WakeUpSource, val sink: WakeUpSink) {
+  def this(pair: (String, String)) = {
+    this(new WakeUpSource(pair._1), new WakeUpSink(pair._2))
   }
 
-  def getSinkExuParam(exus: Seq[ExeUnitParams]) : ExeUnitParams = {
-    val sinkExus = exus.filter(_.name == sink)
-    require(sinkExus.size == 1)
-    sinkExus.head
+  def this(source: String, sink: String) = {
+    this(new WakeUpSource(source), new WakeUpSink(sink))
   }
+
+  override def toString: String = {
+    s"WakeUp(${source.name}->${sink.name})"
+  }
+}
+
+object WakeUpConfig {
+  def apply(source: String, sink: String): WakeUpConfig = new WakeUpConfig(source, sink)
+
+  def apply(pair: (String, String)): WakeUpConfig = new WakeUpConfig(pair)
 }
