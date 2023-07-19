@@ -14,7 +14,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     val in = Vec(RenameWidth, Flipped(Valid(new DecodedInst)))
     val out = new Bundle(){
       val needRobFlags = Vec(RenameWidth, Output(Bool()))
-      val instrSizes = Vec(RenameWidth, Output(UInt(log2Up(MaxCompressWidth).W)))
+      val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(MaxCompressWidth + 1).W)))
     }
   })
   val enqHasExc = io.in.map(uop => !uop.bits.exceptionVec.asUInt.orR)
@@ -57,7 +57,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
 
   def X = BitPat("b0")
 
-  val default = List(X, X, X, X, X, X, X)
+  val default = List.fill(RenameWidth + 1)(X)
   val decoder = DecodeLogic(VecInit(canCompress).asUInt, default, compressTable)
   val needRobFlags = Wire(UInt(RenameWidth.W))
   (valueBitPat +: uopSizeBitPats).zip(decoder).foreach {

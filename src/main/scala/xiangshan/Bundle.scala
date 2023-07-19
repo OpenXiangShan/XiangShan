@@ -254,7 +254,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
-  val instrSize = UInt(log2Up(MaxCompressWidth).W)
+  val instrSize = UInt(log2Ceil(MaxCompressWidth + 1).W)
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
@@ -385,7 +385,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val instrSize = UInt(log2Up(MaxCompressWidth).W)
+  val instrSize = UInt(log2Ceil(MaxCompressWidth + 1).W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {

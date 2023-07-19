@@ -63,31 +63,31 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // decoded
-    val srcType       = Vec(numSrc, SrcType())
-    val lsrc          = Vec(numSrc, UInt(6.W))
-    val ldest         = UInt(6.W)
-    val fuType        = FuType()
-    val fuOpType      = FuOpType()
-    val rfWen         = Bool()
-    val fpWen         = Bool()
-    val vecWen        = Bool()
-    val isXSTrap      = Bool()
-    val waitForward   = Bool() // no speculate execution
-    val blockBackward = Bool()
-    val flushPipe     = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+    val srcType         = Vec(numSrc, SrcType())
+    val lsrc            = Vec(numSrc, UInt(6.W))
+    val ldest           = UInt(6.W)
+    val fuType          = FuType()
+    val fuOpType        = FuOpType()
+    val rfWen           = Bool()
+    val fpWen           = Bool()
+    val vecWen          = Bool()
+    val isXSTrap        = Bool()
+    val waitForward     = Bool() // no speculate execution
+    val blockBackward   = Bool()
+    val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val noExecException = Bool()
-    val selImm        = SelImm()
-    val imm           = UInt(ImmUnion.maxLen.W)
-    val fpu           = new FPUCtrlSignals
-    val vpu           = new VPUCtrlSignals
-    val isMove        = Bool()
-    val uopIdx        = UInt(5.W)
-    val uopSplitType  = UopSplitType()
-    val isVset        = Bool()
-    val firstUop      = Bool()
-    val lastUop       = Bool()
-    val numUops       = UInt(log2Up(MaxUopSize).W) // rob need this
-    val commitType    = CommitType() // Todo: remove it
+    val selImm          = SelImm()
+    val imm             = UInt(ImmUnion.maxLen.W)
+    val fpu             = new FPUCtrlSignals
+    val vpu             = new VPUCtrlSignals
+    val isMove          = Bool()
+    val uopIdx          = UInt(5.W)
+    val uopSplitType    = UopSplitType()
+    val isVset          = Bool()
+    val firstUop        = Bool()
+    val lastUop         = Bool()
+    val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
+    val commitType      = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, noExecException, uopSplitType, selImm)
@@ -159,7 +159,7 @@ object Bundles {
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
-    val instrSize       = UInt(log2Up(MaxCompressWidth).W)
+    val instrSize       = UInt(log2Ceil(MaxCompressWidth + 1).W)
 
     val eliminatedMove  = Bool()
     val debugInfo       = new PerfDebugInfo

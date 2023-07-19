@@ -61,6 +61,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         DecodeWidth = 2,
         RenameWidth = 2,
         CommitWidth = 2,
+        MaxCompressWidth = 2,
         FetchWidth = 4,
         NRPhyRegs = 96,
         IntPhyRegs = 96,
