@@ -1,15 +1,15 @@
 package xiangshan.backend.issue
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
 import chisel3._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, IssueQueueWakeUpBundle, OGRespBundle, WbConflictBundle, WbFuBusyTableReadBundle, WbFuBusyTableWriteBundle}
-import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
-import xiangshan.backend.datapath.WbConfig.WbConfig
-import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.{FuConfig, FuType}
+import chisel3.util._
 import utils.SeqUtils
 import xiangshan.backend.BackendParams
+import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.WbConfig.WbConfig
+import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
+import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu.{FuConfig, FuType}
 
 case class IssueBlockParams(
   // top down
@@ -210,6 +210,10 @@ case class IssueBlockParams(
 
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
     MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuOutputBundle)))
+  }
+
+  def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {
+    MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuBypassBundle)))
   }
 
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {

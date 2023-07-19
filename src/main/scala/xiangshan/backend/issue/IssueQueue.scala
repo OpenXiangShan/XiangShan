@@ -406,19 +406,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.pdest := payloadArrayRdata(i).pdest
     deq.bits.common.robIdx := payloadArrayRdata(i).robIdx
     deq.bits.common.imm := immArrayRdataVec(i)
+    deq.bits.common.exuOH.foreach(x => x := 0.U.asTypeOf(x))
+    if (finalWakeUpIQOH.nonEmpty) {
+      for ((iqWakeUp: Vec[Bool], srcIdx) <- finalWakeUpIQOH.get(i).zipWithIndex) {
+        for (iqWakeUpIdx <- io.wakeupFromIQ.indices) {
+          deq.bits.common.exuOH.get(srcIdx)(io.wakeupFromIQ(iqWakeUpIdx).bits.exuIdx) := iqWakeUp(iqWakeUpIdx)
+        }
+      }
+    }
+
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>
       rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
     }
     deq.bits.rf.zip(payloadArrayRdata(i).srcType).foreach { case (rf, srcType) =>
       rf.foreach(_.srcType := srcType) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
-    }
-    deq.bits.bypass.exuOH.foreach(x => x := 0.U.asTypeOf(x))
-    if (finalWakeUpIQOH.nonEmpty) {
-      for ((iqWakeUp: Vec[Bool], srcIdx) <- finalWakeUpIQOH.get(i).zipWithIndex) {
-        for (iqWakeUpIdx <- io.wakeupFromIQ.indices) {
-          deq.bits.bypass.exuOH(srcIdx)(io.wakeupFromIQ(iqWakeUpIdx).bits.exuIdx) := iqWakeUp(iqWakeUpIdx)
-        }
-      }
     }
     deq.bits.srcType.zip(payloadArrayRdata(i).srcType).foreach { case (sink, source) =>
       sink := source

@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import utils.SeqUtils
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueWakeUpBundle}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, IssueQueueWakeUpBundle}
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.WbConfig
 
@@ -121,6 +121,10 @@ case class SchdBlockParams(
 
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputValidBundle))
+  }
+
+  def genExuBypassValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuBypassValidBundle))
   }
 
   def wakeUpInExuSources: Seq[WakeUpSource] = {
