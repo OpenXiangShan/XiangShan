@@ -645,4 +645,7 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
+
+  // source stages of cancel signal to issue queues
+  val cancelStages = Seq("IS", "OG0", "OG1")
 }

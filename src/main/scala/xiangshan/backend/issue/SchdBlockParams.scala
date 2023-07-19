@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util._
 import utils.SeqUtils
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, IssueQueueWakeUpBundle}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, IssueQueueCancelBundle, IssueQueueIQWakeUpBundle, IssueQueueWBWakeUpBundle}
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.WbConfig
 
@@ -67,7 +67,7 @@ case class SchdBlockParams(
 
   def VstuCnt: Int = issueBlockParams.map(_.VstuCnt).sum
 
-  def numExu: Int = issueBlockParams.map(_.exuBlockParams.count(!_.hasStdFu)).sum
+  def numExu: Int = issueBlockParams.map(_.exuBlockParams.size).sum
 
   def hasCSR = CsrCnt > 0
 
@@ -141,12 +141,28 @@ case class SchdBlockParams(
     )(_.name)
   }
 
-  def genWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
+  def genIQWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
   }
 
-  def genWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWakeUpBundle]] = {
-    MixedVec(this.wakeUpOutExuSources.map(x => ValidIO(new IssueQueueWakeUpBundle(x.name, backendParam))))
+  def genIQWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(this.wakeUpOutExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
+  }
+
+  def genCancelBundle(cancelStages: Seq[String]): MixedVec[IssueQueueCancelBundle] = {
+    MixedVec(backendParam.allExuParams.map(x => new IssueQueueCancelBundle(x.exuIdx, cancelStages)))
+  }
+
+  def genWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
+      case IntScheduler() | MemScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    val vfBundle = schdType match {
+      case VfScheduler() | MemScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(intBundle ++ vfBundle)
   }
 
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)

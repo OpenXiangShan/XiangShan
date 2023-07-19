@@ -19,6 +19,7 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import utils.MapUtils
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
@@ -51,6 +52,7 @@ case class BackendParams(
 
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
+  def pregIdxWidth = pregParams.map(_.addrWidth).max
 
   def numSrc      : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
   def numRegSrc   : Int = allSchdParams.map(_.issueBlockParams.map(_.numRegSrc).max).max
@@ -115,6 +117,11 @@ case class BackendParams(
       exuParams.find(_.name == name).get.exuIdx
     else
       -1
+  }
+
+  def getExuName(idx: Int): String = {
+    val exuParams = allExuParams
+    exuParams(idx).name
   }
 
   def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)

@@ -6,7 +6,7 @@ import chisel3.util._
 import utility.ZeroExt
 import xiangshan.XSBundle
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuVec, ExuOutput}
 import xiangshan.backend.issue.{IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 
@@ -61,14 +61,18 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
   private val toExus: Seq[DecoupledIO[ExuInput]] = (io.toExus.int ++ io.toExus.vf ++ io.toExus.mem).flatten
 
   // (exuIdx, srcIdx, bypassExuIdx)
-  private val bypassVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
-    fromDPs.map(x => x.bits.exuOH.getOrElse(
-      VecInit(Seq.fill(x.bits.params.numRegSrc)(VecInit(Seq.fill(ExuOH.width)(false.B))))
+  private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
+    fromDPs.map(x => x.bits.l1ExuVec.getOrElse(
+      VecInit(Seq.fill(x.bits.params.numRegSrc)(VecInit(Seq.fill(ExuVec.width)(false.B))))
     ))
   )
 
-  private val bypassDataVec: Vec[UInt] = VecInit(
-     fromExus.map(x => ZeroExt(x.bits.data, RegDataMaxWidth))
+  private val forwardDataVec: Vec[UInt] = VecInit(
+    fromExus.map(x => ZeroExt(x.bits.data, RegDataMaxWidth))
+  )
+
+  private val bypassDataVec = VecInit(
+    fromExus.map(x => ZeroExt(RegEnable(x.bits.data, x.valid), RegDataMaxWidth))
   )
 
   toExus.zip(fromDPs).foreach { case (sink, source) =>
@@ -77,10 +81,13 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
 
   toExus.zipWithIndex.foreach { case (exuInput, exuIdx) =>
     exuInput.bits.src.zipWithIndex.foreach { case (src, srcIdx) =>
-      when (bypassVec3(exuIdx)(srcIdx).asUInt.orR) {
-        src := Mux1H(bypassVec3(exuIdx)(srcIdx), bypassDataVec)
+      when (exuInput.bits.dataSources(srcIdx).readForward) {
+        src := Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec)
+      }.elsewhen (exuInput.bits.dataSources(srcIdx).readBypass) {
+        src := Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec)
+      }.otherwise {
+        src := fromDPs(exuIdx).bits.src(srcIdx)
       }
-      // otherwise has been assigned
     }
   }
 }
