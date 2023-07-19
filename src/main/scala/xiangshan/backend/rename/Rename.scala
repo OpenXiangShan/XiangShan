@@ -119,6 +119,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val needRobFlags = compressUnit.io.out.needRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
+  val compressMasksVec = compressUnit.io.out.masks
 
   // speculatively assign the instruction with an robIdx
   val validCount = PopCount(io.in.zip(needRobFlags).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
@@ -136,7 +137,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val uops = Wire(Vec(RenameWidth, new DynInst))
   uops.foreach( uop => {
     uop.srcState      := DontCare
-    uop.robIdx        := DontCare
     uop.debugInfo     := DontCare
     uop.lqIdx         := DontCare
     uop.sqIdx         := DontCare
@@ -200,17 +200,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)
+    when(isMove(i)) {
+      uops(i).numUops := 0.U
+    }
     if (i > 0) {
       when(!needRobFlags(i - 1)) {
         uops(i).firstUop := false.B
         uops(i).ftqPtr := uops(i - 1).ftqPtr
         uops(i).ftqOffset := uops(i - 1).ftqOffset
-        uops(i).numUops := instrSizesVec(i)
+        uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numUops := instrSizesVec(i)
+      uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
     }
 
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))

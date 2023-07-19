@@ -15,6 +15,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     val out = new Bundle(){
       val needRobFlags = Vec(RenameWidth, Output(Bool()))
       val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(MaxCompressWidth + 1).W)))
+      val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
     }
   })
   val enqHasExc = io.in.map(uop => !uop.bits.exceptionVec.asUInt.orR)
@@ -46,21 +47,31 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
           uopSizesPre.zip(value).drop(idx).filter(x => x._2 == 1).map(_._1).head
       }
 
+      var mask = Seq.fill(RenameWidth)(Seq.fill(RenameWidth)(0))
+      var i = 0
+      while (i < RenameWidth) {
+        for (j <- i until i + uopSizes(i)) {
+          mask = mask.updated(j, Seq.fill(i)(0) ++ Seq.fill(uopSizes(i))(1) ++ Seq.fill(RenameWidth - i - uopSizes(i))(0))
+        }
+        i += uopSizes(i)
+      }
+
       println("[Rename.Compress] i: " + keyCandidate + " key: " + key + " value: " + value + " uopSizes: " + uopSizes + " mask: " + mask.map(_.map(_.toBinaryString).reduce(_ + _)))
 
       val keyBitPat = BitPat("b" + keyCandidate.toBinaryString)
       val valueBitPat = BitPat("b" + value.map(_.toBinaryString).reverse.reduce(_ + _))
       val uopSizeBitPats = uopSizes.map(x => BitPat("b" + x.toBinaryString))
+      val maskBitPats = mask.map(m => BitPat("b" + m.map(_.toBinaryString).reverse.reduce(_ + _)))
 
-      (keyBitPat -> (valueBitPat +: uopSizeBitPats))
+      (keyBitPat -> ((valueBitPat +: uopSizeBitPats) ++ maskBitPats))
   }
 
   def X = BitPat("b0")
 
-  val default = List.fill(RenameWidth + 1)(X)
+  val default = List.fill(2 * RenameWidth + 1)(X)
   val decoder = DecodeLogic(VecInit(canCompress).asUInt, default, compressTable)
   val needRobFlags = Wire(UInt(RenameWidth.W))
-  (valueBitPat +: uopSizeBitPats).zip(decoder).foreach {
+  ((needRobFlags +: io.out.instrSizes) ++ io.out.masks).zip(decoder).foreach {
     case (sink, source) =>
       sink := source
   }
