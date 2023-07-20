@@ -5,12 +5,11 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
-import xiangshan.backend.Bundles
+import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, ExuVec, IssueQueueCancelBundle, IssueQueueIQWakeUpBundle, IssueQueueWBWakeUpBundle}
 
 sealed trait SchedulerType
 
@@ -64,7 +63,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bun
     new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
   val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
-  val toDataPath: MixedVec[MixedVec[DecoupledIO[Bundles.IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
+  val toDataPath: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
   val fromSchedulers = new Bundle {
     val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
@@ -75,7 +74,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bun
   }
 
   val fromDataPath = new Bundle {
-    val resp: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
+    val resp: MixedVec[MixedVec[OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
     val og0Cancel = Input(ExuVec(backendParams.numExu))
     // Todo: remove this after no cancel signal from og1
     val og1Cancel = Input(ExuVec(backendParams.numExu))
