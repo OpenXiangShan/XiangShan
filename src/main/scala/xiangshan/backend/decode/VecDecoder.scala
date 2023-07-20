@@ -394,27 +394,27 @@ object VecDecoder extends DecodeConstants {
     VFWSUB_WV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfwsub_w, F, T, F, UopSplitType.VEC_WVW),
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
-    VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F),
+    VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F, UopSplitType.VEC_VVV),
     VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv , F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
-    VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F),
+    VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F, UopSplitType.VEC_VVW),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmacc , F, T, F),
-    VFNMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc, F, T, F),
-    VFMSAC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsac , F, T, F),
-    VFNMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac, F, T, F),
-    VFMADD_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmadd , F, T, F),
-    VFNMADD_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmadd, F, T, F),
-    VFMSUB_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsub , F, T, F),
-    VFNMSUB_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsub, F, T, F),
+    VFMACC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmacc , F, T, F, UopSplitType.VEC_VVV),
+    VFNMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc, F, T, F, UopSplitType.VEC_VVV),
+    VFMSAC_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsac , F, T, F, UopSplitType.VEC_VVV),
+    VFNMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac, F, T, F, UopSplitType.VEC_VVV),
+    VFMADD_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmadd , F, T, F, UopSplitType.VEC_VVV),
+    VFNMADD_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmadd, F, T, F, UopSplitType.VEC_VVV),
+    VFMSUB_VV          -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsub , F, T, F, UopSplitType.VEC_VVV),
+    VFNMSUB_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsub, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.7. Vector Widening Floating-Point Fused Multiply-Add Instructions
-    VFWMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmacc_w , F, T, F),
-    VFWNMACC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc_w, F, T, F),
-    VFWMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsac_w , F, T, F),
-    VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F),
+    VFWMACC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmacc_w , F, T, F, UopSplitType.VEC_VVW),
+    VFWNMACC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc_w, F, T, F, UopSplitType.VEC_VVW),
+    VFWMSAC_VV         -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmsac_w , F, T, F, UopSplitType.VEC_VVW),
+    VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F, UopSplitType.VEC_VVW),
 
     // 13.8. Vector Floating-Point Square-Root Instruction
     VFSQRT_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfdiv, VfdivType.vfsqrt, F, T, F),
@@ -498,28 +498,28 @@ object VecDecoder extends DecodeConstants {
     VFWSUB_WF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfwsub_w, F, T, F, UopSplitType.VEC_WFW),
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
-    VFMUL_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F),
+    VFMUL_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F, UopSplitType.VEC_VFV),
     VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F),
     VFRDIV_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F),
 
     // 13.5. Vector Widening Floating-Point Multiply
-    VFWMUL_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F),
+    VFWMUL_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F, UopSplitType.VEC_VFW),
 
     // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
-    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmacc , F, T, F),
-    VFNMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc, F, T, F),
-    VFMSAC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsac , F, T, F),
-    VFNMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac, F, T, F),
-    VFMADD_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmadd , F, T, F),
-    VFNMADD_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmadd, F, T, F),
-    VFMSUB_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsub , F, T, F),
-    VFNMSUB_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsub, F, T, F),
+    VFMACC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmacc , F, T, F, UopSplitType.VEC_VFV),
+    VFNMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc, F, T, F, UopSplitType.VEC_VFV),
+    VFMSAC_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsac , F, T, F, UopSplitType.VEC_VFV),
+    VFNMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac, F, T, F, UopSplitType.VEC_VFV),
+    VFMADD_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmadd , F, T, F, UopSplitType.VEC_VFV),
+    VFNMADD_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmadd, F, T, F, UopSplitType.VEC_VFV),
+    VFMSUB_VF          -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsub , F, T, F, UopSplitType.VEC_VFV),
+    VFNMSUB_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsub, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.7. Vector Widening Floating-Point Fused Multiply-Add Instructions
-    VFWMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmacc_w , F, T, F),
-    VFWNMACC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc_w, F, T, F),
-    VFWMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsac_w , F, T, F),
-    VFWNMSAC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F),
+    VFWMACC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmacc_w , F, T, F, UopSplitType.VEC_VFW),
+    VFWNMACC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmacc_w, F, T, F, UopSplitType.VEC_VFW),
+    VFWMSAC_VF         -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfmsac_w , F, T, F, UopSplitType.VEC_VFW),
+    VFWNMSAC_VF        -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F, UopSplitType.VEC_VFW),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
     VFMIN_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.VEC_VFV),
