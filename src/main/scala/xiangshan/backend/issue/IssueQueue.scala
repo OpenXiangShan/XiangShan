@@ -143,12 +143,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqOH.map(oh => Mux1H(oh, dataSources)))
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = statusArray.io.srcWakeUpL1ExuOH
-  val wakeUpL2ExuVec: Option[Vec[Vec[Vec[Bool]]]] = statusArray.io.srcWakeUpL2ExuVec
   val srcTimer: Option[Vec[Vec[UInt]]] = statusArray.io.srcTimer
 
   // (deqIdx)(srcIdx)(exuIdx)
   val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
-  val finalWakeUpL2ExuVec: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL2ExuVec.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
   val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
 
   val wakeupEnqSrcStateBypass = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
@@ -184,10 +182,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.data.blocked     := false.B
       enq.bits.data.dataSources.foreach(_.value := DataSource.reg)
       enq.bits.data.srcWakeUpL1ExuOH match {
-        case Some(value) => value := 0.U.asTypeOf(value)
-        case None =>
-      }
-      enq.bits.data.srcWakeUpL2ExuVec match {
         case Some(value) => value := 0.U.asTypeOf(value)
         case None =>
       }
@@ -443,7 +437,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         )
     }
     deq.bits.common.l1ExuVec.foreach(_ := finalWakeUpL1ExuOH.get(i))
-    deq.bits.common.l2ExuVec.foreach(_ := finalWakeUpL2ExuVec.get(i))
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
 
     deq.bits.rf.zip(payloadArrayRdata(i).psrc).foreach { case (rf, psrc) =>

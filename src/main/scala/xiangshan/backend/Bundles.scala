@@ -255,14 +255,11 @@ object Bundles {
   }
 
   class IssueQueueIQWakeUpBundle(exuIdx: Int, backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
-    val l2ExuVec: Vec[Bool] = ExuVec(backendParams.numExu)
-
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
-      this.l2ExuVec := l2ExuVecs.reduce { (x: Vec[Bool], y: Vec[Bool]) => VecInit((x.asUInt | y.asUInt).asBools) }
     }
 
     def fromExuInput(exuInput: ExuInput): Unit = {
@@ -270,7 +267,6 @@ object Bundles {
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
-      this.l2ExuVec.foreach(_ := false.B)
     }
   }
 
@@ -441,7 +437,6 @@ object Bundles {
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
-    val l2ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
 
     def exuIdx = this.params.exuIdx
@@ -449,19 +444,14 @@ object Bundles {
     def needCancel(og0CancelVec: Vec[Bool], og1CancelVec: Vec[Bool]) : Bool = {
       if (params.isIQWakeUpSink) {
         require(
-          og0CancelVec.size == l1ExuVec.get.head.size && og1CancelVec.size == l2ExuVec.get.head.size,
+          og0CancelVec.size == l1ExuVec.get.head.size,
           s"cancelVecSize: {og0: ${og0CancelVec.size}, og1: ${og1CancelVec.size}}"
         )
         val l1Cancel: Bool = l1ExuVec.get.zip(srcTimer.get).map {
           case(exuOH: Vec[Bool], srcTimer: UInt) =>
             (exuOH.asUInt & og0CancelVec.asUInt).orR && srcTimer === 1.U
         }.reduce(_ | _)
-        // Todo: remove this
-        val l2Cancel: Bool = l2ExuVec.get.zip(srcTimer.get).map {
-          case(exuOH: Vec[Bool], srcTimer: UInt) =>
-            (exuOH.asUInt & og1CancelVec.asUInt).orR && srcTimer === 2.U
-        }.reduce(_ | _)
-        l1Cancel | l2Cancel
+        l1Cancel
       } else {
         false.B
       }
@@ -498,7 +488,6 @@ object Bundles {
       this.lqIdx        .foreach(_ := source.common.lqIdx.get)
       this.sqIdx        .foreach(_ := source.common.sqIdx.get)
       this.l1ExuVec     .foreach(_ := source.common.l1ExuVec.get)
-      this.l2ExuVec     .foreach(_ := source.common.l2ExuVec.get)
       this.srcTimer     .foreach(_ := source.common.srcTimer.get)
     }
   }
