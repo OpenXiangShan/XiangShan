@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.SnapshotGenerator
 import utils._
 import utility._
 
@@ -40,6 +41,8 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
 
     val commit = Input(new RobCommitIO)
 
+    val snpt = Input(new SnapshotPort)
+
     val debug_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
@@ -53,4 +56,28 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
       ptr
     }
   }
+
+  val lastCycleRedirect = RegNext(io.redirect, false.B)
+  val lastCycleSnpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
+
+  val headPtr = RegInit(FreeListPtr(false, 0))
+  val headPtrOH = RegInit(1.U(size.W))
+  val archHeadPtr = RegInit(FreeListPtr(false, 0))
+  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
+  val headPtrOHShift = CircularShift(headPtrOH)
+  // may shift [0, RenameWidth] steps
+  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
+
+  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
+
+  val redirectedHeadPtr = Mux(
+    lastCycleSnpt.useSnpt,
+    snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq),
+    archHeadPtr + PopCount(io.walkReq)
+  )
+  val redirectedHeadPtrOH = Mux(
+    lastCycleSnpt.useSnpt,
+    (snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq)).toOH,
+    (archHeadPtr + PopCount(io.walkReq)).toOH
+  )
 }

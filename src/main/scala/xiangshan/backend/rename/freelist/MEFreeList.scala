@@ -29,21 +29,12 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
     Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
 
-  // head and tail pointer
-  val headPtr = RegInit(FreeListPtr(false, 0))
-  val headPtrOH = RegInit(1.U(size.W))
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val headPtrOHShift = CircularShift(headPtrOH)
-  // may shift [0, RenameWidth] steps
-  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
   val tailPtr = RegInit(FreeListPtr(false, size - 1))
-  val archHeadPtr = RegInit(FreeListPtr(false, 0))
 
   val doWalkRename = io.walk && io.doAllocate && !io.redirect
   val doNormalRename = io.canAllocate && io.doAllocate && !io.redirect
   val doRename = doWalkRename || doNormalRename
   val doCommit = io.commit.isCommit
-  val lastCycleRedirect = RegNext(io.redirect, false.B)
 
   /**
     * Allocation: from freelist (same as StdFreelist)
@@ -64,8 +55,8 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
 
   // update head pointer
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
-  val headPtrNew   = Mux(lastCycleRedirect, archHeadPtr + PopCount(io.walkReq), headPtr + numAllocate)
-  val headPtrOHNew = Mux(lastCycleRedirect, (archHeadPtr + PopCount(io.walkReq)).toOH, headPtrOHVec(numAllocate))
+  val headPtrNew   = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
+  val headPtrOHNew = Mux(lastCycleRedirect, redirectedHeadPtrOH, headPtrOHVec(numAllocate))
   val headPtrNext   = Mux(doRename, headPtrNew, headPtr)
   val headPtrOHNext = Mux(doRename, headPtrOHNew, headPtrOH)
   headPtr   := headPtrNext

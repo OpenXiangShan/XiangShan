@@ -234,6 +234,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
+  val snapshot = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
     val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
@@ -392,9 +393,17 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val walkValid = Vec(CommitWidth, Bool())
 
   val info = Vec(CommitWidth, new RobCommitInfo)
+  val robIdx = Vec(CommitWidth, new RobPtr)
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class SnapshotPort(implicit p: Parameters) extends XSBundle {
+  val snptEnq = Bool()
+  val snptDeq = Bool()
+  val useSnpt = Bool()
+  val snptSelect = UInt(log2Ceil(RenameSnapshotNum).W)
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
