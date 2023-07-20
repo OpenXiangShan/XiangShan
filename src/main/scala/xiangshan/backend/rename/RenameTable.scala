@@ -23,7 +23,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utils.XSError
 import xiangshan._
-import xiangshan.backend.SnapshotGen
+import xiangshan.backend.SnapshotGenerator
 
 class RatReadPort(implicit p: Parameters) extends XSBundle {
   val hold = Input(Bool())
@@ -72,7 +72,7 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule with 
 
   val t1_snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
-  val snapshots = SnapshotGen(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect)
+  val snapshots = SnapshotGenerator(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect)
 
   // WRITE: when instruction commits or walking
   val t1_wSpec_addr = t1_wSpec.map(w => Mux(w.wen, UIntToOH(w.addr), 0.U))

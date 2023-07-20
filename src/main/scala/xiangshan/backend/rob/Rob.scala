@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.SnapshotGen
+import xiangshan.backend.SnapshotGenerator
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LsqEnqIO, LqPtr}
@@ -481,7 +481,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
   val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
-  val snapshots = SnapshotGen(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
+  val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
 
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue

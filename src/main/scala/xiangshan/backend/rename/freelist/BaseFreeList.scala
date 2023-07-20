@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.SnapshotGen
+import xiangshan.backend.SnapshotGenerator
 import utils._
 import utility._
 
@@ -68,7 +68,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
 
-  val snapshots = SnapshotGen(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
+  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
 
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,

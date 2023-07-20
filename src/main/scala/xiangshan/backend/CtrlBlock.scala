@@ -44,28 +44,57 @@ class SnapshotPtr(implicit p: Parameters) extends CircularQueuePtr[SnapshotPtr](
   p => p(XSCoreParamsKey).RenameSnapshotNum
 )
 
-object SnapshotGen extends HasCircularQueuePtrHelper {
+object SnapshotGenerator extends HasCircularQueuePtrHelper {
   def apply[T <: Data](enqData: T, enq: Bool, deq: Bool, flush: Bool)(implicit p: Parameters): Vec[T] = {
-    val snapshots = Reg(Vec(p(XSCoreParamsKey).RenameSnapshotNum, chiselTypeOf(enqData)))
-    val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-    val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-    val snptValids = RegInit(VecInit.fill(p(XSCoreParamsKey).RenameSnapshotNum)(false.B))
-    when(!isFull(snptEnqPtr, snptDeqPtr) && enq) {
-      snapshots(snptEnqPtr.value) := enqData
-      snptValids(snptEnqPtr.value) := true.B
-      snptEnqPtr := snptEnqPtr + 1.U
-    }
-    when(deq) {
-      snptValids(snptDeqPtr.value) := false.B
-      snptDeqPtr := snptDeqPtr + 1.U
-      XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
-    }
-    when(flush) {
-      snptValids := 0.U.asTypeOf(snptValids)
-      snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
-      snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
-    }
-    snapshots
+    val snapshotGen = Module(new SnapshotGenerator(enqData))
+    snapshotGen.io.enq := enq
+    snapshotGen.io.enqData.head := enqData
+    snapshotGen.io.deq := deq
+    snapshotGen.io.flush := flush
+    snapshotGen.io.snapshots
+  }
+}
+
+class SnapshotGenerator[T <: Data](dataType: T)(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper {
+
+  class SnapshotGeneratorIO extends Bundle {
+    val enq = Input(Bool())
+    val enqData = Input(Vec(1, chiselTypeOf(dataType))) // make chisel happy
+    val deq = Input(Bool())
+    val flush = Input(Bool())
+    val snapshots = Output(Vec(RenameSnapshotNum, chiselTypeOf(dataType)))
+    val enqPtr = Output(new SnapshotPtr)
+    val deqPtr = Output(new SnapshotPtr)
+    val valids = Output(Vec(RenameSnapshotNum, Bool()))
+  }
+
+  val io = IO(new SnapshotGeneratorIO)
+
+  val snapshots = Reg(Vec(RenameSnapshotNum, chiselTypeOf(dataType)))
+  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
+  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
+
+  io.snapshots := snapshots
+  io.enqPtr := snptEnqPtr
+  io.deqPtr := snptDeqPtr
+  io.valids := snptValids
+
+  when(!isFull(snptEnqPtr, snptDeqPtr) && io.enq) {
+    snapshots(snptEnqPtr.value) := io.enqData.head
+    snptValids(snptEnqPtr.value) := true.B
+    snptEnqPtr := snptEnqPtr + 1.U
+  }
+  when(io.deq) {
+    snptValids(snptDeqPtr.value) := false.B
+    snptDeqPtr := snptDeqPtr + 1.U
+    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
+  }
+  when(io.flush) {
+    snptValids := 0.U.asTypeOf(snptValids)
+    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
+    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
   }
 }
 
@@ -426,54 +455,40 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   waittable.io.update <> RegNext(redirectGen.io.memPredUpdate)
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
-  val renameOut = Wire(chiselTypeOf(rename.io.out))
-  renameOut <> rename.io.out
   // snapshot check
-  val snapshots = Reg(Vec(RenameSnapshotNum, chiselTypeOf(rename.io.out.head.bits.robIdx)))
-  val snptEnqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptDeqPtr = RegInit(0.U.asTypeOf(new SnapshotPtr))
-  val snptValids = RegInit(VecInit.fill(RenameSnapshotNum)(false.B))
-  val snptDeq = snptValids(snptDeqPtr.value) && rob.io.commits.isCommit &&
-    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snapshots(snptDeqPtr.value))).orR
-  rob.io.snpt.snptEnq := DontCare
-  rob.io.snpt.snptDeq := snptDeq
-  rat.io.snpt.snptEnq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
-  rat.io.snpt.snptDeq := snptDeq
-  rename.io.snpt.snptEnq := DontCare
-  rename.io.snpt.snptDeq := snptDeq
-  // prevent rob from generating snapshot when full here
-  when(isFull(snptEnqPtr, snptDeqPtr)) {
-    renameOut.head.bits.snapshot := false.B
-  }
-  when(!isFull(snptEnqPtr, snptDeqPtr) && rename.io.out.head.bits.snapshot && rename.io.out.head.fire) {
-    snapshots(snptEnqPtr.value) := rename.io.out.head.bits.robIdx
-    snptValids(snptEnqPtr.value) := true.B
-    snptEnqPtr := snptEnqPtr + 1.U
-  }
-  when(snptDeq) {
-    snptValids(snptDeqPtr.value) := false.B
-    snptDeqPtr := snptDeqPtr + 1.U
-    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
-  }
-  when(stage2Redirect.valid) {
-    snptValids := 0.U.asTypeOf(snptValids)
-    snptEnqPtr := 0.U.asTypeOf(new SnapshotPtr)
-    snptDeqPtr := 0.U.asTypeOf(new SnapshotPtr)
-  }
+  val snpt = Module(new SnapshotGenerator(rename.io.out.head.bits.robIdx))
+  snpt.io.enq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  snpt.io.enqData.head := rename.io.out.head.bits.robIdx
+  snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
+    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value))).orR
+  snpt.io.flush := stage2Redirect.valid
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snptValids(idx) && stage2Redirect.bits.robIdx >= snapshots(idx)).reduceTree(_ || _)
-  val snptSelect = MuxCase(
-    0.U(log2Ceil(RenameSnapshotNum).W),
-    (1 to RenameSnapshotNum).map(i => (snptEnqPtr - i.U).value).map(idx =>
-      (snptValids(idx) && stage2Redirect.bits.robIdx >= snapshots(idx), idx)
+    snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx)).reduceTree(_ || _)
+  val snptSelect = MuxCase(0.U(log2Ceil(RenameSnapshotNum).W),
+    (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
+      (snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx), idx)
   ))
+
+  rob.io.snpt.snptEnq := DontCare
+  rob.io.snpt.snptDeq := snpt.io.deq
   rob.io.snpt.useSnpt := useSnpt
   rob.io.snpt.snptSelect := snptSelect
+  rat.io.snpt.snptEnq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  rat.io.snpt.snptDeq := snpt.io.deq
   rat.io.snpt.useSnpt := useSnpt
   rat.io.snpt.snptSelect := snptSelect
+  rename.io.snpt.snptEnq := DontCare
+  rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
   rename.io.snpt.snptSelect := snptSelect
+
+  // prevent rob from generating snapshot when full here
+  val renameOut = Wire(chiselTypeOf(rename.io.out))
+  renameOut <> rename.io.out
+  when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
+    renameOut.head.bits.snapshot := false.B
+  }
 
   // LFST lookup and update
   dispatch.io.lfst := DontCare
