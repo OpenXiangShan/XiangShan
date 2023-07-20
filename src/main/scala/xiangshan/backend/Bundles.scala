@@ -270,18 +270,6 @@ object Bundles {
     }
   }
 
-  /**
-    * This bundle is used to set srcState as NotReady.
-    * @param cancelSeq cancel stage seq
-    */
-  class IssueQueueCancelBundle(val exuIdx: Int, cancelSeq: Seq[String]) extends Bundle {
-    val cancelVec: Vec[Bool] = Vec(cancelSeq.size, Bool())
-
-    def apply(cancelStage: String): Bool = {
-      this.cancelVec(cancelSeq.indexOf(cancelStage.toUpperCase))
-    }
-  }
-
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
     // vtype
     val vill      = Bool()

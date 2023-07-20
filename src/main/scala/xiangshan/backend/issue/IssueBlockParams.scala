@@ -242,10 +242,6 @@ case class IssueBlockParams(
     MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
   }
 
-  def genCancelBundle(cancelStages: Seq[String]): MixedVec[IssueQueueCancelBundle] = {
-    MixedVec(backendParam.allExuParams.map(x => new IssueQueueCancelBundle(x.exuIdx, cancelStages)))
-  }
-
   def genOGRespBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))

@@ -159,13 +159,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val fromExus = fromIntExus ++ fromVfExus
 
+  private val fromFlattenIQ: Seq[DecoupledIO[IssueQueueIssueBundle]] = fromIQ.flatten
+
+  private val toFlattenExu: Seq[DecoupledIO[ExuInput]] = toExu.flatten
+
   private val intWbBusyArbiter = Module(new WbBusyArbiter(true))
   private val vfWbBusyArbiter = Module(new WbBusyArbiter(false))
   private val intRFReadArbiter = Module(new RFReadArbiter(true))
   private val vfRFReadArbiter = Module(new RFReadArbiter(false))
 
-  private val og0FailedVec: Vec[Bool] = Wire(Vec(backendParams.numExu, Bool()))
-  private val og1FailedVec: Vec[Bool] = Wire(Vec(backendParams.numExu, Bool()))
   private val og0FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool()))))
   private val og1FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool()))))
 
@@ -491,12 +493,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  io.toIQCancelVec.zipWithIndex.foreach { case (cancelBundle: IssueQueueCancelBundle, i) =>
-    og0FailedVec(i) := (fromIQ.flatten.find(_.bits.exuIdx == cancelBundle.exuIdx).get match { case x => x.valid && !x.fire })
-    og1FailedVec(i) := (toExu.flatten.find(_.bits.exuIdx == cancelBundle.exuIdx).get match { case x => x.valid && !x.fire })
-    cancelBundle("OG0") := og0FailedVec(i)
-    cancelBundle("OG1") := og1FailedVec(i)
-    cancelBundle("IS") := false.B
+  io.og0CancelVec.zip(io.og1CancelVec).zipWithIndex.foreach { case ((og0Cancel, og1Cancel), i) =>
+    og0Cancel := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire
+    og1Cancel := toFlattenExu(i).valid && !toFlattenExu(i).fire
   }
 
   for (i <- toExu.indices) {
@@ -595,7 +594,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
-  val toIQCancelVec = Output(MixedVec(exuParams.map(x => new IssueQueueCancelBundle(x.exuIdx, cancelStages))))
+  val og0CancelVec = Output(ExuVec(backendParams.numExu))
+
+  val og1CancelVec = Output(ExuVec(backendParams.numExu))
 
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 
