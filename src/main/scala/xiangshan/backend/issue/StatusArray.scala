@@ -34,8 +34,6 @@ class StatusEntry(implicit p:Parameters, params: IssueBlockParams) extends Bundl
   val dataSources = Vec(params.numRegSrc, DataSource())
   // if waked up by iq, set when waked up by iq
   val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuVec()))
-  // A->B->C, exu vec of A
-  val srcWakeUpL2ExuVec = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuVec()))
   // src timer, used by cancel signal. It increases every cycle after wakeup src inst issued.
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, UInt(3.W)))
 
@@ -77,7 +75,6 @@ class StatusArrayIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val clear = Output(UInt(params.numEntries.W))
   val dataSources = Output(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
-  val srcWakeUpL2ExuVec = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
   // enq
   val enq = Vec(params.numEnq, Flipped(ValidIO(new StatusArrayEnqBundle)))
@@ -145,11 +142,7 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
         // level1 cancel: A(s)->C, A(s) are the level1 cancel
         val l1Cancel = (io.og0Cancel.asUInt & statusVec(entryIdx).srcWakeUpL1ExuOH.get(srcIdx).asUInt).orR &&
           statusVec(entryIdx).srcTimer.get(srcIdx) === 1.U
-        // level2 cancel: A(s)->B(s)->C, A(s) are the level2 cancel
-        // level2 cancel source exu may be more than 1
-        val l2Cancel = (io.og1Cancel.asUInt & statusVec(entryIdx).srcWakeUpL2ExuVec.get(srcIdx).asUInt).orR &&
-          statusVec(entryIdx).srcTimer.get(srcIdx) === 2.U
-        srcCancel := l1Cancel || l2Cancel
+        srcCancel := l1Cancel
       }
     }
   }
@@ -204,14 +197,6 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
               exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
             }.otherwise {
               exuOH := status.srcWakeUpL1ExuOH.get(srcIdx)
-            }
-        }
-        statusNext.srcWakeUpL2ExuVec.get.zip(srcWakeUpByIQMatrix(entryIdx)).zipWithIndex.foreach {
-          case ((exuVec: Vec[Bool], wakeUpByIQOH: Vec[Bool]), srcIdx) =>
-            when(wakeUpByIQOH.asUInt.orR) {
-              exuVec := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(_.bits.l2ExuVec))
-            }.otherwise {
-              exuVec := status.srcWakeUpL2ExuVec.get(srcIdx)
             }
         }
         statusNext.srcTimer.get.zip(status.srcTimer.get).zip(srcWakeUpByIQMatrix(entryIdx)).zipWithIndex.foreach {
@@ -302,7 +287,6 @@ class StatusArray()(implicit p: Parameters, params: IssueBlockParams) extends XS
   io.clear := clearVec.asUInt
   io.dataSources := statusVec.map(_.dataSources)
   io.srcWakeUpL1ExuOH.foreach(_ := statusVec.map(_.srcWakeUpL1ExuOH.get))
-  io.srcWakeUpL2ExuVec.foreach(_ := statusVec.map(_.srcWakeUpL2ExuVec.get))
   io.srcTimer.foreach(_ := statusVec.map(_.srcTimer.get))
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback)
   io.deq.zip(deqSelVec2).foreach { case (deqSingle, deqSelVecSingle) =>
