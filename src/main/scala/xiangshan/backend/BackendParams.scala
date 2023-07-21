@@ -151,9 +151,11 @@ case class BackendParams(
 
   def getExuIdx(name: String): Int = {
     val exuParams = allExuParams
-    if (name != "WB")
-      exuParams.find(_.name == name).get.exuIdx
-    else
+    if (name != "WB") {
+      val foundExu = exuParams.find(_.name == name)
+      require(foundExu.nonEmpty, s"exu $name not find")
+      foundExu.get.exuIdx
+    } else
       -1
   }
 
