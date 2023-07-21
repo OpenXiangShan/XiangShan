@@ -428,7 +428,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }.otherwise {
         s1_valid := false.B
       }
-      dontTouch(block)
+//      dontTouch(block)
       s0.ready := (s1_ready || !s1_valid) && !block
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
 
