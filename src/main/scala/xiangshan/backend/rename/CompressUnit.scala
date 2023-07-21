@@ -18,9 +18,9 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
     }
   })
-  val enqHasExc = io.in.map(uop => !uop.bits.exceptionVec.asUInt.orR)
-  val uopNoExcAfterIssue = io.in.map(uop => uop.bits.noExecException)
-  val canCompress = io.in.zip(enqHasExc).zip(uopNoExcAfterIssue).map { case ((in, noExc), noExecExc) => in.valid && !CommitType.isFused(in.bits.commitType) && in.bits.lastUop && noExc && noExecExc }
+  val enqNoExc = io.in.map(uop => !uop.bits.exceptionVec.asUInt.orR)
+  val uopCanRobCompress = io.in.map(uop => uop.bits.canRobCompress)
+  val canCompress = io.in.zip(enqNoExc).zip(uopCanRobCompress).map { case ((in, noExc), canComp) => in.valid && !CommitType.isFused(in.bits.commitType) && in.bits.lastUop && noExc && canComp }
 
   assert(MaxCompressWidth <= RenameWidth)
   val compressTable = (0 until 1 << RenameWidth).map {

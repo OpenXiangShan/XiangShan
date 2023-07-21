@@ -75,7 +75,7 @@ object Bundles {
     val waitForward     = Bool() // no speculate execution
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-    val noExecException = Bool()
+    val canRobCompress  = Bool()
     val selImm          = SelImm()
     val imm             = UInt(ImmUnion.maxLen.W)
     val fpu             = new FPUCtrlSignals
@@ -90,7 +90,7 @@ object Bundles {
     val commitType      = CommitType() // Todo: remove it
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      isXSTrap, waitForward, blockBackward, flushPipe, noExecException, uopSplitType, selImm)
+      isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
 
     def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodedInst = {
       val decoder: Seq[UInt] = ListLookup(
@@ -141,7 +141,7 @@ object Bundles {
     val waitForward     = Bool() // no speculate execution
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-    val noExecException = Bool()
+    val canRobCompress  = Bool()
     val selImm          = SelImm()
     val imm             = UInt(XLEN.W) // Todo: check if it need minimized
     val fpu             = new FPUCtrlSignals
