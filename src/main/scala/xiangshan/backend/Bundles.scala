@@ -159,7 +159,7 @@ object Bundles {
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
-    val instrSize       = UInt(log2Ceil(MaxCompressWidth + 1).W)
+    val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
 
     val eliminatedMove  = Bool()
     val debugInfo       = new PerfDebugInfo
