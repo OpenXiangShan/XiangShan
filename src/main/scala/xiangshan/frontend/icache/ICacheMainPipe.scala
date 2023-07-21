@@ -488,7 +488,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_req_ptags    = RegEnable(s1_req_ptags, s1_fire)
   val s2_only_first   = RegEnable(s1_only_first, s1_fire)
   val s2_double_line  = RegEnable(s1_double_line, s1_fire)
-//  val s2_hit          = RegEnable(s1_hit   , s1_fire)
+  val s2_hit          = RegEnable(s1_hit   , s1_fire)
   val s2_port_hit     = Wire(Vec(2, Bool()))// RegEnable(s1_port_hit, s1_fire)
 //  val s2_bank_miss    = RegEnable(s1_bank_miss, s1_fire)
   val s2_waymask      = RegEnable(s1_victim_oh, s1_fire)
@@ -942,25 +942,5 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
         .otherwise { diffMainPipeOut.io.idtfr := 4.U }
       diffMainPipeOut
     }
-
-    val diffICacheReq = Module(new DifftestICacheReq)
-    diffICacheReq.io.clock := clock
-    diffICacheReq.io.coreid := 0.U
-    diffICacheReq.io.index := 0.U
-    diffICacheReq.io.valid_0 := s0_fire
-    diffICacheReq.io.vaddr_0 := s0_final_vaddr(0)
-    diffICacheReq.io.valid_1 := s0_fire && s0_final_double_line
-    diffICacheReq.io.vaddr_1 := s0_final_vaddr(1)
-    diffICacheReq.io.timer := GTimer()
-
-    val diffICacheResp = Module(new DifftestICacheReq)
-    diffICacheResp.io.clock := clock
-    diffICacheResp.io.coreid := 0.U
-    diffICacheResp.io.index := 1.U
-    diffICacheResp.io.valid_0 := s2_fire
-    diffICacheResp.io.vaddr_0 := s2_req_vaddr(0)
-    diffICacheResp.io.valid_1 := s2_fire && s2_double_line
-    diffICacheResp.io.vaddr_1 := s2_req_vaddr(1)
-    diffICacheResp.io.timer := GTimer()
   }
 }
