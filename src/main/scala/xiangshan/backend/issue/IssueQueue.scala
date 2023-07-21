@@ -529,9 +529,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     val fuLatUIntMaps: Map[UInt, UInt] = fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }
-    val lat = Mux1H(fuLatUIntMaps.keys.map(_ === fuType).toSeq, fuLatUIntMaps.values.toSeq)
+    val lat = WireInit(Mux1H(fuLatUIntMaps.keys.map(_ === fuType).toSeq, fuLatUIntMaps.values.toSeq))
     dontTouch(lat)
-    // ParallelLookUp(fuType, fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }.toSeq)
   }
 }
 
