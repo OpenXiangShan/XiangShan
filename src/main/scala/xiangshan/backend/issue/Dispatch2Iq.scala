@@ -165,14 +165,29 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
   finalFuDeqMap.zipWithIndex.foreach { case ((fuTypeSeq, deqPortIdSeq), i) =>
+    val maxSelNum = wrapper.numIn
     val selNum = deqPortIdSeq.length
+    val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
     val canAcc = uopsIn.map(in => canAccept(fuTypeSeq, in.bits.fuType) && in.valid)
-    val select = SelectOne("naive", canAcc, selNum)
-    for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
-      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      when(selectValid) {
-        selIdxOH(i)(j).valid := selectValid
-        selIdxOH(i)(j).bits := selectIdxOH.asUInt
+    if(selNum <= maxSelNum) {
+      val select = SelectOne("naive", canAcc, selNum)
+      for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+        when(selectValid) {
+          selIdxOH(i)(j).valid := selectValid
+          selIdxOH(i)(j).bits := selectIdxOH.asUInt
+        }
+      }
+    } else {
+      val selPort = SelectOne("naive", portReadyVec, maxSelNum)
+      val select = SelectOne("naive", canAcc, maxSelNum)
+      for(j <- 0 until maxSelNum) {
+        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
+        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+        when(selPortReady && selectValid) {
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
+        }
       }
     }
   }
