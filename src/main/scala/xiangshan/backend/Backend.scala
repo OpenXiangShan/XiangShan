@@ -3,14 +3,14 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.OptionWrapper
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.CtrlBlock
+import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.datapath.{BypassNetwork, DataPath, NewPipelineConnect, WbDataPath, WbFuBusyTable}
+import xiangshan.backend.datapath._
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
@@ -72,8 +72,29 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     )
   }
 
+  println(s"[Backend] all fu configs")
   for (cfg <- FuConfig.allConfigs) {
-    println(s"[Backend] $cfg")
+    println(s"[Backend]   $cfg")
+  }
+
+  println(s"[Backend] Int RdConfigs: ExuName(Priority)")
+  for ((port, seq) <- params.getRdPortParams[IntRD]) {
+    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+  }
+
+  println(s"[Backend] Int WbConfigs: ExuName(Priority)")
+  for ((port, seq) <- params.getWbPortParams[IntWB]) {
+    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+  }
+
+  println(s"[Backend] Vf RdConfigs: ExuName(Priority)")
+  for ((port, seq) <- params.getRdPortParams[VfRD]) {
+    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+  }
+
+  println(s"[Backend] Vf WbConfigs: ExuName(Priority)")
+  for ((port, seq) <- params.getWbPortParams[VfWB]) {
+    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
   val ctrlBlock = LazyModule(new CtrlBlock(params))
@@ -129,10 +150,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val og0CancelVecFromDataPath: Vec[Bool] = dataPath.io.og0CancelVec
   private val og0CancelVecFromCancelNet: Vec[Bool] = cancelNetwork.io.out.og0CancelVec
   private val og0CancelVec: Vec[Bool] = VecInit(og0CancelVecFromDataPath.zip(og0CancelVecFromCancelNet).map(x => x._1 | x._2))
-  dontTouch(og0CancelVecFromDataPath)
-  dontTouch(og0CancelVecFromCancelNet)
-  dontTouch(og0CancelVec)
-  dontTouch(og1CancelVec)
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend

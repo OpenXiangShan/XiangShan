@@ -19,16 +19,16 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.MapUtils
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
-import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.datapath.WbConfig._
+import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
+
+import scala.reflect.ClassTag
 
 case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
@@ -109,6 +109,44 @@ case class BackendParams(
   def getVfWbArbiterParams: WbArbiterParams = {
     val vfWbCfgs = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVec || x.writeFp))
     datapath.WbArbiterParams(vfWbCfgs, vfPregParams)
+  }
+
+  /**
+    * Get regfile read port params
+    * @param tag ClassTag of T
+    * @tparam T [[IntRD]] or [[VfRD]]
+    * @return Seq[port->Seq[(exuIdx, priority)]
+    */
+  def getRdPortParams[T <: RdConfig](implicit tag: ClassTag[T]): Seq[(Int, Seq[(Int, Int)])] = {
+    // port -> Seq[exuIdx, priority]
+    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
+      .flatMap(x => x.rfrPortConfigs.flatten.map(xx => (xx, x.exuIdx)))
+      .filter { x => ClassTag(x._1.getClass) == tag }
+      .map(x => (x._1.port, (x._2, x._1.priority)))
+      .groupBy(_._1)
+      .map(x => (x._1, x._2.map(_._2).sortBy({ case (priority, _) => priority })))
+      .toSeq
+      .sortBy(_._1)
+    cfgs
+  }
+
+  /**
+    * Get regfile write back port params
+    *
+    * @param tag ClassTag of T
+    * @tparam T [[IntWB]] or [[VfWB]]
+    * @return Seq[port->Seq[(exuIdx, priority)]
+    */
+  def getWbPortParams[T <: PregWB](implicit tag: ClassTag[T]) = {
+    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
+      .flatMap(x => x.wbPortConfigs.map(xx => (xx.asInstanceOf[PregWB], x.exuIdx)))
+      .filter { x => ClassTag(x._1.getClass) == tag }
+      .map(x => (x._1.port, (x._2, x._1.priority)))
+      .groupBy(_._1)
+      .map(x => (x._1, x._2.map(_._2)))
+      .toSeq
+      .sortBy(_._1)
+    cfgs
   }
 
   def getExuIdx(name: String): Int = {
