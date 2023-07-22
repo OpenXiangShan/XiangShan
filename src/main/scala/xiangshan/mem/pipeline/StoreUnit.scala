@@ -333,18 +333,18 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   printPipeLine(s1_out, s1_valid, "S1")
 
   // perf cnt
-  XSPerfAccumulate("in_valid",                s0_valid)
-  XSPerfAccumulate("in_fire",                 s0_fire)
-  XSPerfAccumulate("in_fire_first_issue",     s0_fire && s0_isFirstIssue)
-  XSPerfAccumulate("addr_spec_success",       s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_failed",        s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once",  s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once",   s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
+  XSPerfAccumulate("s0_in_valid",                s0_valid)
+  XSPerfAccumulate("s0_in_fire",                 s0_fire)
+  XSPerfAccumulate("s0_in_fire_first_issue",     s0_fire && s0_isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_success",       s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_failed",        s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_success_once",  s0_fire && s0_saddr(VAddrBits-1, 12) === s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_failed_once",   s0_fire && s0_saddr(VAddrBits-1, 12) =/= s0_in.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
 
-  XSPerfAccumulate("in_valid",                s1_valid)
-  XSPerfAccumulate("in_fire",                 s1_fire)
-  XSPerfAccumulate("in_fire_first_issue",     s1_fire && s1_in.isFirstIssue)
-  XSPerfAccumulate("tlb_miss",                s1_fire && s1_tlb_miss)
-  XSPerfAccumulate("tlb_miss_first_issue",    s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_in_valid",                s1_valid)
+  XSPerfAccumulate("s1_in_fire",                 s1_fire)
+  XSPerfAccumulate("s1_in_fire_first_issue",     s1_fire && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_tlb_miss",                s1_fire && s1_tlb_miss)
+  XSPerfAccumulate("s1_tlb_miss_first_issue",    s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
   // end
 }
