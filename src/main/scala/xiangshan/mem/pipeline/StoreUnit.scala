@@ -96,6 +96,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s0_out.rsIdx        := s0_rsIdx
   s0_out.mask         := genWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0))
   s0_out.isFirstIssue := s0_isFirstIssue
+  s0_out.isHWPrefetch := false.B // TODO
   s0_out.wlineflag    := s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -168,6 +169,20 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.issue.valid := s1_valid && !s1_tlb_miss
   io.issue.bits  := RegEnable(s0_in, s0_valid)
 
+  // rs feedback
+  val s1_feedback = Wire(Valid(new RSFeedback))
+  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch
+  s1_feedback.bits.hit              := !s1_tlb_miss
+  s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
+  s1_feedback.bits.rsIdx            := s1_out.rsIdx
+  s1_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
+  s1_feedback.bits.dataInvalidSqIdx := DontCare
+  XSDebug(s1_feedback.valid,
+    "S1 Store: tlbHit: %d robIdx: %d\n",
+    s1_feedback.bits.hit,
+    s1_feedback.bits.rsIdx
+  )
+
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
   s1_out        := s1_in
@@ -225,18 +240,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s2_out.uop.cf.exceptionVec(storeAccessFault) := s2_in.uop.cf.exceptionVec(storeAccessFault) || s2_pmp.st
 
   // feedback tlb miss to RS in store_s2
-  val s1_feedback = Wire(Valid(new RSFeedback))
-  s1_feedback.valid                 := s1_valid
-  s1_feedback.bits.hit              := !s1_tlb_miss
-  s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
-  s1_feedback.bits.rsIdx            := s1_out.rsIdx
-  s1_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
-  s1_feedback.bits.dataInvalidSqIdx := DontCare
-  XSDebug(s1_feedback.valid,
-    "S1 Store: tlbHit: %d robIdx: %d\n",
-    s1_feedback.bits.hit,
-    s1_feedback.bits.rsIdx
-  )
   io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
   io.feedback_slow.bits  := RegNext(s1_feedback.bits)
 
@@ -255,7 +258,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
 
-  when (s2_fire) { s3_valid := !s2_mmio || s2_exception  }
+  when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch  }
   .elsewhen (s3_fire) { s3_valid := false.B }
   .elsewhen (s3_kill) { s3_valid := false.B }
 

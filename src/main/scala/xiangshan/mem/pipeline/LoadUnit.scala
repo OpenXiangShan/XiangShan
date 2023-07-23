@@ -706,11 +706,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // --------------------------------------------------------------------------------
   // s2: DCache resp
   val s2_valid  = RegInit(false.B)
+  val s2_in     = Wire(new LqWriteBundle)
+  val s2_out    = Wire(new LqWriteBundle)
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_in     = Wire(new LqWriteBundle)
-  val s2_out    = Wire(new LqWriteBundle)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -873,7 +873,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.out.bits.uop.ctrl.replayInst := false.B
 
   // to be removed
-  io.feedback_fast.valid                 := s2_valid && !s2_in.isLoadReplay && !s2_exception && io.lq_rep_full && s2_out.rep_info.need_rep && !s2_out.uop.robIdx.needFlush(io.redirect)
+  io.feedback_fast.valid                 := s2_valid &&                 // inst is valid
+                                            !s2_in.isLoadReplay &&      // already feedbacked
+                                            io.lq_rep_full &&           // LoadQueueReplay is full
+                                            s2_out.rep_info.need_rep && // need replay
+                                            !s2_exception &&            // no exception is triggered
+                                            !s2_hw_prf                  // not hardware prefetch
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.rsIdx            := s2_in.rsIdx
@@ -908,7 +913,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_ld_valid_dup = RegInit(0.U(6.W))
   s2_ld_valid_dup := 0x0.U(6.W)
   when (s1_ld_left_fire && !s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x3f.U(6.W) }
-  when (s1_kill || s1_fast_rep_kill) { s2_ld_valid_dup := 0x0.U(6.W) }
+  when (s1_kill || s1_fast_rep_kill || s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x0.U(6.W) }
   assert(RegNext((s2_valid === s2_ld_valid_dup(0)) || RegNext(s1_out.isHWPrefetch)))
 
   // Pipeline
@@ -916,7 +921,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // stage 3
   // --------------------------------------------------------------------------------
   // writeback and update load queue
-  val s3_valid        = RegNext(s2_valid) && !RegNext(s2_out.uop.robIdx.needFlush(io.redirect))
+  val s3_valid        = RegNext(s2_valid && !s2_out.isHWPrefetch && !s2_out.uop.robIdx.needFlush(io.redirect))
   val s3_in           = RegEnable(s2_out, s2_fire)
   val s3_out          = Wire(Valid(new ExuOutput))
   val s3_cache_rep    = RegEnable(s2_cache_rep && s2_troublem, s2_fire)
