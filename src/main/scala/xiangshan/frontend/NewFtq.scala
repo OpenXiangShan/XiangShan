@@ -1149,12 +1149,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   val commit_state = RegNext(commitStateQueue(commPtr.value))
   val can_commit_cfi = WireInit(cfiIndex_vec(commPtr.value))
+  val do_commit_cfi = WireInit(cfiIndex_vec(do_commit_ptr.value))
   //
   //when (commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited) {
   //  can_commit_cfi.valid := false.B
   //}
   val commit_cfi = RegNext(can_commit_cfi)
-  val debug_cfi = RegNext(commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited && can_commit_cfi.valid)
+  val debug_cfi = commitStateQueue(do_commit_ptr.value)(do_commit_cfi.bits) =/= c_commited && do_commit_cfi.valid
 
   val commit_mispredict  : Vec[Bool] = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
     case (mis, state) => mis && state === c_commited
