@@ -395,7 +395,7 @@ object VecDecoder extends DecodeConstants {
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
     VFMUL_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F, UopSplitType.VEC_VVV),
-    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv , F, T, F),
+    VFDIV_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv , F, T, F, UopSplitType.VEC_VVV),
 
     // 13.5. Vector Widening Floating-Point Multiply
     VFWMUL_VV          -> OPFVV(SrcType.vp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F, UopSplitType.VEC_VVW),
@@ -417,7 +417,7 @@ object VecDecoder extends DecodeConstants {
     VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F, UopSplitType.VEC_VVW),
 
     // 13.8. Vector Floating-Point Square-Root Instruction
-    VFSQRT_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfdiv, VfdivType.vfsqrt, F, T, F),
+    VFSQRT_V           -> OPFVV(SrcType.X , SrcType.X , FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.9. Vector Floating-Point Reciprocal Square-Root Estimate Instruction
     VFRSQRT7_V         -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
@@ -499,8 +499,8 @@ object VecDecoder extends DecodeConstants {
 
     // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
     VFMUL_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul, F, T, F, UopSplitType.VEC_VFV),
-    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F),
-    VFRDIV_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F),
+    VFDIV_VF           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F, UopSplitType.VEC_VFV),
+    VFRDIV_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfdiv, VfdivType.vfdiv, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.5. Vector Widening Floating-Point Multiply
     VFWMUL_VF          -> OPFVF(SrcType.fp, SrcType.X , FuType.vfma, VfmaType.vfmul_w, F, T, F, UopSplitType.VEC_VFW),

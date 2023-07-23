@@ -560,7 +560,7 @@ object FuConfig {
   val VfdivCfg = FuConfig(
     name = "vfdiv",
     fuType = FuType.vfdiv,
-    fuGen = null, //(p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfdiv")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfdiv")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),

@@ -347,6 +347,9 @@ case class XSCoreParameters
         ExeUnitParams("FEX2", Seq(FDivSqrtCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(11, 0)), Seq(VfRD(12, 0)))),
         ExeUnitParams("FEX3", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 3, 0), IntWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)))),
       ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VEX8", Seq(VfdivCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
       numRfReadWrite = Some((numRfRead, numRfWrite)),
