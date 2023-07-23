@@ -230,11 +230,11 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val srcState = Vec(3, SrcState())
   val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
+  val snapshot = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
     val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
@@ -292,6 +292,7 @@ class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
+  val isRVC = Bool()
   val robIdx = new RobPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -374,10 +375,10 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
+  val isRVC = Bool()
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
@@ -392,9 +393,17 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val walkValid = Vec(CommitWidth, Bool())
 
   val info = Vec(CommitWidth, new RobCommitInfo)
+  val robIdx = Vec(CommitWidth, new RobPtr)
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class SnapshotPort(implicit p: Parameters) extends XSBundle {
+  val snptEnq = Bool()
+  val snptDeq = Bool()
+  val useSnpt = Bool()
+  val snptSelect = UInt(log2Ceil(RenameSnapshotNum).W)
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {

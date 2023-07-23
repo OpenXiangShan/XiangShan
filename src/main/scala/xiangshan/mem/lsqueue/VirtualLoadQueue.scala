@@ -32,12 +32,18 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
-    val redirect = Flipped(Valid(new Redirect)) 
-    val enq = new LqEnqIO 
-    val loadIn = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle))) 
-    val ldWbPtr = Output(new LqPtr)
-    val lqFull = Output(Bool())
-    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
+    // control
+    val redirect    = Flipped(Valid(new Redirect)) 
+    // from dispatch
+    val enq         = new LqEnqIO 
+    // from ldu s3
+    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle))) 
+    // to LoadQueueReplay and LoadQueueRAR
+    val ldWbPtr     = Output(new LqPtr)
+    // global
+    val lqFull      = Output(Bool())
+    // to dispatch
+    val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))   
   })
 
@@ -184,56 +190,56 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for(i <- 0 until LoadPipelineWidth) {
     //   most lq status need to be updated immediately after load writeback to lq
     //   flag bits in lq needs to be updated accurately     
-    io.loadIn(i).ready := true.B
-    val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
+    io.ldin(i).ready := true.B
+    val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
-    when (io.loadIn(i).valid) {
-      val hasExceptions = ExceptionNO.selectByFu(io.loadIn(i).bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
-      val needReplay = io.loadIn(i).bits.replayInfo.needReplay()
+    when (io.ldin(i).valid) {
+      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
+      val need_rep = io.ldin(i).bits.rep_info.need_rep
 
-      when (!needReplay) {
+      when (!need_rep) {
       // update control flag
-        addrvalid(loadWbIndex) := hasExceptions || !io.loadIn(i).bits.tlbMiss
+        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss
         datavalid(loadWbIndex) := 
           (if (EnableFastForward) {
               hasExceptions ||
-              io.loadIn(i).bits.mmio ||
-             !io.loadIn(i).bits.miss && // dcache miss
-             !io.loadIn(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
+              io.ldin(i).bits.mmio ||
+             !io.ldin(i).bits.miss && // dcache miss
+             !io.ldin(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
            } else {
               hasExceptions ||
-              io.loadIn(i).bits.mmio ||
-             !io.loadIn(i).bits.miss 
+              io.ldin(i).bits.mmio ||
+             !io.ldin(i).bits.miss 
            })
 
         // 
-        when (io.loadIn(i).bits.lqDataWenDup(1)) {
-          uop(loadWbIndex).pdest := io.loadIn(i).bits.uop.pdest 
+        when (io.ldin(i).bits.data_wen_dup(1)) {
+          uop(loadWbIndex).pdest := io.ldin(i).bits.uop.pdest 
         }
-        when (io.loadIn(i).bits.lqDataWenDup(2)) {
-          uop(loadWbIndex).cf := io.loadIn(i).bits.uop.cf
+        when (io.ldin(i).bits.data_wen_dup(2)) {
+          uop(loadWbIndex).cf := io.ldin(i).bits.uop.cf
         }
-        when (io.loadIn(i).bits.lqDataWenDup(3)) {
-          uop(loadWbIndex).ctrl := io.loadIn(i).bits.uop.ctrl
+        when (io.ldin(i).bits.data_wen_dup(3)) {
+          uop(loadWbIndex).ctrl := io.ldin(i).bits.uop.ctrl
         }
-        when (io.loadIn(i).bits.lqDataWenDup(4)) {
-          uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
+        when (io.ldin(i).bits.data_wen_dup(4)) {
+          uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
         }
-        uop(loadWbIndex).debugInfo := io.loadIn(i).bits.replayInfo.debug
+        uop(loadWbIndex).debugInfo := io.ldin(i).bits.rep_info.debug
 
         //  Debug info
-        debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio 
-        debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
+        debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio 
+        debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
 
-        XSInfo(io.loadIn(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
-          io.loadIn(i).bits.uop.lqIdx.asUInt,
-          io.loadIn(i).bits.uop.cf.pc,
-          io.loadIn(i).bits.vaddr,
-          io.loadIn(i).bits.paddr,
-          io.loadIn(i).bits.mask,
-          io.loadIn(i).bits.forwardData.asUInt,
-          io.loadIn(i).bits.forwardMask.asUInt,
-          io.loadIn(i).bits.mmio
+        XSInfo(io.ldin(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
+          io.ldin(i).bits.uop.lqIdx.asUInt,
+          io.ldin(i).bits.uop.cf.pc,
+          io.ldin(i).bits.vaddr,
+          io.ldin(i).bits.paddr,
+          io.ldin(i).bits.mask,
+          io.ldin(i).bits.forwardData.asUInt,
+          io.ldin(i).bits.forwardMask.asUInt,
+          io.ldin(i).bits.mmio
         )    
       }
     }

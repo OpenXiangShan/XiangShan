@@ -38,8 +38,8 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     val req = Flipped(Valid(new LqWriteBundle))
 
     // writeback mmio data
-    val loadOut = DecoupledIO(new ExuOutput) 
-    val loadRawDataOut = Output(new LoadDataFromLQBundle) 
+    val ldout = DecoupledIO(new ExuOutput) 
+    val ld_raw_data = Output(new LoadDataFromLQBundle) 
 
     // rob: uncache commit 
     val rob = Flipped(new RobLsqIO) 
@@ -77,18 +77,18 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     XSError(req_valid, p"UncacheBuffer: You can not write an valid entry: $entryIndex")
     req_valid := true.B
     req := io.req.bits
-  } .elsewhen (io.loadOut.fire) {
+  } .elsewhen (io.ldout.fire) {
     req_valid := false.B
   }
 
   when (io.req.valid) {
-    when (io.req.bits.lqDataWenDup(5)) {
+    when (io.req.bits.data_wen_dup(5)) {
       triggerResult := io.trigger.hitLoadAddrTriggerHitVec 
     }
   }
 
   io.trigger.lqLoadAddrTriggerHitVec := Mux(
-    io.loadOut.valid,
+    io.ldout.valid,
     RegNext(triggerResult),
     VecInit(Seq.fill(3)(false.B))
   )
@@ -136,13 +136,13 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.select := uncacheState =/= s_idle
 
-  io.uncache.req.valid := uncacheState === s_req
-  io.uncache.req.bits := DontCare
-  io.uncache.req.bits.cmd := MemoryOpConstants.M_XRD
+  io.uncache.req.valid     := uncacheState === s_req
+  io.uncache.req.bits      := DontCare
+  io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.data := DontCare
   io.uncache.req.bits.addr := req.paddr
   io.uncache.req.bits.mask := req.mask
-  io.uncache.req.bits.id := io.id
+  io.uncache.req.bits.id   := io.id
   io.uncache.req.bits.instrtype := DontCare
   io.uncache.req.bits.replayCarry := DontCare  
   io.uncache.req.bits.atomic := true.B 
@@ -180,34 +180,34 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     ))
   val rdataPartialLoad = rdataHelper(selUop, rdataSel) 
 
-  io.loadOut.valid := (uncacheState === s_wait) && !uncacheCommitFired
-  io.loadOut.bits := DontCare
-  io.loadOut.bits.uop := selUop
-  io.loadOut.bits.uop.lqIdx := req.uop.lqIdx
-  io.loadOut.bits.data := rdataPartialLoad 
-  io.loadOut.bits.redirectValid := false.B
-  io.loadOut.bits.redirect := DontCare
-  io.loadOut.bits.debug.isMMIO := true.B
-  io.loadOut.bits.debug.paddr := req.paddr
-  io.loadOut.bits.debug.vaddr := req.vaddr
-  io.loadOut.bits.fflags := DontCare
+  io.ldout.valid              := (uncacheState === s_wait) && !uncacheCommitFired
+  io.ldout.bits               := DontCare
+  io.ldout.bits.uop           := selUop
+  io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
+  io.ldout.bits.data          := rdataPartialLoad 
+  io.ldout.bits.redirectValid := false.B
+  io.ldout.bits.redirect      := DontCare
+  io.ldout.bits.debug.isMMIO  := true.B
+  io.ldout.bits.debug.paddr   := req.paddr
+  io.ldout.bits.debug.vaddr   := req.vaddr
+  io.ldout.bits.fflags        := DontCare
 
-  io.loadRawDataOut.lqData := uncacheData
-  io.loadRawDataOut.uop := req.uop
-  io.loadRawDataOut.addrOffset := req.paddr
+  io.ld_raw_data.lqData     := uncacheData
+  io.ld_raw_data.uop        := req.uop
+  io.ld_raw_data.addrOffset := req.paddr
 
   
-  val dummyCtrl = RegNext(io.loadOut.valid)
+  val dummyCtrl = RegNext(io.ldout.valid)
   uncacheCommitFire := false.B
-  when (io.loadOut.fire && dummyCtrl) {
+  when (io.ldout.fire && dummyCtrl) {
     req_valid := false.B
     uncacheCommitFire := true.B
     uncacheCommitFired := true.B
 
     XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
-      io.loadOut.bits.uop.robIdx.asUInt,
-      io.loadOut.bits.uop.lqIdx.asUInt,
-      io.loadOut.bits.uop.cf.pc,
+      io.ldout.bits.uop.robIdx.asUInt,
+      io.ldout.bits.uop.lqIdx.asUInt,
+      io.ldout.bits.uop.cf.pc,
       true.B
     )    
   }
@@ -218,14 +218,15 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
 class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    // control
     val redirect = Flipped(Valid(new Redirect))
 
     // 
     val req = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
 
     // writeback mmio data
-    val loadOut = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
-    val loadRawDataOut = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
+    val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
 
     // rob: uncache commit 
     val rob = Flipped(new RobLsqIO) 
@@ -275,9 +276,9 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   // set writeback default
   for (w <- 0 until LoadPipelineWidth) {
-    io.loadOut(w).valid := false.B
-    io.loadOut(w).bits := DontCare
-    io.loadRawDataOut(w) := DontCare
+    io.ldout(w).valid := false.B
+    io.ldout(w).bits := DontCare
+    io.ld_raw_data(w) := DontCare
   }
 
   // set trigger default
@@ -304,7 +305,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   })
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.cf.exceptionVec, lduCfg).asUInt.orR)
-  val s2_need_replay = s2_req.map(_.replayInfo.needReplay())
+  val s2_need_replay = s2_req.map(_.rep_info.need_rep)
 
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   for (w <- 0 until LoadPipelineWidth) {
@@ -331,19 +332,19 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   // 
   val uncacheReq = Wire(Valid(io.uncache.req.bits.cloneType))
-  val loadOut = Wire(Valid(io.loadOut(0).bits.cloneType))
-  val loadRawDataOut = Wire(io.loadRawDataOut(0).cloneType)
+  val ldout = Wire(Valid(io.ldout(0).bits.cloneType))
+  val ld_raw_data = Wire(io.ld_raw_data(0).cloneType)
   val lqLoadAddrTriggerHitVec = Wire(io.trigger(0).lqLoadAddrTriggerHitVec.cloneType)
   val commitFire = Wire(Bool())
 
   // init
   uncacheReq.valid := false.B 
-  uncacheReq.bits := DontCare
-  loadOut.valid := false.B 
-  loadOut.bits := DontCare 
-  loadRawDataOut := DontCare
+  uncacheReq.bits  := DontCare
+  ldout.valid      := false.B 
+  ldout.bits       := DontCare 
+  ld_raw_data        := DontCare
   lqLoadAddrTriggerHitVec := DontCare
-  commitFire := false.B
+  commitFire       := false.B
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
@@ -362,16 +363,15 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
       // uncache logic
       e.io.rob <> io.rob
       e.io.uncache.req.ready <> io.uncache.req.ready
-      e.io.loadOut.ready <> io.loadOut(0).ready
+      e.io.ldout.ready <> io.ldout(0).ready
 
       when (e.io.select) {
         uncacheReq.valid := e.io.uncache.req.valid
         uncacheReq.bits := e.io.uncache.req.bits
 
-        loadOut.valid := e.io.loadOut.valid 
-        loadOut.bits := e.io.loadOut.bits 
-        loadRawDataOut := e.io.loadRawDataOut
-        commitFire := e.io.commitFire
+        ldout       := e.io.ldout
+        ld_raw_data   := e.io.ld_raw_data
+        commitFire  := e.io.commitFire
         // Read vaddr for mem exception
         // no inst will be commited 1 cycle before tval update
         // read vaddr for mmio, and only port 0 is used 
@@ -384,10 +384,10 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   }
 
   io.uncache.req.valid := RegNext(uncacheReq.valid)
-  io.uncache.req.bits := RegNext(uncacheReq.bits)
-  io.loadOut(0).valid := RegNext(loadOut.valid) && !RegNext(commitFire)
-  io.loadOut(0).bits := RegNext(loadOut.bits)
-  io.loadRawDataOut(0) := RegNext(loadRawDataOut)
+  io.uncache.req.bits  := RegNext(uncacheReq.bits)
+  io.ldout(0).valid    := RegNext(ldout.valid) && !RegNext(commitFire)
+  io.ldout(0).bits     := RegNext(ldout.bits)
+  io.ld_raw_data(0)      := RegNext(ld_raw_data)
   io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
 
   for (i <- 0 until LoadPipelineWidth) {
@@ -404,7 +404,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // dealloc logic
   entries.zipWithIndex.foreach {
     case (e, i) => 
-      when ((e.io.select && io.loadOut(0).fire) || e.io.flush) {
+      when ((e.io.select && io.ldout(0).fire) || e.io.flush) {
         freeMaskVec(i) := true.B
       }
   }
@@ -461,11 +461,11 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   }
 
   val (rollbackValid, rollbackUop) = detectRollback()
-  io.rollback.bits := DontCare
-  io.rollback.bits.robIdx := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
+  io.rollback.bits           := DontCare
+  io.rollback.bits.robIdx    := rollbackUop.robIdx
+  io.rollback.bits.ftqIdx    := rollbackUop.cf.ftqPtr
   io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
-  io.rollback.bits.level := RedirectLevel.flush
+  io.rollback.bits.level     := RedirectLevel.flush
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
 
@@ -483,15 +483,15 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   XSPerfAccumulate("mmioCycle", VecInit(entries.map(_.io.select)).asUInt.orR)
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire)
-  XSPerfAccumulate("mmio_writeback_success", io.loadOut(0).fire)
-  XSPerfAccumulate("mmio_writeback_blocked", io.loadOut(0).valid && !io.loadOut(0).ready)
+  XSPerfAccumulate("mmio_writeback_success", io.ldout(0).fire)
+  XSPerfAccumulate("mmio_writeback_blocked", io.ldout(0).valid && !io.ldout(0).ready)
   XSPerfAccumulate("uncache_full_rollback", io.rollback.valid)
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("mmioCycle", VecInit(entries.map(_.io.select)).asUInt.orR),
     ("mmioCnt", io.uncache.req.fire),
-    ("mmio_writeback_success", io.loadOut(0).fire),
-    ("mmio_writeback_blocked", io.loadOut(0).valid && !io.loadOut(0).ready),
+    ("mmio_writeback_success", io.ldout(0).fire),
+    ("mmio_writeback_blocked", io.ldout(0).valid && !io.ldout(0).ready),
     ("uncache_full_rollback",  io.rollback.valid)
   )
   // end
