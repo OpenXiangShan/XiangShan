@@ -174,7 +174,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //
   // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
   // Before data write finish, sbuffer is unable to provide store to load
-  // forward data. As an workaround, deqPtrExt and allocated flag update 
+  // forward data. As an workaround, deqPtrExt and allocated flag update
   // is delayed so that load can get the right data from store queue.
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
@@ -252,7 +252,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       deqPtrExtNext(0) // for mmio insts, deqPtr may be ahead of cmtPtr
     )
   }
-  
+
   io.stAddrReadySqPtr := addrReadyPtrExt
 
   // update
@@ -410,7 +410,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => datavalid(i))))
     val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i) && allocated(i))))
 
-    val storeSetHitVec = 
+    val storeSetHitVec =
       if (LFSTEnable) {
         WireInit(VecInit((0 until StoreQueueSize).map(j => io.forward(i).uop.cf.loadWaitBit && uop(j).robIdx === io.forward(i).uop.cf.waitForRobIdx)))
       } else {
@@ -442,7 +442,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
     // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) &
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt)
     ) =/= 0.U
@@ -474,7 +474,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val dataInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
     dataInvalidMask1Reg := RegNext(dataInvalidMask1)
     // make chisel happy
-    val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W)) 
+    val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
     dataInvalidMask2Reg := RegNext(dataInvalidMask2)
     val dataInvalidMaskReg = dataInvalidMask1Reg | dataInvalidMask2Reg
 
@@ -513,7 +513,31 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(addrInvalidMask2Reg))))
     val addrInvalidSqIdx = Mux(addrInvalidMask2Reg.orR, addrInvalidSqIdx2, addrInvalidSqIdx1)
 
-    when (addrInvalidFlag && !RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+    // store-set content management
+    //                +-----------------------+
+    //                | Search a SSID for the |
+    //                |    load operation     |
+    //                +-----------------------+
+    //                           |
+    //                           V
+    //                 +-------------------+
+    //                 | load wait strict? |
+    //                 +-------------------+
+    //                           |
+    //                           V
+    //               +----------------------+
+    //            Set|                      |Clean
+    //               V                      V
+    //  +------------------------+   +------------------------------+
+    //  | Waiting for all older  |   | Wait until the corresponding |
+    //  |   stores operations    |   | older store operations       |
+    //  +------------------------+   +------------------------------+
+
+
+
+    when (RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+      io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx - 1.U)
+    } .elsewhen (addrInvalidFlag) {
       io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).addrInvalidSqIdx.value := addrInvalidSqIdx
     } .otherwise {
@@ -525,17 +549,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // data invalid sq index
     // make chisel happy
     val dataInvalidMaskRegWire = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMaskRegWire := dataInvalidMaskReg 
+    dataInvalidMaskRegWire := dataInvalidMaskReg
     val dataInvalidFlag = dataInvalidMaskRegWire.orR
 
     val dataInvalidSqIdx1 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(dataInvalidMask1Reg))))
     val dataInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(dataInvalidMask2Reg))))
     val dataInvalidSqIdx = Mux(dataInvalidMask2Reg.orR, dataInvalidSqIdx2, dataInvalidSqIdx1)
 
-    when (dataInvalidFlag) { 
+    when (dataInvalidFlag) {
       io.forward(i).dataInvalidSqIdx.flag := Mux(!s2_differentFlag || dataInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).dataInvalidSqIdx.value := dataInvalidSqIdx
-    } .otherwise { 
+    } .otherwise {
       // may be store inst has been written to sbuffer already.
       io.forward(i).dataInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
     }
@@ -700,7 +724,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
-    // forward data. As an workaround, deqPtrExt and allocated flag update 
+    // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
     when (RegNext(io.sbuffer(i).fire())) {
@@ -757,14 +781,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
  /**
 * update pointers
 **/
-  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect 
-  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect 
-  val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect  
-  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect 
-  
+  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
+  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
+  val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
+  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect
+
   val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
-  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect 
-  
+  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect
+
   when (lastlastCycleRedirect) {
     // we recover the pointers in 2 cycle after redirect for better timing
     enqPtrExt := VecInit(enqPtrExt.map(_ - redirectCancelCount))
@@ -774,7 +798,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
   assert(!(lastCycleRedirect && enqNumber =/= 0.U))
-  
+
   deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExtNext
 
@@ -795,7 +819,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqEmpty := RegNext(
-    enqPtrExt(0).value === deqPtrExt(0).value && 
+    enqPtrExt(0).value === deqPtrExt(0).value &&
     enqPtrExt(0).flag === deqPtrExt(0).flag
   )
   // perf counter

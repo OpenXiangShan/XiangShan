@@ -31,10 +31,19 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
+    // control
     val redirect = Flipped(Valid(new Redirect))
-    val query = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
+    
+    // violation query
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+
+    // release cacheline
     val release = Flipped(Valid(new Release))
+
+    // from VirtualLoadQueue
     val ldWbPtr = Input(new LqPtr)
+
+    // global
     val lqFull = Output(Bool())
   })
 
@@ -124,7 +133,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  Fill info
       uop(enqIndex) := enq.bits.uop
       released(enqIndex) :=
-        enq.bits.datavalid &&
+        enq.bits.data_valid &&
         (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
@@ -150,17 +159,17 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     }
   }
 
-  // if need replay release entry
+  // if need replay revoke entry
   val lastCanAccept = RegNext(VecInit(needEnqueue.zip(enqValidVec).map(x => x._1 && x._2)))
   val lastAllocIndex = RegNext(enqIndexVec)
 
-  for ((release, w) <- io.query.map(_.release).zipWithIndex) {
-    val releaseValid = release && lastCanAccept(w)
-    val releaseIndex = lastAllocIndex(w)
+  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
+    val revokeValid = revoke && lastCanAccept(w)
+    val revokeIndex = lastAllocIndex(w)
 
-    when (allocated(releaseIndex) && releaseValid) {
-      allocated(releaseIndex) := false.B
-      freeMaskVec(releaseIndex) := true.B
+    when (allocated(revokeIndex) && revokeValid) {
+      allocated(revokeIndex) := false.B
+      freeMaskVec(revokeIndex) := true.B
     }
   }
 
@@ -186,7 +195,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     //  Load-to-Load violation check result
     val ldLdViolationMask = WireInit(matchMask & RegNext(released.asUInt))
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.replayFromFetch := ldLdViolationMask.orR
+    query.resp.bits.rep_frm_fetch := ldLdViolationMask.orR
   }
 
 
@@ -211,7 +220,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
-  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.replayFromFetch))
+  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.rep_frm_fetch))
 
   QueuePerf(LoadQueueRARSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enq", canEnqCount)
