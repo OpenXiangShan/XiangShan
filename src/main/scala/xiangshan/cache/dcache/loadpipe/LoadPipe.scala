@@ -51,7 +51,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
-    val bank_conflict_fast = Input(Bool())
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -365,14 +364,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   //
   // * report a miss if bank conflict is detected
   val real_miss = !s2_real_way_en.orR
-
-  resp.bits.miss := real_miss || io.bank_conflict_slow || s2_wpu_pred_fail
-  // resp.bits.miss := real_miss
   // io.debug_s2_cache_miss := real_miss
+  resp.bits.miss := real_miss
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
-  /* load pipe need replay when there is 1. miss and no mshr; 2. a bank conflict; 3. wpu predict fail */
-  resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
-  resp.bits.replayCarry.valid := resp.bits.replay
+  // load pipe need replay when there is a bank conflict or wpu predict fail
+  resp.bits.replay := DontCare 
+  resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
@@ -409,7 +406,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
-  io.lsu.s2_bank_conflict := io.bank_conflict_slow || s2_wpu_pred_fail_and_real_hit
+  // FIXME lyq: remove the follow assignment
+  // io.lsu.s2_bank_conflict := io.bank_conflict_slow || s2_wpu_pred_fail_and_real_hit
+  io.lsu.s2_bank_conflict := io.bank_conflict_slow
+  io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit 
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire() || s2_nack))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------

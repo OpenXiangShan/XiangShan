@@ -83,6 +83,20 @@ object XSPerfHistogram extends HasRegularPerfName {
       ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
       ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
 
+      val sum = RegInit(0.U(64.W))
+      val nSamples = RegInit(0.U(64.W))
+      when (perfClean) {
+        sum := 0.U
+        nSamples := 0.U
+      } .elsewhen (enable) {
+        sum := sum + perfCnt
+        nSamples := nSamples + 1.U
+      }
+
+      when (perfDump) {
+        XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")
+      }
+      
       // drop each perfCnt value into a bin
       val nBins = (stop - start) / step
       require(start >= 0)

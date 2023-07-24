@@ -118,7 +118,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
     val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
-    val l2Hint = Input(Valid(new L2ToL1Hint()))
+    val l2_hint = Input(Valid(new L2ToL1Hint()))
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -181,20 +181,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // However, atom exception will be writebacked to rob
   // using store writeback port
 
-  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.loadOut.bits)
-  val loadOut0 = Wire(Decoupled(new ExuOutput))
-  loadOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.loadOut.valid
-  loadOut0.bits  := loadWritebackOverride
-  atomicsUnit.io.out.ready := loadOut0.ready
-  loadUnits.head.io.loadOut.ready := loadOut0.ready
+  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
+  val ldout0 = Wire(Decoupled(new ExuOutput))
+  ldout0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
+  ldout0.bits  := loadWritebackOverride
+  atomicsUnit.io.out.ready := ldout0.ready
+  loadUnits.head.io.ldout.ready := ldout0.ready
   when(atomicsUnit.io.out.valid){
-    loadOut0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
+    ldout0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
   }
 
-  val ldExeWbReqs = loadOut0 +: loadUnits.tail.map(_.io.loadOut)
+  val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
   io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
-  io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
+  io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   val stOut = io.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // prefetch to l1 req
@@ -206,7 +206,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   loadUnits(0).io.prefetch_req.bits.confidence := 0.U
 
   l1_pf_req.ready := (l1_pf_req.bits.confidence > 0.U) ||
-    loadUnits.map(!_.io.loadIn.valid).reduce(_ || _)
+    loadUnits.map(!_.io.ldin.valid).reduce(_ || _)
 
   // l1 pf fuzzer interface
   val DebugEnableL1PFFuzzer = false
@@ -370,10 +370,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val fastReplaySel = loadUnits.zipWithIndex.map { case (ldu, i) => {
     val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid := ldu.io.fastReplayOut.valid 
-    wrapper.bits.req := ldu.io.fastReplayOut.bits
-    wrapper.bits.balance := ldu.io.fastReplayOut.bits.replayInfo.cause(LoadReplayCauses.bankConflict)
-    wrapper.bits.port := i.U
+    wrapper.valid        := ldu.io.fast_rep_out.valid 
+    wrapper.bits.req     := ldu.io.fast_rep_out.bits
+    wrapper.bits.balance := ldu.io.fast_rep_out.bits.rep_info.bank_conflict
+    wrapper.bits.port    := i.U
     wrapper
   }}
   val balanceFastReplaySel = balanceReOrder(fastReplaySel)
@@ -383,34 +383,34 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.isFirstIssue := true.B
   
     // get input form dispatch
-    loadUnits(i).io.loadIn <> io.issue(i)
-    loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.ldin <> io.issue(i)
+    loadUnits(i).io.feedback_slow <> io.rsfeedback(i).feedbackSlow
+    loadUnits(i).io.feedback_fast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
    
     // fast replay
-    loadUnits(i).io.fastReplayIn.valid := balanceFastReplaySel(i).valid 
-    loadUnits(i).io.fastReplayIn.bits := balanceFastReplaySel(i).bits.req
+    loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid 
+    loadUnits(i).io.fast_rep_in.bits := balanceFastReplaySel(i).bits.req
 
-    loadUnits(i).io.fastReplayOut.ready := false.B
+    loadUnits(i).io.fast_rep_out.ready := false.B
     for (j <- 0 until exuParameters.LduCnt) {
       when (balanceFastReplaySel(j).valid && balanceFastReplaySel(j).bits.port === i.U) {
-        loadUnits(i).io.fastReplayOut.ready := loadUnits(j).io.fastReplayIn.ready
+        loadUnits(i).io.fast_rep_out.ready := loadUnits(j).io.fast_rep_in.ready
       }
     }
      
     // get input form dispatch
-    loadUnits(i).io.loadIn <> io.issue(i)
+    loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
-    loadUnits(i).io.tlDchannel := dcache.io.lsu.forward_D(i)
+    loadUnits(i).io.tl_d_channel := dcache.io.lsu.forward_D(i)
     loadUnits(i).io.forward_mshr <> dcache.io.lsu.forward_mshr(i)
     // ld-ld violation check
-    loadUnits(i).io.lsq.loadLoadViolationQuery <> lsq.io.ldu.loadLoadViolationQuery(i)
-    loadUnits(i).io.lsq.storeLoadViolationQuery <> lsq.io.ldu.storeLoadViolationQuery(i)
+    loadUnits(i).io.lsq.ldld_nuke_query <> lsq.io.ldu.ldld_nuke_query(i)
+    loadUnits(i).io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(i)
     loadUnits(i).io.csrCtrl       <> csrCtrl
     // dcache refill req
     loadUnits(i).io.refill           <> delayedDcacheRefill
@@ -420,9 +420,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // st-ld violation query 
     for (s <- 0 until StorePipelineWidth) {
-      loadUnits(i).io.reExecuteQuery(s) := storeUnits(s).io.reExecuteQuery
+      loadUnits(i).io.stld_nuke_query(s) := storeUnits(s).io.stld_nuke_query
     }
-    loadUnits(i).io.lqReplayFull <> lsq.io.lqReplayFull
+    loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // prefetch
     prefetcherOpt.foreach(pf => {
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
@@ -432,34 +432,36 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
           )
       )
       pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
-      pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2IsPointerChasing, io.loadPc(i), RegNext(io.loadPc(i)))
+      pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2_ptr_chasing, io.loadPc(i), RegNext(io.loadPc(i)))
     })
 
     // load to load fast forward: load(i) prefers data(i)
     val fastPriority = (i until exuParameters.LduCnt) ++ (0 until i)
-    val fastValidVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.valid)
-    val fastDataVec = fastPriority.map(j => loadUnits(j).io.fastpathOut.data)
+    val fastValidVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.valid)
+    val fastDataVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.data)
+    val fastErrorVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.loadFastMatch(i)(j))
-    loadUnits(i).io.fastpathIn.valid := VecInit(fastValidVec).asUInt.orR
-    loadUnits(i).io.fastpathIn.data := ParallelPriorityMux(fastValidVec, fastDataVec)
+    loadUnits(i).io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
+    loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
+    loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
-    loadUnits(i).io.loadFastMatch := fastMatch
-    loadUnits(i).io.loadFastImm := io.loadFastImm(i)
+    loadUnits(i).io.ld_fast_match := fastMatch
+    loadUnits(i).io.ld_fast_imm := io.loadFastImm(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
-    loadUnits(i).io.l2Hint <> io.l2Hint
+    loadUnits(i).io.l2_hint <> io.l2_hint
 
     // passdown to lsq (load s2)
-    lsq.io.ldu.loadIn(i) <> loadUnits(i).io.lsq.loadIn
-    lsq.io.loadOut(i) <> loadUnits(i).io.lsq.loadOut
-    lsq.io.ldRawDataOut(i) <> loadUnits(i).io.lsq.ldRawData
+    lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
+    lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
+    lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
-    lsq.io.l2Hint.valid := io.l2Hint.valid
-    lsq.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
+    lsq.io.l2_hint.valid := io.l2_hint.valid
+    lsq.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 
     // alter writeback exception info
-    io.s3_delayed_load_error(i) := loadUnits(i).io.s3_delayedLoadError
+    io.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
@@ -492,12 +494,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // Prefetcher
   val PrefetcherDTLBPortIndex = exuParameters.LduCnt + exuParameters.StuCnt
-  dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
-  dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
-  dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
-  prefetcherOpt.foreach(pf => {
-    dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
-  })
+  prefetcherOpt match {
+  case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
+  case None =>
+    dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
+    dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
+    dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
+  }
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
@@ -508,9 +511,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
-    stu.io.redirect     <> redirect
-    stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
-    stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
+    stu.io.redirect      <> redirect
+    stu.io.feedback_slow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
+    stu.io.rsIdx         <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
@@ -524,7 +527,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
     // Lsq to sta unit
-    lsq.io.sta.storeMaskIn(i) <> stu.io.storeMaskOut
+    lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // Lsq to std unit's rs
     lsq.io.std.storeDataIn(i) := stData(i)
@@ -689,7 +692,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   when (state =/= s_normal) {
     // use store wb port instead of load
-    loadUnits(0).io.loadOut.ready := false.B
+    loadUnits(0).io.ldout.ready := false.B
     // use load_0's TLB
     atomicsUnit.io.dtlb <> amoTlb
 
@@ -697,13 +700,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits.map(i => i.io.prefetch_req.valid := false.B)
 
     // make sure there's no in-flight uops in load unit
-    assert(!loadUnits(0).io.loadOut.valid)
+    assert(!loadUnits(0).io.ldout.valid)
   }
 
   for (i <- 0 until exuParameters.StuCnt) when (state === s_atomics(i)) {
     atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs(i)).feedbackSlow
 
-    assert(!storeUnits(i).io.feedbackSlow.valid)
+    assert(!storeUnits(i).io.feedback_slow.valid)
   }
 
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
