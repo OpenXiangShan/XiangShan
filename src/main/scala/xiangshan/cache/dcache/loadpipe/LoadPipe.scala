@@ -29,6 +29,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val io = IO(new DCacheBundle {
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
+    val load128Req = Input(Bool())
     // req got nacked in stage 0?
     val nack      = Input(Bool())
 
@@ -40,9 +41,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
 
-    val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
-    val banked_data_resp = Input(new L1BankedDataReadResult())
-    val read_error_delayed = Input(Bool())
+    val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
+    val is128Req = Output(Bool())
+    val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
+    val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits, Bool()))
 
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
@@ -105,6 +107,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.vaddr
   val s0_replayCarry = s0_req.replayCarry
+  val s0_load128Req = io.load128Req
+  val s0_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s0_vaddr))
+  val s0_bank_oh_128 = (s0_bank_oh_64 << 1.U).asUInt | s0_bank_oh_64.asUInt
+  val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -118,9 +124,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
+  val s1_load128Req = RegEnable(s0_load128Req, s0_fire)
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   val s1_vaddr = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
-  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_vaddr))
+  val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
@@ -171,7 +178,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }.otherwise {
     val s1_tag_eq_way_dup_dc = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
     s1_tag_match_way_dup_dc := wayMap((w: Int) => s1_tag_eq_way_dup_dc(w) && meta_resp(w).coh.isValid()).asUInt
-    
+
     // lsu side tag match
     val s1_tag_eq_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_lsu))).asUInt
     s1_tag_match_way_dup_lsu := wayMap((w: Int) => s1_tag_eq_way_dup_lsu(w) && meta_resp(w).coh.isValid()).asUInt
@@ -217,6 +224,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way_dup_dc
+  io.banked_data_read.bits.bankMask := s1_bank_oh
+  io.is128Req := s1_load128Req
 
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
@@ -236,6 +245,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
@@ -375,13 +385,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report ecc error and get selected dcache data
 
   val s3_valid = RegNext(s2_valid)
+  val s3_load128Req = RegEnable(s2_load128Req, s2_fire)
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
 
-  val s3_banked_data_resp_word = io.banked_data_resp.raw_data
-  val s3_data_error = io.read_error_delayed && s3_hit // banked_data_resp_word.error && !bank_conflict
+  val s3_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
+  val s3_data64bit = Fill(2, io.banked_data_resp(0).raw_data)
+  val s3_banked_data_resp_word = Mux(s3_load128Req, s3_data128bit, s3_data64bit)
+  val s3_data_error = Mux(s3_load128Req, io.read_error_delayed.asUInt.orR, io.read_error_delayed(0)) && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
@@ -390,7 +403,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
   resp.bits.data_delayed := s3_banked_data_resp_word
   resp.bits.replacementUpdated := io.replace_access.valid
-  
+
   // report tag / data / l2 error (with paddr) to bus error unit
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
   io.error.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
@@ -411,7 +424,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   if (!cfg.updateReplaceOn2ndmiss) {
     // replacement is only updated on 1st miss
     // io.replace_access.valid := RegNext(RegNext(
-    //   RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) && 
+    //   RegNext(io.meta_read.fire()) && s1_valid && !io.lsu.s1_kill) &&
     //   !s2_nack_no_mshr &&
     //   !s2_miss_merged
     // )

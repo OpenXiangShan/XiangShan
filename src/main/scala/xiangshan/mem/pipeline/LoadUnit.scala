@@ -166,7 +166,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_valid         = Wire(Bool())
   val s0_kill          = Wire(Bool())
   val s0_vaddr         = Wire(UInt(VAddrBits.W))
-  val s0_mask          = Wire(UInt(8.W))
+  val s0_mask          = Wire(UInt((VLEN/8).W))
   val s0_uop           = Wire(new MicroOp)
   val s0_has_rob_entry = Wire(Bool())
   val s0_rsIdx         = Wire(UInt(log2Up(IssQueSize).W))
@@ -369,7 +369,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
     s0_vaddr         := src.vaddr
-    s0_mask          := genWmask(src.vaddr, src.uop.ctrl.fuOpType(1, 0))
+    s0_mask          := genVWmask(src.vaddr, src.uop.ctrl.fuOpType(1, 0))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
@@ -409,7 +409,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromIntIssueSource(src: ExuInput) = {
     s0_vaddr         := src.src(0) + SignExt(src.uop.ctrl.imm(11, 0), VAddrBits)
-    s0_mask          := genWmask(s0_vaddr, src.uop.ctrl.fuOpType(1,0))
+    s0_mask          := genVWmask(s0_vaddr, src.uop.ctrl.fuOpType(1,0))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
@@ -449,7 +449,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(io.l2l_fwd_in.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genWmask(0.U, LSUOpType.ld)
+    s0_mask               := genVWmask(Cat(s0_ptr_chasing_vaddr(3), 0.U(3.W)), LSUOpType.ld)
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
     s0_uop.ctrl.fuOpType  := LSUOpType.ld
@@ -623,6 +623,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
+                       // TODO: Fix me when vector instruction
                        (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
@@ -797,7 +798,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                         io.stld_nuke_query(w).valid && // query valid
                         isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                        (s2_in.paddr(PAddrBits-1,3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
+                        // TODO: Fix me when vector instruction
+                        (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
                         (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR || s2_in.rep_info.nuke
 
@@ -832,11 +834,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // merge forward result
   // lsq has higher priority than sbuffer
-  val s2_fwd_mask = Wire(Vec(8, Bool()))
-  val s2_fwd_data = Wire(Vec(8, UInt(8.W)))
+  val s2_fwd_mask = Wire(Vec((VLEN/8), Bool()))
+  val s2_fwd_data = Wire(Vec((VLEN/8), UInt(8.W)))
   s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.lsq.forward.dataInvalid
   // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
+  for (i <- 0 until VLEN / 8) {
     s2_fwd_mask(i) := io.lsq.forward.forwardMask(i) || io.sbuffer.forwardMask(i)
     s2_fwd_data(i) := Mux(io.lsq.forward.forwardMask(i), io.lsq.forward.forwardData(i), io.sbuffer.forwardData(i))
   }
@@ -1054,7 +1056,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_ld_raw_data_frm_cache.forwardMask          := RegEnable(s2_fwd_mask, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData          := RegEnable(s2_fwd_data, s2_valid)
   s3_ld_raw_data_frm_cache.uop                  := RegEnable(s2_out.uop, s2_valid)
-  s3_ld_raw_data_frm_cache.addrOffset           := RegEnable(s2_out.paddr(2, 0), s2_valid)
+  s3_ld_raw_data_frm_cache.addrOffset           := RegEnable(s2_out.paddr(3, 0), s2_valid)
   s3_ld_raw_data_frm_cache.forward_D            := RegEnable(s2_fwd_frm_d_chan, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData_D        := RegEnable(s2_fwd_data_frm_d_chan, s2_valid)
   s3_ld_raw_data_frm_cache.forward_mshr         := RegEnable(s2_fwd_frm_mshr, s2_valid)
@@ -1063,14 +1065,22 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergedData()
   val s3_picked_data_frm_cache = LookupTree(s3_ld_raw_data_frm_cache.addrOffset, List(
-    "b000".U -> s3_merged_data_frm_cache(63,  0),
-    "b001".U -> s3_merged_data_frm_cache(63,  8),
-    "b010".U -> s3_merged_data_frm_cache(63, 16),
-    "b011".U -> s3_merged_data_frm_cache(63, 24),
-    "b100".U -> s3_merged_data_frm_cache(63, 32),
-    "b101".U -> s3_merged_data_frm_cache(63, 40),
-    "b110".U -> s3_merged_data_frm_cache(63, 48),
-    "b111".U -> s3_merged_data_frm_cache(63, 56)
+    "b0000".U -> s3_merged_data_frm_cache(63,    0),
+    "b0001".U -> s3_merged_data_frm_cache(63,    8),
+    "b0010".U -> s3_merged_data_frm_cache(63,   16),
+    "b0011".U -> s3_merged_data_frm_cache(63,   24),
+    "b0100".U -> s3_merged_data_frm_cache(63,   32),
+    "b0101".U -> s3_merged_data_frm_cache(63,   40),
+    "b0110".U -> s3_merged_data_frm_cache(63,   48),
+    "b0111".U -> s3_merged_data_frm_cache(63,   56),
+    "b1000".U -> s3_merged_data_frm_cache(127,  64),
+    "b1001".U -> s3_merged_data_frm_cache(127,  72),
+    "b1010".U -> s3_merged_data_frm_cache(127,  80),
+    "b1011".U -> s3_merged_data_frm_cache(127,  88),
+    "b1100".U -> s3_merged_data_frm_cache(127,  96),
+    "b1101".U -> s3_merged_data_frm_cache(127, 104),
+    "b1110".U -> s3_merged_data_frm_cache(127, 112),
+    "b1111".U -> s3_merged_data_frm_cache(127, 120)
   ))
   val s3_ld_data_frm_cache = rdataHelper(s3_ld_raw_data_frm_cache.uop, s3_picked_data_frm_cache)
 
@@ -1084,7 +1094,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill // for debug only
-  io.l2l_fwd_out.data       := s3_merged_data_frm_cache // load to load is for ld only
+  io.l2l_fwd_out.data       := Mux(s3_ld_raw_data_frm_cache.addrOffset(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0)) // load to load is for ld only
   io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
 
    // trigger

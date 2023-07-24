@@ -94,7 +94,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s0_out.uop          := s0_in.uop
   s0_out.miss         := DontCare
   s0_out.rsIdx        := s0_rsIdx
-  s0_out.mask         := genWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0))
+  s0_out.mask         := genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0))
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := false.B // TODO
   s0_out.wlineflag    := s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero
