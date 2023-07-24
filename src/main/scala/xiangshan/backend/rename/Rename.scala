@@ -49,6 +49,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val int_need_free = Vec(CommitWidth, Input(Bool()))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // for snapshots
+    val snpt = Input(new SnapshotPort)
     // debug arch ports
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
@@ -115,6 +117,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.debugInfo := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
+    uop.snapshot := DontCare
   })
 
   require(RenameWidth >= CommitWidth)
@@ -282,6 +285,21 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
 
   }
+
+  val hasCFI = VecInit(io.in.map(in => (!in.bits.cf.pd.notCFI || FuType.isJumpExu(in.bits.ctrl.fuType)) && in.fire)).asUInt.orR
+  val snapshotCtr = RegInit((4 * CommitWidth).U)
+  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR else false.B
+  io.out.head.bits.snapshot := hasCFI && allowSnpt
+  when(io.out.head.fire && io.out.head.bits.snapshot) {
+    snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
+  }.elsewhen(io.out.head.fire) {
+    snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
+  }
+
+  intFreeList.io.snpt := io.snpt
+  fpFreeList.io.snpt := io.snpt
+  intFreeList.io.snpt.snptEnq := io.out.head.fire && io.out.head.bits.snapshot
+  fpFreeList.io.snpt.snptEnq := io.out.head.fire && io.out.head.bits.snapshot
 
   /**
     * Instructions commit: update freelist and rename table

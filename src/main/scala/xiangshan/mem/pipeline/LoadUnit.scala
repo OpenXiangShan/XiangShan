@@ -184,21 +184,25 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_out           = Wire(new LqWriteBundle)
 
   // load flow select/gen
-  // src0: load replayed by LSQ (io.replay)
-  // src1: hardware prefetch from prefetchor (high confidence) (io.prefetch)
-  // src2: int read / software prefetch first issue from RS (io.in)
-  // src3: vec read first issue from RS (TODO)
-  // src4: load try pointchaising when no issued or replayed load (io.fastpath)
-  // src5: hardware prefetch from prefetchor (high confidence) (io.prefetch)
+  // src0: super load replayed by LSQ (cache miss replay) (io.replay)
+  // src1: fast load replay (io.fast_rep_in)
+  // src2: load replayed by LSQ (io.replay)
+  // src3: hardware prefetch from prefetchor (high confidence) (io.prefetch)
+  // src4: int read / software prefetch first issue from RS (io.in)
+  // src5: vec read first issue from RS (TODO)
+  // src6: load try pointchaising when no issued or replayed load (io.fastpath)
+  // src7: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // priority: high to low
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.robIdx, io.ldin.bits.uop.robIdx)
+  val s0_super_ld_rep_valid  = io.replay.valid && io.replay.bits.forward_tlDchannel
   val s0_ld_fast_rep_valid   = io.fast_rep_in.valid
-  val s0_ld_rep_valid        = io.replay.valid && !s0_rep_stall
+  val s0_ld_rep_valid        = io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall
   val s0_high_conf_prf_valid = io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U
   val s0_int_iss_valid       = io.ldin.valid // int flow first issue or software prefetch
   val s0_vec_iss_valid       = WireInit(false.B) // TODO
   val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
+  dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
   dontTouch(s0_ld_rep_valid)
   dontTouch(s0_high_conf_prf_valid)
@@ -208,32 +212,40 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   dontTouch(s0_low_conf_prf_valid)
 
   // load flow source ready
-  val s0_ld_fast_rep_ready   = WireInit(true.B)
-  val s0_ld_rep_ready        = !s0_ld_fast_rep_valid
-  val s0_high_conf_prf_ready = !s0_ld_fast_rep_valid &&
+  val s0_super_ld_rep_ready  = WireInit(true.B)
+  val s0_ld_fast_rep_ready   = !s0_super_ld_rep_valid
+  val s0_ld_rep_ready        = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid
+  val s0_high_conf_prf_ready = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid &&
                                !s0_ld_rep_valid
 
-  val s0_int_iss_ready       = !s0_ld_fast_rep_valid &&
+  val s0_int_iss_ready       = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid &&
                                !s0_ld_rep_valid &&
                                !s0_high_conf_prf_valid
 
-  val s0_vec_iss_ready       = !s0_ld_fast_rep_valid &&
+  val s0_vec_iss_ready       = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid &&
                                !s0_ld_rep_valid &&
                                !s0_high_conf_prf_valid &&
                                !s0_int_iss_valid
 
-  val s0_l2l_fwd_ready       = !s0_ld_fast_rep_valid &&
+  val s0_l2l_fwd_ready       = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid &&
                                !s0_ld_rep_valid &&
                                !s0_high_conf_prf_valid &&
                                !s0_int_iss_valid &&
                                !s0_vec_iss_valid
 
-  val s0_low_conf_prf_ready  = !s0_ld_fast_rep_valid &&
+  val s0_low_conf_prf_ready  = !s0_super_ld_rep_valid &&
+                               !s0_ld_fast_rep_valid &&
                                !s0_ld_rep_valid &&
                                !s0_high_conf_prf_valid &&
                                !s0_int_iss_valid &&
                                !s0_vec_iss_valid &&
                                !s0_l2l_fwd_valid
+  dontTouch(s0_super_ld_rep_ready)
   dontTouch(s0_ld_fast_rep_ready)
   dontTouch(s0_ld_rep_ready)
   dontTouch(s0_high_conf_prf_ready)
@@ -243,14 +255,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   dontTouch(s0_low_conf_prf_ready)
 
   // load flow source select (OH)
-  val s0_ld_fast_rep_select = s0_ld_fast_rep_valid && s0_ld_fast_rep_ready
-  val s0_ld_rep_select      = s0_ld_rep_valid && s0_ld_rep_ready
-  val s0_hw_prf_select      = s0_high_conf_prf_ready && s0_high_conf_prf_valid ||
-                              s0_low_conf_prf_ready && s0_low_conf_prf_valid
-  val s0_int_iss_select     = s0_int_iss_ready && s0_int_iss_valid
-  val s0_vec_iss_select     = s0_vec_iss_ready && s0_vec_iss_valid
-  val s0_l2l_fwd_select     = s0_l2l_fwd_ready && s0_l2l_fwd_valid
+  val s0_super_ld_rep_select = s0_super_ld_rep_valid && s0_super_ld_rep_ready
+  val s0_ld_fast_rep_select  = s0_ld_fast_rep_valid && s0_ld_fast_rep_ready
+  val s0_ld_rep_select       = s0_ld_rep_valid && s0_ld_rep_ready
+  val s0_hw_prf_select       = s0_high_conf_prf_ready && s0_high_conf_prf_valid ||
+                               s0_low_conf_prf_ready && s0_low_conf_prf_valid
+  val s0_int_iss_select      = s0_int_iss_ready && s0_int_iss_valid
+  val s0_vec_iss_select      = s0_vec_iss_ready && s0_vec_iss_valid
+  val s0_l2l_fwd_select      = s0_l2l_fwd_ready && s0_l2l_fwd_valid
   assert(!s0_vec_iss_select) // to be added
+  dontTouch(s0_super_ld_rep_select)
   dontTouch(s0_ld_fast_rep_select)
   dontTouch(s0_ld_rep_select)
   dontTouch(s0_hw_prf_select)
@@ -258,7 +272,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   dontTouch(s0_vec_iss_select)
   dontTouch(s0_l2l_fwd_select)
 
-  s0_valid := (s0_ld_fast_rep_valid ||
+  s0_valid := (s0_super_ld_rep_valid ||
+               s0_ld_fast_rep_valid ||
                s0_ld_rep_valid ||
                s0_high_conf_prf_valid ||
                s0_int_iss_valid ||
@@ -458,11 +473,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // set default
   s0_uop := DontCare
-  when (s0_ld_fast_rep_select)  { fromFastReplaySource(io.fast_rep_in.bits)  }
-  .elsewhen (s0_ld_rep_select)  { fromNormalReplaySource(io.replay.bits) }
-  .elsewhen (s0_hw_prf_select)  { fromPrefetchSource(io.prefetch_req.bits)   }
-  .elsewhen (s0_int_iss_select) { fromIntIssueSource(io.ldin.bits)           }
-  .elsewhen (s0_vec_iss_select) { fromVecIssueSource()                       }
+  when (s0_super_ld_rep_select)      { fromNormalReplaySource(io.replay.bits)     }
+  .elsewhen (s0_ld_fast_rep_select)  { fromFastReplaySource(io.fast_rep_in.bits)  }
+  .elsewhen (s0_ld_rep_select)       { fromNormalReplaySource(io.replay.bits)     }
+  .elsewhen (s0_hw_prf_select)       { fromPrefetchSource(io.prefetch_req.bits)   }
+  .elsewhen (s0_int_iss_select)      { fromIntIssueSource(io.ldin.bits)           }
+  .elsewhen (s0_vec_iss_select)      { fromVecIssueSource()                       }
   .otherwise {
     if (EnableLoadToLoadForward) {
       fromLoadToLoadSource(io.l2l_fwd_in)
@@ -495,7 +511,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.isFastPath    := s0_l2l_fwd
   s0_out.mshrid        := s0_mshrid
   s0_out.uop.cf.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned
-  s0_out.forward_tlDchannel := io.replay.valid && io.replay.bits.forward_tlDchannel
+  s0_out.forward_tlDchannel := s0_super_ld_rep_select
   when(io.tlb.req.valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }.otherwise{
@@ -507,13 +523,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_in.ready := (s0_can_go && io.dcache.req.ready && s0_ld_fast_rep_ready)
 
   // load flow source ready
-  // always accept load flow from load replay queue
-  // io.replay has highest priority
-  io.replay.ready := (s0_can_go && io.dcache.req.ready && s0_ld_rep_ready && !s0_rep_stall)
+  // cache missed load has highest priority
+  // always accept cache missed load flow from load replay queue
+  io.replay.ready := (s0_can_go && io.dcache.req.ready && (s0_ld_rep_ready && !s0_rep_stall || s0_super_ld_rep_select))
 
   // accept load flow from rs when:
   // 1) there is no lsq-replayed load
-  // 2) there is no high confidence prefetch request
+  // 2) there is no fast replayed load
+  // 3) there is no high confidence prefetch request
   io.ldin.ready := (s0_can_go && io.dcache.req.ready && s0_int_iss_ready)
 
   // for hw prefetch load flow feedback, to be added later
@@ -707,11 +724,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // --------------------------------------------------------------------------------
   // s2: DCache resp
   val s2_valid  = RegInit(false.B)
+  val s2_in     = Wire(new LqWriteBundle)
+  val s2_out    = Wire(new LqWriteBundle)
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_in     = Wire(new LqWriteBundle)
-  val s2_out    = Wire(new LqWriteBundle)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -875,7 +892,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.out.bits.uop.ctrl.replayInst := false.B
 
   // to be removed
-  io.feedback_fast.valid                 := s2_valid && !s2_in.isLoadReplay && !s2_exception && io.lq_rep_full && s2_out.rep_info.need_rep && !s2_out.uop.robIdx.needFlush(io.redirect)
+  io.feedback_fast.valid                 := s2_valid &&                 // inst is valid
+                                            !s2_in.isLoadReplay &&      // already feedbacked
+                                            io.lq_rep_full &&           // LoadQueueReplay is full
+                                            s2_out.rep_info.need_rep && // need replay
+                                            !s2_exception &&            // no exception is triggered
+                                            !s2_hw_prf                  // not hardware prefetch
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.rsIdx            := s2_in.rsIdx
@@ -910,7 +932,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_ld_valid_dup = RegInit(0.U(6.W))
   s2_ld_valid_dup := 0x0.U(6.W)
   when (s1_ld_left_fire && !s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x3f.U(6.W) }
-  when (s1_kill || s1_fast_rep_kill) { s2_ld_valid_dup := 0x0.U(6.W) }
+  when (s1_kill || s1_fast_rep_kill || s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x0.U(6.W) }
   assert(RegNext((s2_valid === s2_ld_valid_dup(0)) || RegNext(s1_out.isHWPrefetch)))
 
   // Pipeline
@@ -918,7 +940,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // stage 3
   // --------------------------------------------------------------------------------
   // writeback and update load queue
-  val s3_valid        = RegNext(s2_valid) && !RegNext(s2_out.uop.robIdx.needFlush(io.redirect))
+  val s3_valid        = RegNext(s2_valid && !s2_out.isHWPrefetch && !s2_out.uop.robIdx.needFlush(io.redirect))
   val s3_in           = RegEnable(s2_out, s2_fire)
   val s3_out          = Wire(Valid(new ExuOutput))
   val s3_cache_rep    = RegEnable(s2_cache_rep && s2_troublem, s2_fire)
@@ -1102,46 +1124,46 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsTopdownInfo.s2.paddr_bits  := s2_in.paddr
 
   // perf cnt
-  XSPerfAccumulate("in_valid",                  io.ldin.valid)
-  XSPerfAccumulate("in_block",                  io.ldin.valid && !io.ldin.fire)
-  XSPerfAccumulate("in_fire_first_issue",       s0_valid && s0_isFirstIssue)
-  XSPerfAccumulate("lsq_fire_first_issue",      io.replay.fire)
-  XSPerfAccumulate("ldu_fire_first_issue",      io.ldin.fire && s0_isFirstIssue)
-  XSPerfAccumulate("fast_replay_issue",         io.fast_rep_in.fire)
-  XSPerfAccumulate("s0_stall_out",              s0_valid && !s0_can_go)
-  XSPerfAccumulate("s0_stall_dcache",           s0_valid && !io.dcache.req.ready)
-  XSPerfAccumulate("addr_spec_success",         s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_failed",          s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once",    s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once",     s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
-  XSPerfAccumulate("forward_tl_d_channel",      s0_out.forward_tlDchannel)
-  XSPerfAccumulate("hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
-  XSPerfAccumulate("software_prefetch_fire",    s0_fire && s0_prf && s0_int_iss_select)
-  XSPerfAccumulate("hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select)
-  XSPerfAccumulate("hardware_prefetch_total",   io.prefetch_req.valid)
+  XSPerfAccumulate("s0_in_valid",                  io.ldin.valid)
+  XSPerfAccumulate("s0_in_block",                  io.ldin.valid && !io.ldin.fire)
+  XSPerfAccumulate("s0_in_fire_first_issue",       s0_valid && s0_isFirstIssue)
+  XSPerfAccumulate("s0_lsq_fire_first_issue",      io.replay.fire)
+  XSPerfAccumulate("s0_ldu_fire_first_issue",      io.ldin.fire && s0_isFirstIssue)
+  XSPerfAccumulate("s0_fast_replay_issue",         io.fast_rep_in.fire)
+  XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
+  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
+  XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_failed_once",     s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
+  XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forward_tlDchannel)
+  XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
+  XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_prf && s0_int_iss_select)
+  XSPerfAccumulate("s0_hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select)
+  XSPerfAccumulate("s0_hardware_prefetch_total",   io.prefetch_req.valid)
 
-  XSPerfAccumulate("in_valid",                  s1_valid)
-  XSPerfAccumulate("in_fire",                   s1_fire)
-  XSPerfAccumulate("in_fire_first_issue",       s1_fire && s1_in.isFirstIssue)
-  XSPerfAccumulate("tlb_miss",                  s1_fire && s1_tlb_miss)
-  XSPerfAccumulate("tlb_miss_first_issue",      s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
-  XSPerfAccumulate("s1_stall_out",              s1_valid && !s1_can_go)
+  XSPerfAccumulate("s1_in_valid",                  s1_valid)
+  XSPerfAccumulate("s1_in_fire",                   s1_fire)
+  XSPerfAccumulate("s1_in_fire_first_issue",       s1_fire && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_tlb_miss",                  s1_fire && s1_tlb_miss)
+  XSPerfAccumulate("s1_tlb_miss_first_issue",      s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
+  XSPerfAccumulate("s1_stall_out",                 s1_valid && !s1_can_go)
 
-  XSPerfAccumulate("in_valid",                  s2_valid)
-  XSPerfAccumulate("in_fire",                   s2_fire)
-  XSPerfAccumulate("in_fire_first_issue",       s2_fire && s2_in.isFirstIssue)
-  XSPerfAccumulate("dcache_miss",               s2_fire && s2_cache_miss)
-  XSPerfAccumulate("dcache_miss_first_issue",   s2_fire && s2_cache_miss && s2_in.isFirstIssue)
-  XSPerfAccumulate("full_forward",              s2_fire && s2_full_fwd)
-  XSPerfAccumulate("dcache_miss_full_forward",  s2_fire && s2_cache_miss && s2_full_fwd)
-  XSPerfAccumulate("s2_stall_out",              s2_fire && !s2_can_go)
-  XSPerfAccumulate("prefetch",                  s2_fire && s2_prf)
-  XSPerfAccumulate("prefetch_ignored",          s2_fire && s2_prf && s2_cache_rep) // ignore prefetch for mshr full / miss req port conflict
-  XSPerfAccumulate("prefetch_miss",             s2_fire && s2_prf && s2_cache_miss) // prefetch req miss in l1
-  XSPerfAccumulate("prefetch_hit",              s2_fire && s2_prf && !s2_cache_miss) // prefetch req hit in l1
-  XSPerfAccumulate("prefetch_accept",           s2_fire && s2_prf && s2_cache_miss && !s2_cache_rep) // prefetch a missed line in l1, and l1 accepted it
-  XSPerfAccumulate("successfully_forward_channel_D", s2_fwd_frm_d_chan && s2_fwd_data_valid)
-  XSPerfAccumulate("successfully_forward_mshr",      s2_fwd_frm_mshr && s2_fwd_data_valid)
+  XSPerfAccumulate("s2_in_valid",                  s2_valid)
+  XSPerfAccumulate("s2_in_fire",                   s2_fire)
+  XSPerfAccumulate("s2_in_fire_first_issue",       s2_fire && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_miss",               s2_fire && s2_cache_miss)
+  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && s2_cache_miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_full_forward",              s2_fire && s2_full_fwd)
+  XSPerfAccumulate("s2_dcache_miss_full_forward",  s2_fire && s2_cache_miss && s2_full_fwd)
+  XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go)
+  XSPerfAccumulate("s2_prefetch",                  s2_fire && s2_prf)
+  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && s2_cache_rep) // ignore prefetch for mshr full / miss req port conflict
+  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && s2_cache_miss) // prefetch req miss in l1
+  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !s2_cache_miss) // prefetch req hit in l1
+  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && s2_cache_miss && !s2_cache_rep) // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fwd_frm_d_chan && s2_fwd_data_valid)
+  XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fwd_frm_mshr && s2_fwd_data_valid)
 
   XSPerfAccumulate("load_to_load_forward",                      s1_try_ptr_chasing && !s1_ptr_chasing_canceled)
   XSPerfAccumulate("load_to_load_forward_try",                  s1_try_ptr_chasing)

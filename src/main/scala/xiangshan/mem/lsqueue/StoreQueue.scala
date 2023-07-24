@@ -512,7 +512,31 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(addrInvalidMask2Reg))))
     val addrInvalidSqIdx = Mux(addrInvalidMask2Reg.orR, addrInvalidSqIdx2, addrInvalidSqIdx1)
 
-    when (addrInvalidFlag && !RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+    // store-set content management
+    //                +-----------------------+
+    //                | Search a SSID for the |
+    //                |    load operation     |
+    //                +-----------------------+
+    //                           |
+    //                           V
+    //                 +-------------------+
+    //                 | load wait strict? |
+    //                 +-------------------+
+    //                           |
+    //                           V
+    //               +----------------------+
+    //            Set|                      |Clean
+    //               V                      V
+    //  +------------------------+   +------------------------------+
+    //  | Waiting for all older  |   | Wait until the corresponding |
+    //  |   stores operations    |   | older store operations       |
+    //  +------------------------+   +------------------------------+
+
+
+
+    when (RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+      io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx - 1.U)
+    } .elsewhen (addrInvalidFlag) {
       io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).addrInvalidSqIdx.value := addrInvalidSqIdx
     } .otherwise {

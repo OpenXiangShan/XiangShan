@@ -306,8 +306,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val sameTag = inptags(0) === inptags(1)
   val firstWord = getVWord(io.in(0).bits.addr)
   val secondWord = getVWord(io.in(1).bits.addr)
-  val sameWord = firstWord === secondWord
-
   // merge condition
   val mergeMask = Wire(Vec(EnsbufferWidth, Vec(StoreBufferSize, Bool())))
   val mergeIdx = mergeMask.map(PriorityEncoder(_)) // avoid using mergeIdx for better timing
@@ -373,7 +371,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
-  io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
+  io.in(1).ready := secondCanInsert && io.in(0).ready
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,
