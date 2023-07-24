@@ -606,7 +606,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                       (s1_paddr_dup_lsu(PAddrBits-1, DCacheVWordOffset) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, DCacheVWordOffset)) && // paddr match
+                       // TODO: Fix me when vector instruction
+                       (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
   // Generate forwardMaskFast to wake up insts earlier
@@ -780,7 +781,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                         io.stld_nuke_query(w).valid && // query valid
                         isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                        (s2_in.paddr(PAddrBits-1, DCacheVWordOffset) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, DCacheVWordOffset)) && // paddr match
+                        // TODO: Fix me when vector instruction
+                        (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
                         (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR || s2_in.rep_info.nuke
 
