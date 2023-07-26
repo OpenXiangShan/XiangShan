@@ -335,7 +335,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
-  val line_way_en = io.readline.bits.way_en
+  // when WPU is enabled, line_way_en is all enabled when read data
+  val line_way_en = Fill(DCacheWays, 1.U) // val line_way_en = io.readline.bits.way_en
+  val line_way_en_reg = RegNext(io.readline.bits.way_en)
 
   val write_bank_mask_reg = RegNext(io.write.bits.wmask)
   val write_data_reg = RegNext(io.write.bits.data)
@@ -369,8 +371,8 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach { i =>
-    val judge = if (ReduceReadlineConflict) io.read(i).valid && io.readline.bits.rmask(bank_addrs(i)) && line_div_addr === div_addrs(i) && io.readline.bits.way_en === way_en(i) && line_set_addr =/= set_addrs(i)
-                else io.read(i).valid && line_div_addr === div_addrs(i) && io.readline.bits.way_en === way_en(i) && line_set_addr =/= set_addrs(i)
+    val judge = if (ReduceReadlineConflict) io.read(i).valid && io.readline.bits.rmask(bank_addrs(i)) && line_div_addr === div_addrs(i) && line_set_addr =/= set_addrs(i)
+                else io.read(i).valid && line_div_addr === div_addrs(i) && line_set_addr =/= set_addrs(i)
     rrl_bank_conflict(i) := judge && io.readline.valid
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
@@ -380,7 +382,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     way_en(x) === write_wayen_dup_reg.head && 
     write_bank_mask_reg(bank_addrs(x))
   )
-  val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head && line_way_en === write_wayen_dup_reg.head
+  val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head
   // ready
   io.readline.ready := !(wrl_bank_conflict)
   io.read.zipWithIndex.map { case (x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard) }
@@ -432,9 +434,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         })))
         val readline_en = Wire(Bool())
         if (ReduceReadlineConflict) {
-          readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && io.readline.bits.way_en(way_index) && div_index.U === line_div_addr
+          readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && line_way_en(way_index) && div_index.U === line_div_addr
         } else {
-          readline_en := io.readline.valid && io.readline.bits.way_en(way_index) && div_index.U === line_div_addr
+          readline_en := io.readline.valid && line_way_en(way_index) && div_index.U === line_div_addr
         }
         val sram_set_addr = Mux(readline_en,
           addr_to_dcache_div_set(io.readline.bits.addr),
