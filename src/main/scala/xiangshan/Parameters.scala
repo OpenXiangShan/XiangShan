@@ -44,6 +44,7 @@ case class XSCoreParameters
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
+  VLEN: Int = 128,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -127,6 +128,8 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
+  EnableRenameSnapshot: Boolean = true,
+  RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
@@ -173,7 +176,7 @@ case class XSCoreParameters
   EnsbufferWidth: Int = 2,
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
-  EnableFastForward: Boolean = false,
+  EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
@@ -312,6 +315,7 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
+  val VLEN = coreParams.VLEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -328,6 +332,7 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val VDataBytes = VLEN / 8
   val HasFPU = coreParams.HasFPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
@@ -396,6 +401,8 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
+  val RenameSnapshotNum = coreParams.RenameSnapshotNum
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp

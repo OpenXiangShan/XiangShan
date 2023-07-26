@@ -167,6 +167,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+    // force write
+    val force_write = Input(Bool())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -183,10 +185,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   // convert store req to main pipe req, and select a req from store and probe
   val storeWaitCycles = RegInit(0.U(4.W))
-  val StoreWaitThreshold = WireInit(12.U(4.W))
+  val StoreWaitThreshold = Wire(UInt(4.W))
+  StoreWaitThreshold := Constantin.createRecord("StoreWaitThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 0.U)
   val storeWaitTooLong = storeWaitCycles >= StoreWaitThreshold
   val loadsAreComing = io.data_read.asUInt.orR
-  val storeCanAccept = storeWaitTooLong || !loadsAreComing
+  val storeCanAccept = storeWaitTooLong || !loadsAreComing || io.force_write
 
   val store_req = Wire(DecoupledIO(new MainPipeReq))
   store_req.bits := (new MainPipeReq).convertStoreReq(io.store_req.bits)
@@ -195,7 +198,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   when (store_req.fire) { // if wait too long and write success, reset counter.
     storeWaitCycles := 0.U
-  } .elsewhen (storeWaitCycles < StoreWaitThreshold && store_req.valid && !store_req.ready) { // if block store, increase counter.
+  } .elsewhen (storeWaitCycles < StoreWaitThreshold && io.store_req.valid && !store_req.ready) { // if block store, increase counter.
     storeWaitCycles := storeWaitCycles + 1.U
   }
 
