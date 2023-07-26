@@ -25,7 +25,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utils._
 import utility._
-import xiangshan.L1CacheErrorInfo
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -102,6 +102,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
     // store miss go to miss queue
     val miss_req = DecoupledIO(new MissReq)
+    val miss_resp = Input(new MissResp) // miss resp is used to support plru update
     // store buffer
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
@@ -120,8 +121,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val probe_ttob_check_resp = Flipped(ValidIO(new ProbeToBCheckResp))
 
     // data sram
+    val data_read = Vec(LoadPipelineWidth, Input(Bool()))
     val data_read_intend = Output(Bool())
-    val data_read = DecoupledIO(new L1BankedDataReadLineReq)
+    val data_readline = DecoupledIO(new L1BankedDataReadLineReq)
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
@@ -165,6 +167,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+    // force write
+    val force_write = Input(Bool())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -180,10 +184,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
 
   // convert store req to main pipe req, and select a req from store and probe
+  val storeWaitCycles = RegInit(0.U(4.W))
+  val StoreWaitThreshold = Wire(UInt(4.W))
+  StoreWaitThreshold := Constantin.createRecord("StoreWaitThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 0.U)
+  val storeWaitTooLong = storeWaitCycles >= StoreWaitThreshold
+  val loadsAreComing = io.data_read.asUInt.orR
+  val storeCanAccept = storeWaitTooLong || !loadsAreComing || io.force_write
+
   val store_req = Wire(DecoupledIO(new MainPipeReq))
   store_req.bits := (new MainPipeReq).convertStoreReq(io.store_req.bits)
-  store_req.valid := io.store_req.valid
-  io.store_req.ready := store_req.ready
+  store_req.valid := io.store_req.valid && storeCanAccept
+  io.store_req.ready := store_req.ready && storeCanAccept
+
+  when (store_req.fire) { // if wait too long and write success, reset counter.
+    storeWaitCycles := 0.U
+  } .elsewhen (storeWaitCycles < StoreWaitThreshold && io.store_req.valid && !store_req.ready) { // if block store, increase counter.
+    storeWaitCycles := storeWaitCycles + 1.U
+  }
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
@@ -243,7 +260,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
   val s1_need_tag = RegEnable(s0_need_tag, s0_fire)
-  val s1_can_go = s2_ready && (io.data_read.ready || !s1_need_data)
+  val s1_can_go = s2_ready && (io.data_readline.ready || !s1_need_data)
   val s1_fire = s1_valid && s1_can_go
   val s1_idx = get_idx(s1_req.vaddr)
 
@@ -292,8 +309,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
+  val s1_invalid_vec = wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid())
+  val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
+  val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
-  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(io.replace_way.way), RegNext(s1_repl_way_en))
+  s1_repl_way_en := Mux(
+    RegNext(s0_fire),
+    Mux(
+      s1_have_invalid_way,
+      s1_invalid_way_en,
+      UIntToOH(io.replace_way.way)
+      ),
+    RegNext(s1_repl_way_en)
+  )
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_miss_tag = Mux1H(s1_req.miss_way_en, wayMap(w => tag_resp(w)))
@@ -335,6 +363,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
     )
   )
+
+  XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
+  XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_hit = s1_tag_match && s1_has_permission
@@ -1395,10 +1426,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
   io.data_read_intend := s1_valid_dup(3) && s1_need_data
-  io.data_read.valid := s1_valid_dup(4) && s1_need_data
-  io.data_read.bits.rmask := s1_banked_rmask
-  io.data_read.bits.way_en := s1_way_en
-  io.data_read.bits.addr := s1_req_vaddr_dup_for_data_read
+  io.data_readline.valid := s1_valid_dup(4) && s1_need_data
+  io.data_readline.bits.rmask := s1_banked_rmask
+  io.data_readline.bits.way_en := s1_way_en
+  io.data_readline.bits.addr := s1_req_vaddr_dup_for_data_read
 
   io.miss_req.valid := s2_valid_dup(4) && s2_can_go_to_mq_dup(0)
   val miss_req = io.miss_req.bits
@@ -1544,9 +1575,45 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.wb.bits.delay_release := s3_req_replace_dup_for_wb_valid
   io.wb.bits.miss_id := s3_req.miss_id
 
-  io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe)
-  io.replace_access.bits.set := s2_idx_dup_for_replace_access
-  io.replace_access.bits.way := RegNext(OHToUInt(s1_way_en))
+  // update plru in main pipe s3
+  if (!cfg.updateReplaceOn2ndmiss) {
+  // replacement is only updated on 1st miss
+    io.replace_access.valid := RegNext(
+      // generated in mainpipe s1
+      RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
+      // generated in mainpipe s2
+      Mux(
+        io.miss_req.valid, 
+        !io.miss_resp.merged && io.miss_req.ready, // if store miss, only update plru for the first miss
+        true.B // normal store access
+      )
+    )
+    io.replace_access.bits.set := RegNext(s2_idx_dup_for_replace_access)
+    io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_way_en)))
+  } else {
+    // replacement is updated on both 1st and 2nd miss
+    // timing is worse than !cfg.updateReplaceOn2ndmiss
+    io.replace_access.valid := RegNext(
+      // generated in mainpipe s1
+      RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
+      // generated in mainpipe s2
+      Mux(
+        io.miss_req.valid, 
+        io.miss_req.ready, // if store miss, do not update plru if that req needs to be replayed
+        true.B // normal store access
+      )
+    )
+    io.replace_access.bits.set := RegNext(s2_idx_dup_for_replace_access)
+    io.replace_access.bits.way := RegNext(
+      Mux(
+        io.miss_req.valid && io.miss_resp.merged,
+        // miss queue 2nd fire: access replace way selected at miss queue allocate time
+        OHToUInt(io.miss_resp.repl_way_en),
+        // new selected replace way or hit way
+        RegNext(OHToUInt(s1_way_en))
+      )
+    )
+  }
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx_dup_for_replace_way

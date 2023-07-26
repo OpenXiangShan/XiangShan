@@ -6,20 +6,19 @@ import chiseltest._
 import chiseltest.ChiselScalatestTester
 import chiseltest.VerilatorBackendAnnotation
 import chiseltest.simulator.{VerilatorFlags, VerilatorCFlags}
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import freechips.rocketchip.util.HasRocketChipStageUtils
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import firrtl.stage.RunFirrtlTransformAnnotation
 import xstransforms.PrintModuleName
-
 import firrtl.options.TargetDirAnnotation
-
 import top.ArgParser
+import utility.FileRegisters
 import xiangshan.backend.decode.DecodeUnit
 
 object DecodeMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier) = ArgParser.parse(args)
+    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
     // //val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     // If Complex Params are needed, wrap it with a Top Module to do dirty works,
     // and use "chisel3.aop.Select.collectDeep[ModuleWanted](WrapperModule){case a: ModuleWanted => a}.head.Params"
@@ -34,9 +33,7 @@ object DecodeMain extends App with HasRocketChipStageUtils {
       ChiselGeneratorAnnotation(() => new DecodeUnit()(defaultConfig)
     )))
 //    // Generate files when compiling. Used by ChiselDB.
-//    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-//      writeOutputFile("./build", s"DecodeUnit.${extension}", contents())
-//    }
+//    FileRegisters.write("./build")
   }
 }
 

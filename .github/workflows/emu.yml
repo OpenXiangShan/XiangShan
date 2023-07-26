@@ -13,12 +13,13 @@ jobs:
     continue-on-error: false
     name: Generate Verilog
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
@@ -48,12 +49,13 @@ jobs:
     timeout-minutes: 900
     name: EMU - Basics
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -104,12 +106,13 @@ jobs:
     timeout-minutes: 900
     name: EMU - Performance
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -166,12 +169,13 @@ jobs:
     timeout-minutes: 900
     name: EMU - MC
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
@@ -199,12 +203,13 @@ jobs:
   #   timeout-minutes: 900
   #   name: SIMV - Basics
   #   steps:
-  #     - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v2
   #       with:
   #         submodules: 'recursive'
   #     - name: set env
   #       run: |
   #         export HEAD_SHA=${{ github.run_number }}
+  #         echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
   #         echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
   #         echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
   #         echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV

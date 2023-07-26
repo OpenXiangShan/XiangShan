@@ -119,6 +119,17 @@ object huancun extends XSModule with SbtModule {
   )
 }
 
+object coupledL2 extends XSModule with SbtModule {
+
+  override def millSourcePath = os.pwd / "coupledL2"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    huancun,
+    utility
+  )
+}
+
 object difftest extends XSModule with SbtModule {
   override def millSourcePath = os.pwd / "difftest"
 }
@@ -141,6 +152,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
   def rocketModule: PublishModule
   def difftestModule: PublishModule
   def huancunModule: PublishModule
+  def coupledL2Module: PublishModule
   def fudianModule: PublishModule
   def utilityModule: PublishModule
 
@@ -154,6 +166,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
     rocketModule,
     difftestModule,
     huancunModule,
+    coupledL2Module,
     fudianModule,
     utilityModule
   )
@@ -174,6 +187,7 @@ object XiangShan extends CommonXiangShan {
   override def rocketModule = rocketchip
   override def difftestModule = difftest
   override def huancunModule = huancun
+  override def coupledL2Module = coupledL2
   override def fudianModule = fudian
   override def utilityModule = utility
 }

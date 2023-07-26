@@ -291,6 +291,11 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           s2_tageTakens(w)
         )
 
+      val s3_disagree = RegEnable(s2_disagree, io.s2_fire)
+      // FIXME: not portable
+      io.out.last_stage_ftb_entry.brSlots(0).sc := RegEnable(s2_disagree(0), io.s2_fire)
+      io.out.last_stage_ftb_entry.tailSlot.sc := RegEnable(s2_disagree(1), io.s2_fire)
+
       scMeta.tageTakens(w) := RegEnable(s2_tageTakens(w), io.s2_fire)
       scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire)
       scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire)
