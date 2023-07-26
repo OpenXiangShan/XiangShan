@@ -614,11 +614,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
-
+  dcache.io.force_write := lsq.io.force_write
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
-
+  sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid

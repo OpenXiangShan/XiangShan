@@ -53,8 +53,8 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
+  val data   = UInt(VLEN.W)
+  val mask   = UInt((VLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
 }
@@ -88,6 +88,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val force_write = Output(Bool())
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -613,8 +614,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  io.uncache.req.bits.data := dataModule.io.rdata(0).data
-  io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
+  io.uncache.req.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
+  io.uncache.req.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
@@ -649,7 +650,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
+  io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
@@ -740,8 +741,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       fakeRAM.en    := allocated(ptr) && committed(ptr) && !mmio(ptr)
       fakeRAM.rIdx  := 0.U
       fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
-      fakeRAM.wdata := dataModule.io.rdata(i).data
-      fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      fakeRAM.wdata := Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).data(127,64), dataModule.io.rdata(i).data(63,0))
+      fakeRAM.wmask := Mux(paddrModule.io.rdata(i)(3), MaskExpand(dataModule.io.rdata(i).mask(15,8)), MaskExpand(dataModule.io.rdata(i).mask(7,0)))
       fakeRAM.wen   := allocated(ptr) && committed(ptr) && !mmio(ptr)
     }
   }
@@ -750,8 +751,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     for (i <- 0 until EnsbufferWidth) {
       val storeCommit = io.sbuffer(i).fire()
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
-      val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
-      val wmask = io.sbuffer(i).bits.mask
+      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
+      val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
+      val wmask = sbufferMask
+      val wdata = sbufferData & MaskExpand(sbufferMask)
 
       val difftest = Module(new DifftestStoreEvent)
       difftest.io.clock       := clock
@@ -805,6 +808,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // If redirect at T0, sqCancelCnt is at T2
   io.sqCancelCnt := redirectCancelCount
+  val ForceWriteUpper = Wire(UInt(log2Up(StoreQueueSize + 1).W))
+  ForceWriteUpper := Constantin.createRecord("ForceWriteUpper_"+p(XSCoreParamsKey).HartId.toString(), initValue = 60.U)
+  val ForceWriteLower = Wire(UInt(log2Up(StoreQueueSize + 1).W))
+  ForceWriteLower := Constantin.createRecord("ForceWriteLower_"+p(XSCoreParamsKey).HartId.toString(), initValue = 55.U)
+
+  val valid_cnt = PopCount(allocated)
+  io.force_write := RegNext(Mux(valid_cnt >= ForceWriteUpper, true.B, valid_cnt >= ForceWriteLower && io.force_write), init = false.B)
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing

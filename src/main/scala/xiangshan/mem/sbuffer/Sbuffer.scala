@@ -51,6 +51,11 @@ trait HasSbufferConst extends HasXSParameter {
   val PTagWidth: Int = PAddrBits - OffsetWidth
   val VTagWidth: Int = VAddrBits - OffsetWidth
   val WordOffsetWidth: Int = PAddrBits - WordsWidth
+
+  val CacheLineVWords: Int = CacheLineBytes / VDataBytes
+  val VWordsWidth: Int = log2Up(CacheLineVWords)
+  val VWordWidth: Int = log2Up(VDataBytes)
+  val VWordOffsetWidth: Int = PAddrBits - VWordWidth
 }
 
 class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
@@ -72,9 +77,9 @@ class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   // univerisal writemask
   val wvec = UInt(StoreBufferSize.W)
   // 2 cycle update
-  val mask = UInt((DataBits/8).W)
-  val data = UInt(DataBits.W)
-  val wordOffset = UInt(WordOffsetWidth.W)
+  val mask = UInt((VLEN/8).W)
+  val data = UInt(VLEN.W)
+  val vwordOffset = UInt(VWordOffsetWidth.W)
   val wline = Bool() // write full cacheline
 }
 
@@ -89,16 +94,16 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     val writeReq = Vec(EnsbufferWidth, Flipped(ValidIO(new DataWriteReq)))
     // clean mask when deq
     val maskFlushReq = Vec(NumDcacheWriteResp, Flipped(ValidIO(new MaskFlushReq)))
-    val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
-    val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
+    val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
   })
 
-  val data = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
+  val data = Reg(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
   // val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val mask = RegInit(
     VecInit(Seq.fill(StoreBufferSize)(
-      VecInit(Seq.fill(CacheLineWords)(
-        VecInit(Seq.fill(DataBytes)(false.B))
+      VecInit(Seq.fill(CacheLineVWords)(
+        VecInit(Seq.fill(VDataBytes)(false.B))
       ))
     ))
   )
@@ -110,8 +115,8 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     )
     line_mask_clean_flag.suggestName("line_mask_clean_flag_"+line)
     when(line_mask_clean_flag){
-      for(word <- 0 until CacheLineWords){
-        for(byte <- 0 until DataBytes){
+      for(word <- 0 until CacheLineVWords){
+        for(byte <- 0 until VDataBytes){
           mask(line)(word)(byte) := false.B
         }
       }
@@ -127,17 +132,17 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
       val line_write_buffer_data = RegEnable(req.bits.data, sbuffer_in_s1_line_wen)
       val line_write_buffer_wline = RegEnable(req.bits.wline, sbuffer_in_s1_line_wen)
       val line_write_buffer_mask = RegEnable(req.bits.mask, sbuffer_in_s1_line_wen)
-      val line_write_buffer_offset = RegEnable(req.bits.wordOffset(WordsWidth-1, 0), sbuffer_in_s1_line_wen)
+      val line_write_buffer_offset = RegEnable(req.bits.vwordOffset(VWordsWidth-1, 0), sbuffer_in_s1_line_wen)
       sbuffer_in_s1_line_wen.suggestName("sbuffer_in_s1_line_wen_"+line)
       sbuffer_in_s2_line_wen.suggestName("sbuffer_in_s2_line_wen_"+line)
       line_write_buffer_data.suggestName("line_write_buffer_data_"+line)
       line_write_buffer_wline.suggestName("line_write_buffer_wline_"+line)
       line_write_buffer_mask.suggestName("line_write_buffer_mask_"+line)
       line_write_buffer_offset.suggestName("line_write_buffer_offset_"+line)
-      for(word <- 0 until CacheLineWords){
-        for(byte <- 0 until DataBytes){
+      for(word <- 0 until CacheLineVWords){
+        for(byte <- 0 until VDataBytes){
           val write_byte = sbuffer_in_s2_line_wen && (
-            line_write_buffer_mask(byte) && (line_write_buffer_offset === word.U) || 
+            line_write_buffer_mask(byte) && (line_write_buffer_offset === word.U) ||
             line_write_buffer_wline
           )
           when(write_byte){
@@ -155,14 +160,14 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   //   when(req.valid){
   //     for(line <- 0 until StoreBufferSize){
   //       when(
-  //         req.bits.wvec(line) && 
+  //         req.bits.wvec(line) &&
   //         req.bits.cleanMask
   //       ){
   //         for(word <- 0 until CacheLineWords){
   //           for(byte <- 0 until DataBytes){
   //             mask(line)(word)(byte) := false.B
   //             val debug_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
-  //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) || 
+  //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) ||
   //               req.bits.wline
   //             ))
   //             assert(!debug_last_cycle_write_byte)
@@ -186,6 +191,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val force_write = Input(Bool())
   })
 
   val dataModule = Module(new SbufferData)
@@ -226,8 +232,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   def getWord(pa: UInt): UInt =
     pa(PAddrBits-1, 3)
 
+  def getVWord(pa: UInt): UInt =
+    pa(PAddrBits-1, 4)
+
   def getWordOffset(pa: UInt): UInt =
     pa(OffsetWidth-1, 3)
+
+  def getVWordOffset(pa: UInt): UInt =
+    pa(OffsetWidth-1, 4)
 
   def getAddr(ptag: UInt): UInt =
     Cat(ptag, 0.U((PAddrBits - PTagWidth).W))
@@ -242,16 +254,17 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // sbuffer entry count
 
-  val plru = new PseudoLRU(StoreBufferSize)
+  val plru = new ValidPseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(EnsbufferWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
   val candidateVec = VecInit(stateVec.map(s => s.isDcacheReqCandidate()))
-  val candidateIdx = PriorityEncoder(candidateVec)
 
-  val replaceAlgoIdx = plru.way
+  val replaceAlgoIdx = plru.way(candidateVec.reverse)._2
   val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
 
-  val replaceIdx = Mux(replaceAlgoNotDcacheCandidate, candidateIdx, replaceAlgoIdx)
+  assert(!(candidateVec.asUInt().orR && replaceAlgoNotDcacheCandidate), "we have way to select, but replace algo selects invalid way")
+
+  val replaceIdx = replaceAlgoIdx
   plru.access(accessIdx)
 
   //-------------------------cohCount-----------------------------
@@ -270,17 +283,17 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // Now sbuffer enq logic is divided into 3 stages:
 
-  // sbuffer_in_s0: 
+  // sbuffer_in_s0:
   // * read data and meta from store queue
   // * store them in 2 entry fifo queue
 
-  // sbuffer_in_s1: 
+  // sbuffer_in_s1:
   // * read data and meta from fifo queue
   // * update sbuffer meta (vtag, ptag, flag)
   // * prevert that line from being sent to dcache (add a block condition)
-  // * prepare cacheline level write enable signal, RegNext() data and mask 
+  // * prepare cacheline level write enable signal, RegNext() data and mask
 
-  // sbuffer_in_s2: 
+  // sbuffer_in_s2:
   // * use cacheline level buffer to update sbuffer data and mask
   // * remove dcache write block (if there is)
 
@@ -293,9 +306,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val inptags = io.in.map(in => getPTag(in.bits.addr))
   val invtags = io.in.map(in => getVTag(in.bits.vaddr))
   val sameTag = inptags(0) === inptags(1)
-  val firstWord = getWord(io.in(0).bits.addr)
-  val secondWord = getWord(io.in(1).bits.addr)
-
+  val firstWord = getVWord(io.in(0).bits.addr)
+  val secondWord = getVWord(io.in(1).bits.addr)
   // merge condition
   val mergeMask = Wire(Vec(EnsbufferWidth, Vec(StoreBufferSize, Bool())))
   val mergeIdx = mergeMask.map(PriorityEncoder(_)) // avoid using mergeIdx for better timing
@@ -383,7 +395,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         cohCount(entryIdx) := 0.U
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
-        vtag(entryIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
+        vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
       }
     })
   }
@@ -415,9 +427,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     })
   }
 
-  for(((in, wordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
+  for(((in, vwordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
     writeReq(i).valid := in.fire()
-    writeReq(i).bits.wordOffset := wordOffset
+    writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
@@ -430,11 +442,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     when(in.fire()){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
-        mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), wordOffset)
+        mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
         XSDebug(p"merge req $i to line [${mergeIdx(i)}]\n")
       }.otherwise({
         writeReq(i).bits.wvec := insertVec
-        wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, wordOffset)
+        wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, vwordOffset)
         XSDebug(p"insert req $i to line[$insertIdx]\n")
         assert(debug_insertIdx === insertIdx)
       })
@@ -452,8 +464,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     XSDebug(req.fire(),
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
-        p"mask:${Binary(req.bits.mask)} " +
-        p"data:${Hexadecimal(req.bits.data)}\n"
+        p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
+        p"data:${Hexadecimal(shiftDataToLow(req.bits.addr,req.bits.data))}\n"
     )
     XSDebug(req.valid && !req.ready,
       p"req [$i] blocked by sbuffer\n"
@@ -465,10 +477,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val sbuffer_empty = Cat(invalidMask).andR()
   val sq_empty = !Cat(io.in.map(_.valid)).orR()
   val empty = sbuffer_empty && sq_empty
-  val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
+  val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
+  threshold := Constantin.createRecord("StoreBufferThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 7.U)
+  val base = Wire(UInt(5.W))
+  base := Constantin.createRecord("StoreBufferBase_"+p(XSCoreParamsKey).HartId.toString(), initValue = 4.U)
   val ActiveCount = PopCount(activeMask)
   val ValidCount = PopCount(validMask)
-  val do_eviction = RegNext(ActiveCount >= threshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
+  val forceThreshold = Mux(io.force_write, threshold - base, threshold)
+  val do_eviction = RegNext(ActiveCount >= forceThreshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
   XSDebug(p"ActiveCount[$ActiveCount]\n")
@@ -560,11 +576,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
   // current eviction should be blocked.
-  val sbuffer_out_s0_valid = missqReplayHasTimeOut || 
+  val sbuffer_out_s0_valid = missqReplayHasTimeOut ||
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate && 
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready
@@ -590,7 +606,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   when(sbuffer_out_s1_fire){
     sbuffer_out_s1_valid := false.B
   }
-  // when sbuffer_out_s0_fire, read dcache req data and store them in a pipeline reg 
+  // when sbuffer_out_s0_fire, read dcache req data and store them in a pipeline reg
   when(sbuffer_out_s0_cango){
     sbuffer_out_s1_valid := sbuffer_out_s0_valid
   }
@@ -652,12 +668,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
     // Update w_sameblock_inflight flag is delayed for 1 cycle
     //
-    // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore 
+    // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore
     // current dcache.hit_resps. Then, in the next cycle, we have plenty of time to check
     // if the same block is still inflight
     (0 until StoreBufferSize).map(i => {
       when(
-        stateVec(i).w_sameblock_inflight && 
+        stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
         RegNext(resp.fire()) &&
         waitInflightMask(i) === UIntToOH(RegNext(id_to_sbuffer_id(dcache_resp_id)))
@@ -681,11 +697,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     assert(io.dcache.replay_resp.bits.replay)
     assert(stateVec(replay_resp_id).state_inflight === true.B)
   }
-  
+
   // TODO: reuse cohCount
   (0 until StoreBufferSize).map(i => {
     when(stateVec(i).w_timeout && stateVec(i).state_inflight && !missqReplayCount(i)(MissqReplayCountBits-1)) {
-      missqReplayCount(i) := missqReplayCount(i) + 1.U 
+      missqReplayCount(i) := missqReplayCount(i) + 1.U
     }
     when(activeMask(i) && !cohTimeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U
@@ -730,17 +746,17 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     }
     val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
-    val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
+    val line_offset_mask = UIntToOH(getVWordOffset(forward.paddr))
 
     val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
     val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
     val line_offset_reg = RegNext(line_offset_mask)
     val forward_mask_candidate_reg = RegEnable(
-      VecInit(mask.map(entry => entry(getWordOffset(forward.paddr)))),
+      VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid
     )
     val forward_data_candidate_reg = RegEnable(
-      VecInit(data.map(entry => entry(getWordOffset(forward.paddr)))),
+      VecInit(data.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid
     )
 
@@ -755,12 +771,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     selectedInflightData.suggestName("selectedInflightData_"+i)
 
     // currently not being used
-    val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-    val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
+    val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
 
     forward.dataInvalid := false.B // data in store line merge buffer is always ready
     forward.matchInvalid := tag_mismatch // paddr / vaddr cam result does not match
-    for (j <- 0 until DataBytes) {
+    for (j <- 0 until VDataBytes) {
       forward.forwardMask(j) := false.B
       forward.forwardData(j) := DontCare
 
