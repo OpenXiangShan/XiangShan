@@ -774,7 +774,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_full_fwd        = Wire(Bool())
   val s2_cache_miss      = io.dcache.resp.bits.miss && !s2_fwd_frm_d_chan_or_mshr
   val s2_mq_nack         = io.dcache.s2_mq_nack
-  val s2_bank_conflict   = io.dcache.s2_bank_conflict && !io.dcache.resp.bits.miss && !s2_full_fwd
+  val s2_bank_conflict   = io.dcache.s2_bank_conflict.reduce(_ || _) && !io.dcache.resp.bits.miss && !s2_full_fwd
   val s2_wpu_pred_fail   = io.dcache.s2_wpu_pred_fail
   val s2_cache_rep       = s2_bank_conflict || s2_wpu_pred_fail
   val s2_cache_handled   = io.dcache.resp.bits.handled

@@ -137,6 +137,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val DCacheVWordBytes = VLEN / 8
+  val OneReqAccessCnt = VLEN / DCacheSRAMRowBits
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -539,7 +540,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // cycle 2: hit signal
   val s2_hit = Input(Bool()) // hit signal for lsu,
   val s2_first_hit = Input(Bool())
-  val s2_bank_conflict = Input(Bool())
+  val s2_bank_conflict = Input(Vec(OneReqAccessCnt, Bool()))
   val s2_wpu_pred_fail = Input(Bool())
   val s2_mq_nack = Input(Bool())
 

@@ -52,7 +52,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
 
     // banked data read conflict
-    val bank_conflict_slow = Input(Bool())
+    val bank_conflict_slow = Input(Vec(OneReqAccessCnt, Bool()))
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -377,7 +377,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := DontCare 
-  resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
+  resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow.reduce(_ || _) || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
@@ -400,7 +400,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
 
-  XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
+  XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow.reduce(_ || _) && s2_valid)
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss)
   XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss && !s2_hit_access)
 
@@ -524,7 +524,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_replay", io.lsu.resp.fire() && resp.bits.replay)
   XSPerfAccumulate("load_replay_for_dcache_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
   XSPerfAccumulate("load_replay_for_dcache_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow.reduce(_ || _))
   XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire() && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
@@ -538,7 +538,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     ("load_replay              ", io.lsu.resp.fire() && resp.bits.replay                          ),
     ("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
     ("load_replay_for_no_mshr  ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
-    ("load_replay_for_conflict ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
+    ("load_replay_for_conflict ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow.reduce(_ || _)),
   )
   generatePerfEvent()
 }
