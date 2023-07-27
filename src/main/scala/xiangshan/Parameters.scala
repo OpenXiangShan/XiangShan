@@ -186,12 +186,12 @@ case class XSCoreParameters
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   iwpuParameters: WPUParameters = WPUParameters(
-    enWPU = false,
+    enWPU = true,
     algoName = "mmru",
     isICache = true,
   ),
   dwpuParameters: WPUParameters = WPUParameters(
-    enWPU = false,
+    enWPU = true,
     algoName = "mmru",
     enCfPred = false,
     isICache = false,
