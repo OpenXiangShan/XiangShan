@@ -843,8 +843,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   XSPerfAccumulate("data_read_counter", data_read_oh.foldLeft(0.U)(_ + _))
 
-  // read result: expose banked read result
-  io.readline_resp := bank_result
   val bank_result_delayed = RegNext(bank_result)
   (0 until LoadPipelineWidth).map(i => {
     val rr_read_fire = RegNext(RegNext(io.read(i).fire))
