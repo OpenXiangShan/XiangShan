@@ -53,6 +53,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle with HasDCacheP
   def nuke          = cause(LoadReplayCauses.C_NK)
   def mem_amb       = cause(LoadReplayCauses.C_MA)
   def fwd_fail      = cause(LoadReplayCauses.C_FF)
+  def wpu_fail      = cause(LoadReplayCauses.C_WF)
   def dcache_miss   = cause(LoadReplayCauses.C_DM)
   def bank_conflict = cause(LoadReplayCauses.C_BC)
   def dcache_rep    = cause(LoadReplayCauses.C_DR)
@@ -775,8 +776,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_cache_miss      = io.dcache.resp.bits.miss && !s2_fwd_frm_d_chan_or_mshr
   val s2_mq_nack         = io.dcache.s2_mq_nack
   val s2_bank_conflict   = io.dcache.s2_bank_conflict && !io.dcache.resp.bits.miss && !s2_full_fwd
-  val s2_wpu_pred_fail   = io.dcache.s2_wpu_pred_fail
-  val s2_cache_rep       = s2_bank_conflict || s2_wpu_pred_fail
+  val s2_wpu_pred_fail   = io.dcache.s2_wpu_pred_fail && !s2_full_fwd
+  val s2_cache_rep       = s2_mq_nack
   val s2_cache_handled   = io.dcache.resp.bits.handled
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) && io.dcache.resp.bits.tag_error
   val s2_fwd_fail        = io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid
@@ -868,10 +869,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * dcache replay
   // * forward data invalid
   // * dcache miss
-  s2_out.rep_info.tlb_miss        := s2_in.tlbMiss
   s2_out.rep_info.mem_amb         := s2_mem_amb && s2_troublem
+  s2_out.rep_info.tlb_miss        := s2_in.tlbMiss
   s2_out.rep_info.nuke            := s2_nuke && s2_troublem
   s2_out.rep_info.fwd_fail        := s2_data_inv && s2_troublem
+  s2_out.rep_info.wpu_fail        := s2_wpu_pred_fail && s2_troublem
   s2_out.rep_info.dcache_rep      := s2_cache_rep && s2_troublem
   s2_out.rep_info.dcache_miss     := s2_out.miss
   s2_out.rep_info.bank_conflict   := s2_bank_conflict && s2_troublem
