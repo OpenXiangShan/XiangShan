@@ -639,7 +639,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         // normal case: dcache replay
         blockByOthers(enqIndex) := true.B
         blockPtrOthers(enqIndex) :=  Mux(blockPtrOthers(enqIndex) === 3.U(2.W), blockPtrOthers(enqIndex), blockPtrOthers(enqIndex) + 1.U(2.W))
-      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_NK || replayInfo.cause(LoadReplayCauses.C_WF))) {
+      } .elsewhen (replayInfo.cause(LoadReplayCauses.C_BC) || replayInfo.cause(LoadReplayCauses.C_NK) || replayInfo.cause(LoadReplayCauses.C_WF)) {
         // normal case: bank conflict or schedule error
         // can replay next cycle
         creditUpdate(enqIndex) := 0.U
@@ -776,8 +776,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val deqNumber               = PopCount(io.replay.map(_.fire))
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
   val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_TM)))
-  val replayMemAmbCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
+  val replayMemAmbCount       = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
   val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MA)))
+  val replayWpuFailCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_WF)))
   val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAR)))
   val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAW)))
   val replayBankConflictCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_BC)))
@@ -792,6 +793,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_raw_nack", replayRAWRejectCount)
   XSPerfAccumulate("replay_nuke", replayNukeCount)
   XSPerfAccumulate("replay_mem_amb", replayMemAmbCount)
+  XSPerfAccumulate("replay_wpu_fail", replayWpuFailCount)
   XSPerfAccumulate("replay_tlb_miss", replayTlbMissCount)
   XSPerfAccumulate("replay_bank_conflict", replayBankConflictCount)
   XSPerfAccumulate("replay_dcache_replay", replayDCacheReplayCount)
@@ -808,6 +810,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     ("replay_raw_nack", replayRAWRejectCount),
     ("replay_nuke", replayNukeCount),
     ("replay_mem_amb", replayMemAmbCount),
+    ("replay_wpu_fail", replayWpuFailCount),
     ("replay_tlb_miss", replayTlbMissCount),
     ("replay_bank_conflict", replayBankConflictCount),
     ("replay_dcache_replay", replayDCacheReplayCount),
