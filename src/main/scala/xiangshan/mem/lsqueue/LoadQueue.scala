@@ -27,7 +27,6 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
-import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.mem.mdp._
 import xiangshan.backend.rob.RobPtr
 
