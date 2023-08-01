@@ -44,7 +44,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val hartId = Input(UInt(8.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
-    val ptw = new VectorTlbPtwIO(coreParams.itlbPortNum)
+    val ptw = new TlbPtwIO()
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -110,9 +110,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.base_connect(io.sfence, tlbCsr)
-  io.ptw.connect(itlb.io.ptw)
   itlb.io.ptw_replenish <> DontCare
   itlb.io.flushPipe.map(_ := needFlush)
+
+  val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
+  itlb_ptw.connect(itlb.io.ptw)
+  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, io.sfence, tlbCsr, l2tlbParams.ifilterSize)
+  io.ptw <> itlbRepeater1.io.ptw
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
