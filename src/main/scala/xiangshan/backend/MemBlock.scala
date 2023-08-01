@@ -126,6 +126,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
   })
 
+  val reset_io = IO(new Bundle() {
+    // reset signals of frontend & backend are generated in memblock
+    val frontend = Output(Reset())
+    val backend = Output(Reset())
+  })
+
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
 
   val redirect = RegNextWithEnable(io.redirect)
@@ -752,6 +758,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  val resetTree = ResetGenNode(
+    Seq(
+      ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io.frontend))))),
+      CellNode(reset_io.backend),
+      ModuleNode(itlbRepeater2),
+      ModuleNode(dtlbRepeater2),
+      ModuleNode(ptw),
+      ModuleNode(ptw_to_l2_buffer)
+    )
+  )
+  ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
 
   val ldDeqCount = PopCount(io.issue.take(exuParameters.LduCnt).map(_.valid))
   val stDeqCount = PopCount(io.issue.drop(exuParameters.LduCnt).map(_.valid))

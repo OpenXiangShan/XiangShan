@@ -138,90 +138,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val frontend = LazyModule(new Frontend())
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
-  val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
-  val intWbPorts = wbArbiter.intWbPorts
-  val fpWbPorts = wbArbiter.fpWbPorts
-
-  // TODO: better RS organization
-  // generate rs according to number of function units
-  require(exuParameters.JmpCnt == 1)
-  require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
-  require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
-  require(exuParameters.LduCnt == exuParameters.StuCnt) // TODO: remove this limitation
-
-  // one RS every 2 MDUs
-  val schedulePorts = Seq(
-    // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
-    Seq(
-      (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
-      (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg), Seq()),
-      (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
-      (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
-      (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
-      (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
-    ),
-    Seq(
-      (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
-      (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq())
-    )
-  )
-
-  // should do outer fast wakeup ports here
-  val otherFastPorts = schedulePorts.zipWithIndex.map { case (sche, i) =>
-    val otherCfg = schedulePorts.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
-    val outerPorts = sche.map(cfg => {
-      // exe units from this scheduler need fastUops from exeunits
-      val outerWakeupInSche = sche.filter(_._1.wakeupFromExu)
-      val intraIntScheOuter = outerWakeupInSche.filter(_._3.contains(cfg._1)).map(_._1)
-      val intraFpScheOuter = outerWakeupInSche.filter(_._4.contains(cfg._1)).map(_._1)
-      // exe units from other schedulers need fastUop from outside
-      val otherIntSource = otherCfg.filter(_._3.contains(cfg._1)).map(_._1)
-      val otherFpSource = otherCfg.filter(_._4.contains(cfg._1)).map(_._1)
-      val intSource = findInWbPorts(intWbPorts, intraIntScheOuter ++ otherIntSource)
-      val fpSource = findInWbPorts(fpWbPorts, intraFpScheOuter ++ otherFpSource)
-      getFastWakeupIndex(cfg._1, intSource, fpSource, intWbPorts.length).sorted
-    })
-    println(s"inter-scheduler wakeup sources for $i: $outerPorts")
-    outerPorts
-  }
-
-  // allow mdu and fmisc to have 2*numDeq enqueue ports
-  val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
-    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
-    else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
-    else Seq((0, i))
-  })
-  val lsDpPorts = (0 until exuParameters.LduCnt).map(i => Seq((3, i))) ++
-                  (0 until exuParameters.StuCnt).map(i => Seq((4, i))) ++
-                  (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
-  val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
-    if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
-    else Seq((0, i))
-  })
-
-  val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts)
-
-  val outIntRfReadPorts = Seq(0, 0)
-  val outFpRfReadPorts = Seq(0, StorePipelineWidth)
-  val hasIntRf = Seq(true, false)
-  val hasFpRf = Seq(false, true)
-  val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).zipWithIndex.map {
-    case (((sche, disp), other), i) =>
-      LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, outIntRfReadPorts(i), outFpRfReadPorts(i), hasIntRf(i), hasFpRf(i)))
-  }
-
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = exuBlocks.head.scheduler.getMemRsEntries
+      IssQueSize = 32// exuBlocks.head.scheduler.getMemRsEntries // TODO
     )
   })))
 
-  val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
-  wb2Ctrl.addWritebackSink(exuBlocks :+ memBlock)
-  val dpExuConfigs = exuBlocks.flatMap(_.scheduler.dispatch2.map(_.configs))
-  val ctrlBlock = LazyModule(new CtrlBlock(dpExuConfigs))
-  val writebackSources = Seq(Seq(wb2Ctrl), Seq(wbArbiter))
-  writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
+  val backend = LazyModule(new Backend(memBlock)(p))
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -246,195 +169,103 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
   val frontend = outer.frontend.module
-  val ctrlBlock = outer.ctrlBlock.module
-  val wb2Ctrl = outer.wb2Ctrl.module
+  val backend = outer.backend.module
   val memBlock = outer.memBlock.module
-  val exuBlocks = outer.exuBlocks.map(_.module)
 
   frontend.io.hartId  := io.hartId
-  ctrlBlock.io.hartId := io.hartId
-  exuBlocks.foreach(_.io.hartId := io.hartId)
+  backend.io.hartId := io.hartId
   memBlock.io.hartId := io.hartId
-  outer.wbArbiter.module.io.hartId := io.hartId
   frontend.io.reset_vector := io.reset_vector
 
-  io.cpu_halt := ctrlBlock.io.cpu_halt
+  io.cpu_halt := backend.io.cpu_halt
 
-  outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
-  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
-  require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
-  outer.wbArbiter.module.io.in <> allWriteback
-  val rfWriteback = outer.wbArbiter.module.io.out
+  backend.io.memBlock.writeback <> memBlock.io.writeback
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  wb2Ctrl.io.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
-
-  wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
-  outer.wb2Ctrl.generateWritebackIO()
+  backend.io.memBlock.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
-  require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
-  val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
-  val csrioIn = csrFenceMod.io.fuExtra.csrio.get
-  val fenceio = csrFenceMod.io.fuExtra.fenceio.get
+  frontend.io.backend <> backend.io.frontend.frontend2Ctrl
+  frontend.io.sfence <> backend.io.frontend.sfence
+  frontend.io.tlbCsr <> backend.io.frontend.tlbCsr
+  frontend.io.csrCtrl <> backend.io.frontend.csrCtrl
+  frontend.io.fencei := backend.io.frontend.fencei
 
-  frontend.io.backend <> ctrlBlock.io.frontend
-  frontend.io.sfence <> fenceio.sfence
-  frontend.io.tlbCsr <> csrioIn.tlb
-  frontend.io.csrCtrl <> csrioIn.customCtrl
-  frontend.io.fencei := fenceio.fencei
+  backend.io.memBlock.stIn <> memBlock.io.stIn
+  backend.io.memBlock.memoryViolation <> memBlock.io.memoryViolation
+  backend.io.memBlock.enqLsq <> memBlock.io.enqLsq
+  backend.io.memBlock.lcommit := memBlock.io.lqDeq
+  backend.io.memBlock.scommit := memBlock.io.sqDeq
+  backend.io.memBlock.lqCancelCnt := memBlock.io.lqCancelCnt
+  backend.io.memBlock.sqCancelCnt := memBlock.io.sqCancelCnt
+  backend.io.memBlock.otherFastWakeup <> memBlock.io.otherFastWakeup
+  backend.io.memBlock.lsqio <> memBlock.io.lsqio
+  backend.io.memBlock.stIssuePtr := memBlock.io.stIssuePtr
 
-  ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
-  val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
-  ctrlBlock.io.exuRedirect <> redirectBlocks.flatMap(_.io.fuExtra.exuRedirect)
-  ctrlBlock.io.stIn <> memBlock.io.stIn
-  ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
-  exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
-  exuBlocks.foreach(b => {
-    b.io.scheExtra.lcommit := memBlock.io.lqDeq
-    b.io.scheExtra.scommit := memBlock.io.sqDeq
-    b.io.scheExtra.lqCancelCnt := memBlock.io.lqCancelCnt
-    b.io.scheExtra.sqCancelCnt := memBlock.io.sqCancelCnt
-  })
-  val sourceModules = outer.writebackSources.map(_.map(_.module.asInstanceOf[HasWritebackSourceImp]))
-  outer.ctrlBlock.generateWritebackIO()
+  memBlock.io.issue <> backend.io.memBlock.issue
+  memBlock.io.loadFastMatch <> backend.io.memBlock.loadFastMatch
+  memBlock.io.loadFastImm <> backend.io.memBlock.loadFastImm
+  memBlock.io.loadPc <> backend.io.memBlock.loadPc
 
-  val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup
-  require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
-  val intFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
-  val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
-  val intFastUop1 = outer.wbArbiter.intConnections.map(c => intFastUop(c.head))
-  val fpFastUop1 = outer.wbArbiter.fpConnections.map(c => fpFastUop(c.head))
-  val allFastUop1 = intFastUop1 ++ fpFastUop1
+  backend.io.perf <> DontCare
+  backend.io.perf.memInfo <> memBlock.io.memInfo
+  backend.io.perf.frontendInfo <> frontend.io.frontendInfo
 
-  ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
-  ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
-  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
-  ctrlBlock.io.lqDeq := memBlock.io.lqDeq
-  ctrlBlock.io.sqDeq := memBlock.io.sqDeq
-  ctrlBlock.io.lqCanAccept := memBlock.io.lsqio.lqCanAccept
-  ctrlBlock.io.sqCanAccept := memBlock.io.lsqio.sqCanAccept
-  ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt
-  ctrlBlock.io.sqCancelCnt := memBlock.io.sqCancelCnt
-  ctrlBlock.io.robHeadLsIssue := exuBlocks.map(_.io.scheExtra.robHeadLsIssue).reduce(_ || _)
+  backend.io.perf.perfEventsFrontend <> frontend.getPerf
+  backend.io.perf.perfEventsLsu      <> memBlock.getPerf
+  backend.io.perf.perfEventsHc       <> io.perfEvents
 
-  exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
-  exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get
+  backend.io.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  backend.io.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  backend.io.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  backend.io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
+  backend.io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
-  for((c, e) <- ctrlBlock.io.ld_pc_read.zip(exuBlocks(0).io.issue.get)){
-    // read load pc at load s0
-    c.ptr := e.bits.uop.cf.ftqPtr
-    c.offset := e.bits.uop.cf.ftqOffset
-  }
-  // return load pc at load s2
-  memBlock.io.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
-  memBlock.io.issue <> exuBlocks(0).io.issue.get
-  // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.issue.map(_.bits.uop.clearExceptions())
-  exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
-  exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.loadFastImm
+  backend.io.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
+  backend.io.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
+  backend.io.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
+  backend.io.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
-  val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
-  exuBlocks.map(_.io).foreach { exu =>
-    exu.redirect <> ctrlBlock.io.redirect
-    exu.allocPregs <> ctrlBlock.io.allocPregs
-    exu.rfWriteback <> rfWriteback
-    exu.fastUopIn <> allFastUop1
-    exu.scheExtra.jumpPc <> ctrlBlock.io.jumpPc
-    exu.scheExtra.jalr_target <> ctrlBlock.io.jalr_target
-    exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
-    exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
-    exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
-    exu.scheExtra.robDeqPtr := ctrlBlock.io.robDeqPtr
-    exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
-      sink.bits := src.bits
-      sink.valid := src.valid
-    }}
-    exu.scheExtra.memWaitUpdateReq.stdIssue.zip(stdIssue).foreach{case (sink, src) => {
-      sink.valid := src.valid
-      sink.bits := src.bits
-    }}
-  }
-  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
-  XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
-
-  ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
-  ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
-
-  csrioIn.hartId <> io.hartId
-  csrioIn.perf <> DontCare
-  csrioIn.perf.retiredInstr <> ctrlBlock.io.robio.toCSR.perfinfo.retiredInstr
-  csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
-  csrioIn.perf.memInfo <> memBlock.io.memInfo
-  csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
-
-  csrioIn.perf.perfEventsFrontend <> frontend.getPerf
-  csrioIn.perf.perfEventsCtrl     <> ctrlBlock.getPerf
-  csrioIn.perf.perfEventsLsu      <> memBlock.getPerf
-  csrioIn.perf.perfEventsHc       <> io.perfEvents
-
-  csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
-  csrioIn.fpu.isIllegal := false.B
-  csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
-  csrioIn.fpu.frm <> exuBlocks(1).io.fuExtra.frm.get
-  csrioIn.exception <> ctrlBlock.io.robio.exception
-  csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
-  csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
-  csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
-  csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
-  csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
-
-  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
-
-  csrioIn.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
-  csrioIn.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
-  csrioIn.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
-  csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
-
-  fenceio.sfence <> memBlock.io.sfence
-  fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+  backend.io.memBlock.sfence <> memBlock.io.sfence
+  backend.io.memBlock.fenceToSbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.itlb <> frontend.io.ptw
-  memBlock.io.redirect <> ctrlBlock.io.redirect
-  memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
-  memBlock.io.csrCtrl <> csrioIn.customCtrl
-  memBlock.io.tlbCsr <> csrioIn.tlb
-  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
-  memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
-  memBlock.io.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
+  memBlock.io.redirect <> backend.io.memBlock.redirect
+  memBlock.io.rsfeedback <> backend.io.memBlock.rsfeedback
+  memBlock.io.csrCtrl <> backend.io.memBlock.csrCtrl
+  memBlock.io.tlbCsr <> backend.io.memBlock.tlbCsr
+  memBlock.io.lsqio.rob <> backend.io.memBlock.lsqio.rob
+  memBlock.io.lsqio.exceptionAddr.isStore := backend.io.memBlock.lsqio.exceptionAddr.isStore
+  memBlock.io.debug_ls <> backend.io.memBlock.debug_ls
+  memBlock.io.lsTopdownInfo <> backend.io.memBlock.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+  io.l2_pf_enable := backend.io.l2_pf_enable
 
   // Modules are reset one by one
-  val resetTree = ResetGenNode(
-    Seq(
-      ModuleNode(memBlock),
-      ResetGenNode(Seq(
-        ModuleNode(exuBlocks.head),
-        ResetGenNode(
-          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
-        ),
-        ResetGenNode(Seq(
-          ModuleNode(ctrlBlock),
-          ResetGenNode(Seq(
-            ModuleNode(frontend)
-          ))
-        ))
-      ))
-    )
-  )
+  // val resetTree = ResetGenNode(
+  //   Seq(
+  //     ModuleNode(memBlock),
+  //     ResetGenNode(Seq(
+  //       ModuleNode(exuBlocks.head),
+  //       ResetGenNode(
+  //         exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module)
+  //       ),
+  //       ResetGenNode(Seq(
+  //         ModuleNode(ctrlBlock),
+  //         ResetGenNode(Seq(
+  //           ModuleNode(frontend)
+  //         ))
+  //       ))
+  //     ))
+  //   )
+  // )
 
-  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
-
+  // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
+  frontend.reset := memBlock.reset_io.frontend
+  backend.reset := memBlock.reset_io.backend
 }
