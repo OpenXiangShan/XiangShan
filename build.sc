@@ -145,7 +145,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
     fudianModule
   )
 
-  object test extends Tests with TestModule.ScalaTest {
+  object test extends SbtModuleTests with TestModule.ScalaTest {
 
     override def forkArgs = m.forkArgs
 
