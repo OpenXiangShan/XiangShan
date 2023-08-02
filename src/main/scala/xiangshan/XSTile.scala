@@ -44,7 +44,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val beu_int_source = l2top.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
 
-  // =========== Connection ============
+  // =========== Components' Connection ============
   // L1 to l1_xbar (same as before)
   coreParams.dcacheParametersOpt.map { _ =>
     l2top.misc_l2_pmu := l2top.l1d_logger := l2top.l1d_l2_bufferOpt.get.node :=
@@ -74,7 +74,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.i_mmio_port := core.frontend.instrUncache.clientNode
   l2top.d_mmio_port := core.memBlock.uncache.clientNode
 
-  // =========== Miscs ============
+  // =========== IO Connection ============
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
@@ -101,18 +101,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.beu_errors.dcache <> core.module.io.beu_errors.dcache
-    if (l2cache.isDefined) {
-      // TODO: add ECC interface of L2
-      // misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
-      // misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
-      l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
-      core.module.io.l2_hint.valid := l2cache.get.module.io.l2_hint.valid
-    } else {
-      l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := DontCare
-      core.module.io.l2_hint.valid := false.B
-    }
+
+    l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2) // TODO: add ECC interface of L2
+    core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits
+    core.module.io.l2_hint.valid := l2top.module.l2_hint.valid
 
     // Modules are reset one by one
     // io_reset ----
@@ -120,9 +112,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     //             v
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
     val resetChain = Seq(
-      Seq(l2top.module, core.module) ++
-        l2top.l1d_l2_bufferOpt.map(_.module) ++
-        l2cache.map(_.module)
+      Seq(l2top.module, core.module) // TTTODO: problem of l2cache resetting twice
     )
     ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }

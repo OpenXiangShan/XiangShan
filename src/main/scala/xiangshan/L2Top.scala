@@ -105,15 +105,21 @@ class L2Top()(implicit p: Parameters) extends LazyModule
 
   lazy val module = new LazyModuleImp(this) {
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
+    beu.module.io.errors <> beu_errors
+
     val reset_vector = IO(new Bundle {
       val fromTile = Input(UInt(PAddrBits.W))
       val toCore = Output(UInt(PAddrBits.W))
     })
-
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
-
-    beu.module.io.errors <> beu_errors
     resetDelayN.io.in := reset_vector.fromTile
     reset_vector.toCore := resetDelayN.io.out
+
+    val l2_hint = IO(ValidIO(UInt(32.W))) // TODO: parameterize this
+    if (l2cache.isDefined) {
+      l2_hint := l2cache.get.module.io.l2_hint
+    } else {
+      l2_hint := 0.U.asTypeOf(l2_hint)
+    }
   }
 }
