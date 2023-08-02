@@ -103,9 +103,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // public ports
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
-  val clint_int_sink = core.clint_int_sink
-  val plic_int_sink = core.plic_int_sink
-  val debug_int_sink = core.debug_int_sink
+  val clint_int_sink = core.memBlock.clint_int_sink
+  val plic_int_sink = core.memBlock.plic_int_sink
+  val debug_int_sink = core.memBlock.debug_int_sink
   val beu_int_source = misc.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val l1d_l2_pmu = BusPerfMonitor(name = "L1d_L2", enable = !debugOpts.FPGAPlatform, stat_latency = true)
@@ -125,7 +125,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     (buffers, node)
   }
 
-  misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
+  misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
     misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.ptw_to_l2_buffer.node
   } 
@@ -142,7 +142,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
-  misc.i_mmio_port := core.frontend.instrUncache.clientNode
+  misc.i_mmio_port := core.memBlock.frontendBridge.instr_uncache_node
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
   lazy val module = new LazyModuleImp(this){

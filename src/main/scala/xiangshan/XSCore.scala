@@ -21,7 +21,6 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
-import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
@@ -130,10 +129,6 @@ abstract class XSBundle(implicit val p: Parameters) extends Bundle
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
-  // interrupt sinks
-  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
-  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-  val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
@@ -145,6 +140,9 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   })))
 
   val backend = LazyModule(new Backend(memBlock)(p))
+
+  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
+  memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -172,19 +170,22 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val backend = outer.backend.module
   val memBlock = outer.memBlock.module
 
-  frontend.io.hartId  := io.hartId
-  backend.io.hartId := io.hartId
+  frontend.io.hartId  := memBlock.io.inner_hartId
+  backend.io.hartId := memBlock.io.inner_hartId
   memBlock.io.hartId := io.hartId
-  frontend.io.reset_vector := io.reset_vector
+  memBlock.io.outer_reset_vector := io.reset_vector
+  frontend.io.reset_vector := memBlock.io.inner_reset_vector
 
-  io.cpu_halt := backend.io.cpu_halt
+  memBlock.io.inner_cpu_halt := backend.io.cpu_halt
+  io.cpu_halt := memBlock.io.outer_cpu_halt
 
   backend.io.memBlock.writeback <> memBlock.io.writeback
 
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.memBlock.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
 
-  io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  memBlock.io.inner_beu_errors_icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   frontend.io.backend <> backend.io.frontend.frontend2Ctrl
@@ -215,13 +216,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.perf.perfEventsFrontend <> frontend.getPerf
   backend.io.perf.perfEventsLsu      <> memBlock.getPerf
-  backend.io.perf.perfEventsHc       <> io.perfEvents
+  memBlock.io.outer_hc_perfEvents    <> io.perfEvents
+  backend.io.perf.perfEventsHc       <> memBlock.io.inner_hc_perfEvents
 
-  backend.io.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  backend.io.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  backend.io.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  backend.io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  backend.io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+  backend.io.externalInterrupt := memBlock.io.externalInterrupt
 
   backend.io.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
   backend.io.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
@@ -244,7 +242,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  io.l2_pf_enable := backend.io.l2_pf_enable
+  memBlock.io.inner_l2_pf_enable := backend.io.l2_pf_enable
+  io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
 
   // Modules are reset one by one
   // val resetTree = ResetGenNode(
@@ -266,6 +265,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // )
 
   // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
-  frontend.reset := memBlock.reset_io.frontend
-  backend.reset := memBlock.reset_io.backend
+  if (debugOpts.FPGAPlatform) {
+    frontend.reset := memBlock.reset_io_frontend
+    backend.reset := memBlock.reset_io_backend
+  }
 }
