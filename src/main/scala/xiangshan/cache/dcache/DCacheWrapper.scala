@@ -686,7 +686,8 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
+  val refill = ValidIO(new Refill)  // refill to load queue, wake up load misses
+  val tl_d_channel = Output(new DcacheToLduForwardIO)
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
@@ -893,6 +894,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       io.lsu.forward_D(i).dontCare()
     }
   })
+  // tl D channel wakeup
+  val (_, _, done, _) = edge.count(bus.d)
+  when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
+    io.lsu.tl_d_channel.apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+  } .otherwise {
+    io.lsu.tl_d_channel.dontCare()
+  }
   mainPipe.io.force_write <> io.force_write
 
   /** dwpu */
@@ -1023,7 +1031,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
 
   // refill to load queue
-  io.lsu.lsq <> missQueue.io.refill_to_ldq
+  io.lsu.refill <> missQueue.io.refill_to_ldq
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
