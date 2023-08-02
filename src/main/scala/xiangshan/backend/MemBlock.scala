@@ -128,7 +128,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  val delayedDcacheRefill = RegNext(dcache.io.lsu.refill)
+  val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
