@@ -654,7 +654,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // special case: dcache miss
       when (replayInfo.cause(LoadReplayCauses.C_DM) && enq.bits.handledByMSHR) {
         blockByCacheMiss(enqIndex) := !replayInfo.full_fwd && //  dcache miss
-                                  !(io.refill.valid && io.refill.bits.id === replayInfo.mshr_id) // no refill in this cycle
+                                  !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
 
         blockPtrCache(enqIndex) := Mux(blockPtrCache(enqIndex) === 3.U(2.W), blockPtrCache(enqIndex), blockPtrCache(enqIndex) + 1.U(2.W))
       }
