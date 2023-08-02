@@ -48,16 +48,7 @@ class FrontendBridge()(implicit p: Parameters) extends LazyModule {
   val icache_node = TLIdentityNode()
   val instr_uncache_node = TLIdentityNode()
   lazy val module = new LazyModuleImp(this) {
-    icache_node.in.zip(icache_node.out).foreach{ x =>
-      x._2._1 <> x._1._1
-      dontTouch(x._1._1)
-      dontTouch(x._2._1)
-    }
-    instr_uncache_node.in.zip(instr_uncache_node.out).foreach{ x =>
-      x._2._1 <> x._1._1
-      dontTouch(x._1._1)
-      dontTouch(x._2._1)
-    }
+    // Nothing
   }
 }
 
