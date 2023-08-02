@@ -111,9 +111,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     //             |
     //             v
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    val resetChain = Seq(
-      Seq(l2top.module, core.module) // TTTODO: problem of l2cache resetting twice
-    )
-    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
+//    val resetChain = Seq(
+//      Seq(l2top.module, core.module) // TTTODO: problem of l2cache resetting twice
+//    )
+//    ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }
 }
