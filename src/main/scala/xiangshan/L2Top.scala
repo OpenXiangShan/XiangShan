@@ -82,6 +82,10 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
   val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
 
+  val clint_int_node = IntIdentityNode()
+  val debug_int_node = IntIdentityNode()
+  val plic_int_node = IntIdentityNode()
+
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
@@ -111,9 +115,21 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val fromTile = Input(UInt(PAddrBits.W))
       val toCore = Output(UInt(PAddrBits.W))
     })
+    val hartId = IO(new Bundle() {
+      val fromTile = Input(UInt(64.W))
+      val toCore = Output(UInt(64.W))
+    })
+    val cpu_halt = IO(new Bundle() {
+      val fromCore = Input(Bool())
+      val toTile = Output(Bool())
+    })
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
     resetDelayN.io.in := reset_vector.fromTile
     reset_vector.toCore := resetDelayN.io.out
+    hartId.toCore := hartId.fromTile
+    cpu_halt.toTile := cpu_halt.fromCore
+    dontTouch(hartId)
+    dontTouch(cpu_halt)
 
     val l2_hint = IO(ValidIO(UInt(32.W))) // TODO: parameterize this
     if (l2cache.isDefined) {

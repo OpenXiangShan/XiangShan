@@ -38,11 +38,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== Public Ports ============
   val memory_port = l2top.memory_port
   val uncache = l2top.mmio_port
-  val clint_int_sink = core.memBlock.clint_int_sink
-  val plic_int_sink = core.memBlock.plic_int_sink
-  val debug_int_sink = core.memBlock.debug_int_sink
   val beu_int_source = l2top.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
+  val clint_int_node = l2top.clint_int_node
+  val plic_int_node = l2top.plic_int_node
+  val debug_int_node = l2top.debug_int_node
+  core.memBlock.clint_int_sink := clint_int_node
+  core.memBlock.plic_int_sink :*= plic_int_node
+  core.memBlock.debug_int_sink := debug_int_node
 
   // =========== Components' Connection ============
   // L1 to l1_xbar (same as before)
@@ -86,10 +89,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
 
-    core.module.io.hartId := io.hartId
+    l2top.module.hartId.fromTile := io.hartId
+    core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
     l2top.module.reset_vector.fromTile := io.reset_vector
-    io.cpu_halt := core.module.io.cpu_halt
+    l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
+    io.cpu_halt := l2top.module.cpu_halt.toTile
 
     if (l2cache.isDefined) {
       // TODO: add perfEvents of L2
