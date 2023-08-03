@@ -803,7 +803,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // csr access check, special case
   val tvmNotPermit = (priviledgeMode === ModeS && mstatusStruct.tvm.asBool)
   val accessPermitted = !(addr === Satp.U && tvmNotPermit)
-  csrio.disableSfence := tvmNotPermit
+  csrio.disableSfence := tvmNotPermit || priviledgeMode === ModeU
 
   // general CSR wen check
   val wen = valid && CSROpType.needAccess(func) && (addr=/=Satp.U || satpLegalMode)
