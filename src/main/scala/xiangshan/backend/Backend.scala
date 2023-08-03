@@ -199,39 +199,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   cancelNetwork.io.in.mem <> memScheduler.io.toDataPath
   cancelNetwork.io.in.og0CancelVec := og0CancelVecFromDataPath
   cancelNetwork.io.in.og1CancelVec := og1CancelVec
+  intScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.int
+  vfScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.vf
+  memScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.mem
 
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
 
-  for (i <- 0 until dataPath.io.fromIntIQ.length) {
-    for (j <- 0 until dataPath.io.fromIntIQ(i).length) {
-      NewPipelineConnect(
-        cancelNetwork.io.out.int(i)(j), dataPath.io.fromIntIQ(i)(j), dataPath.io.fromIntIQ(i)(j).valid,
-        cancelNetwork.io.out.int(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
-        Option("intScheduler2DataPathPipe")
-      )
-    }
-  }
-
-  for (i <- 0 until dataPath.io.fromVfIQ.length) {
-    for (j <- 0 until dataPath.io.fromVfIQ(i).length) {
-      NewPipelineConnect(
-        cancelNetwork.io.out.vf(i)(j), dataPath.io.fromVfIQ(i)(j), dataPath.io.fromVfIQ(i)(j).valid,
-        cancelNetwork.io.out.vf(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
-        Option("vfScheduler2DataPathPipe")
-      )
-    }
-  }
-
-  for (i <- 0 until dataPath.io.fromMemIQ.length) {
-    for (j <- 0 until dataPath.io.fromMemIQ(i).length) {
-      NewPipelineConnect(
-        cancelNetwork.io.out.mem(i)(j), dataPath.io.fromMemIQ(i)(j), dataPath.io.fromMemIQ(i)(j).valid,
-        cancelNetwork.io.out.mem(i)(j).bits.common.robIdx.needFlush(ctrlBlock.io.toDataPath.flush),
-        Option("memScheduler2DataPathPipe")
-      )
-    }
-  }
+  dataPath.io.fromIntIQ <> intScheduler.io.toDataPathAfterDelay
+  dataPath.io.fromVfIQ <> vfScheduler.io.toDataPathAfterDelay
+  dataPath.io.fromMemIQ <> memScheduler.io.toDataPathAfterDelay
 
   println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
   println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
