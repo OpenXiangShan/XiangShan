@@ -3,20 +3,19 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.HasXSParameter
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, WriteBackBundle}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.datapath.WakeUpConfig
-import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, WbConfig}
+import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
+import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
 
 case class ExeUnitParams(
   name          : String,
   fuConfigs     : Seq[FuConfig],
-  wbPortConfigs : Seq[WbConfig],
+  wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
 )(
   implicit
@@ -58,7 +57,14 @@ case class ExeUnitParams(
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val wbPregIdxWidth = if (wbPortConfigs.nonEmpty) wbPortConfigs.map(_.pregIdxWidth).max else 0
+
+  def rdPregIdxWidth: Int = {
+    this.pregRdDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)
+  }
+
+  def wbPregIdxWidth: Int = {
+    this.pregWbDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)
+  }
 
   val writeIntFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
   val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf || x.writeVecRf)
@@ -195,6 +201,20 @@ case class ExeUnitParams(
     }
   }
 
+  /**
+    * Get the [[DataConfig]] that this exu need to read
+    */
+  def pregRdDataCfgSet: Set[DataConfig] = {
+    this.rfrPortConfigs.flatten.map(_.getDataConfig).toSet
+  }
+
+  /**
+    * Get the [[DataConfig]] that this exu need to write
+    */
+  def pregWbDataCfgSet: Set[DataConfig] = {
+    this.wbPortConfigs.map(_.dataCfg).toSet
+  }
+
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
     val fuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuConfigs.map(_.getRfReadDataCfgSet)
     val alignedFuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuSrcsCfgSet.map(x => x ++ Seq.fill(numRegSrc - x.length)(Set[DataConfig]()))
@@ -202,6 +222,34 @@ case class ExeUnitParams(
     val exuSrcsCfgSet = alignedFuSrcsCfgSet.reduce((x, y) => (x zip y).map { case (cfg1, cfg2) => cfg1 union cfg2 })
 
     exuSrcsCfgSet
+  }
+
+  /**
+    * Get the [[DataConfig]] mapped indices of source data of exu
+    *
+    * @example
+    * {{{
+    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData())
+    *   getRfReadSrcIdx(VecData()) = Seq(0, 1, 2)
+    *   getRfReadSrcIdx(MaskSrcData()) = Seq(3)
+    *   getRfReadSrcIdx(VConfigData()) = Seq(4)
+    * }}}
+    * @return Map[DataConfig -> Seq[indices]]
+    */
+  def getRfReadSrcIdx: Map[DataConfig, Seq[Int]] = {
+    val dataCfgs = DataConfig.RegSrcDataSet
+    val rfRdDataCfgSet = this.getRfReadDataCfgSet
+    dataCfgs.toSeq.map { cfg =>
+      (
+        cfg,
+        rfRdDataCfgSet.zipWithIndex.map { case (set, srcIdx) =>
+          if (set.contains(cfg))
+            Option(srcIdx)
+          else
+            None
+        }.filter(_.nonEmpty).map(_.get)
+      )
+    }.toMap
   }
 
   def genExuModule(implicit p: Parameters): ExeUnit = {

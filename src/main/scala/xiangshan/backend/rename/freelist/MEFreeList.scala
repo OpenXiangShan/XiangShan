@@ -102,7 +102,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     case 0 => true.B
     case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
   })
-  XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= NRPhyRegs.U, "Integer physical register should be in either arch RAT or arch free list\n")
+  XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= size.U, "Integer physical register should be in either arch RAT or arch free list\n")
 
   val perfEvents = Seq(
     ("me_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                     ),

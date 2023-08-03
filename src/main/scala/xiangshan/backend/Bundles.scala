@@ -4,17 +4,18 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import utils.BundleUtils.makeValid
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
-import xiangshan.backend.datapath.WbConfig.WbConfig
+import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.vector.Bundles.{Category, Nf, VConfig, VLmul, VSew, VType, Vl, Vxrm}
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
+import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
@@ -324,9 +325,7 @@ object Bundles {
   // DynInst --[IssueQueue]--> DataPath
   class IssueQueueIssueBundle(
     iqParams: IssueBlockParams,
-    exuParams: ExeUnitParams,
-    addrWidth: Int,
-    vaddrBits: Int
+    val exuParams: ExeUnitParams,
   )(implicit
     p: Parameters
   ) extends Bundle {
@@ -334,7 +333,7 @@ object Bundles {
 
     val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
       rfReadDataCfgSet.map((set: Set[DataConfig]) =>
-        MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, addrWidth)).toSeq)
+        MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, exuParams.rdPregIdxWidth)).toSeq)
       )
     ))
 
@@ -350,6 +349,24 @@ object Bundles {
     def getVfWbBusyBundle = common.getVfWen.toSeq
     def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
     def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf)
+
+    def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
+      getIntRfReadBundle.zip(srcType).map {
+        case (rfRd: RfReadPortWithConfig, t: UInt) =>
+          makeValid(issueValid && SrcType.isXp(t), rfRd)
+      }
+    }
+
+    def getVfRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
+      getVfRfReadBundle.zip(srcType).map {
+        case (rfRd: RfReadPortWithConfig, t: UInt) =>
+          makeValid(issueValid && SrcType.isVfp(t), rfRd)
+      }
+    }
+
+    def getIntRfWriteValidBundle(issueValid: Bool) = {
+
+    }
   }
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
@@ -512,11 +529,11 @@ object Bundles {
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
-  class WriteBackBundle(val params: WbConfig)(implicit p: Parameters) extends Bundle with BundleSource {
+  class WriteBackBundle(val params: PregWB, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
-    val pdest = UInt(params.pregIdxWidth.W)
+    val pdest = UInt(params.pregIdxWidth(backendParams).W)
     val data = UInt(params.dataWidth.W)
     val robIdx = new RobPtr()(p)
     val flushPipe = Bool()
@@ -548,7 +565,7 @@ object Bundles {
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, this.params.pregIdxWidth)))
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(IntData()).addrWidth)))
       rfWrite.wen := this.rfWen && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
@@ -559,7 +576,7 @@ object Bundles {
     }
 
     def asVfRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, this.params.pregIdxWidth)))
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VecData()).addrWidth)))
       rfWrite.wen := (this.fpWen || this.vecWen) && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data

@@ -7,6 +7,7 @@ import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import utils.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
+import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.{Redirect, XSBundle, XSModule}
 
@@ -24,7 +25,7 @@ class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T =
 
   private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
 
-  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"s[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
+  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
 
   io.out.zipWithIndex.foreach { case (out, i) =>
     out.valid := acceptVec(i) && io.in.valid
@@ -49,7 +50,7 @@ class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModul
 
   private val arbiters: Seq[Option[Arbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
     if (inGroup.contains(x)) {
-      Some(Module(new Arbiter(new WriteBackBundle(inGroup.values.head.head.bits.params), inGroup(x).length)))
+      Some(Module(new Arbiter(new WriteBackBundle(inGroup.values.head.head.bits.params, backendParams), inGroup(x).length)))
     } else {
       None
     }
@@ -92,10 +93,10 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBu
 
   val fromMemExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.memSchdParams.get.genExuOutputDecoupledBundle)
 
-  val toIntPreg = Flipped(MixedVec(Vec(params.intPregParams.numWrite,
+  val toIntPreg = Flipped(MixedVec(Vec(params.numPregWb(IntData()),
     new RfWritePortWithConfig(params.intPregParams.dataCfg, params.intPregParams.addrWidth))))
 
-  val toVfPreg = Flipped(MixedVec(Vec(params.vfPregParams.numWrite,
+  val toVfPreg = Flipped(MixedVec(Vec(params.numPregWb(VecData()),
     new RfWritePortWithConfig(params.vfPregParams.dataCfg, params.vfPregParams.addrWidth))))
 
   val toCtrlBlock = new Bundle {

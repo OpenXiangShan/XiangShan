@@ -21,8 +21,8 @@ abstract class XSTester extends AnyFlatSpec with ChiselScalatestTester with Matc
       // Example of how to change params
       intPreg = IntPregParams(
         numEntries = 64,
-        numRead = 14,
-        numWrite = 8,
+        numRead = Some(14),
+        numWrite = Some(8),
       ),
     )
   })

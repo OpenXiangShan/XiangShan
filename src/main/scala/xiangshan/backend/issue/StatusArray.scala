@@ -24,7 +24,7 @@ class StatusEntryMemPart(implicit p:Parameters, params: IssueBlockParams) extend
 class StatusEntry(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val srcState = Vec(params.numRegSrc, SrcState())
 
-  val psrc = Vec(params.numRegSrc, UInt(params.pregBits.W))
+  val psrc = Vec(params.numRegSrc, UInt(params.rdPregIdxWidth.W))
   val srcType = Vec(params.numRegSrc, SrcType())
   val robIdx = new RobPtr
   val issued = Bool()           // for predict issue

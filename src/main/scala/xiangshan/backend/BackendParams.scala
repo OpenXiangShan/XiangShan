@@ -28,7 +28,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 
-import scala.reflect.ClassTag
+import scala.reflect.{ClassTag, classTag}
 
 case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
@@ -52,6 +52,10 @@ case class BackendParams(
 
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
+  def getPregParams: Map[DataConfig, PregParams] = {
+    pregParams.map(x => (x.dataCfg, x)).toMap
+  }
+
   def pregIdxWidth = pregParams.map(_.addrWidth).max
 
   def numSrc      : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
@@ -71,12 +75,11 @@ case class BackendParams(
 
   def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
 
-  def numIntWb = intPregParams.numWrite
-  def numVfWb = vfPregParams.numWrite
+  def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)
+  def numPregWb(dataCfg: DataConfig) = this.getRfWriteSize(dataCfg)
+
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
-  def numRfRead  = 14
-  def numRfWrite = 8
   def vconfigPort = 0 // Todo: remove it
 
   def numException = allExuParams.count(_.exceptionOut.nonEmpty)
@@ -84,13 +87,11 @@ case class BackendParams(
   def numRedirect = allSchdParams.map(_.numRedirect).sum
 
   def genIntWriteBackBundle(implicit p: Parameters) = {
-    // Todo: limit write port
-    Seq.tabulate(numIntWb)(x => new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))
+    Seq.fill(this.getIntRfWriteSize)(new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))
   }
 
   def genVfWriteBackBundle(implicit p: Parameters) = {
-    // Todo: limit write port
-    Seq.tabulate(numVfWb)(x => new RfWritePortWithConfig(VecData(), intPregParams.addrWidth))
+    Seq.fill(this.getVfRfWriteSize)(new RfWritePortWithConfig(VecData(), vfPregParams.addrWidth))
   }
 
   def genWriteBackBundles(implicit p: Parameters): Seq[RfWritePortWithConfig] = {
@@ -102,26 +103,26 @@ case class BackendParams(
   }
 
   def getIntWbArbiterParams: WbArbiterParams = {
-    val intWbCfgs: Seq[WbConfig] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(_.writeInt))
-    datapath.WbArbiterParams(intWbCfgs, intPregParams)
+    val intWbCfgs: Seq[IntWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(_.writeInt)).map(_.asInstanceOf[IntWB])
+    datapath.WbArbiterParams(intWbCfgs, intPregParams, this)
   }
 
   def getVfWbArbiterParams: WbArbiterParams = {
-    val vfWbCfgs = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVec || x.writeFp))
-    datapath.WbArbiterParams(vfWbCfgs, vfPregParams)
+    val vfWbCfgs: Seq[VfWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVec || x.writeFp)).map(_.asInstanceOf[VfWB])
+    datapath.WbArbiterParams(vfWbCfgs, vfPregParams, this)
   }
 
   /**
     * Get regfile read port params
-    * @param tag ClassTag of T
-    * @tparam T [[IntRD]] or [[VfRD]]
+    *
+    * @param dataCfg [[IntData]] or [[VecData]]
     * @return Seq[port->Seq[(exuIdx, priority)]
     */
-  def getRdPortParams[T <: RdConfig](implicit tag: ClassTag[T]): Seq[(Int, Seq[(Int, Int)])] = {
+  def getRdPortParams(dataCfg: DataConfig) = {
     // port -> Seq[exuIdx, priority]
     val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
       .flatMap(x => x.rfrPortConfigs.flatten.map(xx => (xx, x.exuIdx)))
-      .filter { x => ClassTag(x._1.getClass) == tag }
+      .filter { x => x._1.getDataConfig == dataCfg }
       .map(x => (x._1.port, (x._2, x._1.priority)))
       .groupBy(_._1)
       .map(x => (x._1, x._2.map(_._2).sortBy({ case (priority, _) => priority })))
@@ -133,20 +134,92 @@ case class BackendParams(
   /**
     * Get regfile write back port params
     *
-    * @param tag ClassTag of T
-    * @tparam T [[IntWB]] or [[VfWB]]
+    * @param dataCfg [[IntData]] or [[VecData]]
     * @return Seq[port->Seq[(exuIdx, priority)]
     */
-  def getWbPortParams[T <: PregWB](implicit tag: ClassTag[T]) = {
+  def getWbPortParams(dataCfg: DataConfig) = {
     val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
-      .flatMap(x => x.wbPortConfigs.map(xx => (xx.asInstanceOf[PregWB], x.exuIdx)))
-      .filter { x => ClassTag(x._1.getClass) == tag }
+      .flatMap(x => x.wbPortConfigs.map(xx => (xx, x.exuIdx)))
+      .filter { x => x._1.dataCfg == dataCfg }
       .map(x => (x._1.port, (x._2, x._1.priority)))
       .groupBy(_._1)
       .map(x => (x._1, x._2.map(_._2)))
       .toSeq
       .sortBy(_._1)
     cfgs
+  }
+
+  def getRdPortIndices(dataCfg: DataConfig) = {
+    this.getRdPortParams(dataCfg).map(_._1)
+  }
+
+  def getWbPortIndices(dataCfg: DataConfig) = {
+    this.getWbPortParams(dataCfg).map(_._1)
+  }
+
+  def getRdCfgs[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = allIssueParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst{ case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getAllWbCfgs: Seq[Seq[Set[PregWB]]] = {
+    allIssueParams.map(_.exuBlockParams.map(_.wbPortConfigs.toSet))
+  }
+
+  def getWbCfgs[T <: PregWB](implicit tag: ClassTag[T]): Seq[Seq[PregWB]] = {
+    val wbCfgs: Seq[Seq[PregWB]] = allIssueParams.map(_.exuBlockParams.map(_.wbPortConfigs.collectFirst{ case x: T => x }.getOrElse(NoWB())))
+    wbCfgs
+  }
+
+  /**
+    * Get size of read ports of int regfile
+    *
+    * @return if [[IntPregParams.numRead]] is [[None]], get size of ports in [[IntRD]]
+    */
+  def getIntRfReadSize = {
+    this.intPregParams.numRead.getOrElse(this.getRdPortIndices(IntData()).size)
+  }
+
+  /**
+    * Get size of write ports of vf regfile
+    *
+    * @return if [[IntPregParams.numWrite]] is [[None]], get size of ports in [[IntWB]]
+    */
+  def getIntRfWriteSize = {
+    this.intPregParams.numWrite.getOrElse(this.getWbPortIndices(IntData()).size)
+  }
+
+  /**
+    * Get size of read ports of int regfile
+    *
+    * @return if [[VfPregParams.numRead]] is [[None]], get size of ports in [[VfRD]]
+    */
+  def getVfRfReadSize = {
+    this.vfPregParams.numRead.getOrElse(this.getRdPortIndices(VecData()).size)
+  }
+
+  /**
+    * Get size of write ports of vf regfile
+    *
+    * @return if [[VfPregParams.numWrite]] is [[None]], get size of ports in [[VfWB]]
+    */
+  def getVfRfWriteSize = {
+    this.vfPregParams.numWrite.getOrElse(this.getWbPortIndices(VecData()).size)
+  }
+
+  def getRfReadSize(dataCfg: DataConfig) = {
+    this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
+  }
+
+  def getRfWriteSize(dataCfg: DataConfig) = {
+    this.getPregParams(dataCfg).numWrite.getOrElse(this.getWbPortIndices(dataCfg).size)
   }
 
   def getExuIdx(name: String): Int = {
@@ -167,7 +240,42 @@ case class BackendParams(
   def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
   def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
+  private def isContinuous(portIndices: Seq[Int]): Boolean = {
+    val portIndicesSet = portIndices.toSet
+    portIndicesSet.min == 0 && portIndicesSet.max == portIndicesSet.size - 1
+  }
+
   def configChecks = {
+    checkReadPortContinuous
+    checkWritePortContinuous
+    configCheck
+  }
+
+  def checkReadPortContinuous = {
+    pregParams.foreach { x =>
+      if (x.numRead.isEmpty) {
+        val portIndices: Seq[Int] = getRdPortIndices(x.dataCfg)
+        require(isContinuous(portIndices),
+          s"The read ports of ${x.getClass.getSimpleName} should be continuous, " +
+            s"when numRead of ${x.getClass.getSimpleName} is None. The read port indices are $portIndices")
+      }
+    }
+  }
+
+  def checkWritePortContinuous = {
+    pregParams.foreach { x =>
+      if (x.numWrite.isEmpty) {
+        val portIndices: Seq[Int] = getWbPortIndices(x.dataCfg)
+        require(
+          isContinuous(portIndices),
+          s"The write ports of ${x.getClass.getSimpleName} should be continuous, " +
+            s"when numWrite of ${x.getClass.getSimpleName} is None. The write port indices are $portIndices"
+        )
+      }
+    }
+  }
+
+  def configCheck = {
     // check 0
     val maxPortSource = 2
 

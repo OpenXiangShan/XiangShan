@@ -6,17 +6,16 @@ import chisel3.util._
 import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
-import xiangshan.backend.datapath.WbConfig.WbConfig
+import xiangshan.backend.datapath.DataConfig.DataConfig
+import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
-import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
 
 case class IssueBlockParams(
   // top down
   exuBlockParams     : Seq[ExeUnitParams],
   numEntries         : Int,
-  pregBits           : Int,
-  numWakeupFromWB    : Int,
   numEnq             : Int,
   numDeqOutside      : Int = 0,
   numWakeupFromOthers: Int = 0,
@@ -151,6 +150,30 @@ case class IssueBlockParams(
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
+  /**
+    * Get the regfile type that this issue queue need to read
+    */
+  def pregReadSet: Set[DataConfig] = exuBlockParams.map(_.pregRdDataCfgSet).fold(Set())(_ union _)
+
+  /**
+    * Get the regfile type that this issue queue need to read
+    */
+  def pregWriteSet: Set[DataConfig] = exuBlockParams.map(_.pregWbDataCfgSet).fold(Set())(_ union _)
+
+  /**
+    * Get the max width of psrc
+    */
+  def rdPregIdxWidth = {
+    this.pregReadSet.map(cfg => backendParam.getPregParams(cfg).addrWidth).fold(0)(_ max _)
+  }
+
+  /**
+    * Get the max width of pdest
+    */
+  def wbPregIdxWidth = {
+    this.pregWriteSet.map(cfg => backendParam.getPregParams(cfg).addrWidth).fold(0)(_ max _)
+  }
+
   def iqWakeUpSourcePairs: Seq[WakeUpConfig] = exuBlockParams.flatMap(_.iqWakeUpSourcePairs)
 
   /** Get exu source wake up
@@ -185,12 +208,22 @@ case class IssueBlockParams(
 
   def numAllWakeUp: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
 
+  def numWakeupFromWB = {
+    val pregSet = this.pregReadSet
+    pregSet.map(cfg => backendParam.getRfWriteSize(cfg)).sum
+  }
+
   def hasIQWakeUp: Boolean = numWakeupFromIQ > 0
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   // cfgs(exuIdx)(set of exu's wb)
-  def getWbCfgs: Seq[Set[WbConfig]] = {
+
+  /**
+    * Get [[PregWB]] of this IssueBlock
+    * @return set of [[PregWB]] of [[ExeUnit]]
+    */
+  def getWbCfgs: Seq[Set[PregWB]] = {
     exuBlockParams.map(exu => exu.wbPortConfigs.toSet)
   }
 
@@ -219,7 +252,7 @@ case class IssueBlockParams(
   }
 
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
+    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
   }
 
   def genWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
