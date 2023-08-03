@@ -6,12 +6,11 @@ import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.WakeUpSource
-import xiangshan.backend.datapath.WbConfig.WbConfig
+import xiangshan.backend.datapath.WbConfig.PregWB
 
 case class SchdBlockParams(
   issueBlockParams: Seq[IssueBlockParams],
   numPregs        : Int,
-  numRfReadWrite  : Option[(Int, Int)],
   numDeqOutside   : Int,
   schdType        : SchedulerType,
   rfDataWidth     : Int,
@@ -104,9 +103,6 @@ case class SchdBlockParams(
 
   def numVfRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.numVecSrc).sum).sum
 
-  // Todo: 14R8W
-  def numIntRfRead: Int = numIntRfReadByExu
-
   def bindBackendParam(param: BackendParams): Unit = {
     backendParam = param
   }
@@ -162,7 +158,7 @@ case class SchdBlockParams(
   }
 
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)
-  def getWbCfgs: Seq[Seq[Set[WbConfig]]] = {
+  def getWbCfgs: Seq[Seq[Set[PregWB]]] = {
     this.issueBlockParams.map(_.getWbCfgs)
   }
 }

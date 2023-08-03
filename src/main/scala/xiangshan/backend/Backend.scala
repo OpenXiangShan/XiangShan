@@ -8,6 +8,7 @@ import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.CtrlBlock
+import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath._
@@ -78,22 +79,22 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   }
 
   println(s"[Backend] Int RdConfigs: ExuName(Priority)")
-  for ((port, seq) <- params.getRdPortParams[IntRD]) {
+  for ((port, seq) <- params.getRdPortParams(IntData())) {
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
   println(s"[Backend] Int WbConfigs: ExuName(Priority)")
-  for ((port, seq) <- params.getWbPortParams[IntWB]) {
+  for ((port, seq) <- params.getWbPortParams(IntData())) {
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
   println(s"[Backend] Vf RdConfigs: ExuName(Priority)")
-  for ((port, seq) <- params.getRdPortParams[VfRD]) {
+  for ((port, seq) <- params.getRdPortParams(VecData())) {
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
   println(s"[Backend] Vf WbConfigs: ExuName(Priority)")
-  for ((port, seq) <- params.getWbPortParams[VfWB]) {
+  for ((port, seq) <- params.getWbPortParams(VecData())) {
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 

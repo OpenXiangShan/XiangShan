@@ -6,7 +6,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.datapath.DataConfig.VAddrData
+import xiangshan.backend.datapath.DataConfig.{IntData, VAddrData, VecData}
+import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB}
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
@@ -19,8 +20,8 @@ case class VfScheduler() extends SchedulerType
 case class NoScheduler() extends SchedulerType
 
 class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  val numIntStateWrite = backendParams.numIntWb
-  val numVfStateWrite = backendParams.numVfWb
+  val numIntStateWrite = backendParams.numPregWb(IntData())
+  val numVfStateWrite = backendParams.numPregWb(VecData())
 
   val dispatch2Iq = LazyModule(new Dispatch2Iq(params))
   val issueQueue = params.issueBlockParams.map(x => LazyModule(new IssueQueue(x).suggestName(x.getIQName)))
@@ -59,9 +60,9 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bun
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
     val uops =  Vec(params.numUopIn, Flipped(DecoupledIO(new DynInst)))
   }
-  val intWriteBack = MixedVec(Vec(backendParams.intPregParams.numWrite,
+  val intWriteBack = MixedVec(Vec(backendParams.numPregWb(IntData()),
     new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
-  val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
+  val vfWriteBack = MixedVec(Vec(backendParams.numPregWb(VecData()),
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPath: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
@@ -114,8 +115,6 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   private val iqWakeUpInMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
     io.fromSchedulers.wakeupVec.map(x => (x.bits.exuIdx, x)).toMap
   private val schdType = params.schdType
-  private val (numRfRead, numRfWrite) = params.numRfReadWrite.getOrElse((0, 0))
-  private val numPregs = params.numPregs
 
   // Modules
   val dispatch2Iq: Dispatch2IqImp = wrapper.dispatch2Iq.module
@@ -123,12 +122,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // BusyTable Modules
   val intBusyTable = schdType match {
-    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite)))
+    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite, IntPhyRegs)))
     case _ => None
   }
 
   val vfBusyTable = schdType match {
-    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite)))
+    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite, VfPhyRegs)))
     case _ => None
   }
 

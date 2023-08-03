@@ -62,9 +62,6 @@ class MinimalConfig(n: Int = 1) extends Config(
         RenameWidth = 2,
         CommitWidth = 2,
         FetchWidth = 4,
-        NRPhyRegs = 96,
-        IntPhyRegs = 96,
-        VfPhyRegs = 96,
         VirtualLoadQueueSize = 16,
         LoadQueueRARSize = 16,
         LoadQueueRAWSize = 12,
@@ -89,14 +86,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           LsDqDeqWidth = 4
         ),
         intPreg = IntPregParams(
-          numEntries = 128,
-          numRead = 14,
-          numWrite = 8,
+          numEntries = 64,
+          numRead = Some(14),
+          numWrite = Some(8),
         ),
         vfPreg = VfPregParams(
-          numEntries = 128,
-          numRead = 14,
-          numWrite = 8,
+          numEntries = 96,
+          numRead = Some(14),
+          numWrite = Some(8),
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache

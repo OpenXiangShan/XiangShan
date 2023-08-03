@@ -150,8 +150,6 @@ case class XSCoreParameters
   VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
   VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
-  IntPhyRegs: Int = 192,
-  VfPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 80,
   LoadQueueRARSize: Int = 80,
   LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
@@ -174,14 +172,14 @@ case class XSCoreParameters
     LsDqDeqWidth = 6,
   ),
   intPreg: PregParams = IntPregParams(
-    numEntries = 256,
-    numRead = 14,
-    numWrite = 8,
+    numEntries = 192,
+    numRead = None,
+    numWrite = None,
   ),
   vfPreg: VfPregParams = VfPregParams(
-    numEntries = 256,
-    numRead = 14,
-    numWrite = 8,
+    numEntries = 192,
+    numRead = None,
+    numWrite = None,
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
@@ -297,102 +295,93 @@ case class XSCoreParameters
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
-  def intSchdParams = {
+  val intSchdParams = {
     implicit val schdType: SchedulerType = IntScheduler()
-    val pregBits = intPreg.addrWidth
-    val numRfRead = intPreg.numRead
-    val numRfWrite = intPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("IEX0", Seq(AluCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0)))),
         ExeUnitParams("IEX1", Seq(AluCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("IEX2", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0)))),
         ExeUnitParams("IEX3", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(8, 0)), Seq(IntRD(9, 0)))),
         ExeUnitParams("BJU1", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(3, 1)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("IMISC0", Seq(VSetRiWiCfg, I2fCfg, VSetRiWvfCfg), Seq(IntWB(port = 4, 1), VfWB(4, 0)), Seq(Seq(IntRD(8, 1)), Seq(IntRD(9, 1)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("IDIV0", Seq(DivCfg), Seq(IntWB(port = 5, 1)), Seq(Seq(IntRD(6, Int.MaxValue)), Seq(IntRD(7, Int.MaxValue)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
     ),
       numPregs = intPreg.numEntries,
-      numRfReadWrite = Some((numRfRead, numRfWrite)),
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = intPreg.dataCfg.dataWidth,
       numUopIn = dpParams.IntDqDeqWidth,
     )
   }
-  def vfSchdParams = {
+  val vfSchdParams = {
     implicit val schdType: SchedulerType = VfScheduler()
-    val pregBits = vfPreg.addrWidth
-    val numRfRead = vfPreg.numRead
-    val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("VEX0", Seq(VialuCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
         ExeUnitParams("VEX1", Seq(VimacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)))),
+        ExeUnitParams("FEX0", Seq(FmacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)))),
         ExeUnitParams("FEX1", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(VfRD(6, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("FEX2", Seq(FDivSqrtCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(11, 0)), Seq(VfRD(12, 0)))),
         ExeUnitParams("FEX3", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 2, 0), IntWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX2", Seq(VppuCfg), Seq(VfWB(port = 3, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
         ExeUnitParams("VEX3", Seq(VipuCfg), Seq(VfWB(port = 3, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX2", Seq(VfaluCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
         ExeUnitParams("VEX3", Seq(VfmaCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX4", Seq(VfdivCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
-      numRfReadWrite = Some((numRfRead, numRfWrite)),
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = vfPreg.dataCfg.dataWidth,
       numUopIn = dpParams.FpDqDeqWidth,
     )
   }
-  def memSchdParams = {
+
+  val memSchdParams = {
     implicit val schdType: SchedulerType = MemScheduler()
-    val pregBits = vfPreg.addrWidth max intPreg.addrWidth
     val rfDataWidth = 64
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(10, 0)))),
         ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(11, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(6, 1)), Seq(Seq(IntRD(12, 0)))),
         ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(7, 1)), Seq(Seq(IntRD(13, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(8, Int.MaxValue), VfRD(12, Int.MaxValue)))),
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(9, Int.MaxValue), VfRD(13, Int.MaxValue)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(9, Int.MaxValue), VfRD(10, Int.MaxValue)))),
+      ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
         ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+      ), numEntries = 8, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
-      numRfReadWrite = None,
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = rfDataWidth,
@@ -564,12 +553,9 @@ trait HasXSParameter {
   val FpLogicRegs = coreParams.FpLogicRegs
   val VecLogicRegs = coreParams.VecLogicRegs
   val VCONFIG_IDX = coreParams.VCONFIG_IDX
-  val NRPhyRegs = coreParams.NRPhyRegs
-  val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val IntPhyRegs = coreParams.IntPhyRegs
-  val VfPhyRegs = coreParams.VfPhyRegs
-  val IntPregIdxWidth = log2Up(IntPhyRegs)
-  val VfPregIdxWidth = log2Up(VfPhyRegs)
+  val IntPhyRegs = coreParams.intPreg.numEntries
+  val VfPhyRegs = coreParams.vfPreg.numEntries
+  val PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
   val RobSize = coreParams.RobSize
   val RabSize = coreParams.RabSize
   val IntRefCounterWidth = log2Ceil(RobSize)

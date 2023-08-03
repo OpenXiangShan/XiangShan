@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig.{DataConfig, FpData, FpRegSrcDataSet, IntData, IntRegSrcDataSet, VecData, VecRegSrcDataSet, VfRegSrcDataSet}
+import xiangshan.backend.exu.ExeUnitParams
 
 class RfReadPort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val addr = Input(UInt(addrWidth.W))

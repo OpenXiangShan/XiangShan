@@ -28,7 +28,7 @@ class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val resp = Output(Bool())
 }
 
-class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
@@ -38,7 +38,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
     val read = Vec(numReadPorts, new BusyTableReadIO)
   })
 
-  val table = RegInit(0.U(NRPhyRegs.W))
+  val table = RegInit(0.U(numPhyPregs.W))
 
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
     ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
@@ -62,17 +62,17 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")
   XSDebug(p"allocMask: ${Binary(allocMask)}\n")
   XSDebug(p"wbMask   : ${Binary(wbMask)}\n")
-  for (i <- 0 until NRPhyRegs) {
+  for (i <- 0 until numPhyPregs) {
     XSDebug(table(i), "%d is busy\n", i.U)
   }
 
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", busyCount < (NRPhyRegs / 4).U                                      ),
-    ("std_freelist_2_4_valid", busyCount > (NRPhyRegs / 4).U && busyCount <= (NRPhyRegs / 2).U    ),
-    ("std_freelist_3_4_valid", busyCount > (NRPhyRegs / 2).U && busyCount <= (NRPhyRegs * 3 / 4).U),
-    ("std_freelist_4_4_valid", busyCount > (NRPhyRegs * 3 / 4).U                                  )
+    ("std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                      ),
+    ("std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U    ),
+    ("std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U),
+    ("std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                  )
   )
   generatePerfEvent()
 }
