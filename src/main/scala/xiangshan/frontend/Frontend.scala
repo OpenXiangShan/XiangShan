@@ -109,13 +109,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     Seq(true, true) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
-  itlb.io.base_connect(io.sfence, tlbCsr)
+  itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.ptw_replenish <> DontCare
   itlb.io.flushPipe.map(_ := needFlush)
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
   itlb_ptw.connect(itlb.io.ptw)
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, io.sfence, tlbCsr, l2tlbParams.ifilterSize)
+  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
   io.ptw <> itlbRepeater1.io.ptw
 
   icache.io.prefetch <> ftq.io.toPrefetch
