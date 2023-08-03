@@ -5,13 +5,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.HasCircularQueuePtrHelper
-import utils.OptionWrapper
+import utils.{MathUtils, OptionWrapper}
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
+import xiangshan.backend.datapath.NewPipelineConnect
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   implicit val iqParams = params
@@ -53,6 +54,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
+  val fromCancelNetwork = Flipped(params.genIssueDecoupledBundle)
+  val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
@@ -149,12 +152,31 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
   val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
 
-  val wakeupEnqSrcStateBypass = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
+  val wakeupEnqSrcStateBypassFromWB = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
   for (i <- io.enq.indices) {
     for (j <- s0_enqBits(i).srcType.indices) {
-      wakeupEnqSrcStateBypass(i)(j) := Cat(
+      wakeupEnqSrcStateBypassFromWB(i)(j) := Cat(
         io.wakeupFromWB.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head)
       ).orR
+    }
+  }
+  val wakeupEnqSrcStateBypassFromIQ = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
+  for (i <- io.enq.indices) {
+    for (j <- s0_enqBits(i).srcType.indices) {
+      wakeupEnqSrcStateBypassFromIQ(i)(j) := Cat(
+        io.wakeupFromIQ.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head)
+      ).orR
+    }
+  }
+  val srcWakeUpEnqByIQMatrix = Wire(Vec(params.numEnq, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+  srcWakeUpEnqByIQMatrix.zipWithIndex.foreach { case (wakeups: Vec[Vec[Bool]], i) =>
+    if (io.wakeupFromIQ.isEmpty) {
+      wakeups := 0.U.asTypeOf(wakeups)
+    } else {
+      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeupFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
+        bundle.bits.wakeUp(s0_enqBits(i).psrc.take(params.numRegSrc) zip s0_enqBits(i).srcType.take(params.numRegSrc), bundle.valid)
+      ).transpose
+      wakeups := wakeupVec.map(x => VecInit(x))
     }
   }
 
@@ -172,21 +194,37 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.addrOH           := s0_enqSelOHVec(i)
       val numLSrc = s0_enqBits(i).srcType.size.min(enq.bits.data.srcType.size)
       for (j <- 0 until numLSrc) {
-        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
+        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypassFromWB(i)(j) | wakeupEnqSrcStateBypassFromIQ(i)(j)
         enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
         enq.bits.data.srcType(j)  := s0_enqBits(i).srcType(j)
+        enq.bits.data.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.forward, DataSource.reg)
       }
       enq.bits.data.robIdx      := s0_enqBits(i).robIdx
       enq.bits.data.issued      := false.B
       enq.bits.data.firstIssue  := false.B
       enq.bits.data.blocked     := false.B
-      enq.bits.data.dataSources.foreach(_.value := DataSource.reg)
       enq.bits.data.srcWakeUpL1ExuOH match {
-        case Some(value) => value := 0.U.asTypeOf(value)
+        case Some(value) =>
+          enq.bits.data.srcWakeUpL1ExuOH.get.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
+            case ((exuOH, wakeUpByIQOH), srcIdx) =>
+              when(wakeUpByIQOH.asUInt.orR) {
+                exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
+              }.otherwise {
+                exuOH := 0.U.asTypeOf(exuOH)
+              }
+          }
         case None =>
       }
       enq.bits.data.srcTimer match {
-        case Some(value) => value := 0.U.asTypeOf(value)
+        case Some(value) =>
+          enq.bits.data.srcTimer.get.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
+            case ((timer, wakeUpByIQOH), srcIdx) =>
+              when(wakeUpByIQOH.asUInt.orR) {
+                timer := 1.U.asTypeOf(timer)
+              }.otherwise {
+                timer := 0.U.asTypeOf(timer)
+              }
+          }
         case None =>
       }
     }
@@ -450,7 +488,14 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     deq.bits.immType := payloadArrayRdata(i).selImm
   }
-
+  io.deqDelay.zip(io.fromCancelNetwork).foreach{ case(deqDly, deq) =>
+    NewPipelineConnect(
+      deq, deqDly, deqDly.valid,
+      deq.bits.common.robIdx.needFlush(io.flush),
+      Option("Scheduler2DataPathPipe")
+    )
+  }
+  dontTouch(io.deqDelay)
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty && finalWakeUpL1ExuOH.nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
@@ -567,14 +612,6 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
       val numLSrc = s0_enqBits(i).srcType.size min enq.bits.data.srcType.size
       val numPSrc = s0_enqBits(i).srcState.size min enq.bits.data.srcState.size
 
-      for (j <- 0 until numPSrc) {
-        enq.bits.data.srcState(j) := s0_enqBits(i).srcState(j) | wakeupEnqSrcStateBypass(i)(j)
-        enq.bits.data.psrc(j)     := s0_enqBits(i).psrc(j)
-      }
-
-      for (j <- 0 until numLSrc) {
-        enq.bits.data.srcType(j) := s0_enqBits(i).srcType(j)
-      }
       if (enq.bits.data.srcType.isDefinedAt(3)) enq.bits.data.srcType(3) := SrcType.vp // v0: mask src
       if (enq.bits.data.srcType.isDefinedAt(4)) enq.bits.data.srcType(4) := SrcType.vp // vl&vtype
     }
