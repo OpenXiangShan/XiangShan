@@ -370,7 +370,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val fastReplaySel = loadUnits.zipWithIndex.map { case (ldu, i) => {
     val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid        := ldu.io.fast_rep_out.valid 
+    wrapper.valid        := ldu.io.fast_rep_out.valid
     wrapper.bits.req     := ldu.io.fast_rep_out.bits
     wrapper.bits.balance := ldu.io.fast_rep_out.bits.rep_info.bank_conflict
     wrapper.bits.port    := i.U
@@ -381,15 +381,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.isFirstIssue := true.B
-  
+
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     loadUnits(i).io.feedback_slow <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedback_fast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
-   
+
     // fast replay
-    loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid 
+    loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid
     loadUnits(i).io.fast_rep_in.bits := balanceFastReplaySel(i).bits.req
 
     loadUnits(i).io.fast_rep_out.ready := false.B
@@ -398,7 +398,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         loadUnits(i).io.fast_rep_out.ready := loadUnits(j).io.fast_rep_in.ready
       }
     }
-     
+
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
     // dcache access
@@ -418,7 +418,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
-    // st-ld violation query 
+    // st-ld violation query
     for (s <- 0 until StorePipelineWidth) {
       loadUnits(i).io.stld_nuke_query(s) := storeUnits(s).io.stld_nuke_query
     }
@@ -605,8 +605,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
   // delay dcache refill for 1 cycle for better timing
-  lsq.io.refill         := delayedDcacheRefill
-  lsq.io.release        := dcache.io.lsu.release
+  lsq.io.refill       := delayedDcacheRefill
+  lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
+  lsq.io.release      := dcache.io.lsu.release
   lsq.io.lqCancelCnt <> io.lqCancelCnt
   lsq.io.sqCancelCnt <> io.sqCancelCnt
   lsq.io.lqDeq <> io.lqDeq
