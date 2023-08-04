@@ -573,19 +573,6 @@ object FuConfig {
     dataBits = 128,
   )
 
-  val VfpuCfg: FuConfig = FuConfig (
-    name = "vfpu",
-    fuType = FuType.vfpu,
-    fuGen = null, // Todo
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
-      Seq(FpData(), VecData(), VecData(), MaskSrcData(), VConfigData()),   // f[rs1], vs2, vd_old, v0
-    ),
-    piped = false,
-    writeVecRf = true,
-    latency = UncertainLatency(),
-  )
-
   val VlduCfg: FuConfig = FuConfig (
     name = "vldu",
     fuType = FuType.vldu,
@@ -609,12 +596,12 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VfpuCfg, VlduCfg,
+    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg,
     VfaluCfg, VfmaCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfpuCfg, VfaluCfg, VfmaCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg
   )
 }
 
