@@ -146,30 +146,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   .elsewhen (s1_kill) { s1_valid := false.B }
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss
+  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
 
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
-  io.feedback_slow.valid           := s1_fire
-  io.feedback_slow.bits.hit        := !s1_tlb_miss
-  io.feedback_slow.bits.flushState := io.tlb.resp.bits.ptwBack
-  io.feedback_slow.bits.rsIdx      := s1_in.rsIdx
-  io.feedback_slow.bits.sourceType := RSFeedbackType.tlbMiss
-  XSDebug(io.feedback_slow.valid,
-    "S1 Store: tlbHit: %d robIdx: %d\n",
-    io.feedback_slow.bits.hit,
-    io.feedback_slow.bits.rsIdx
-  )
-  io.feedback_slow.bits.dataInvalidSqIdx := DontCare
-
-  // issue
-  io.issue.valid := s1_valid && !s1_tlb_miss
-  io.issue.bits  := RegEnable(s0_in, s0_valid)
-
-  // rs feedback
   val s1_feedback = Wire(Valid(new RSFeedback))
   s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch
   s1_feedback.bits.hit              := !s1_tlb_miss
@@ -182,6 +165,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     s1_feedback.bits.hit,
     s1_feedback.bits.rsIdx
   )
+
+  // issue
+  io.issue.valid := s1_valid && !s1_tlb_miss
+  io.issue.bits  := RegEnable(s0_in, s0_valid)
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
