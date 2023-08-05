@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import freechips.rocketchip.tilelink.TLBuffer
 import coupledL2.PrefetchRecv
 import utils._
 import utility._
@@ -29,7 +30,7 @@ import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO}
 import xiangshan.cache._
-import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
+import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher}
@@ -46,9 +47,13 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
+  val ptw = LazyModule(new L2TLBWrapper())
+  val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
+
+  ptw_to_l2_buffer.node := ptw.node
 
   lazy val module = new MemBlockImp(this)
 
@@ -70,7 +75,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val redirect = Flipped(ValidIO(new Redirect))
-    // in
+    // in from fetch
+    val itlb = Flipped(new TlbPtwIO())
+    // in from ooo
     val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
@@ -91,7 +98,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1) // load + store + hw prefetch
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -111,7 +117,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
-    val perfEventsPTW = Input(Vec(19, new PerfEvent))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -238,9 +243,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.hartId := io.hartId
   atomicsUnit.io.hartId := io.hartId
 
-  // dtlb
+  // ptw
   val sfence = RegNext(RegNext(io.sfence))
   val tlbcsr = RegNext(RegNext(io.tlbCsr))
+  val ptw = outer.ptw.module
+  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  ptw.io.sfence <> sfence
+  ptw.io.csr.tlb <> tlbcsr
+  ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  ptw.io.tlb(0) <> io.itlb
+
+  val perfEventsPTW = Wire(Vec(19, new PerfEvent))
+  if (!coreParams.softPTW) {
+    perfEventsPTW := ptw.getPerf
+  } else {
+    perfEventsPTW := DontCare
+  }
+
+  // dtlb
   val dtlb_ld = VecInit(Seq.fill(1){
     val tlb_ld = Module(new TLBNonBlock(exuParameters.LduCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
@@ -254,6 +274,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 1)) // load + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.sfence := sfence)
@@ -264,30 +285,31 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace)
 
     val replace = Module(new TlbReplace(exuParameters.LduCnt + exuParameters.StuCnt + 1, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
-      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-      replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
   }
 
-  val ptw_resp_next = RegEnable(io.ptw.resp.bits, io.ptw.resp.valid)
-  val ptw_resp_v = RegNext(io.ptw.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
-  io.ptw.resp.ready := true.B
+  val ptw_resp_next = RegEnable(ptwio.resp.bits, ptwio.resp.valid)
+  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
+  ptwio.resp.ready := true.B
 
   dtlb.flatMap(a => a.ptw.req)
     .zipWithIndex
     .foreach{ case (tlb, i) =>
-    tlb <> io.ptw.req(i)
+      tlb.ready := ptwio.req(i).ready
+      ptwio.req(i).bits := tlb.bits
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
-    io.ptw.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
+    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
@@ -299,14 +321,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + exuParameters.StuCnt)).orR)
   }
 
-  for (i <- 0 until exuParameters.LduCnt) {
-    io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
-  }
-  for (i <- 0 until exuParameters.StuCnt) {
-    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
-  }
-
-  io.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
+  val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, ptwio, sfence, tlbcsr, l2tlbParams.dfilterSize)
+  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), sfence, tlbcsr)
+  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.itlb, ptw.io.tlb(0), sfence, tlbcsr)
+  ExcitingUtils.addSource(dtlbRepeater1.io.rob_head_miss_in_tlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   // pmp
   val pmp = Module(new PMP())
@@ -319,10 +337,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   for (i <- 0 until 8) {
     val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
-      Cat(io.ptw.resp.bits.data.entry.ppn, io.ptw.resp.bits.data.ppn_low(i), 0.U(12.W)).asUInt)
+    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, ptwio.resp.valid,
+      Cat(ptwio.resp.bits.data.entry.ppn, ptwio.resp.bits.data.ppn_low(i), 0.U(12.W)).asUInt)
     dtlb.map(_.ptw_replenish(i) := pmp_check_ptw.io.resp)
   }
+
+  for (i <- 0 until exuParameters.LduCnt) {
+    io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
+  }
+  for (i <- 0 until exuParameters.StuCnt) {
+    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
+  }
+
+  io.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
 
   val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
@@ -745,7 +772,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     ("stDeqCount", stDeqCount),
   )
   val allPerfEvents = memBlockPerfEvents ++ (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
-  val hpmEvents = allPerfEvents.map(_._2.asTypeOf(new PerfEvent)) ++ io.perfEventsPTW
+  val hpmEvents = allPerfEvents.map(_._2.asTypeOf(new PerfEvent)) ++ perfEventsPTW
   val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
   generatePerfEvent()
 }
