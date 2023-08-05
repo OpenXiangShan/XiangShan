@@ -167,6 +167,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val refill = Flipped(ValidIO(new Refill))
+    val tl_d_channel = Input(new DcacheToLduForwardIO)
+
 
     // from StoreQueue
     val stAddrReadySqPtr = Input(new SqPtr)
@@ -325,9 +327,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   (0 until LoadQueueReplaySize).map(i => {
     blockByForwardFail(i) := Mux(blockByForwardFail(i) && stDataDeqVec(i), false.B, blockByForwardFail(i))
     blockByMemAmb(i) := Mux(blockByMemAmb(i) && stAddrDeqVec(i), false.B, blockByMemAmb(i))
-    blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i), false.B, blockByCacheMiss(i))
+    blockByCacheMiss(i) := Mux(blockByCacheMiss(i) && io.tl_d_channel.valid && io.tl_d_channel.mshrid === missMSHRId(i), false.B, blockByCacheMiss(i))
 
-    when (blockByCacheMiss(i) && io.refill.valid && io.refill.bits.id === missMSHRId(i)) { creditUpdate(i) := 0.U }
+    when (blockByCacheMiss(i) && io.tl_d_channel.valid && io.tl_d_channel.mshrid === missMSHRId(i)) { creditUpdate(i) := 0.U }
     when (blockByRARReject(i) && (!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr))) { blockByRARReject(i) := false.B }
     when (blockByRAWReject(i) && (!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr))) { blockByRAWReject(i) := false.B }
     when (blockByTlbMiss(i) && creditUpdate(i) === 0.U) { blockByTlbMiss(i) := false.B }
@@ -655,7 +657,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // special case: dcache miss
       when (replayInfo.cause(LoadReplayCauses.C_DM) && enq.bits.handledByMSHR) {
         blockByCacheMiss(enqIndex) := !replayInfo.full_fwd && //  dcache miss
-                                  !(io.refill.valid && io.refill.bits.id === replayInfo.mshr_id) // no refill in this cycle
+                                  !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
 
         blockPtrCache(enqIndex) := Mux(blockPtrCache(enqIndex) === 3.U(2.W), blockPtrCache(enqIndex), blockPtrCache(enqIndex) + 1.U(2.W))
       }
