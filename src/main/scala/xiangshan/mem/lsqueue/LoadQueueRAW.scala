@@ -30,18 +30,27 @@ import xiangshan.backend.Bundles.DynInst
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
-  with HasCircularQueuePtrHelper 
+  with HasCircularQueuePtrHelper
   with HasLoadHelper
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
+    // control
     val redirect = Flipped(ValidIO(new Redirect))
-    val query = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
+
+    // violation query
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+
+    // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val rollback = Output(Valid(new Redirect)) 
+
+    // global rollback flush
+    val rollback = Output(Valid(new Redirect))
+
+    // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
-    val stIssuePtr = Input(new SqPtr)
-    val lqFull = Output(Bool())
+    val stIssuePtr       = Input(new SqPtr)
+    val lqFull           = Output(Bool())
   })
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
@@ -62,17 +71,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRAWSize,
-    numRead = LoadPipelineWidth, 
-    numWrite = LoadPipelineWidth, 
+    numRead = LoadPipelineWidth,
+    numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
     numCamPort = StorePipelineWidth
   ))
   paddrModule.io := DontCare
   val maskModule = Module(new LqMaskModule(
-    gen = UInt(8.W),
-    numEntries = LoadQueueRAWSize, 
-    numRead = LoadPipelineWidth, 
+    gen = UInt((VLEN/8).W),
+    numEntries = LoadQueueRAWSize,
+    numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
@@ -86,7 +95,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // | 0 | 1 |      ......  | n-2 | n-1 |
   // +---+---+--------------+-----+-----+
   val freeList = Module(new FreeList(
-    size = LoadQueueRAWSize, 
+    size = LoadQueueRAWSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
     moduleName = "LoadQueueRAW freelist"
@@ -95,19 +104,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect)) 
+  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => {
-    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B) 
+    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
-  val bypassMask = Reg(Vec(LoadPipelineWidth, UInt(8.W)))
+  val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
-  // Allocate logic 
+  // Allocate logic
   val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-  val enqOffset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
@@ -115,12 +123,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     maskModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    enqOffset(w) := PopCount(needEnqueue.take(w)) 
     freeList.io.allocateReq(w) := needEnqueue(w)
 
-    //  Allocate ready 
-    enqValidVec(w) := freeList.io.canAllocate(enqOffset(w))
-    enqIndexVec(w) := freeList.io.allocateSlot(enqOffset(w))
+    //  Allocate ready
+    enqValidVec(w) := freeList.io.canAllocate(w)
+    enqIndexVec(w) := freeList.io.allocateSlot(w)
     enq.ready := Mux(needEnqueue(w), enqValidVec(w), true.B)
 
     val enqIndex = enqIndexVec(w)
@@ -134,26 +141,26 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       allocated(enqIndex) := true.B
 
       //  Write paddr
-      paddrModule.io.wen(w) := true.B 
-      paddrModule.io.waddr(w) := enqIndex 
+      paddrModule.io.wen(w) := true.B
+      paddrModule.io.waddr(w) := enqIndex
       paddrModule.io.wdata(w) := enq.bits.paddr
       bypassPAddr(w) := enq.bits.paddr
 
       //  Write mask
-      maskModule.io.wen(w) := true.B 
-      maskModule.io.waddr(w) := enqIndex 
+      maskModule.io.wen(w) := true.B
+      maskModule.io.waddr(w) := enqIndex
       maskModule.io.wdata(w) := enq.bits.mask
       bypassMask(w) := enq.bits.mask
 
-      //  Fill info 
+      //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.datavalid
+      datavalid(enqIndex) := enq.bits.data_valid
     }
   }
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
-    query.bits.replayFromFetch := RegNext(false.B)
+    query.bits.rep_frm_fetch := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate
@@ -178,13 +185,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val lastCanAccept = RegNext(VecInit(needEnqueue.zip(enqValidVec).map(x => x._1 && x._2)))
   val lastAllocIndex = RegNext(enqIndexVec)
 
-  for ((release, w) <- io.query.map(_.release).zipWithIndex) {
-    val releaseValid = release && lastCanAccept(w)
-    val releaseIndex = lastAllocIndex(w)
+  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
+    val revokeValid = revoke && lastCanAccept(w)
+    val revokeIndex = lastAllocIndex(w)
 
-    when (allocated(releaseIndex) && releaseValid) {
-      allocated(releaseIndex) := false.B
-      freeMaskVec(releaseIndex) := true.B
+    when (allocated(revokeIndex) && revokeValid) {
+      allocated(revokeIndex) := false.B
+      freeMaskVec(revokeIndex) := true.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -207,18 +214,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     *   Prepare redirect request according to the detected violation.
     *   Fire redirect request (if valid)
     */
-  //              SelectGroup 0         SelectGroup 1          SelectGroup y   
+  //              SelectGroup 0         SelectGroup 1          SelectGroup y
   // stage 0:       lq  lq  lq  ......    lq  lq  lq  .......    lq  lq  lq
-  //                |   |   |             |   |   |              |   |   | 
+  //                |   |   |             |   |   |              |   |   |
   // stage 1:       lq  lq  lq  ......    lq  lq  lq  .......    lq  lq  lq
   //                 \  |  /    ......     \  |  /    .......     \  |  /
   // stage 2:           lq                    lq                     lq
   //                     \  |  /  .......  \  |  /   ........  \  |  /
   // stage 3:               lq                lq                  lq
   //                                          ...
-  //                                          ... 
-  //                                           | 
-  // stage x:                                  lq 
+  //                                          ...
+  //                                           |
+  // stage x:                                  lq
   //                                           |
   //                                       rollback req
 
@@ -251,7 +258,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
     // group info
-    val selectValidGroups = 
+    val selectValidGroups =
       if (valid.length <= SelectGroupSize) {
         Seq(valid)
       } else {
@@ -263,7 +270,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
           }
         })
       }
-    val selectBitsGroups = 
+    val selectBitsGroups =
       if (bits.length <= SelectGroupSize) {
         Seq(bits)
       } else {
@@ -276,7 +283,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
         })
       }
 
-    // select logic 
+    // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
       (Seq(RegNext(selValid(0) && !selBits(0).uop.robIdx.needFlush(io.redirect))), Seq(RegNext(selBits(0))))
@@ -293,9 +300,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, 3) === io.storeIn(i).bits.paddr(PAddrBits-1, 3))))
+    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
     val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
-    val bypassMaskUInt = (0 until LoadPipelineWidth).map(j => 
+    val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize))
     ).reduce(_|_)
 
@@ -327,7 +334,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     )
 
     (lqViolation, lqViolationUop)
-  } 
+  }
 
   // select rollback (part1) and generate rollback request
   // rollback check
@@ -337,13 +344,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
-    rollbackLqWb(w).bits.uop := detectedRollback._2
+    rollbackLqWb(w).valid     := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).bits.uop  := detectedRollback._2
     rollbackLqWb(w).bits.flag := w.U
     stFtqIdx(w) := DelayN(io.storeIn(w).bits.uop.ftqPtr, TotalSelectCycles)
     stFtqOffset(w) := DelayN(io.storeIn(w).bits.uop.ftqOffset, TotalSelectCycles)
   }
- 
+
   val rollbackLqWbValid = rollbackLqWb.map(x => x.valid && !x.bits.uop.robIdx.needFlush(io.redirect))
   val rollbackLqWbBits = rollbackLqWb.map(x => x.bits)
 
@@ -357,16 +364,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackUop = rollbackUopExt.uop
   val rollbackStFtqIdx = stFtqIdx(rollbackUopExt.flag)
   val rollbackStFtqOffset = stFtqOffset(rollbackUopExt.flag)
- 
+
   // check if rollback request is still valid in parallel
-  io.rollback.bits.robIdx := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx := rollbackUop.ftqPtr
-  io.rollback.bits.stFtqIdx := rollbackStFtqIdx
-  io.rollback.bits.ftqOffset := rollbackUop.ftqOffset
+  io.rollback.bits             := DontCare
+  io.rollback.bits.robIdx      := rollbackUop.robIdx
+  io.rollback.bits.ftqIdx      := rollbackUop.ftqPtr
+  io.rollback.bits.stFtqIdx    := rollbackStFtqIdx
+  io.rollback.bits.ftqOffset   := rollbackUop.ftqOffset
   io.rollback.bits.stFtqOffset := rollbackStFtqOffset
-  io.rollback.bits.level := RedirectLevel.flush
-  io.rollback.bits.interrupt := DontCare
-  io.rollback.bits.cfiUpdate := DontCare
+  io.rollback.bits.level       := RedirectLevel.flush
+  io.rollback.bits.interrupt   := DontCare
+  io.rollback.bits.cfiUpdate   := DontCare
   io.rollback.bits.cfiUpdate.target := rollbackUop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
@@ -380,11 +388,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
-  XSPerfAccumulate("stld_rollback", io.rollback.valid) 
+  XSPerfAccumulate("stld_rollback", io.rollback.valid)
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq ", canEnqCount),
     ("stld_rollback", io.rollback.valid),
   )
-  generatePerfEvent()   
+  generatePerfEvent()
   // end
 }

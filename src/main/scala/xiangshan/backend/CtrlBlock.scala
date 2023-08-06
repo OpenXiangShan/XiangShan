@@ -183,7 +183,7 @@ class CtrlBlockImp(
   // T6: io.frontend.toFtq.stage2Redirect.valid
   val s2_robFlushPc = RegEnable(Mux(s1_robFlushRedirect.bits.flushItself(),
     s1_robFlushPc, // replay inst
-    s1_robFlushPc + 4.U // flush pipe
+    s1_robFlushPc + Mux(flushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s2_csrIsXRet = io.robio.csr.isXRet
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
@@ -195,37 +195,12 @@ class CtrlBlockImp(
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
   }
 
-  if (env.EnableTopDown) {
-    val stage2Redirect_valid_when_pending = s2_s4_pendingRedirectValid && s1_s3_redirect.valid
 
-    val stage2_redirect_cycles = RegInit(false.B)                                         // frontend_bound->fetch_lantency->stage2_redirect
-    val MissPredPending = RegInit(false.B); val branch_resteers_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->branch_resteers
-    val RobFlushPending = RegInit(false.B); val robFlush_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->robflush_bubble
-    val LdReplayPending = RegInit(false.B); val ldReplay_bubble_cycles = RegInit(false.B) // frontend_bound->fetch_lantency->stage2_redirect->ldReplay_bubble
-
-    when(redirectGen.io.isMisspreRedirect) { MissPredPending := true.B }
-    when(s1_robFlushRedirect.valid)              { RobFlushPending := true.B }
-    when(redirectGen.io.loadReplay.valid)  { LdReplayPending := true.B }
-
-    when (RegNext(io.frontend.toFtq.redirect.valid)) {
-      when(s2_s4_pendingRedirectValid) {                             stage2_redirect_cycles := true.B }
-      when(MissPredPending) { MissPredPending := false.B; branch_resteers_cycles := true.B }
-      when(RobFlushPending) { RobFlushPending := false.B; robFlush_bubble_cycles := true.B }
-      when(LdReplayPending) { LdReplayPending := false.B; ldReplay_bubble_cycles := true.B }
-    }
-
-    when(VecInit(decode.io.out.map(x => x.valid)).asUInt.orR){
-      when(stage2_redirect_cycles) { stage2_redirect_cycles := false.B }
-      when(branch_resteers_cycles) { branch_resteers_cycles := false.B }
-      when(robFlush_bubble_cycles) { robFlush_bubble_cycles := false.B }
-      when(ldReplay_bubble_cycles) { ldReplay_bubble_cycles := false.B }
-    }
-
-    XSPerfAccumulate("stage2_redirect_cycles", stage2_redirect_cycles)
-    XSPerfAccumulate("branch_resteers_cycles", branch_resteers_cycles)
-    XSPerfAccumulate("robFlush_bubble_cycles", robFlush_bubble_cycles)
-    XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
-    XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
+  val pendingRedirect = RegInit(false.B)
+  when (stage2Redirect.valid) {
+    pendingRedirect := true.B
+  }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
+    pendingRedirect := false.B
   }
 
   // vtype commit
@@ -254,6 +229,44 @@ class CtrlBlockImp(
   decode.io.fpRat <> rat.io.fpReadPorts
   decode.io.vecRat <> rat.io.vecReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
+
+  // snapshot check
+  val snpt = Module(new SnapshotGenerator(rename.io.out.head.bits.robIdx))
+  snpt.io.enq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  snpt.io.enqData.head := rename.io.out.head.bits.robIdx
+  snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
+    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value))).orR
+  snpt.io.flush := stage2Redirect.valid
+
+  val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
+    snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx)
+  ).reduceTree(_ || _)
+  val snptSelect = MuxCase(
+    0.U(log2Ceil(RenameSnapshotNum).W),
+    (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
+      (snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx), idx)
+    )
+  )
+
+  rob.io.snpt.snptEnq := DontCare
+  rob.io.snpt.snptDeq := snpt.io.deq
+  rob.io.snpt.useSnpt := useSnpt
+  rob.io.snpt.snptSelect := snptSelect
+  rat.io.snpt.snptEnq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  rat.io.snpt.snptDeq := snpt.io.deq
+  rat.io.snpt.useSnpt := useSnpt
+  rat.io.snpt.snptSelect := snptSelect
+  rename.io.snpt.snptEnq := DontCare
+  rename.io.snpt.snptDeq := snpt.io.deq
+  rename.io.snpt.useSnpt := useSnpt
+  rename.io.snpt.snptSelect := snptSelect
+
+  // prevent rob from generating snapshot when full here
+  val renameOut = Wire(chiselTypeOf(rename.io.out))
+  renameOut <> rename.io.out
+  when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
+    renameOut.head.bits.snapshot := false.B
+  }
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
   // fusion decoder
@@ -334,10 +347,14 @@ class CtrlBlockImp(
   rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
+  rename.io.int_need_free := rat.io.int_need_free
+  rename.io.int_old_pdest := rat.io.int_old_pdest
+  rename.io.fp_old_pdest := rat.io.fp_old_pdest
   rename.io.debug_int_rat := rat.io.debug_int_rat
   rename.io.debug_fp_rat := rat.io.debug_fp_rat
   rename.io.debug_vec_rat := rat.io.debug_vec_rat
   rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
+  rename.io.stallReason.in <> decode.io.stallReason.out
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -347,6 +364,12 @@ class CtrlBlockImp(
   dispatch.io.hartId := io.fromTop.hartId
   dispatch.io.redirect := s1_s3_redirect
   dispatch.io.enqRob <> rob.io.enq
+  dispatch.io.robHead := rob.io.debugRobHead
+  dispatch.io.stallReason <> rename.io.stallReason.out
+  dispatch.io.lqCanAccept := io.lqCanAccept
+  dispatch.io.sqCanAccept := io.sqCanAccept
+  dispatch.io.robHeadNotReady := rob.io.headNotReady
+  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
   intDq.io.enq <> dispatch.io.toIntDq
@@ -435,6 +458,12 @@ class CtrlBlockImp(
   io.debug_vec_rat := rat.io.diff_vec_rat
   io.debug_vconfig_rat := rat.io.diff_vconfig_rat
 
+  // Todo: merge
+//  rob.io.debug_ls := io.robio.debug_ls
+//  rob.io.debugHeadLsIssue := io.robHeadLsIssue
+//  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+//  io.robDeqPtr := rob.io.robDeqPtr
+
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
@@ -512,6 +541,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
 
+  // Todo: add these
+  val sqCanAccept = Input(Bool())
+  val lqCanAccept = Input(Bool())
+  val lsTopdownInfo = Vec(LduCnt, Input(new LsTopdownInfo))
+  val robDeqPtr = Output(new RobPtr)
+  val robHeadLsIssue = Input(Bool())
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

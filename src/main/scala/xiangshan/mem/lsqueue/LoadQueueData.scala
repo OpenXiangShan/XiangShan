@@ -31,6 +31,7 @@ import utility._
 // These raw data modules are like SyncDataModuleTemplate, but support cam-like ops
 abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int, numWrite: Int, numWBank: Int, numWDelay: Int, numCamPort: Int = 0)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
+    val ren   = Input(Vec(numRead, Bool()))
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, gen))
     val wen   = Input(Vec(numWrite, Bool()))
@@ -40,7 +41,7 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
     val violationMdata = Input(Vec(numCamPort, gen)) // addr
     val violationMmask = Output(Vec(numCamPort, Vec(numEntries, Bool()))) // cam result mask
     // refill cam: hit if addr is in the same cacheline
-    val releaseMdata = Input(Vec(numCamPort, gen)) 
+    val releaseMdata = Input(Vec(numCamPort, gen))
     val releaseMmask = Output(Vec(numCamPort, Vec(numEntries, Bool())))  // cam result mask
     // release violation cam: hit if addr is in the same cacheline
     val releaseViolationMdata = Input(Vec(numCamPort, gen))
@@ -57,7 +58,7 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
   val data = Reg(Vec(numEntries, gen))
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(RegNext(io.raddr(i)))
+    io.rdata(i) := RegEnable(data(io.raddr(i)), io.ren(i))
   }
 
   // write ports
@@ -117,20 +118,20 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
 
 // Load queue physical address module
 class LqPAddrModule[T <: UInt](
-  gen: T, 
-  numEntries: Int, 
-  numRead: Int, 
-  numWrite: Int, 
-  numWBank: Int, 
-  numWDelay: Int = 1, 
-  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort) 
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  numWBank: Int,
+  numWDelay: Int = 1,
+  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort)
   with HasDCacheParameters
 {
   // content addressed match
-  // word aligned
+  // 128-bits aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheVWordOffset) === data(j)(PAddrBits-1, DCacheVWordOffset)
     }
   }
 
@@ -141,7 +142,7 @@ class LqPAddrModule[T <: UInt](
       io.releaseViolationMmask(i)(j) := io.releaseViolationMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
     }
   }
- 
+
   // content addressed match
   // cacheline aligned
   for (i <- 0 until numCamPort) {
@@ -153,39 +154,39 @@ class LqPAddrModule[T <: UInt](
 
 // Load queue data module
 class LqVAddrModule[T <: UInt](
-  gen: T, 
-  numEntries: Int, 
-  numRead: Int, 
-  numWrite: Int, 
-  numWBank: Int, 
-  numWDelay: Int = 1, 
-  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort) 
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  numWBank: Int,
+  numWDelay: Int = 1,
+  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort)
   with HasDCacheParameters
 {
   // content addressed match
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, 3) === data(j)(VAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(VAddrBits-1, DCacheVWordOffset) === data(j)(VAddrBits-1, DCacheVWordOffset)
     }
   }
- 
+
   // content addressed match
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.releaseMmask(i)(j) := io.releaseMdata(i)(VAddrBits-1, 0) === data(j)(VAddrBits-1, 0)
+      io.releaseMmask(i)(j) := io.releaseMdata(i)(VAddrBits-1, DCacheLineOffset) === data(j)(VAddrBits-1, DCacheLineOffset)
     }
   }
 }
 
 // Load queue mask module
 class LqMaskModule[T <: UInt](
-  gen: T, 
-  numEntries: Int, 
-  numRead: Int, 
-  numWrite: Int, 
-  numWBank: Int, 
-  numWDelay: Int = 1, 
-  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort) 
+  gen: T,
+  numEntries: Int,
+  numRead: Int,
+  numWrite: Int,
+  numWBank: Int,
+  numWDelay: Int = 1,
+  numCamPort: Int = 1)(implicit p: Parameters) extends LqRawDataModule(gen, numEntries, numRead, numWrite, numWBank, numWDelay, numCamPort)
   with HasDCacheParameters
 {
   // content addressed match

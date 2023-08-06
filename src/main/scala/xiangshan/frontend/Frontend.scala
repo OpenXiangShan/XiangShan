@@ -44,7 +44,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val hartId = Input(UInt(8.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
-    val ptw = new VectorTlbPtwIO(coreParams.itlbPortNum)
+    val ptw = new TlbPtwIO()
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -69,6 +69,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
 
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
+  val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
+  val FlushMemVioRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
+  val FlushControlBTBMiss = Wire(Bool())
+  val FlushTAGEMiss = Wire(Bool())
+  val FlushSCMiss = Wire(Bool())
+  val FlushITTAGEMiss = Wire(Bool())
+  val FlushRASMiss = Wire(Bool())
 
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -102,10 +109,14 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     Seq(true, true) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
-  itlb.io.base_connect(io.sfence, tlbCsr)
-  io.ptw.connect(itlb.io.ptw)
+  itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.ptw_replenish <> DontCare
   itlb.io.flushPipe.map(_ := needFlush)
+
+  val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
+  itlb_ptw.connect(itlb.io.ptw)
+  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
+  io.ptw <> itlbRepeater1.io.ptw
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
@@ -126,6 +137,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ifu.io.icacheInter.resp <>    icache.io.fetch.resp
   ifu.io.icacheInter.icacheReady :=  icache.io.toIFU
+  ifu.io.icacheInter.topdownIcacheMiss := icache.io.fetch.topdownIcacheMiss
+  ifu.io.icacheInter.topdownItlbMiss := icache.io.fetch.topdownItlbMiss
   icache.io.stop := ifu.io.icacheStop
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
@@ -148,7 +161,23 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
   ibuffer.io.flush := needFlush
+  ibuffer.io.ControlRedirect := FlushControlRedirect
+  ibuffer.io.MemVioRedirect := FlushMemVioRedirect
+  ibuffer.io.ControlBTBMissBubble := FlushControlBTBMiss
+  ibuffer.io.TAGEMissBubble := FlushTAGEMiss
+  ibuffer.io.SCMissBubble := FlushSCMiss
+  ibuffer.io.ITTAGEMissBubble := FlushITTAGEMiss
+  ibuffer.io.RASMissBubble := FlushRASMiss
+
+  FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
+  FlushTAGEMiss := ftq.io.TAGEMissBubble
+  FlushSCMiss := ftq.io.SCMissBubble
+  FlushITTAGEMiss := ftq.io.ITTAGEMissBubble
+  FlushRASMiss := ftq.io.RASMissBubble
+
   io.backend.cfVec <> ibuffer.io.out
+  io.backend.stallReason <> ibuffer.io.stallReason
+  dontTouch(io.backend.stallReason)
 
   instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp

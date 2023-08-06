@@ -41,6 +41,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
@@ -143,6 +144,8 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   MaxUopSize: Int = 65,
+  EnableRenameSnapshot: Boolean = true,
+  RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
@@ -154,7 +157,7 @@ case class XSCoreParameters
   LoadQueueRARSize: Int = 80,
   LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
-  LoadQueueReplaySize: Int = 80,
+  LoadQueueReplaySize: Int = 72,
   LoadUncacheBufferSize: Int = 20,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
@@ -192,15 +195,25 @@ case class XSCoreParameters
   EnsbufferWidth: Int = 2,
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
-  EnableFastForward: Boolean = false,
+  EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
+  iwpuParameters: WPUParameters = WPUParameters(
+    enWPU = false,
+    algoName = "mmru",
+    isICache = true,
+  ),
+  dwpuParameters: WPUParameters = WPUParameters(
+    enWPU = false,
+    algoName = "mmru",
+    enCfPred = false,
+    isICache = false,
+  ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -438,7 +451,8 @@ case class DebugOptions
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
-  EnableTopDown: Boolean = false
+  EnableChiselDB: Boolean = false,
+  AlwaysBasicDB: Boolean = true,
 )
 
 trait HasXSParameter {
@@ -469,6 +483,7 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val VDataBytes = VLEN / 8
   val HasFPU = coreParams.HasFPU
   val HasVPU = coreParams.HasVPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
@@ -539,6 +554,8 @@ trait HasXSParameter {
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
   val MaxUopSize = coreParams.MaxUopSize
+  val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
+  val RenameSnapshotNum = coreParams.RenameSnapshotNum
   val FtqSize = coreParams.FtqSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   val IntLogicRegs = coreParams.IntLogicRegs
@@ -581,12 +598,13 @@ trait HasXSParameter {
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val EnableDCacheWPU = coreParams.EnableDCacheWPU
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
+  val iwpuParam = coreParams.iwpuParameters
+  val dwpuParam = coreParams.dwpuParameters
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
@@ -633,7 +651,4 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
-
-  // source stages of cancel signal to issue queues
-  val cancelStages = Seq("IS", "OG0", "OG1")
 }

@@ -245,8 +245,7 @@ class WithNKBL2
   n: Int,
   ways: Int = 8,
   inclusive: Boolean = true,
-  banks: Int = 1,
-  alwaysReleaseData: Boolean = false
+  banks: Int = 1
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     val upParams = up(XSTileKey)
@@ -262,6 +261,7 @@ class WithNKBL2
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
+        reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
       )),
@@ -293,6 +293,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           address = 0x39000000,
           numCores = tiles.size
         )),
+        reqField = Seq(utility.ReqSourceField()),
         sramClkDivBy2 = true,
         sramDepthDiv = 4,
         tagECC = Some("secded"),
@@ -316,21 +317,21 @@ class DefaultL3DebugConfig(n: Int = 1) extends Config(
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = false, alwaysReleaseData = true) ++
+    new WithNKBL2(256, inclusive = false) ++
     new WithNKBL1D(128) ++
     new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL2(512, inclusive = false)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
