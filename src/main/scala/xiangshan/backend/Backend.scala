@@ -7,7 +7,6 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
-import xiangshan.backend.ctrlblock.CtrlBlock
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
