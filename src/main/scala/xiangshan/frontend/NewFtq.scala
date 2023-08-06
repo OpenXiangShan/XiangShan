@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.decode.ImmUnion
 import utility.ChiselDB
-import xiangshan.backend.ctrlblock.CtrlToFtqIO
+import xiangshan.backend.CtrlToFtqIO
 
 class FtqDebugBundle extends Bundle {
   val pc = UInt(39.W)
