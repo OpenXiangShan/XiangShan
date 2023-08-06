@@ -3,7 +3,7 @@ package xiangshan
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.log2Ceil
-import xiangshan.backend.rob.{DebugLsInfo, DebugMdpInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
 import xiangshan.cache.DCacheBundle
 import xiangshan.backend.fu.FuType
 
