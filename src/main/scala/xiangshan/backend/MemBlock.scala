@@ -28,7 +28,8 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO}
+import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.ctrlblock._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem._

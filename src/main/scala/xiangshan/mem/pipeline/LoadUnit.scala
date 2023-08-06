@@ -23,8 +23,9 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.{DebugLsInfoBundle, LsTopdownInfo, RobPtr}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}

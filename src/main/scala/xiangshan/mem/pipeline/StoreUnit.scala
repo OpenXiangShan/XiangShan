@@ -23,8 +23,8 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class StoreUnit(implicit p: Parameters) extends XSModule {

@@ -23,7 +23,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utils.XSError
 import xiangshan._
-import xiangshan.backend.SnapshotGenerator
+import xiangshan.backend.ctrlblock.SnapshotGenerator
 
 class RatReadPort(implicit p: Parameters) extends XSBundle {
   val hold = Input(Bool())
