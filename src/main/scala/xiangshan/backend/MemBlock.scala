@@ -19,22 +19,21 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import coupledL2.PrefetchRecv
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import coupledL2.PrefetchRecv
-import utils._
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
+import xiangshan.backend.ctrlblock.DebugLSIO
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, RobLsqIO}
+import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TLBNonBlock, TlbReplace, VectorTlbPtwIO}
 import xiangshan.mem._
-import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher}
-import Bundles.{DynInst, MemExuInput, MemExuOutput}
 
 class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready

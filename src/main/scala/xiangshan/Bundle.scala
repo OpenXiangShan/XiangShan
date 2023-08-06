@@ -22,7 +22,6 @@ import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utility._
 import utils._
-import xiangshan.backend.ctrlblock.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
@@ -45,6 +44,7 @@ import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
+import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
