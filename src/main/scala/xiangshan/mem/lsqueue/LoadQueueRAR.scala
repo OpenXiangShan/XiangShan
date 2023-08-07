@@ -116,7 +116,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val offset = PopCount(needEnqueue.take(w))
     val canAccept = freeList.io.canAllocate(offset)
     val enqIndex = freeList.io.allocateSlot(offset)
-    enq.ready := Mux(needEnqueue(w), canAccept(w), true.B)
+    enq.ready := Mux(needEnqueue(w), canAccept, true.B)
 
     enqIndexVec(w) := enqIndex
     when (needEnqueue(w) && enq.ready) {
