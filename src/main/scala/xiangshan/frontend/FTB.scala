@@ -355,10 +355,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     read_way.valid := hit
     read_way.bits  := hit_way
 
-    touch_set(0) := Mux(write_way.valid, write_set, read_set)
+    touch_set(0) := Mux(write_way.valid, write_set, RegNext(read_set))
 
-    touch_way(0).valid := write_way.valid || read_way.valid
-    touch_way(0).bits := Mux(write_way.valid, write_way.bits, read_way.bits)
+    touch_way(0).valid := write_way.valid || RegNext(read_way.valid)
+    touch_way(0).bits := Mux(write_way.valid, write_way.bits, RegNext(read_way.bits))
 
     replacer.access(touch_set, touch_way)
 
