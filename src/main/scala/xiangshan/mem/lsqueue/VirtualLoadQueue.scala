@@ -88,6 +88,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.redirect))
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
+  val redirectCancelCount = RegEnable(next = lastCycleCancelCount + lastEnqCancel, init = 0.U, enable = lastCycleRedirect.valid)
 
   // update enqueue pointer
   val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
@@ -129,7 +130,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   io.lqDeq := RegNext(lastCommitCount)
   io.lqCancelCnt := redirectCancelCount
-  io.ldWbPtr := deqPtr 
+  io.ldWbPtr := deqPtr
 
   /**
    * Enqueue at dispatch
