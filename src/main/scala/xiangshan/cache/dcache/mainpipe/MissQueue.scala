@@ -630,6 +630,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   val refill = io.refill_pipe_req.bits
   refill.source := req.source
+  refill.vaddr := req.vaddr
   refill.addr := req.addr
   refill.way_en := req.way_en
   refill.wmask := Mux(

@@ -23,13 +23,11 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.TLBuffer
 import system.HasSoCParameter
 import utils._
 import utility._
 import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
-import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
 
@@ -138,13 +136,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
-  val ptw = LazyModule(new L2TLBWrapper())
-  val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
-
-  if (!coreParams.softPTW) {
-    ptw_to_l2_buffer.node := ptw.node
-  }
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
@@ -257,8 +249,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val ctrlBlock = outer.ctrlBlock.module
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   frontend.io.hartId  := io.hartId
@@ -372,11 +362,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  if (!coreParams.softPTW) {
-    memBlock.io.perfEventsPTW := ptw.getPerf
-  } else {
-    memBlock.io.perfEventsPTW := DontCare
-  }
   ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId
@@ -416,6 +401,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   fenceio.sfence <> memBlock.io.sfence
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
+  memBlock.io.itlb <> frontend.io.ptw
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
@@ -427,29 +413,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
-  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
-  val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.dfilterSize)
-  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)
-  ptw.io.sfence <> fenceio.sfence
-  ptw.io.csr.tlb <> csrioIn.tlb
-  ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
-
-  ExcitingUtils.addSource(dtlbRepeater1.io.rob_head_miss_in_tlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf, true)
-
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(
     Seq(
-      ModuleNode(memBlock), ModuleNode(dtlbRepeater1),
-      ResetGenNode(Seq(
-        ModuleNode(itlbRepeater2),
-        ModuleNode(ptw),
-        ModuleNode(dtlbRepeater2),
-        ModuleNode(ptw_to_l2_buffer),
-      )),
+      ModuleNode(memBlock),
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
         ResetGenNode(
@@ -458,7 +428,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
         ResetGenNode(Seq(
           ModuleNode(ctrlBlock),
           ResetGenNode(Seq(
-            ModuleNode(frontend), ModuleNode(itlbRepeater1)
+            ModuleNode(frontend)
           ))
         ))
       ))

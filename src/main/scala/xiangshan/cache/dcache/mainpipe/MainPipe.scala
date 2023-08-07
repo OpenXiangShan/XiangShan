@@ -268,6 +268,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_valid_dup = RegInit(VecInit(Seq.fill(6)(false.B)))
   val s1_req_vaddr_dup_for_data_read = RegEnable(s0_req.vaddr, s0_fire)
   val s1_idx_dup_for_replace_way = RegEnable(get_idx(s0_req.vaddr), s0_fire)
+  val s1_dmWay_dup_for_replace_way = RegEnable(get_direct_map_way(s0_req.vaddr), s0_fire)
 
   val s1_valid_dup_for_status = RegInit(VecInit(Seq.fill(nDupStatus)(false.B)))
 
@@ -1529,6 +1530,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_write.bits.idx := s3_idx_dup(4)
   io.tag_write.bits.way_en := s3_way_en_dup(2)
   io.tag_write.bits.tag := get_tag(s3_req_addr_dup(4))
+  io.tag_write.bits.vaddr := s3_req_vaddr_dup_for_data_write
 
   io.tag_write_intend := s3_req_miss_dup(7) && s3_valid_dup(11)
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
@@ -1617,6 +1619,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx_dup_for_replace_way
+  io.replace_way.dmWay := s1_dmWay_dup_for_replace_way
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid

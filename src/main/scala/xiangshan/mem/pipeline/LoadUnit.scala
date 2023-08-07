@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.{DebugLsInfoBundle, LsTopdownInfo, RobPtr}
 import xiangshan.cache._
-import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.mem.mdp._
 
@@ -40,7 +40,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle with HasDCacheP
   // wait for address from store queue index
   val addr_inv_sq_idx = new SqPtr
   // replay carry
-  val rep_carry       = new ReplayCarry
+  val rep_carry       = new ReplayCarry(nWays)
   // data in last beat
   val last_beat       = Bool()
   // replay cause
@@ -173,7 +173,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_sqIdx         = Wire(new SqPtr)
   val s0_mshrid        = Wire(UInt())
   val s0_try_l2l       = Wire(Bool())
-  val s0_rep_carry     = Wire(new ReplayCarry)
+  val s0_rep_carry     = Wire(new ReplayCarry(nWays))
   val s0_isFirstIssue  = Wire(Bool())
   val s0_fast_rep      = Wire(Bool())
   val s0_ld_rep        = Wire(Bool())
@@ -922,10 +922,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
-  if (env.FPGAPlatform)
+  if (env.FPGAPlatform){
+    io.dcache.s0_pc := DontCare
+    io.dcache.s1_pc := DontCare
     io.dcache.s2_pc := DontCare
-  else
+  }else{
+    io.dcache.s0_pc := s0_out.uop.cf.pc
+    io.dcache.s1_pc := s1_out.uop.cf.pc
     io.dcache.s2_pc := s2_out.uop.cf.pc
+  }
   io.dcache.s2_kill := s2_pmp.ld || s2_pmp.mmio || s2_kill
 
   val s1_ld_left_fire = s1_valid && !s1_kill && !s1_fast_rep_kill && s2_ready
