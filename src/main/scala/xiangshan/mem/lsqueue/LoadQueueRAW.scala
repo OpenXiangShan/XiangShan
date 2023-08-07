@@ -97,6 +97,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     size = LoadQueueRAWSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
+    enablePreAlloc = true,
     moduleName = "LoadQueueRAW freelist"
   ))
   freeList.io := DontCare
@@ -113,24 +114,28 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
   // Allocate logic
-  val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
+  val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
 
   // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
+    acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
     maskModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    freeList.io.allocateReq(w) := needEnqueue(w)
+    freeList.io.allocateReq(w) := true.B
 
     //  Allocate ready
-    enqValidVec(w) := freeList.io.canAllocate(w)
-    enqIndexVec(w) := freeList.io.allocateSlot(w)
-    enq.ready := Mux(needEnqueue(w), enqValidVec(w), true.B)
+    val offset = PopCount(needEnqueue.take(w))
+    val canAccept = freeList.io.canAllocate(offset)
+    val enqIndex = freeList.io.allocateSlot(offset)
+    enq.ready := Mux(needEnqueue(w), canAccept(w), true.B)
 
-    val enqIndex = enqIndexVec(w)
+    enqIndexVec(w) := enqIndex
     when (needEnqueue(w) && enq.ready) {
+      acceptedVec(w) := true.B
+
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
@@ -181,7 +186,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   // if need replay deallocate entry
-  val lastCanAccept = RegNext(VecInit(needEnqueue.zip(enqValidVec).map(x => x._1 && x._2)))
+  val lastCanAccept = RegNext(acceptedVec)
   val lastAllocIndex = RegNext(enqIndexVec)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
@@ -285,11 +290,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
-      (Seq(RegNext(selValid(0) && !selBits(0).uop.robIdx.needFlush(io.redirect))), Seq(RegNext(selBits(0))))
+      val selValidNext = RegNext(selValid(0))
+      val selBitsNext = RegNext(selBits(0))
+      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
-        (RegNext(selValid(0) && !selBits(0).uop.robIdx.needFlush(io.redirect)), RegNext(selBits(0)))
+        val selValidNext = RegNext(selValid(0))
+        val selBitsNext = RegNext(selBits(0))
+        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
       })
       selectOldest(select.map(_._1), select.map(_._2))
     }

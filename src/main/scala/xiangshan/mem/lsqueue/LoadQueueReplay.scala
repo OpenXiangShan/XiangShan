@@ -216,6 +216,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     size = LoadQueueReplaySize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
+    enablePreAlloc = true,
     moduleName = "LoadQueueReplay freelist"
   ))
   freeList.io := DontCare
@@ -582,7 +583,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    freeList.io.allocateReq(w) := newEnqueue(w)
+    freeList.io.allocateReq(w) := true.B
 
     //  Allocated ready
     enqValidVec(w) := freeList.io.canAllocate(w)
