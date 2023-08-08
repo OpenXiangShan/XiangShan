@@ -183,6 +183,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits := DontCare
   // only send out a prefetch write to Dcache
   io.miss_req.bits.source := DCACHE_PREFETCH_SOURCE.U
+  io.miss_req.bits.pf_source := L1_HW_PREFETCH_STORE
   io.miss_req.bits.cmd := MemoryOpConstants.M_PFW
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_req.vaddr

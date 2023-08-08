@@ -249,6 +249,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2Hint = Input(Valid(new L2ToL1Hint()))
+    val l2PfqBusy = Input(Bool())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -435,6 +436,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2Hint.valid := io.l2Hint.valid
   memBlock.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
+  memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)

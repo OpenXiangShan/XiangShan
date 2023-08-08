@@ -96,7 +96,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
-  val meta_prefetch = Bool()
+  val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {

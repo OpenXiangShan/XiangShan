@@ -115,6 +115,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val replacementUpdated = Output(Bool())
     val canAcceptLowConfPrefetch = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
+    val pf_source = Output(UInt(L1PfSourceBits.W))
   })
   require(LoadPipelineWidth == exuParameters.LduCnt)
 
@@ -403,6 +404,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // dcache replacement extra info
   // TODO: should prefetch load update replacement?
   io.replacementUpdated := Mux(lfsrc_loadReplay_select, io.replay.bits.replacementUpdated, false.B)
+  io.pf_source := Mux(lfsrc_hwprefetch_select, io.prefetch_in.bits.pf_source.value, L1_HW_PREFETCH_NULL)
 
   XSDebug(io.dcacheReq.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
@@ -939,6 +941,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val l2Hint = Input(Valid(new L2ToL1Hint))
     val canAcceptLowConfPrefetch = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
+    val CorrectMissTrain = Input(Bool())
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -956,6 +959,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // hareware prefetch to l1
   load_s0.io.prefetch_in <> io.prefetch_req
   io.dcache.replacementUpdated := load_s0.io.replacementUpdated
+  io.dcache.pf_source := load_s0.io.pf_source
   load_s0.io.fastReplay <> io.fastReplayIn
   load_s0.io.canAcceptLowConfPrefetch <> io.canAcceptLowConfPrefetch
   load_s0.io.canAcceptHighConfPrefetch <> io.canAcceptHighConfPrefetch
@@ -1060,12 +1064,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.s2IsPointerChasing := RegEnable(s1_tryPointerChasing && !cancelPointerChasing, load_s1.io.out.fire)
   io.prefetch_train.bits.fromLsPipelineBundle(load_s2.io.in.bits)
   // override miss bit
-  io.prefetch_train.bits.miss := io.dcache.resp.bits.real_miss
+  when(io.CorrectMissTrain) {
+    io.prefetch_train.bits.miss := io.dcache.resp.bits.real_miss
+  }.otherwise {
+    io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  }
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access := io.dcache.resp.bits.meta_access
   io.prefetch_train.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio && !load_s2.io.in.bits.tlbMiss
 
   io.prefetch_train_l1.bits.fromLsPipelineBundle(load_s2.io.in.bits)
+  io.prefetch_train_l1.bits.miss := io.dcache.resp.bits.real_miss
+  io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
+  io.prefetch_train_l1.bits.meta_access := io.dcache.resp.bits.meta_access
   io.prefetch_train_l1.valid := load_s2.io.in.fire && !load_s2.io.out.bits.mmio
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   if (env.FPGAPlatform)

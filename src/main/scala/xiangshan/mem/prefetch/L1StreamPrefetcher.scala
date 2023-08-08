@@ -10,6 +10,7 @@ import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
 import xiangshan.mem.trace._
+import xiangshan.mem.L1PrefetchSource
 
 trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
@@ -81,6 +82,13 @@ trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePa
     val mid = x(2 * width - 1, width)
     val high = x(3 * width - 1, 2 * width)
     low ^ mid ^ high
+  }
+
+  def pc_hash_tag(x: UInt): UInt = {
+    val low = x(BLK_ADDR_RAW_WIDTH - 1, 0)
+    val high = x(BLK_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, BLK_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
   }
 
   def block_hash_tag(x: UInt): UInt = {
@@ -277,19 +285,21 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val sink = UInt(SINK_BITS.W)
+  val source = new L1PrefetchSource()
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
     res.region := get_region_tag(vaddr)
     res.sink := sink
+    res.source.value := source
     
     val region_bits = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
     res.bit_vec := Mux(
       decr_mode,
-      (1 until width).map{ case i => region_bit_vec >> i}.reduce(_ | _) | region_bit_vec,
-      (1 until width).map{ case i => region_bit_vec << i}.reduce(_ | _) | region_bit_vec
+      (0 until width).map{ case i => region_bit_vec >> i}.reduce(_ | _),
+      (0 until width).map{ case i => region_bit_vec << i}.reduce(_ | _)
     )
 
     assert(PopCount(res.bit_vec) <= width.U, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
@@ -323,6 +333,10 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val dynamic_depth = Input(UInt(DEPTH_BITS.W))
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
     val prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+
+    // Stride send lookup req here
+    val stream_lookup_req  = Flipped(ValidIO(new PrefetchReqBundle))
+    val stream_lookup_resp = Output(Bool())
   })
 
   val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
@@ -439,12 +453,14 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     vaddr = s2_l1_vaddr,
     width = WIDTH_CACHE_BLOCKS,
     decr_mode = s2_decr_mode,
-    sink = SINK_L1)
+    sink = SINK_L1,
+    source = L1_HW_PREFETCH_STREAM)
   val s2_pf_l2_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     vaddr = s2_l2_vaddr,
     width = L2_WIDTH_CACHE_BLOCKS,
     decr_mode = s2_decr_mode,
-    sink = SINK_L2)
+    sink = SINK_L2,
+    source = L1_HW_PREFETCH_STREAM)
   
   XSPerfAccumulate("s2_valid", s2_valid)
   XSPerfAccumulate("s2_will_not_send_pf", s2_valid && !s2_will_send_pf)
@@ -470,6 +486,28 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s4_pf_blocked", s3_pf_l1_valid && s4_pf_l2_valid)
   XSPerfAccumulate("pf_sent", io.prefetch_req.valid)
 
+  // Stride lookup starts here
+  // S0: Stride send req
+  val s0_lookup_valid = io.stream_lookup_req.valid
+  val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
+  val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
+  // S1: match
+  val s1_lookup_valid = RegNext(s0_lookup_valid)
+  val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
+  val s1_lookup_tag_match_vec = array.map(_.tag_match(s1_lookup_tag))
+  val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
+  val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
+  // S2: read active out
+  val s2_lookup_valid = RegNext(s1_lookup_valid)
+  val s2_lookup_hit = RegEnable(s1_lookup_hit, s1_lookup_valid)
+  val s2_lookup_index = RegEnable(s1_lookup_index, s1_lookup_valid)
+  val s2_lookup_active = array(s2_lookup_index).active
+  // S3: send back to Stride
+  val s3_lookup_valid = RegNext(s2_lookup_valid)
+  val s3_lookup_hit = RegEnable(s2_lookup_hit, s2_lookup_valid)
+  val s3_lookup_active = RegEnable(s2_lookup_active, s2_lookup_valid)
+  io.stream_lookup_resp := s3_lookup_valid && s3_lookup_hit && s3_lookup_active
+
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
     when(reset.asBool || RegNext(io.flush)) {
@@ -491,6 +529,7 @@ class StreamFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
   val sink = UInt(SINK_BITS.W)
   val alias = UInt(2.W)
   val is_vaddr = Bool()
+  val source = new L1PrefetchSource()
 
   def reset(index: Int) = {
     tag := region_hash_tag(index.U)
@@ -500,6 +539,7 @@ class StreamFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
     sink := SINK_L1
     alias := 0.U
     is_vaddr := false.B
+    source.value := L1_HW_PREFETCH_NULL
   }
 
   def tag_match(new_tag: UInt): Bool = {
@@ -552,6 +592,7 @@ class StreamFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
     res.sent_vec := 0.U
     res.sink := x.sink
     res.is_vaddr := true.B
+    res.source := x.source
     res.alias := x.region(PAGE_OFFSET - REGION_TAG_OFFSET + 1, PAGE_OFFSET - REGION_TAG_OFFSET)
 
     res
@@ -573,8 +614,8 @@ class StreamFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
 // 1. prefetch enqueue
 // 2. tlb request
 // 3. actual l1 prefetch
-// 4. actual l2 prefetch (TODO)
-class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+// 4. actual l2 prefetch
+class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     val flush = Input(Bool())
@@ -583,6 +624,7 @@ class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefet
     val l1_req = DecoupledIO(new L1PrefetchReq())
     val pf_addr = ValidIO(UInt(PAddrBits.W))
     val confidence = Input(UInt(1.W))
+    val l2PfqBusy = Input(Bool())
   })
 
   val array = Reg(Vec(STREAM_FILTER_SIZE, new StreamFilterBundle))
@@ -713,6 +755,7 @@ class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefet
     l1_pf_req_arb.io.in(i).bits.alias := array(i).alias
     l1_pf_req_arb.io.in(i).bits.confidence := io.confidence
     l1_pf_req_arb.io.in(i).bits.is_store := false.B
+    l1_pf_req_arb.io.in(i).bits.pf_source := array(i).source
   }
 
   when(s0_pf_fire) {
@@ -781,46 +824,69 @@ class StreamFilter(implicit p: Parameters) extends XSModule with HasStreamPrefet
     }
   }
 
+  XSPerfAccumulate("l2_prefetche_queue_busby", io.l2PfqBusy)
   XSPerfHistogram("filter_active", PopCount(VecInit(array.map(_.can_send_pf())).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
   XSPerfHistogram("l1_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L1))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
   XSPerfHistogram("l2_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L2))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
 }
 
-class L1StreamPrefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper {
+class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
+  val stride_train = IO(Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle()))))
+  val l2PfqBusy = IO(Input(Bool()))
 
-  val train_filter = Module(new StreamTrainFilter)
-  val bit_vec_array = Module(new StreamBitVectorArray)
-  val stream_filter = Module(new StreamFilter)
+  val stride_train_filter = Module(new StrideTrainFilter)
+  val stride_meta_array = Module(new StrideMetaArray)
+  val stream_train_filter = Module(new StreamTrainFilter)
+  val stream_bit_vec_array = Module(new StreamBitVectorArray)
+  val pf_queue_filter = Module(new L1L2prefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
   val enable = io.enable
   val flush = pf_ctrl.flush
 
-  train_filter.io.ld_in.zipWithIndex.foreach {
+  stream_train_filter.io.ld_in.zipWithIndex.foreach {
     case (ld_in, i) => {
       ld_in.valid := io.ld_in(i).valid && enable
       ld_in.bits := io.ld_in(i).bits
     }
   }
-  train_filter.io.enable := enable
-  train_filter.io.flush := flush
+  stream_train_filter.io.enable := enable
+  stream_train_filter.io.flush := flush
 
-  bit_vec_array.io.enable := enable
-  bit_vec_array.io.flush := flush
-  bit_vec_array.io.dynamic_depth := pf_ctrl.dynamic_depth
-  bit_vec_array.io.train_req <> train_filter.io.train_req
+  stride_train_filter.io.ld_in.zipWithIndex.foreach {
+    case (ld_in, i) => {
+      ld_in.valid := stride_train(i).valid && enable
+      ld_in.bits := stride_train(i).bits
+    }
+  }
+  stride_train_filter.io.enable := enable
+  stride_train_filter.io.flush := flush
 
-  bit_vec_array.io.prefetch_req <> stream_filter.io.prefetch_req
-  // io.l1_req <> stream_filter.io.l1_req
-  io.l1_req.valid := stream_filter.io.l1_req.valid && enable && pf_ctrl.enable
-  io.l1_req.bits := stream_filter.io.l1_req.bits
-  stream_filter.io.l1_req.ready := Mux(pf_ctrl.enable, io.l1_req.ready, true.B)
-  io.tlb_req <> stream_filter.io.tlb_req
-  stream_filter.io.enable := enable
-  stream_filter.io.flush := flush
-  stream_filter.io.confidence := pf_ctrl.confidence
+  stream_bit_vec_array.io.enable := enable
+  stream_bit_vec_array.io.flush := flush
+  stream_bit_vec_array.io.dynamic_depth := pf_ctrl.dynamic_depth
+  stream_bit_vec_array.io.train_req <> stream_train_filter.io.train_req
 
-  io.pf_addr.valid := stream_filter.io.pf_addr.valid && stream_filter.io.pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
-  io.pf_addr.bits := stream_filter.io.pf_addr.bits
+  stride_meta_array.io.enable := enable
+  stride_meta_array.io.flush := flush
+  stride_meta_array.io.dynamic_depth := 0.U
+  stride_meta_array.io.train_req <> stride_train_filter.io.train_req
+  stride_meta_array.io.stream_lookup_req <> stream_bit_vec_array.io.stream_lookup_req
+  stride_meta_array.io.stream_lookup_resp <> stream_bit_vec_array.io.stream_lookup_resp
+
+  pf_queue_filter.io.prefetch_req.valid := stream_bit_vec_array.io.prefetch_req.valid || stride_meta_array.io.prefetch_req.valid
+  pf_queue_filter.io.prefetch_req.bits := Mux(stream_bit_vec_array.io.prefetch_req.valid, stream_bit_vec_array.io.prefetch_req.bits, stride_meta_array.io.prefetch_req.bits)
+  // io.l1_req <> pf_queue_filter.io.l1_req
+  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && enable && pf_ctrl.enable
+  io.l1_req.bits := pf_queue_filter.io.l1_req.bits
+  pf_queue_filter.io.l1_req.ready := Mux(pf_ctrl.enable, io.l1_req.ready, true.B)
+  io.tlb_req <> pf_queue_filter.io.tlb_req
+  pf_queue_filter.io.enable := enable
+  pf_queue_filter.io.flush := flush
+  pf_queue_filter.io.confidence := pf_ctrl.confidence
+  pf_queue_filter.io.l2PfqBusy := l2PfqBusy
+
+  io.pf_addr.valid := pf_queue_filter.io.pf_addr.valid && pf_queue_filter.io.pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
+  io.pf_addr.bits := pf_queue_filter.io.pf_addr.bits
 }

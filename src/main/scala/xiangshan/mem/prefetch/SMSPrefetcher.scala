@@ -10,6 +10,7 @@ import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.mem.trace._
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 case class SMSParams
 (
@@ -1047,7 +1048,7 @@ class PrefetchTrainFilter()(implicit p: Parameters) extends XSModule with HasSMS
   }
 }
 
-class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper {
+class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper with HasL1PrefetchSourceParameter {
 
   require(exuParameters.LduCnt == 2)
 
@@ -1188,15 +1189,17 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
   io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+  // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
   io.l1_req.bits.is_store := true.B
   io.l1_req.bits.confidence := 1.U
+  io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_NULL
   io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
-    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && train.bits.meta_prefetch)
+    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.meta_prefetch))
   }
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U

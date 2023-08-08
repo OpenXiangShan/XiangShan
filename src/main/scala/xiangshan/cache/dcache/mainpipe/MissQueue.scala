@@ -33,6 +33,7 @@ import mem.trace._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
+  val pf_source = UInt(L1PfSourceBits.W)
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
@@ -97,6 +98,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   def toMissReqWoStoreData(): MissReqWoStoreData = {
     val out = Wire(new MissReqWoStoreData)
     out.source := source
+    out.pf_source := pf_source
     out.cmd := cmd
     out.addr := addr
     out.vaddr := vaddr
@@ -692,7 +694,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
   refill.error := error
-  refill.prefetch := prefetch
+  refill.prefetch := req.pf_source
   refill.access := access
   refill.alias := req.vaddr(13, 12) // TODO
   assert(!io.refill_pipe_req.valid || (refill.meta.coh =/= ClientMetadata(Nothing)), "refill modifies meta to Nothing, should not happen")
@@ -895,7 +897,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
-  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 14.U))
+  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 15.U))
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)

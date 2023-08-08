@@ -30,7 +30,7 @@ class RefillPipeReqCtrl(implicit p: Parameters) extends DCacheBundle {
 
   val id = UInt(reqIdWidth.W)
   val error = Bool()
-  val prefetch = Bool()
+  val prefetch = UInt(L1PfSourceBits.W)
   val access = Bool()
 
   def paddrWithVirtualAlias: UInt = {
@@ -73,7 +73,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
     val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
     val meta_write = DecoupledIO(new CohMetaWriteReq)
     val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
-    val prefetch_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
     val store_resp = ValidIO(new DCacheLineResp)
@@ -124,7 +124,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.prefetch_flag_write.valid := io.req_dup_for_err_w.valid
   io.prefetch_flag_write.bits.idx := req_dup_for_err_w.idx
   io.prefetch_flag_write.bits.way_en := req_dup_for_err_w.way_en
-  io.prefetch_flag_write.bits.flag := refill_w_req.prefetch
+  io.prefetch_flag_write.bits.source := refill_w_req.prefetch
 
   io.access_flag_write.valid := io.req_dup_for_err_w.valid
   io.access_flag_write.bits.idx := req_dup_for_err_w.idx

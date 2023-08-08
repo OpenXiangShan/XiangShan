@@ -32,7 +32,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu.{VectorTlbPtwIO, TLBNonBlock, TlbReplace}
 import xiangshan.mem._
 import xiangshan.mem.mdp._
-import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher, L1StreamPrefetcher}
+import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher, L1Prefetcher}
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -65,6 +65,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasFPUParameters
   with HasWritebackSourceImp
   with HasPerfEvents
+  with HasL1PrefetchSourceParameter
 {
 
   val io = IO(new Bundle {
@@ -120,6 +121,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val debug_ls = new DebugLSIO
     val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
     val l2Hint = Input(Valid(new L2ToL1Hint()))
+    val l2PfqBusy = Input(Bool())
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -155,16 +157,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms.io_pht_en := RegNextN(io.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := RegNextN(io.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
       sms.io_act_stride := RegNextN(io.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
-      sms.io_stride_en := RegNextN(io.csrCtrl.l1D_pf_enable_stride, 2, Some(true.B))
+      sms.io_stride_en := false.B
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
   val l1PrefetcherOpt: Option[BasePrefecher] = {
-    val stream = Module(new L1StreamPrefetcher())
-    stream.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
-    stream.pf_ctrl <> dcache.io.pf_ctrl
+    val l1Prefetcher = Module(new L1Prefetcher())
+    l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+    l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
+    l1Prefetcher.l2PfqBusy := io.l2PfqBusy
+    // stride will train on miss or prefetch hit
+    for (i <- 0 until exuParameters.LduCnt) {
+      l1Prefetcher.stride_train(i).valid := loadUnits(i).io.prefetch_train_l1.valid && loadUnits(i).io.prefetch_train_l1.bits.isFirstIssue && (
+        loadUnits(i).io.prefetch_train_l1.bits.miss || isFromStride(loadUnits(i).io.prefetch_train_l1.bits.meta_prefetch)
+      )
+      l1Prefetcher.stride_train(i).bits := loadUnits(i).io.prefetch_train_l1.bits
+    }
 
-    Some(stream)
+    Some(l1Prefetcher)
   }
   // load prefetch to l1 Dcache
   l1PrefetcherOpt match {
@@ -425,6 +435,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }}
   val balanceFastReplaySel = balanceReOrder(fastReplaySel)
 
+  val CorrectMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
+  
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.isFirstIssue := true.B
@@ -434,6 +446,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.feedbackSlow <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedbackFast <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx := io.rsfeedback(i).rsIdx
+    loadUnits(i).io.CorrectMissTrain := CorrectMissTrain
    
     // fast replay
     loadUnits(i).io.fastReplayIn.valid := balanceFastReplaySel(i).valid 
@@ -605,7 +618,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       pf.io.st_in(i).valid := Mux(pf_train_on_hit,
         stu.io.prefetch_train.valid,
         stu.io.prefetch_train.valid && stu.io.prefetch_train.bits.isFirstIssue && (
-          stu.io.prefetch_train.bits.miss || stu.io.prefetch_train.bits.meta_prefetch
+          stu.io.prefetch_train.bits.miss
           )
       )
       pf.io.st_in(i).bits := stu.io.prefetch_train.bits

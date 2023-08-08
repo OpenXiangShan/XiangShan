@@ -33,6 +33,7 @@ import utility.FastArbiter
 import mem.{AddPipelineReg}
 import xiangshan.cache.dcache.ReplayCarry
 import xiangshan.mem.prefetch.{PrefetchControlBundle, PrefetcherMonitor}
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 import scala.math.max
 
@@ -90,7 +91,7 @@ case class DCacheParameters
 
 // Default DCache size = 64 sets * 8 ways * 8 banks * 8 Byte = 32K Byte
 
-trait HasDCacheParameters extends HasL1CacheParameters {
+trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceParameter{
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
@@ -113,6 +114,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // prefetch source >= 3
   def DCACHE_PREFETCH_SOURCE = 3
   def SOFT_PREFETCH = 4
+  // the following sources are only used inside SMS
   def HW_PREFETCH_AGT = 5
   def HW_PREFETCH_PHT_CUR = 6
   def HW_PREFETCH_PHT_INC = 7
@@ -329,7 +331,7 @@ class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
 class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
 {
   val error = Bool() // cache line has been marked as corrupted by l2 / ecc error detected when store
-  val prefetch = Bool() // cache line is first required by prefetch
+  val prefetch = UInt(L1PfSourceBits.W) // cache line is first required by prefetch
   val access = Bool() // cache line has been accessed by load / store
 
   // val debug_access_timestamp = UInt(64.W) // last time a load / store / refill access that cacheline
@@ -421,7 +423,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 
 class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
-  val meta_prefetch = Bool()
+  val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
   // s2
   val handled = Bool()
@@ -557,6 +559,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_pc = Output(UInt(VAddrBits.W))
   // cycle 0: load has updated replacement before
   val replacementUpdated = Output(Bool())
+  // cycle 0: prefetch source bits
+  val pf_source = Output(UInt(L1PfSourceBits.W))
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
@@ -750,7 +754,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents with HasL1PrefetchSourceParameter {
 
   val io = IO(new DCacheIO)
   
@@ -785,7 +789,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val bankedDataArray = if(EnableDCacheWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = MetaReadPort, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
-  val prefetchArray = Module(new L1FlagMetaArray(readPorts = PrefetchArrayReadPort, writePorts = 2)) // prefetch flag array
+  val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 2)) // prefetch flag array
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 2))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
@@ -869,8 +873,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && extra_flag_prefetch && extra_flag_access
-    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && extra_flag_prefetch && !extra_flag_access
+    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && extra_flag_access
+    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && !extra_flag_access
   }
 
   // write extra meta

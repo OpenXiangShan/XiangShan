@@ -24,12 +24,13 @@ import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 import utility.{ParallelPriorityMux, ChiselDB}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
 }
 
-class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
+class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasL1PrefetchSourceParameter {
   val io = IO(new DCacheBundle {
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
@@ -322,6 +323,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.valid := s2_valid && s2_can_send_miss_req && !s2_wpu_pred_fail
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
+  io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
@@ -367,18 +369,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   XSPerfAccumulate("wpu_pred_fail", s2_wpu_pred_fail && s2_valid)
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
-  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss)
-  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && s2_hit_prefetch && !resp.bits.miss && !s2_hit_access)
+  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isFromL1Prefetch(s2_hit_prefetch) && !resp.bits.miss)
+  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isFromL1Prefetch(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val late_hit_prefetch = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !s2_hit_prefetch
-  val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && s2_hit_prefetch
+  val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !isFromL1Prefetch(s2_hit_prefetch)
+  val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && isFromL1Prefetch(s2_hit_prefetch)
   val useless_prefetch = io.miss_req.valid && io.miss_req.ready && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
 
-  val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && s2_hit_prefetch && s2_req.isFirstIssue
+  val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && isFromL1Prefetch(s2_hit_prefetch) && s2_req.isFirstIssue
   
   io.prefetch_info.total_prefetch := total_prefetch
   io.prefetch_info.late_hit_prefetch := late_hit_prefetch
