@@ -27,7 +27,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
-import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 
 class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -41,26 +41,26 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val req = Reg(new LqWriteBundle)
 
   // enqueue
-  // s1: 
-  val s1_req = VecInit(io.req.map(_.bits)) 
+  // s1:
+  val s1_req = VecInit(io.req.map(_.bits))
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
   // s2: delay 1 cycle
   val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until LoadPipelineWidth).map(i => 
-    RegNext(s1_valid(i)) && 
+  val s2_valid = (0 until LoadPipelineWidth).map(i =>
+    RegNext(s1_valid(i)) &&
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.cf.exceptionVec, lduCfg).asUInt.orR)
 
-  val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool())) 
+  val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   for (w <- 0 until LoadPipelineWidth) {
-    s2_enqueue(w) := s2_valid(w) && s2_has_exception(w) 
+    s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 
-  when (req.uop.robIdx.needFlush(io.redirect)) {
-    req_valid := false.B
+  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
+    req_valid := s2_enqueue.asUInt.orR
   } .elsewhen (s2_enqueue.asUInt.orR) {
     req_valid := req_valid || true.B
   }
@@ -94,6 +94,6 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
 
   io.exceptionAddr.vaddr := req.vaddr
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
-  
+
   // end
 }

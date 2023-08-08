@@ -167,6 +167,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+    // force write
+    val force_write = Input(Bool())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -183,10 +185,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   // convert store req to main pipe req, and select a req from store and probe
   val storeWaitCycles = RegInit(0.U(4.W))
-  val StoreWaitThreshold = WireInit(12.U(4.W))
+  val StoreWaitThreshold = Wire(UInt(4.W))
+  StoreWaitThreshold := Constantin.createRecord("StoreWaitThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 0.U)
   val storeWaitTooLong = storeWaitCycles >= StoreWaitThreshold
   val loadsAreComing = io.data_read.asUInt.orR
-  val storeCanAccept = storeWaitTooLong || !loadsAreComing
+  val storeCanAccept = storeWaitTooLong || !loadsAreComing || io.force_write
 
   val store_req = Wire(DecoupledIO(new MainPipeReq))
   store_req.bits := (new MainPipeReq).convertStoreReq(io.store_req.bits)
@@ -195,7 +198,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   when (store_req.fire) { // if wait too long and write success, reset counter.
     storeWaitCycles := 0.U
-  } .elsewhen (storeWaitCycles < StoreWaitThreshold && store_req.valid && !store_req.ready) { // if block store, increase counter.
+  } .elsewhen (storeWaitCycles < StoreWaitThreshold && io.store_req.valid && !store_req.ready) { // if block store, increase counter.
     storeWaitCycles := storeWaitCycles + 1.U
   }
 
@@ -265,6 +268,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_valid_dup = RegInit(VecInit(Seq.fill(6)(false.B)))
   val s1_req_vaddr_dup_for_data_read = RegEnable(s0_req.vaddr, s0_fire)
   val s1_idx_dup_for_replace_way = RegEnable(get_idx(s0_req.vaddr), s0_fire)
+  val s1_dmWay_dup_for_replace_way = RegEnable(get_direct_map_way(s0_req.vaddr), s0_fire)
 
   val s1_valid_dup_for_status = RegInit(VecInit(Seq.fill(nDupStatus)(false.B)))
 
@@ -1526,6 +1530,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.tag_write.bits.idx := s3_idx_dup(4)
   io.tag_write.bits.way_en := s3_way_en_dup(2)
   io.tag_write.bits.tag := get_tag(s3_req_addr_dup(4))
+  io.tag_write.bits.vaddr := s3_req_vaddr_dup_for_data_write
 
   io.tag_write_intend := s3_req_miss_dup(7) && s3_valid_dup(11)
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
@@ -1614,6 +1619,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx_dup_for_replace_way
+  io.replace_way.dmWay := s1_dmWay_dup_for_replace_way
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid

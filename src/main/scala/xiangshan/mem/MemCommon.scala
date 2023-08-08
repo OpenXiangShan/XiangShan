@@ -26,7 +26,7 @@ import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.cache.dcache.ReplayCarry
+import xiangshan.cache.wpu.ReplayCarry
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -39,14 +39,36 @@ object genWmask {
   }
 }
 
+object genVWmask {
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
+    (LookupTree(sizeEncode, List(
+      "b00".U -> 0x1.U, //0001 << addr(2:0)
+      "b01".U -> 0x3.U, //0011
+      "b10".U -> 0xf.U, //1111
+      "b11".U -> 0xff.U //11111111
+    )) << addr(3, 0)).asUInt()
+  }
+}
+
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
-      "b00".U -> Fill(8, data(7, 0)),
-      "b01".U -> Fill(4, data(15, 0)),
-      "b10".U -> Fill(2, data(31, 0)),
-      "b11".U -> data
+      "b00".U -> Fill(16, data(7, 0)),
+      "b01".U -> Fill(8, data(15, 0)),
+      "b10".U -> Fill(4, data(31, 0)),
+      "b11".U -> Fill(2, data(63,0))
     ))
+  }
+}
+
+object shiftDataToLow {
+  def apply(addr: UInt,data : UInt): UInt = {
+    Mux(addr(3), (data >> 64).asUInt,data)
+  }
+}
+object shiftMaskToLow {
+  def apply(addr: UInt,mask: UInt): UInt = {
+    Mux(addr(3),(mask >> 8).asUInt,mask)
   }
 }
 
@@ -54,8 +76,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
-  val mask = UInt(8.W)
-  val data = UInt((XLEN+1).W)
+  val mask = UInt((VLEN/8).W)
+  val data = UInt((VLEN+1).W)
   val wlineflag = Bool() // store write the whole cache line
 
   val miss = Bool()
@@ -65,8 +87,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val atomic = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 
-  val forwardMask = Vec(8, Bool())
-  val forwardData = Vec(8, UInt(8.W))
+  val forwardMask = Vec(VLEN/8, Bool())
+  val forwardData = Vec(VLEN/8, UInt(8.W))
 
   // prefetch
   val isPrefetch = Bool()
@@ -81,7 +103,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val isLoadReplay = Bool()
   val isFastPath = Bool()
   val isFastReplay = Bool()
-  val replayCarry = new ReplayCarry
+  val replayCarry = new ReplayCarry(nWays)
 
   // For dcache miss load
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
@@ -189,14 +211,14 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
-  val mask = Output(UInt(8.W))
+  val mask = Output(UInt((VLEN/8).W))
   override val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
-  val forwardMaskFast = Input(Vec(8, Bool())) // resp to load_s1
-  val forwardMask = Input(Vec(8, Bool())) // resp to load_s2
-  val forwardData = Input(Vec(8, UInt(8.W))) // resp to load_s2
+  val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
+  val forwardMask = Input(Vec((VLEN/8), Bool())) // resp to load_s2
+  val forwardData = Input(Vec((VLEN/8), UInt(8.W))) // resp to load_s2
 
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
@@ -234,7 +256,7 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 }
 
 // Query load queue for ld-ld violation
-// 
+//
 // Req should be send in load_s1
 // Resp will be generated 1 cycle later
 //
@@ -242,7 +264,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // If it happens, a replay from rs is needed.
 class LoadNukeQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
   // mask: load's data mask.
-  val mask       = UInt(8.W)
+  val mask = UInt((VLEN/8).W)
+
   // paddr: load's paddr.
   val paddr      = UInt(PAddrBits.W)
   // dataInvalid: load data is invalid.
@@ -261,14 +284,14 @@ class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
 }
 
 class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  //  robIdx: Requestor's (a store instruction) rob index for match logic. 
+  //  robIdx: Requestor's (a store instruction) rob index for match logic.
   val robIdx = new RobPtr
 
-  //  paddr: requestor's (a store instruction) physical address for match logic. 
+  //  paddr: requestor's (a store instruction) physical address for match logic.
   val paddr  = UInt(PAddrBits.W)
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask   = UInt(8.W)  
+  val mask = UInt((VLEN/8).W)
 }
 
 // Store byte valid mask write bundle
@@ -276,31 +299,31 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 // Store byte valid mask write to SQ takes 2 cycles
 class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
   val sqIdx = new SqPtr
-  val mask = UInt(8.W)
+  val mask = UInt((VLEN/8).W)
 }
 
 class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   // old dcache: optimize data sram read fanout
   // val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
-  // val bank_oh = UInt(DCacheBanks.W)  
-  
+  // val bank_oh = UInt(DCacheBanks.W)
+
   // new dcache
-  val respDcacheData = UInt(XLEN.W)
-  val forwardMask = Vec(8, Bool())
-  val forwardData = Vec(8, UInt(8.W))
+  val respDcacheData = UInt(VLEN.W)
+  val forwardMask = Vec(VLEN/8, Bool())
+  val forwardData = Vec(VLEN/8, UInt(8.W))
   val uop = new MicroOp // for data selection, only fwen and fuOpType are used
-  val addrOffset = UInt(3.W) // for data selection
-  
+  val addrOffset = UInt(4.W) // for data selection
+
   // forward tilelink D channel
   val forward_D = Bool()
-  val forwardData_D = Vec(8, UInt(8.W))
+  val forwardData_D = Vec(VLEN/8, UInt(8.W))
 
   // forward mshr data
   val forward_mshr = Bool()
-  val forwardData_mshr = Vec(8, UInt(8.W))
+  val forwardData_mshr = Vec(VLEN/8, UInt(8.W))
 
   val forward_result_valid = Bool()
-  
+
   def dcacheData(): UInt = {
     // old dcache
     // val dcache_data = Mux1H(bank_oh, bankedDcacheData)
@@ -312,7 +335,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   }
 
   def mergedData(): UInt = {
-    val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+    val rdataVec = VecInit((0 until VLEN / 8).map(j =>
       Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
     ))
     rdataVec.asUInt

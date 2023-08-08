@@ -356,6 +356,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, ptwio, sfence, tlbcsr, l2tlbParams.dfilterSize)
   val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), sfence, tlbcsr)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
+
   ExcitingUtils.addSource(dtlbRepeater1.io.rob_head_miss_in_tlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf, true)
 
   // pmp
@@ -679,6 +680,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
   lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
+  lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
+
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
   lsq.io.sqEmpty        <> sbuffer.io.sqempty

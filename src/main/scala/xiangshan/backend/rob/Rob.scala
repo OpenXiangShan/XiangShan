@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.SnapshotGenerator
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LsqEnqIO, LqPtr}
@@ -410,6 +411,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
+    val snpt = Input(new SnapshotPort)
     val robFull = Output(Bool())
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
@@ -477,6 +479,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val isEmpty = enqPtr === deqPtr
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
+
+  val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
+  val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
 
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
@@ -732,7 +737,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
+  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -749,7 +754,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
     io.commits.commitValid(i) := commit_v(i) && commit_w(i) && !isBlocked
-    io.commits.info(i)  := dispatchDataRead(i)
+    io.commits.info(i) := dispatchDataRead(i)
+    io.commits.robIdx(i) := deqPtrVec(i)
 
     when (state === s_walk) {
       io.commits.walkValid(i) := shouldWalkVec(i)
@@ -831,7 +837,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // (1) redirect occurs: update according to state
   // (2) walk: move forwards
   val walkPtrVec_next = Mux(io.redirect.valid,
-    deqPtrVec_next,
+    Mux(io.snpt.useSnpt, snapshots(io.snpt.snptSelect), deqPtrVec_next),
     Mux(state === s_walk, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrVec := walkPtrVec_next
