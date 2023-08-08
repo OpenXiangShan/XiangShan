@@ -354,8 +354,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // generate mask
   val needCancel = Wire(Vec(LoadQueueReplaySize, Bool()))
   // generate enq mask
-  val selectIndexOH = Wire(Vec(LoadPipelineWidth, UInt(LoadQueueReplaySize.W)))
-  val s0_loadEnqFireMask = io.enq.map(x => x.fire && !x.bits.isLoadReplay).zip(selectIndexOH).map(x => Mux(x._1, x._2, 0.U))
+  val enqIndexOH = Wire(Vec(LoadPipelineWidth, UInt(LoadQueueReplaySize.W)))
+  val s0_loadEnqFireMask = io.enq.map(x => x.fire && !x.bits.isLoadReplay).zip(enqIndexOH).map(x => Mux(x._1, x._2, 0.U))
   val s0_remLoadEnqFireVec = s0_loadEnqFireMask.map(x => VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(x)(rem))))
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
@@ -573,9 +573,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   freeMaskVec.map(e => e := false.B)
 
   // Allocate logic
-  val enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-
   val newEnqueue = (0 until LoadPipelineWidth).map(i => {
     needEnqueue(i) && !io.enq(i).bits.isLoadReplay
   })
