@@ -314,7 +314,7 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
-  EnableRollingDB: Boolean = true
+  EnableRollingDB: Boolean = false
 )
 
 trait HasXSParameter {
