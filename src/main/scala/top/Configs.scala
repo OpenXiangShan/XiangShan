@@ -77,6 +77,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufSize = 16,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
+        IssueQueueSize = 4,
         dpParams = DispatchParameters(
           IntDqSize = 12,
           FpDqSize = 12,
@@ -87,13 +88,13 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         intPreg = IntPregParams(
           numEntries = 64,
-          numRead = Some(14),
-          numWrite = Some(8),
+          numRead = None,
+          numWrite = None,
         ),
         vfPreg = VfPregParams(
           numEntries = 96,
-          numRead = Some(14),
-          numWrite = Some(8),
+          numRead = None,
+          numWrite = None,
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache
