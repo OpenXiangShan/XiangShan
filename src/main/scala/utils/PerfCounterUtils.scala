@@ -19,6 +19,7 @@ package utils
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import utility.ChiselDB
 import xiangshan.DebugOptionsKey
 import xiangshan._
 
@@ -134,6 +135,7 @@ object XSPerfHistogram extends HasRegularPerfName {
     }
   }
 }
+
 object XSPerfMax extends HasRegularPerfName {
   def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit p: Parameters) = {
     judgeName(perfName)
@@ -169,8 +171,7 @@ object QueuePerf {
   }
 }
 
-object TransactionLatencyCounter
-{
+object TransactionLatencyCounter {
   // count the latency between start signal and stop signal
   // whenever stop signals comes, we create a latency sample
   def apply(start: Bool, stop: Bool): (Bool, UInt) = {
@@ -179,6 +180,94 @@ object TransactionLatencyCounter
     val next_counter = counter + 1.U
     counter := Mux(start || stop, 0.U, next_counter)
     (stop, next_counter)
+  }
+}
+
+object XSPerfRolling extends HasRegularPerfName {
+
+  class RollingEntry()(implicit p: Parameters) extends Bundle {
+    val xAxisPt = UInt(64.W)
+    val yAxisPt = UInt(64.W)
+
+    def apply(xAxisPt: UInt, yAxisPt: UInt): RollingEntry = {
+      val e = Wire(new RollingEntry())
+      e.xAxisPt := xAxisPt
+      e.yAxisPt := yAxisPt
+      e
+    }
+  }
+
+  def apply(
+    perfName: String,
+    perfCnt: UInt,
+    granularity: Int,
+    clock: Clock,
+    reset: Reset
+  )(implicit p: Parameters): Unit = {
+    judgeName(perfName)
+    val env = p(DebugOptionsKey)
+    if (env.EnableRollingDB && !env.FPGAPlatform) {
+      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val logTimestamp = WireInit(0.U(64.W))
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+
+      val xAxisCnt = RegInit(0.U(64.W))
+      val yAxisCnt = RegInit(0.U(64.W))
+      val xAxisPt = RegInit(0.U(64.W))
+      xAxisCnt := xAxisCnt + 1.U(64.W)  // increment per cycle
+      yAxisCnt := yAxisCnt + perfCnt
+
+      val triggerDB = xAxisCnt === granularity.U
+      when(triggerDB) {
+        xAxisCnt := 1.U(64.W)
+        yAxisCnt := perfCnt
+        xAxisPt := xAxisPt + granularity.U
+      }
+      val rollingPt = new RollingEntry().apply(xAxisPt, yAxisCnt)
+      rollingTable.log(rollingPt, triggerDB, "", clock, reset)
+    }
+  }
+
+  def apply(
+    perfName: String,
+    perfCnt: UInt,
+    eventTrigger: UInt,
+    granularity: Int,
+    clock: Clock,
+    reset: Reset
+  )(implicit p: Parameters) = {
+    judgeName(perfName)
+    val env = p(DebugOptionsKey)
+    if (env.EnableRollingDB && !env.FPGAPlatform) {
+      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val logTimestamp = WireInit(0.U(64.W))
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+
+      val xAxisCnt = RegInit(0.U(64.W))
+      val yAxisCnt = RegInit(0.U(64.W))
+      val xAxisPt = RegInit(0.U(64.W))
+      xAxisCnt := xAxisCnt + eventTrigger // increment when event triggers
+      yAxisCnt := yAxisCnt + perfCnt
+
+      val triggerDB = xAxisCnt === granularity.U
+      when(triggerDB) {
+        xAxisCnt := eventTrigger
+        yAxisCnt := perfCnt
+        xAxisPt := xAxisPt + granularity.U
+      }
+      val rollingPt = new RollingEntry().apply(xAxisPt, yAxisCnt)
+      rollingTable.log(rollingPt, triggerDB, "", clock, reset)
+    }
   }
 }
 
