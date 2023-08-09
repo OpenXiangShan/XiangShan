@@ -1154,19 +1154,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s1_tlb_miss_first_issue",      s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
   XSPerfAccumulate("s1_stall_out",                 s1_valid && !s1_can_go)
 
-  XSPerfAccumulate("s2_in_valid",                  s2_valid)
-  XSPerfAccumulate("s2_in_fire",                   s2_fire)
-  XSPerfAccumulate("s2_in_fire_first_issue",       s2_fire && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_dcache_miss",               s2_fire && s2_cache_miss)
-  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && s2_cache_miss && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_full_forward",              s2_fire && s2_full_fwd)
-  XSPerfAccumulate("s2_dcache_miss_full_forward",  s2_fire && s2_cache_miss && s2_full_fwd)
-  XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go)
-  XSPerfAccumulate("s2_prefetch",                  s2_fire && s2_prf)
-  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && s2_cache_rep) // ignore prefetch for mshr full / miss req port conflict
-  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && s2_cache_miss) // prefetch req miss in l1
-  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !s2_cache_miss) // prefetch req hit in l1
-  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && s2_cache_miss && !s2_cache_rep) // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("s2_in_valid",                       s2_valid)
+  XSPerfAccumulate("s2_in_fire",                        s2_fire)
+  XSPerfAccumulate("s2_in_fire_first_issue",            s2_fire && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_miss",                    s2_fire && s2_cache_miss)
+  XSPerfAccumulate("s2_dcache_miss_first_issue",        s2_fire && s2_cache_miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.dcache.resp.bits.real_miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_full_forward",                   s2_fire && s2_full_fwd)
+  XSPerfAccumulate("s2_dcache_miss_full_forward",       s2_fire && s2_cache_miss && s2_full_fwd)
+  XSPerfAccumulate("s2_stall_out",                      s2_fire && !s2_can_go)
+  XSPerfAccumulate("s2_prefetch",                       s2_fire && s2_prf)
+  XSPerfAccumulate("s2_prefetch_ignored",               s2_fire && s2_prf && s2_cache_rep) // ignore prefetch for mshr full / miss req port conflict
+  XSPerfAccumulate("s2_prefetch_miss",                  s2_fire && s2_prf && s2_cache_miss) // prefetch req miss in l1
+  XSPerfAccumulate("s2_prefetch_hit",                   s2_fire && s2_prf && !s2_cache_miss) // prefetch req hit in l1
+  XSPerfAccumulate("s2_prefetch_accept",                s2_fire && s2_prf && s2_cache_miss && !s2_cache_rep) // prefetch a missed line in l1, and l1 accepted it
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fwd_frm_mshr && s2_fwd_data_valid)
 
