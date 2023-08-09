@@ -990,7 +990,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
 
   // forwrad last beat
-  val (s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s2_valid && s2_out.miss && s2_out.handledByMSHR, s2_out.rep_info.mshr_id, s2_out.paddr)
+  val (s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s2_valid && s2_out.forward_tlDchannel, s2_out.mshrid, s2_out.paddr)
+  val s3_fwd_data_valid = RegEnable(s2_fwd_data_valid, s2_valid)
+  val s3_fwd_frm_d_chan_valid = (s3_fwd_frm_d_chan && s3_fwd_data_valid)
 
   // s3 load fast replay
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
@@ -998,7 +1000,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
-  io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan
+  io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
@@ -1021,9 +1023,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  s3_rep_info.wpu_fail      := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan && s3_troublem
-  s3_rep_info.bank_conflict := s3_in.rep_info.bank_conflict && !s3_fwd_frm_d_chan && s3_troublem
-  s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan && s3_troublem
+  s3_rep_info.wpu_fail      := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan_valid && s3_troublem
+  s3_rep_info.bank_conflict := s3_in.rep_info.bank_conflict && !s3_fwd_frm_d_chan_valid && s3_troublem
+  s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
@@ -1104,11 +1106,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_ld_raw_data_frm_cache.forwardData          := RegEnable(s2_fwd_data, s2_valid)
   s3_ld_raw_data_frm_cache.uop                  := RegEnable(s2_out.uop, s2_valid)
   s3_ld_raw_data_frm_cache.addrOffset           := RegEnable(s2_out.paddr(3, 0), s2_valid)
-  s3_ld_raw_data_frm_cache.forward_D            := RegEnable(s2_fwd_frm_d_chan, s2_valid) || s3_fwd_frm_d_chan
-  s3_ld_raw_data_frm_cache.forwardData_D        := Mux(s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan, RegEnable(s2_fwd_data_frm_d_chan, s2_valid))
+  s3_ld_raw_data_frm_cache.forward_D            := RegEnable(s2_fwd_frm_d_chan, s2_valid) || s3_fwd_frm_d_chan_valid
+  s3_ld_raw_data_frm_cache.forwardData_D        := Mux(s3_fwd_frm_d_chan_valid, s3_fwd_data_frm_d_chan, RegEnable(s2_fwd_data_frm_d_chan, s2_valid))
   s3_ld_raw_data_frm_cache.forward_mshr         := RegEnable(s2_fwd_frm_mshr, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData_mshr     := RegEnable(s2_fwd_data_frm_mshr, s2_valid)
-  s3_ld_raw_data_frm_cache.forward_result_valid := RegEnable(s2_fwd_data_valid, s2_valid) || s3_fwd_frm_d_chan
+  s3_ld_raw_data_frm_cache.forward_result_valid := RegEnable(s2_fwd_data_valid, s2_valid)
 
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergedData()
   val s3_picked_data_frm_cache = LookupTree(s3_ld_raw_data_frm_cache.addrOffset, List(
@@ -1215,7 +1217,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fwd_frm_mshr && s2_fwd_data_valid)
 
-  XSPerfAccumulate("s3_fwd_frm_d_chan",            s3_valid && s3_fwd_frm_d_chan)
+  XSPerfAccumulate("s3_fwd_frm_d_chan",            s3_valid && s3_fwd_frm_d_chan_valid)
 
   XSPerfAccumulate("load_to_load_forward",                      s1_try_ptr_chasing && !s1_ptr_chasing_canceled)
   XSPerfAccumulate("load_to_load_forward_try",                  s1_try_ptr_chasing)
